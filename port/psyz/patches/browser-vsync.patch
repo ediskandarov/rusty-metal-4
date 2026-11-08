@@ -1,0 +1,45 @@
+--- a/platform/sdl3_common.h
++++ b/platform/sdl3_common.h
+@@ -38,7 +38,7 @@
+ static void QuitPlatform(void);
+ bool InitPlatform(void);
+ #ifdef PLATFORM_WEB
+-void Psyz_WebWaitForNextFrame(void);
++void Psyz_WebWaitForNextFrame(double delay_ms);
+ #endif
+ 
+ #ifndef PSYZ_TITLE
+@@ -635,10 +635,14 @@
+     double target_us = target_frame_time_us * frames;
+ 
+ #ifdef PLATFORM_WEB
+-    // yield to browser
+-    for (; frames > 0; frames--) {
+-        Psyz_WebWaitForNextFrame();
+-    }
++    // Present on a browser frame and pace longer waits by emulated VBlank time.
++    double delay_ms = 0.0;
++    if (frames > 1) {
++        double elapsed_us = GetElapsedMicroseconds(
++            last_frame_time, SDL_GetPerformanceCounter());
++        delay_ms = MAX(0.0, target_us - elapsed_us) / 1000.0;
++    }
++    Psyz_WebWaitForNextFrame(delay_ms);
+ #else
+     if (use_driver_vsync) {
+         for (int i = 1; i < frames; i++) {
+--- a/web/web_timing.c
++++ b/web/web_timing.c
+@@ -3,7 +3,11 @@
+ // clang-format off
+ // psy-q blocks in VSync which doesn't work well with emscripten.
+ // use asyncify to break out to the browser and resume after
+-EM_ASYNC_JS(void, Psyz_WebWaitForNextFrame, (), {
++EM_ASYNC_JS(void, Psyz_WebWaitForNextFrame, (double delay_ms), {
++    const timer = delay_ms > 0
++        ? new Promise((resolve) => setTimeout(resolve, Math.ceil(delay_ms)))
++        : null;
+     await new Promise((resolve) => requestAnimationFrame(resolve));
+     globalThis.__psyzFrameCount = (globalThis.__psyzFrameCount || 0) + 1;
++    if (timer) await timer;
+ });

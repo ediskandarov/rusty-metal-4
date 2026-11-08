@@ -1,0 +1,98 @@
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -29,6 +29,9 @@
+ #include "sdl3_draw.h"
+ #include "rgb24.h"
+ static bool display_rgb24;
++static unsigned int display_horizontal_start = 0x260;
++static unsigned int display_vertical_start = 0x10;
++static bool display_pal;
+ static GLuint rgb24_texture, rgb24_fbo;
+ static bool rgb24_dirty = true;
+ 
+@@ -886,6 +889,24 @@
+     return true;
+ }
+ 
++/* PsyQ PutDispEnv uses these scanout origins for screen.x/y == 0.
++ * Keep its centering controls relative to the fitted display, not VRAM.
++ * Horizontal units are GPU clocks; the standard display spans 2560 clocks.
++ * This does not simulate analog overscan or interlace timing. */
++static SDL_Rect OffsetAndClipDisplay(SDL_Rect rect, int window_height) {
++    if (debug_show_vram) {
++        return rect;
++    }
++    glEnable(GL_SCISSOR_TEST);
++    glScissor(rect.x, window_height - rect.y - rect.h, rect.w, rect.h);
++    rect.x += (int)lroundf(((int)display_horizontal_start - 0x260) *
++                          (float)rect.w / 2560.0f);
++    rect.y += (int)lroundf(((int)display_vertical_start -
++                           (display_pal ? 0x13 : 0x10)) *
++                          (float)rect.h / (display_pal ? 288.0f : 240.0f));
++    return rect;
++}
++
+ static void PlatformBackend_Present(void) {
+     if (!sdl3_window && !InitPlatform()) {
+         return;
+@@ -935,7 +956,8 @@
+ 
+     if (native_present) {
+         if (fb_index >= 0) {
+-            const SDL_Rect p = GetCanvasPresentRect(&layout, win.w, win.h);
++            const SDL_Rect p = OffsetAndClipDisplay(
++                GetCanvasPresentRect(&layout, win.w, win.h), win.h);
+             const int cw = layout.canvas.w * (int)canvas_res;
+             const int ch = layout.canvas.h * (int)canvas_res;
+             glBindFramebuffer(GL_READ_FRAMEBUFFER, canvas_fbo[fb_index]);
+@@ -943,10 +965,14 @@
+                               win.h - p.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+         }
+     } else if (disp_on) {
++        dst.y = win.h - dst.y - dst.h;
++        dst = OffsetAndClipDisplay(dst, win.h);
+         glBlitFramebuffer(src.x * n, (src.y + src.h) * n, (src.x + src.w) * n,
+-                          src.y * n, dst.x, dst.y, dst.x + dst.w, dst.y + dst.h,
++                          src.y * n, dst.x, win.h - dst.y - dst.h,
++                          dst.x + dst.w, win.h - dst.y,
+                           GL_COLOR_BUFFER_BIT, GL_NEAREST);
+     }
++    glDisable(GL_SCISSOR_TEST);
+     if (overlay_frame_cb) {
+         overlay_frame_cb();
+     }
+@@ -954,10 +980,7 @@
+     finish_time = SDL_GetPerformanceCounter();
+     SDL_GL_SwapWindow(sdl3_window);
+ 
+-    BindDrawFbo();
+-    glBindTexture(GL_TEXTURE_2D, vram_texture);
+-    glViewport(0, 0, VRAM_W, VRAM_H);
+-    glEnable(GL_SCISSOR_TEST);
++    RestoreDrawTarget();
+ }
+ 
+ static void QuitPlatform(void) {
+@@ -1184,12 +1207,13 @@
+ }
+ 
+ void Draw_DisplayHorizontalRange(unsigned int start, unsigned int end) {
++    display_horizontal_start = start;
+     set_disp_horiz = (int)(end - start) / 10;
+     ApplyDisplayPendingChanges();
+ }
+ 
+ void Draw_DisplayVerticalRange(unsigned int start, int unsigned end) {
+-    (void)start;
++    display_vertical_start = start;
+     (void)end;
+ }
+ 
+@@ -1198,6 +1222,7 @@
+     GLposi previous_size = display_size;
+     // TODO the interlace flag is ignored
+     display_rgb24 = mode->rgb24;
++    display_pal = mode->pal;
+     if (mode->reversed) {
+         WARNF("reverse mode not supported");
+     }

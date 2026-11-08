@@ -1,0 +1,22 @@
+--- a/platform/sdl3_common.h
++++ b/platform/sdl3_common.h
+@@ -423,7 +423,19 @@
+ static unsigned GetAutoInternalRes(const VideoLayout* l) {
+     int n;
+     if (!l->native) {
++#ifdef PLATFORM_WEB
++        WndSize win;
++        SDL_GetWindowSizeInPixels(sdl3_window, &win.w, &win.h);
++        if (fb_size.w <= 0 || fb_size.h <= 0) {
++            return 1;
++        }
++        SDL_Rect fit = FitGameToWindow(
++            GetCurrentGameAspectRatio(fb_size.w, fb_size.h), win);
++        n = MIN(fit.w / fb_size.w, fit.h / fb_size.h);
++        return (unsigned)CLAMP(n, 1, PSYZ_INTERNAL_RES_MAX);
++#else
+         return 1;
++#endif
+     }
+     n = MIN((int)Psyz_GetRectWidth(l->present) / l->canvas.w,
+             (int)Psyz_GetRectHeight(l->present) / l->canvas.h);

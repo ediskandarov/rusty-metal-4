@@ -1,0 +1,15 @@
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -1136,9 +1136,12 @@
+     ApplyPendingInternalRes();
+     if (cur_display_size.x != display_size.x ||
+         cur_display_size.y != display_size.y || !is_window_visible) {
++#ifndef __EMSCRIPTEN__
++        /* In the browser SDL already uses the canvas CSS size and pixel ratio. */
+         if (!is_window_visible) {
+             SetWindowSizeInPixels(DEFAULT_FRONT_W, DEFAULT_FRONT_H);
+         }
++#endif
+ 
+         cur_display_size = display_size;
+         glUniform2f(

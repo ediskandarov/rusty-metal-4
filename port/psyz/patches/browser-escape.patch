@@ -1,0 +1,13 @@
+--- a/platform/sdl3_common.h
++++ b/platform/sdl3_common.h
+@@ -1118,9 +1118,11 @@
+ #ifndef PLATFORM_IOS
+         case SDL_EVENT_KEY_DOWN:
++#ifndef PLATFORM_WEB
+             if (event.key.scancode == SDL_SCANCODE_ESCAPE) {
+                 SDL_SetAtomicInt(&quit_requested, 1);
+             }
++#endif
+             if (event.key.scancode == SDL_SCANCODE_F6) {
+                 debug_show_vram ^= 1;
+             }

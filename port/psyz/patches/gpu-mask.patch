@@ -1,0 +1,288 @@
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -125,6 +125,8 @@
+     "flat in ivec2 pageBase;\n"
+     "flat in uvec4 texWindow;\n"
+     "uniform sampler2D texVram;\n"
++    "uniform sampler2D maskSnapshot;\n"
++    "uniform bool maskPass, forceMask, checkMask;\n"
+     "\n"
+     "uvec2 resolveTexel() {\n"
+     "    vec2 uv = rawUV + 1.0 / 512.0;\n"
+@@ -155,6 +157,7 @@
+     "}\n"
+     "\n"
+     "void main() {\n"
++    "    if (checkMask && texelFetch(maskSnapshot, ivec2(gl_FragCoord.xy), 0).a > 0.5) discard;\n"
+     "    vec4 texColor;\n"
+     "    if (textureMode == 0u) {\n" // untextured
+     "        texColor = vec4(1, 1, 1, 2);\n"
+@@ -174,7 +177,12 @@
+     "    }\n"
+     // check for full transparency
+     "    if (texColor == vec4(0, 0, 0, 0)) {\n"
+-    "        FragColor = vec4(0);\n"
++    "        discard;\n"
++    "    }\n"
++    // VRAM bit 15 is independent of the alpha used for RGB blending.
++    "    if (maskPass) {\n"
++    "        bool masked = forceMask || (textureMode != 0u && texColor.a > 0.5);\n"
++    "        FragColor = vec4(0.0, 0.0, 0.0, masked ? 1.0 : 0.0);\n"
+     "        return;\n"
+     "    }\n"
+     // check for setSemiTrans(p, 1)
+@@ -234,6 +242,8 @@
+ static GLint uniform_draw_offset = 0;
+ static GLint uniform_half_pixel = 0;
+ static GLint uniform_target_size = 0;
++static GLint uniform_mask_pass, uniform_force_mask, uniform_check_mask;
++static GLuint mask_snapshot_texture;
+ static GLuint vram_texture;
+ static GLuint vram_fbo = 0;
+ static GLuint scratch_texture = 0;
+@@ -438,6 +448,17 @@
+     uniform_target_size = glGetUniformLocation(shader_program, "targetSize");
+ 
+     glUniform1i(uniform_tex_vram, 0);
++    glUniform1i(glGetUniformLocation(shader_program, "maskSnapshot"), 1);
++    uniform_mask_pass = glGetUniformLocation(shader_program, "maskPass");
++    uniform_force_mask = glGetUniformLocation(shader_program, "forceMask");
++    uniform_check_mask = glGetUniformLocation(shader_program, "checkMask");
++    glGenTextures(1, &mask_snapshot_texture);
++    glActiveTexture(GL_TEXTURE1);
++    glBindTexture(GL_TEXTURE_2D, mask_snapshot_texture);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++    glActiveTexture(GL_TEXTURE0);
+     glUniform2f(uniform_draw_offset, 0, 0);
+     glUniform2f(uniform_target_size, (float)VRAM_W, (float)VRAM_H);
+     glGenTextures(1, &vram_texture);
+@@ -984,6 +1005,10 @@
+     if (shader_program) {
+         glDeleteProgram(shader_program);
+         shader_program = 0;
++    }
++    if (mask_snapshot_texture) {
++        glDeleteTextures(1, &mask_snapshot_texture);
++        mask_snapshot_texture = 0;
+     }
+     if (vram_texture) {
+         glDeleteTextures(1, &vram_texture);
+@@ -1657,6 +1682,33 @@
+     MarkRgb24Dirty(part.x, part.y, part.w, part.h);
+     SyncNativeVramToScaled(part.x, part.y, part.w, part.h);
+ }
++// Slow path only for protected transfers. Drawing normally stays on the GPU.
++static void ProtectUploadedPixels(const PS1_RECT* rect, u8* pixels) {
++    SDL_Rect area = {rect->x, rect->y, rect->w, rect->h};
++    SDL_Rect vram = {0, 0, VRAM_W, VRAM_H}, clipped;
++    if (!SDL_GetRectIntersection(&area, &vram, &clipped)) return;
++    SyncDirtyCanvases(&clipped);
++    u8* previous = malloc((size_t)clipped.w * clipped.h * 4);
++    if (!previous) { ERRORF("mask readback allocation failed"); return; }
++    GLint read_fbo;
++    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, vram_fbo);
++    glReadPixels(clipped.x, clipped.y, clipped.w, clipped.h,
++                 GL_RGBA, GL_UNSIGNED_BYTE, previous);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
++    for (int y = 0; y < clipped.h; y++) {
++        for (int x = 0; x < clipped.w; x++) {
++            const u8* old = previous + (y * clipped.w + x) * 4;
++            if (old[3] >= 128) {
++                u8* pixel = pixels + ((y + clipped.y - rect->y) * rect->w +
++                                      x + clipped.x - rect->x) * 4;
++                memcpy(pixel, old, 4);
++            }
++        }
++    }
++    free(previous);
++}
++
+ void Draw_LoadImage(PS1_RECT* rect, u_long* p) {
+     if (rect->w <= 0 || rect->h <= 0) {
+         return;
+@@ -1686,7 +1738,12 @@
+     if (!buf) {
+         return;
+     }
++    Draw_FlushBuffer();
+     ConvertRgb5551ToRgba8888((const u16*)p, buf, count);
++    if (force_mask_bit) {
++        for (size_t i = 0; i < count; i++) buf[i * 4 + 3] = 255;
++    }
++    if (check_mask_bit) ProtectUploadedPixels(rect, buf);
+ 
+     // an image touching the framebuffer being drawn only writes VRAM inside
+     // it and its canvas gets all of it, so the overhang keeps nearby VRAM
+@@ -1814,6 +1871,22 @@
+         SyncDirtyCanvases(&(SDL_Rect){src_x, src_y, copy_w, copy_h});
+     } else {
+         LeaveNative();
++    }
++
++    if (force_mask_bit || check_mask_bit) {
++        // Preserve the existing row-by-row overlap behavior while applying E6.
++        u8 rgba[VRAM_W * 4];
++        u_long pixels[VRAM_W / 2];
++        for (int row = 0; row < copy_h; row++) {
++            glBindFramebuffer(GL_READ_FRAMEBUFFER, vram_fbo);
++            glReadPixels(src_x, src_y + row, copy_w, 1,
++                         GL_RGBA, GL_UNSIGNED_BYTE, rgba);
++            ConvertRgba8888ToRgb5551(rgba, (u16*)pixels, copy_w);
++            PS1_RECT destination = {dst_x, dst_y + row, copy_w, 1};
++            Draw_LoadImage(&destination, pixels);
++        }
++        BindDrawFbo();
++        return;
+     }
+ 
+     // same-FBO blit work-around for MESA and macOS
+@@ -1891,6 +1964,31 @@
+ static void DrawIndices(int start, int end) {
+     glDrawElements(GL_TRIANGLES, end - start, GL_UNSIGNED_SHORT,
+                    (const GLvoid*)((uintptr_t)start * sizeof(unsigned short)));
++}
++
++// The color pass uses alpha as a blend factor; the second pass writes only
++// the actual PS1 mask bit. Transparent texture pixels are discarded in both.
++static void DrawMaskBits(int start, int end) {
++    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_TRUE);
++    glDisable(GL_BLEND);
++    glUniform1i(uniform_mask_pass, 1);
++    DrawIndices(start, end);
++    glUniform1i(uniform_mask_pass, 0);
++    glEnable(GL_BLEND);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
++}
++
++static void SnapshotMask(PsyzSize size) {
++    GLint read_fbo, draw_fbo;
++    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read_fbo);
++    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw_fbo);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, draw_fbo);
++    glActiveTexture(GL_TEXTURE1);
++    glBindTexture(GL_TEXTURE_2D, mask_snapshot_texture);
++    glCopyTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 0, 0,
++                    size.w * internal_res, size.h * internal_res, 0);
++    glActiveTexture(GL_TEXTURE0);
++    glBindFramebuffer(GL_READ_FRAMEBUFFER, read_fbo);
+ }
+ 
+ void Draw_FlushBuffer(void) {
+@@ -1953,36 +2051,57 @@
+         glUniform2f(
+             uniform_target_size, (float)target_size.w, (float)target_size.h);
+     }
+-    int prim_size = 3;
+-    int start = 0;
+-    while (start < n_indices) {
+-        Vertex* v = &vertex_buf[index_buf[start]];
+-        bool need_subtract = is_subtract_abr(v);
+-        int end = start + prim_size;
+-        while (end < n_indices) {
+-            v = &vertex_buf[index_buf[end]];
+-            bool next_subtract = is_subtract_abr(v);
+-            if (next_subtract != need_subtract) {
+-                break;
++    glUniform1i(uniform_force_mask, force_mask_bit);
++    glUniform1i(uniform_check_mask, check_mask_bit);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
++    if (check_mask_bit) {
++        // Each triangle sees masks written by earlier primitives in this batch.
++        for (int i = 0; i < n_indices; i += 3) {
++            SnapshotMask(target_size);
++            Vertex* v = &vertex_buf[index_buf[i]];
++            SetBlendMode(is_subtract_abr(v) ? BLEND_SUB : BLEND_ADD);
++            DrawIndices(i, i + 3);
++            if (is_subtract_abr(v) && !is_untextured(v)) {
++                SetBlendMode(BLEND_SUB_OPAQUE);
++                DrawIndices(i, i + 3);
+             }
+-            end += prim_size;
+-        }
+-        while (need_subtract && start < end) {
+-            int group_end = SubtractGroupEnd(start, end);
+-            SetBlendMode(BLEND_SUB);
+-            DrawIndices(start, group_end);
+-            if (!is_untextured(&vertex_buf[index_buf[start]])) {
+-                SetBlendMode(BLEND_SUB_OPAQUE);
++            DrawMaskBits(i, i + 3);
++        }
++        SetBlendMode(BLEND_ADD);
++    } else {
++        int prim_size = 3;
++        int start = 0;
++        while (start < n_indices) {
++            Vertex* v = &vertex_buf[index_buf[start]];
++            bool need_subtract = is_subtract_abr(v);
++            int end = start + prim_size;
++            while (end < n_indices) {
++                v = &vertex_buf[index_buf[end]];
++                bool next_subtract = is_subtract_abr(v);
++                if (next_subtract != need_subtract) {
++                    break;
++                }
++                end += prim_size;
++            }
++            while (need_subtract && start < end) {
++                int group_end = SubtractGroupEnd(start, end);
++                SetBlendMode(BLEND_SUB);
+                 DrawIndices(start, group_end);
++                if (!is_untextured(&vertex_buf[index_buf[start]])) {
++                    SetBlendMode(BLEND_SUB_OPAQUE);
++                    DrawIndices(start, group_end);
++                }
++                start = group_end;
+             }
+-            start = group_end;
+-        }
+-        SetBlendMode(BLEND_ADD);
+-        if (start < end) {
+-            DrawIndices(start, end);
+-            start = end;
+-        }
+-    }
++            SetBlendMode(BLEND_ADD);
++            if (start < end) {
++                DrawIndices(start, end);
++                start = end;
++            }
++        }
++        DrawMaskBits(0, n_indices);
++    }
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+     if (fb_index >= 0) {
+         InvalidateCanvas(&layout, fb_index, scissor_rect);
+         glUniform2f(
+--- a/platform/sdl3_draw.h
++++ b/platform/sdl3_draw.h
+@@ -179,10 +179,14 @@
+         (unsigned char)((off_x & mask_x) * 8),
+         (unsigned char)((off_y & mask_y) * 8));
+ }
++static bool force_mask_bit, check_mask_bit;
+ void Draw_SetMask(int bit0, int bit1) {
+-    if (bit0 || bit1) {
+-        NOT_IMPLEMENTED;
++    if (force_mask_bit == !!bit0 && check_mask_bit == !!bit1) {
++        return;
+     }
++    Draw_FlushBuffer();
++    force_mask_bit = !!bit0;
++    check_mask_bit = !!bit1;
+ }
+ 
+ #endif
+--- a/psyz/libgpu.c
++++ b/psyz/libgpu.c
+@@ -289,7 +289,7 @@
+ static int psyz_cwb(u32* data, s32 n) {
+     gpu_busy = 1;
+     if (n > 0) {
+-        Draw_PushPrim((u_long*)data, n);
++        DispatchPackets((u_long*)data, n);
+     }
+     return 0;
+ }
