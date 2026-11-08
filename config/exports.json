@@ -1,0 +1,632 @@
+{
+  "sound": {
+    "image_name": "o_sound.sym",
+    "exports": [
+      "SoundEmitterClassConstructor",
+      "SoundEmitterConstructor",
+      "SoundEmitterDestructor",
+      "SoundEmitterInstanceConstructor",
+      "SoundEmitterProcess",
+      "SoundEmitterSetPitchScale",
+      "SoundEmitterSetVolumeFade",
+      "SoundEmitterSetVolumeScale",
+      "SoundEmitterSizeof"
+    ]
+  },
+  "camera": {
+    "image_name": "o_camera.sym",
+    "exports": [
+      "CameraConstructor",
+      "CameraDestructor",
+      "CameraProcess",
+      "CameraSetObject",
+      "CameraSizeof"
+    ]
+  },
+  "car": {
+    "image_name": "o_car.sym",
+    "exports": [
+      "AIConstructor",
+      "AIDestructor",
+      "AddInventoryToCar",
+      "BuildMatrix",
+      "CarAiClassConstructor",
+      "CarAiClassDestructor",
+      "CarAiConstructor",
+      "CarAiDestructor",
+      "CarAiInteractedWithFire",
+      "CarAiMovedThroughTeleporter",
+      "CarAiProcess",
+      "CarAiProcessFunctionDisable",
+      "CarAiProcessFunctionEnable",
+      "CarApplyDamage",
+      "CarAxelWeaponSpecialConstructor",
+      "CarCalypsoWeaponSpecialConstructor",
+      "CarCameraConstructor",
+      "CarCameraProcess",
+      "CarCameraSizeof",
+      "CarCharacterClassConstructor",
+      "CarCharacterClassDestructor",
+      "CarClassConstructor",
+      "CarClassDestructor",
+      "CarConstructor",
+      "CarControlsFrozen",
+      "CarDestructor",
+      "CarDisplay",
+      "CarDisplayClassConstructor",
+      "CarDisplayClassDestructor",
+      "CarDisplayConstructor",
+      "CarDisplayDestructor",
+      "CarDisplayFreezeConstructor",
+      "CarDisplayFreezeDestructor",
+      "CarDisplayGetGroup",
+      "CarDisplayGetGroupRadius",
+      "CarDisplayGroupTranslations",
+      "CarDisplayInvisibilityConstructor",
+      "CarDisplayInvisibilityDestructor",
+      "CarDisplayJumpConstructor",
+      "CarDisplayProcess",
+      "CarDisplayShieldConstructor",
+      "CarDisplayShieldDestructor",
+      "CarDragWeaponSpecialConstructor",
+      "CarFreezeCar",
+      "CarGoggleWeaponSpecialConstructor",
+      "CarInvisibilityConstructorConstructor",
+      "CarInvisibilityConstructorProcess",
+      "CarJumpConstructor",
+      "CarJumpDisplay",
+      "CarJumpProcess",
+      "CarLaunchAutolob",
+      "CarLaunchDetno",
+      "CarLaunchFire",
+      "CarLaunchFreeze",
+      "CarLaunchFreezeRemote",
+      "CarLaunchFunny",
+      "CarLaunchHoming",
+      "CarLaunchLaser",
+      "CarLaunchLightning",
+      "CarLaunchMIRV",
+      "CarLaunchMassive",
+      "CarLaunchMassiveOnTimer",
+      "CarLaunchMortar",
+      "CarLaunchNapalm",
+      "CarLaunchPower",
+      "CarLaunchProjectile",
+      "CarLaunchProximity",
+      "CarLaunchRain",
+      "CarLaunchRain2",
+      "CarLaunchRayBeam",
+      "CarLaunchRemote",
+      "CarLaunchRicochet",
+      "CarLaunchSpecial",
+      "CarLaunchSpecialSound",
+      "CarLaunchSpeed",
+      "CarLaunchTorchers",
+      "CarLocalPosToWorldPos",
+      "CarLocalPosToWorldVel",
+      "CarMaidWeaponSpecialConstructor",
+      "CarMinionWeaponSpecialConstructor",
+      "CarMoonWeaponSpecialConstructor",
+      "CarMuzzleDisplay",
+      "CarOrbitalWeaponSpecialConstructor",
+      "CarOrientWithMatrix",
+      "CarPhysicsClassConstructor",
+      "CarPhysicsClassDestructor",
+      "CarPhysicsConstructor",
+      "CarPhysicsConstructorPostDisplayConstructor",
+      "CarPhysicsDestructor",
+      "CarPhysicsProcess",
+      "CarPirateWeaponSpecialConstructor",
+      "CarPizzaWeaponSpecialConstructor",
+      "CarProcess",
+      "CarQuatroWeaponSpecialConstructor",
+      "CarRccarWeaponSpecialConstructor",
+      "CarRelocateBitStuff",
+      "CarShadowDisplay",
+      "CarSizeof",
+      "CarStoothWeaponSpecialConstructor",
+      "CarTankWeaponSpecialConstructor",
+      "CarThumpWeaponSpecialConstructor",
+      "CarToyWeaponSpecialConstructor",
+      "CarTurboDisplay",
+      "CarWagonWeaponSpecialConstructor",
+      "CarWeaponClassConstructor",
+      "CarWeaponClassDestructor",
+      "CarWeaponConstructor",
+      "CarWeaponDestructor",
+      "CarWeaponProcess",
+      "CarWorldPosToWorldVel",
+      "CarZombieWeaponSpecialConstructor",
+      "ChangeAIObjectNumState",
+      "ChangeAIObjectState",
+      "CollideWorldWithCarAtoms",
+      "G",
+      "GetAIObjectNumber",
+      "InteractCarWithCar",
+      "InteractCarWithLightEmitter",
+      "RegisterAIHealthPowerup",
+      "RemoveObjectFromDetonationDeviceList",
+      "TransformOriginalBox",
+      "TransformOriginalBoxCenterPoint",
+      "aiWorldInfo"
+    ]
+  },
+  "menu": {
+    "image_name": "menu.sym",
+    "exports": ["CarRelocateBitStuff", "MenuMain", "MenuSave"]
+  },
+  "weap": {
+    "image_name": "o_weap.sym",
+    "exports": [
+      "AutolobProjectilePhysics",
+      "BladeProjectileDisplay",
+      "DetnoProjectileOnDestroy",
+      "FunnyProjectileOnDestroy",
+      "Hench1ProjectilePhysics",
+      "Hench2ProjectilePhysics",
+      "Hench3ProjectilePhysics",
+      "MIRVProjectilePhysics",
+      "NukeProjectileOnDestroy",
+      "ProjectileDisplay",
+      "ProjectilePhysics",
+      "Quasar1ProjectilePhysics",
+      "Quasar2ProjectilePhysics",
+      "Quasar3ProjectilePhysics",
+      "Rain2ProjectilePhysics",
+      "RainProjectilePhysics",
+      "RicochetProjectilePhysics",
+      "RotateProjectileDisplay",
+      "SkullProjectileDisplay",
+      "SkullProjectilePhysics",
+      "TeleorbProjectilePhysics",
+      "WeaponBombApplyDamage",
+      "WeaponBombClassConstructor",
+      "WeaponBombClassDestructor",
+      "WeaponBombConstructor",
+      "WeaponBombDestructor",
+      "WeaponBombDisplay",
+      "WeaponBombInstanceConstructor",
+      "WeaponBombProcess",
+      "WeaponBombSizeof",
+      "WeaponClassConstructor",
+      "WeaponDisplay",
+      "WeaponFireballClassConstructor",
+      "WeaponFireballConstructor",
+      "WeaponFireballDestructor",
+      "WeaponFireballDisplay",
+      "WeaponFireballProcess",
+      "WeaponFireballSizeof",
+      "WeaponProjectileClassConstructor",
+      "WeaponProjectileClassDestructor",
+      "WeaponProjectileConstructor",
+      "WeaponProjectileDestructor",
+      "WeaponProjectileDisplay",
+      "WeaponProjectileProcess",
+      "WeaponProjectileSizeof",
+      "WeaponTargetClassConstructor",
+      "WeaponTargetConstructor",
+      "WeaponTargetDestructor",
+      "WeaponTargetDisplay",
+      "WeaponTargetSizeof",
+      "worldWeaponColor"
+    ]
+  },
+  "carprt": {
+    "image_name": "o_carprt.sym",
+    "exports": ["CarpartConstructor", "CarpartDisplay", "CarpartProcess", "CarpartSizeof"]
+  },
+  "afc": {
+    "image_name": "o_afc.sym",
+    "exports": [
+      "AfcClassConstructor",
+      "AfcConstructor",
+      "AfcControlLightAndSize",
+      "AfcDisplay",
+      "AfcInstanceConstructor",
+      "AfcSizeof"
+    ]
+  },
+  "power": {
+    "image_name": "o_power.sym",
+    "exports": [
+      "InteractCarWithPowerupHealth",
+      "InteractCarWithPowerupTurbo",
+      "InteractCarWithPowerupWeapon",
+      "PowerupClassConstructor",
+      "PowerupClassDestructor",
+      "PowerupConstructor",
+      "PowerupDisplay",
+      "PowerupDisplayClassConstructor",
+      "PowerupDoDisplay",
+      "PowerupInstanceConstructor",
+      "PowerupProcess",
+      "PowerupScreenDisplay",
+      "PowerupSizeof",
+      "PowerupSparkleConstructor"
+    ]
+  },
+  "timer": {
+    "image_name": "o_timer.sym",
+    "exports": ["TimerConstructor", "TimerProcess", "TimerSizeof"]
+  },
+  "bullet": {
+    "image_name": "o_bullet.sym",
+    "exports": [
+      "BulletClassConstructor",
+      "BulletConstructor",
+      "BulletDestructor",
+      "BulletDisplay",
+      "BulletProcess",
+      "BulletProjectileConstructor",
+      "BulletProjectileDestructor",
+      "BulletProjectileProcess",
+      "BulletSizeof"
+    ]
+  },
+  "ray": {
+    "image_name": "o_ray.sym",
+    "exports": [
+      "WeaponRayBeamClassConstructor",
+      "WeaponRayBeamClassDestructor",
+      "WeaponRayBeamConstructor",
+      "WeaponRayBeamDestructor",
+      "WeaponRayBeamDisplay",
+      "WeaponRayBeamInstanceConstructor",
+      "WeaponRayBeamProcess",
+      "WeaponRayBeamSizeof"
+    ]
+  },
+  "fire": {
+    "image_name": "o_fire.sym",
+    "exports": [
+      "FlameEmitterClassConstructor",
+      "FlameEmitterClassDestructor",
+      "FlameEmitterConstructor",
+      "FlameEmitterInstanceConstructor",
+      "FlameEmitterProcess",
+      "FlameEmitterSizeof"
+    ]
+  },
+  "firing": {
+    "image_name": "o_firing.sym",
+    "exports": ["FireRingConstructor", "FireRingDestructor", "FireRingProcess", "FireRingSizeof"]
+  },
+  "lightn": {
+    "image_name": "o_lightn.sym",
+    "exports": [
+      "WeaponLightningConstructor",
+      "WeaponLightningDisplay",
+      "WeaponLightningEmitterClassConstructor",
+      "WeaponLightningEmitterClassDestructor",
+      "WeaponLightningEmitterConstructor",
+      "WeaponLightningEmitterDestructor",
+      "WeaponLightningEmitterDisplay",
+      "WeaponLightningEmitterInstanceConstructor",
+      "WeaponLightningEmitterProcess",
+      "WeaponLightningEmitterSizeof",
+      "WeaponLightningProcess",
+      "WeaponLightningSizeof"
+    ]
+  },
+  "light": {
+    "image_name": "o_light.sym",
+    "exports": ["LightEmitterConstructor", "LightEmitterInstanceConstructor", "LightEmitterSizeof"]
+  },
+  "tele": {
+    "image_name": "o_tele.sym",
+    "exports": [
+      "TeleporterClassConstructor",
+      "TeleporterConstructor",
+      "TeleporterDisplay",
+      "TeleporterInstanceConstructor",
+      "TeleporterProcess",
+      "TeleporterSizeof"
+    ]
+  },
+  "jumppad": {
+    "image_name": "o_jump.sym",
+    "exports": [
+      "JumppadConstructor",
+      "JumppadDestructor",
+      "JumppadInstanceConstructor",
+      "JumppadProcess",
+      "JumppadSizeof"
+    ]
+  },
+  "conveyer": {
+    "image_name": "o_convey.sym",
+    "exports": ["ConveyerConstructor", "ConveyerInstanceConstructor", "ConveyerSizeof"]
+  },
+  "jumbo": {
+    "image_name": "o_jumbo.sym",
+    "exports": ["JumbotronDisplay", "JumbotronInstanceConstructor", "JumbotronSizeof"]
+  },
+  "destry": {
+    "image_name": "o_destry.sym",
+    "exports": [
+      "DestroyableApplyDamage",
+      "DestroyableConstructor",
+      "DestroyableDestructor",
+      "DestroyableInstanceConstructor",
+      "DestroyableProcess",
+      "DestroyableSizeof"
+    ]
+  },
+  "frag": {
+    "image_name": "o_frag.sym",
+    "exports": ["FragmentConstructor", "FragmentDisplay", "FragmentProcess", "FragmentSizeof"]
+  },
+  "anim": {
+    "image_name": "o_anim.sym",
+    "exports": [
+      "AnimClassConstructor",
+      "AnimClassDestructor",
+      "AnimConstructor",
+      "AnimDestructor",
+      "AnimDisplay",
+      "AnimProcess",
+      "AnimSizeof",
+      "GetAnimInfo",
+      "InteractCarWithAnim_goggle"
+    ]
+  },
+  "cars/c_pirate": {
+    "image_name": "c_pirate.sym",
+    "exports": [
+      "CarPirateClassConstructor",
+      "CarPirateDisplayGroupTranslations",
+      "CarPirateDisplaySpecialGroupDisplay",
+      "CarPirateProcess",
+      "CarPirateSizeof"
+    ]
+  },
+  "cars/auger": {
+    "image_name": "c_auger.sym",
+    "exports": [
+      "CarAugerClassConstructor",
+      "CarAugerDisplayGroupTranslations",
+      "CarAugerDisplaySpecialGroupDisplay",
+      "CarAugerProcess",
+      "CarAugerSizeof",
+      "CarAugerWeaponSpecialConstructor",
+      "InteractCarAugerWithCar"
+    ]
+  },
+  "cars/c_toy": {
+    "image_name": "c_toy.sym",
+    "exports": [
+      "CarToyClassConstructor",
+      "CarToyDisplayGroupTranslations",
+      "CarToyDisplaySpecialGroupDisplay",
+      "CarToyProcess",
+      "CarToySizeof"
+    ]
+  },
+  "cars/c_stooth": {
+    "image_name": "c_stooth.sym",
+    "exports": ["CarStoothClassConstructor", "CarStoothConstructor"]
+  },
+  "cars/c_tank": {
+    "image_name": "c_tank.sym",
+    "exports": [
+      "CarTankClassConstructor",
+      "CarTankClassDestructor",
+      "CarTankConstructor",
+      "CarTankDestructor",
+      "CarTankProcess",
+      "TreadPolysClassConstructor",
+      "TreadPolysClassDestructor",
+      "TreadPolysConstructor",
+      "TreadPolysDestructor",
+      "TreadPolysProcess"
+    ]
+  },
+  "cars/c_minion": {
+    "image_name": "c_minion.sym",
+    "exports": [
+      "CarMinionClassConstructor",
+      "CarMinionClassDestructor",
+      "CarMinionConstructor",
+      "CarMinionDestructor",
+      "CarMinionProcess",
+      "TreadPolysClassConstructor",
+      "TreadPolysClassDestructor",
+      "TreadPolysConstructor",
+      "TreadPolysDestructor",
+      "TreadPolysProcess"
+    ]
+  },
+  "cars/c_slam": {
+    "image_name": "c_slam.sym",
+    "exports": [
+      "CarSlamClassConstructor",
+      "CarSlamDisplayGroupTranslations",
+      "CarSlamDisplaySpecialGroupDisplay",
+      "CarSlamProcess",
+      "CarSlamSizeof",
+      "CarSlamWeaponSpecialConstructor",
+      "InteractCarSlamWithCar"
+    ]
+  },
+  "cars/c_trash": {
+    "image_name": "c_trash.sym",
+    "exports": [
+      "CarTrashClassConstructor",
+      "CarTrashDisplayGroupTranslations",
+      "CarTrashDisplaySpecialGroupDisplay",
+      "CarTrashProcess",
+      "CarTrashSizeof",
+      "CarTrashWeaponSpecialConstructor",
+      "InteractCarTrashWithCar"
+    ]
+  },
+  "cars/c_crush": {
+    "image_name": "c_crush.sym",
+    "exports": [
+      "CarCrusherClassConstructor",
+      "CarCrusherClassDestructor",
+      "CarCrusherConstructor",
+      "CarCrusherDestructor",
+      "CarCrusherDisplayGroupTranslations",
+      "CarCrusherDisplaySpecialGroupDisplay",
+      "CarCrusherProcess",
+      "CarCrusherSizeof",
+      "CarCrusherWeaponSpecialConstructor",
+      "InteractCarCrusherWithCar",
+      "TreadPolysClassConstructor",
+      "TreadPolysClassDestructor",
+      "TreadPolysConstructor",
+      "TreadPolysDestructor",
+      "TreadPolysProcess"
+    ]
+  },
+  "expl": {
+    "image_name": "o_expl.sym",
+    "exports": [
+      "ExplosionShockWaveClassConstructor",
+      "ExplosionShockWaveClassDestructor",
+      "ExplosionShockWaveConstructor",
+      "ExplosionShockWaveDestructor",
+      "ExplosionShockWaveDisplay",
+      "ExplosionShockWaveProcess",
+      "ExplosionShockWaveSizeof",
+      "SpawnExplosion",
+      "SpawnExplosion_XYZ"
+    ]
+  },
+  "interact": {
+    "image_name": "interact.sym",
+    "exports": [
+      "BoxObjectApplyDamage",
+      "ExplosionShockwaveGetObjectForceDamage",
+      "InteractBoxObjectWithBullet",
+      "InteractBoxObjectWithBulletProjectile",
+      "InteractBoxObjectWithWeaponBomb",
+      "InteractBoxObjectWithWeaponProjectile",
+      "InteractBulletWithDestroyable",
+      "InteractCarWithAnim",
+      "InteractCarWithAnim_fire",
+      "InteractCarWithBullet",
+      "InteractCarWithConveyer",
+      "InteractCarWithDestroyable",
+      "InteractCarWithExplosionShockWave",
+      "InteractCarWithFlames",
+      "InteractCarWithJumppad",
+      "InteractCarWithPowerup",
+      "InteractCarWithTeleporter",
+      "InteractCarWithWeaponBomb",
+      "InteractCarWithWeaponProjectile",
+      "InteractExplosionShockWaveWithDestroyable",
+      "InteractExplosionShockWaveWithWeaponBomb",
+      "InteractWeaponBombWithBullet",
+      "InteractWeaponBombWithWeaponProjectile",
+      "InteractWeaponProjectileWithDestroyable",
+      "InteractWeaponRayBeamWithDestroyable",
+      "InteractWeaponRayBeamWithWeaponBomb",
+      "InteractWithFlammableTerrainPoly",
+      "WorldObjectExplode",
+      "WorldObjectSpawnDisplayFaceFragments"
+    ]
+  },
+  "levels/w_yard": {
+    "image_name": "w_yard.sym",
+    "exports": [
+      "CraneCameraProcess",
+      "CraneCameraSizeof",
+      "CraneClassConstructor",
+      "CraneConeDisplay",
+      "CraneControlConstructor",
+      "CraneControlDestructor",
+      "CraneDestructor",
+      "CraneDisplay",
+      "CraneInstanceConstructor",
+      "CraneMarkerDisplay",
+      "CraneProcess",
+      "CraneSizeof",
+      "DeathPointDestructor",
+      "DeathPointInstanceConstructor",
+      "DeathPointProcess",
+      "DeathPointSizeof",
+      "InteractCarWithDeathPoint",
+      "InteractCraneControlWithOtherObject"
+    ]
+  },
+  "levels/w_neon": {
+    "image_name": "w_neon.sym",
+    "exports": [
+      "InteractCarWithTrain",
+      "InteractTrainWithBullet",
+      "InteractTrainWithExplosionShockWave",
+      "InteractTrainWithWeaponBomb",
+      "InteractTrainWithWeaponProjectile",
+      "InteractUfoWithBullet",
+      "InteractUfoWithWeaponProjectile",
+      "PathingInfoDestructor",
+      "PathingInfoInstanceConstructor",
+      "PathingInfoProcess",
+      "TrainApplyDamage",
+      "TrainCameraProcess",
+      "TrainCameraSizeof",
+      "TrainClassConstructor",
+      "TrainDestructor",
+      "TrainDisplay",
+      "TrainInstanceConstructor",
+      "TrainProcess",
+      "TrainSizeof",
+      "UfoApplyDamage",
+      "UfoCameraProcess",
+      "UfoCameraSizeof",
+      "UfoClassConstructor",
+      "UfoConeDisplay",
+      "UfoDestructor",
+      "UfoDisplay",
+      "UfoInstanceConstructor",
+      "UfoProcess",
+      "UfoSizeof"
+    ]
+  },
+  "levels/w_carni": {
+    "image_name": "w_carni.sym",
+    "exports": [
+      "CoasterApplyDamage",
+      "CoasterCameraProcess",
+      "CoasterCameraSizeof",
+      "CoasterClassConstructor",
+      "CoasterDestructor",
+      "CoasterDisplay",
+      "CoasterInstanceConstructor",
+      "CoasterProcess",
+      "CoasterSizeof",
+      "InteractCarWithCoaster",
+      "InteractCoasterWithBullet",
+      "InteractCoasterWithExplosionShockWave",
+      "InteractCoasterWithWeaponBomb",
+      "InteractCoasterWithWeaponProjectile",
+      "PathingInfoDestructor",
+      "PathingInfoInstanceConstructor",
+      "PathingInfoProcess"
+    ]
+  },
+  "levels/w_oil": {
+    "image_name": "w_oil.sym",
+    "exports": [
+      "HelicopterApplyDamage",
+      "HelicopterCameraProcess",
+      "HelicopterCameraSizeof",
+      "HelicopterClassConstructor",
+      "HelicopterDestructor",
+      "HelicopterDisplay",
+      "HelicopterInstanceConstructor",
+      "HelicopterProcess",
+      "HelicopterSizeof",
+      "InteractHelicopterWithBullet",
+      "InteractHelicopterWithWeaponProjectile",
+      "OilAiInstanceConstructor",
+      "OilAiProcess",
+      "OilAiSizeof",
+      "PathingInfoDestructor",
+      "PathingInfoInstanceConstructor",
+      "PathingInfoProcess"
+    ]
+  }
+}
