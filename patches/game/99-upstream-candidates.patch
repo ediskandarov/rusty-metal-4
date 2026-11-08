@@ -1,0 +1,28 @@
+diff --git a/src/main/image.c b/src/main/image.c
+--- a/src/main/image.c
++++ b/src/main/image.c
+@@ -56,8 +56,8 @@
+ {
+     RECT rectangle;
+     TimBlock* palette;
+-    register u_long size TM4_BIND_REGISTER("v0");
+-    register TimBlock* image TM4_BIND_REGISTER("a1") = (TimBlock*)tim;
++    u_long size;
++    TimBlock* image = (TimBlock*)tim;
+ 
+     if (tim[4] & 8) {
+         palette = (TimBlock*)(tim + 8);
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -699,9 +699,7 @@
+                 ((blue = object->radar_color.b), blue));
+             setXY0(&primitives->radar_dots[index], x + 35, y + 50);
+         }
+-        /* The packet address field takes the low 24 bits of the old head. */
+-        setaddr(&primitives->radar_dots[index], *orderingTable);
+-        setaddr(orderingTable, &primitives->radar_dots[index]);
++        addPrim(orderingTable, &primitives->radar_dots[index]);
+     }
+ }
+ #endif
