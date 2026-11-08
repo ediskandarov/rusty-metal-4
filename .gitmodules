@@ -1,3 +1,6 @@
 [submodule "game"]
 	path = game
 	url = git@github.com:ediskandarov/tm4_archaeology.git
+[submodule "external/psyz"]
+	path = external/psyz
+	url = https://github.com/Xeeynamo/psyz.git
