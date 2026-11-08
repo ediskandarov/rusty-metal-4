@@ -1,0 +1,134 @@
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -27,6 +27,7 @@
+ #include <LIBAPI.H>
+ 
+ #ifdef __psyz
++#include "port/web/interpolation.h"
+ #include "port/web/render_sync.h"
+ #include "port/web/subpixel.h"
+ #endif
+@@ -1076,7 +1077,10 @@
+         primitives += RenderPrimitiveCount;
+         view_state = (Tm4GameInfo*)((u8*)&GameInfo + view * sizeof(Tm4GamePlayer));
+         camera = view_state->players[0].camera;
+-
++#ifdef __psyz
++        Camera pose;
++        camera = WebInterpolationCamera(camera, &pose);
++#endif
+         GameInfo.active_view = camera;
+         SetRotMatrix(&camera->world_to_camera);
+         SetTransMatrix(&GameInfo.active_view->world_to_camera);
+@@ -1098,7 +1102,9 @@
+             *(u8*)&RenderDrawBuffer->buffer_index + (view % 2) * 2);
+         setaddr(&RenderDisplayBuffer->players[view].world_environment, getaddr(ordering));
+         setaddr(ordering, &RenderDisplayBuffer->players[view].world_environment);
+-
++#ifdef __psyz
++        GameInfo.active_view = view_state->players[0].camera;
++#endif
+     }
+ #ifdef __psyz
+     WebSubpixelSelect(WEB_SUBPIXEL_NONE);
+diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
+--- a/src/modules/afc/display.c
++++ b/src/modules/afc/display.c
+@@ -1,7 +1,9 @@
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
+-
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4/gpu_packet.h"
+ #include "tm4_scalar.h"
+@@ -59,7 +61,11 @@
+             maximum = Int32Max(dx, dz);
+             minimum = Int32Min(dx, dz);
+             object->rotation_angle = (maximum + minimum / 2) / 2;
++#ifdef __psyz
++        } else if (!GameInfo.pause_player && WebInterpolationAdvanceDisplay()) {
++#else
+         } else if (!GameInfo.pause_player) {
++#endif
+             object->rotation_angle += object->rotation_step;
+             object->rotation_angle %= ANGLE_FULL_TURN;
+         }
+diff --git a/src/modules/car/camera.c b/src/modules/car/camera.c
+--- a/src/modules/car/camera.c
++++ b/src/modules/car/camera.c
+@@ -1,7 +1,9 @@
+ 
+ #include "tm4/modules/camera.h"
+ #include "private.h"
+-
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -309,7 +311,10 @@
+     look_button = GameInfo.players[((Car*)object)->controller_index]
+                       .bindings[pad->has_analog]
+                       .actions[GameControlLookBack];
+-
++#ifdef __psyz
++    if (car_camera_state(data)->snap || ((pad->buttons ^ pad->previous_buttons) & look_button))
++        WebInterpolationCutCamera(camera);
++#endif
+     if (pad->buttons & look_button) {
+         if ((u32)car_camera_state(data)->distance_preset < 3) {
+             SVECTOR* car_position;
+diff --git a/src/modules/car/display.c b/src/modules/car/display.c
+--- a/src/modules/car/display.c
++++ b/src/modules/car/display.c
+@@ -13,6 +13,7 @@
+ #include "tm4/gpu_packet.h"
+ #ifdef __psyz
+ #include "port/web/car.h"
++#include "port/web/interpolation.h"
+ #include "port/web/subpixel.h"
+ #endif
+ #include "tm4/gte.h"
+@@ -124,7 +125,11 @@
+         CarTurboDisplay(car, ordering, car_sort_depth, bucket, packets, context.packet_end,
+             context.world_to_camera);
+     if (car->invisibility_ticks && car->invisibility_hidden && !car->freeze_ticks
++#ifdef __psyz
++        && camera->object != WebInterpolationCarIdentity(car))
++#else
+         && camera->object != car)
++#endif
+         return;
+     {
+         register u32 byte_offset TM4_BIND_REGISTER("$2") = bucket * sizeof(*ordering);
+diff --git a/src/modules/car/orientation.c b/src/modules/car/orientation.c
+--- a/src/modules/car/orientation.c
++++ b/src/modules/car/orientation.c
+@@ -1,7 +1,9 @@
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
+-
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/vector.h"
+@@ -92,7 +94,9 @@
+     s32 i;
+     const s32 particle_count = ArrayCount(car->particles);
+     const s32 wheel_count = ArrayCount(car->wheels);
+-
++#ifdef __psyz
++    WebInterpolationCutCar(car);
++#endif
+     car->transform = *matrix;
+     TransformOriginalBox(car);
+     for (i = 0; i < particle_count; i++) {
