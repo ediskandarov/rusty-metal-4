@@ -1,0 +1,11 @@
+/build/
+/orig/
+/disks/
+/.venv/
+/cmake-build-*/
+/compile_commands.json
+/CMakeUserPresets.json
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store

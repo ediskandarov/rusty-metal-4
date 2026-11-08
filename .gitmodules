@@ -1,0 +1,3 @@
+[submodule "game"]
+	path = game
+	url = git@github.com:ediskandarov/tm4_archaeology.git
