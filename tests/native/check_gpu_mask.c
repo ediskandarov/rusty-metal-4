@@ -1,7 +1,7 @@
 #include <emscripten.h>
 #include <libgpu.h>
 #include <stdio.h>
-#include "../psyz/subpixel.h"
+#include "port/psyz/subpixel.h"
 
 /* Exercise real packets and VRAM readback, independently of game assets. */
 static int failures;

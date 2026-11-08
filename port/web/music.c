@@ -8,7 +8,23 @@
 typedef struct WebMusicTrack {
     int start, end, toc;
 } WebMusicTrack;
-#include "music_tracks.h"
+static WebMusicTrack music_tracks[100];
+static int music_track_count, music_leadout;
+
+EMSCRIPTEN_KEEPALIVE void WebMusicConfigureTrack(int track, int start, int end, int toc)
+{
+    if (track > 0 && track < 100 && start >= 0 && end > start) {
+        music_tracks[track] = (WebMusicTrack){ start, end, toc };
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE void WebMusicConfigureDisc(int count, int leadout)
+{
+    if (count > 0 && count < 100) {
+        music_track_count = count;
+        music_leadout = leadout;
+    }
+}
 
 static int movie_mode, movie_ended;
 static unsigned int movie_samples, movie_generation;
@@ -41,11 +57,7 @@ static int requested_sector;
 static unsigned int samples_read, nonzero_samples;
 
 EM_JS(void, fetch_track, (int track, unsigned int generation), {
-    const url = 'audio/track' + String(track).padStart(2, '0') + '.pcm';
-    fetch(url).then(response => {
-        if (!response.ok) throw new Error(url + ': ' + response.status);
-        return response.arrayBuffer();
-    }).then(bytes => {
+    globalThis.tm4Assets.readAudio(track).then(bytes => {
         const pointer = Module._malloc(bytes.byteLength);
         if (!pointer) throw new Error('Cannot allocate CD audio buffer');
         HEAPU8.set(new Uint8Array(bytes), pointer);
@@ -111,10 +123,10 @@ size_t __wrap_Psyz_CdPullSamples(short* output, size_t frames)
 static int play_sector(int sector)
 {
     int track;
-    for (track = 2; track <= WEB_MUSIC_TRACK_COUNT; ++track)
+    for (track = 2; track <= music_track_count; ++track)
         if (sector >= music_tracks[track].start && sector < music_tracks[track].end)
             break;
-    if (track > WEB_MUSIC_TRACK_COUNT)
+    if (track > music_track_count)
         return 0;
     Psyz_AudioLock();
     requested_sector = sector;
@@ -185,9 +197,9 @@ CdlCB WebMusicReadyCallback(CdlCB callback)
 int WebMusicGetToc(CdlLOC* toc)
 {
     CdIntToPos(music_leadout, &toc[0]);
-    for (int i = 1; i <= WEB_MUSIC_TRACK_COUNT; ++i)
+    for (int i = 1; i <= music_track_count; ++i)
         CdIntToPos(music_tracks[i].toc, &toc[i]);
-    return WEB_MUSIC_TRACK_COUNT;
+    return music_track_count;
 }
 
 static void poll_music(void* unused)
@@ -217,7 +229,7 @@ static void poll_music(void* unused)
         track, sector, active, ready, silent, frames, nonzero);
     if (!ready)
         return;
-    int stopped = ended && ((current_mode & CdlModeAP) || track == WEB_MUSIC_TRACK_COUNT);
+    int stopped = ended && ((current_mode & CdlModeAP) || track == music_track_count);
     if (stopped) {
         Psyz_AudioLock();
         playing = 0;

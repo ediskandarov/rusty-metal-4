@@ -1,0 +1,21 @@
+{
+  "name": "tm4-rewired",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun tools/build.js",
+    "build:dev": "bun tools/build.js --dev",
+    "dev": "bun tools/serve.js",
+    "test": "bun test tests/unit",
+    "fmt": "bun fmt --no-script tools web tests package.json config tsconfig.json bunfig.toml",
+    "fmt:check": "bun fmt --no-script --check tools web tests package.json config tsconfig.json bunfig.toml",
+    "lint": "bun lint --no-script tools web tests",
+    "typecheck": "tsc --noEmit && tsc --project web/tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@tsconfig/bun": "^1.0.11",
+    "@types/bun": "^1.4.4",
+    "playwright": "1.56.1",
+    "typescript": "^7.0.2"
+  }
+}

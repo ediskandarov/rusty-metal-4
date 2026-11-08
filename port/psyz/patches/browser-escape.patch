@@ -1,6 +1,6 @@
 --- a/platform/sdl3_common.h
 +++ b/platform/sdl3_common.h
-@@ -1118,9 +1118,11 @@
+@@ -1131,8 +1131,10 @@
  #ifndef PLATFORM_IOS
          case SDL_EVENT_KEY_DOWN:
 +#ifndef PLATFORM_WEB

@@ -47,10 +47,7 @@ EM_JS(void, fetch_movie, (const char* name, unsigned request), {
         document.body.appendChild(button);
     }
     const controller = Module.tm4MovieFetch = new AbortController();
-    fetch('movies/' + movie + '.STR', {signal: controller.signal}).then(response => {
-        if (!response.ok) throw new Error('Movie download failed: ' + response.status);
-        return response.arrayBuffer();
-    }).then(bytes => {
+    globalThis.tm4Assets.readMovie(movie, {signal: controller.signal}).then(bytes => {
         if (tm4Port.movie !== state || !state.active) return;
         FS.writeFile('/movie.bin', new Uint8Array(bytes), {canOwn: true});
         FS.writeFile('/movie.cue', 'FILE "movie.bin" BINARY\n  TRACK 01 MODE2/2352\n    INDEX 01 00:00:00\n');

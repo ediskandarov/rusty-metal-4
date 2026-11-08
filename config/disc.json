@@ -1,0 +1,291 @@
+{
+  "executable": {
+    "name": "SCUS_945.60",
+    "sha256": "a449ad01f9a4b1fe3d0a9182cd63dc3a174fcb63971e5e73e7412e34c6532be5"
+  },
+  "files": [
+    {
+      "name": "Twisted Metal 4 (Track 01).bin",
+      "size": 384615504,
+      "sha256": "1be99e1d98c5b5e2d7572f3b46aa63c43ddd6f19f1b5cf179ffd853261a139f1"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 02).bin",
+      "size": 49175616,
+      "sha256": "0072c7e59b11f3051a7333218bbb72fa3b7e6077b6c9b11fba7e1618a3d74931"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 03).bin",
+      "size": 47366928,
+      "sha256": "bd4b17241bdb03af6fb1b6f557d43b1bc087187a570db7a819ee7d7e7c9a6557"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 04).bin",
+      "size": 37667280,
+      "sha256": "35d95968e5afecd7d0378e7413e0d2b138fbb2ec8dde402eb3b0de2418b9de21"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 05).bin",
+      "size": 24093888,
+      "sha256": "7aafda608ab5342fc541278667f844134b8151395475fce88ddf90057860d760"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 06).bin",
+      "size": 45245424,
+      "sha256": "befdfdd396caee14f974ec5253fc2d7c98903a0b1b91e745bb7c761f2d411efb"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 07).bin",
+      "size": 34346256,
+      "sha256": "250acfe135c1fa3d0c97c0d1662703a3f06ab9dc47da2515697566e759145fad"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 08).bin",
+      "size": 48326544,
+      "sha256": "d3c4b4375d435a7ab5e92eb158cb25b1683aebf48d9680fc5006567a12522a5e"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 09).bin",
+      "size": 3342192,
+      "sha256": "e6ff2c29228e73de8b899bfe1e73c1db703415d392ffbbae5b7bbcbd6a933cbb"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 10).bin",
+      "size": 3335136,
+      "sha256": "95b6b92ac6502db53dc85f99da98dd9dce09091230e23d538cd8974f5c4e1196"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 11).bin",
+      "size": 2279088,
+      "sha256": "af14f3ca38332124ad44355bbb2a973fa60a137306f4d6fac0bfb99c320e3ff6"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 12).bin",
+      "size": 2518992,
+      "sha256": "ced80c53f0d85f4d5605b2a4a2679b336ce1bb9594dce41881d750f89b63b284"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 13).bin",
+      "size": 1747536,
+      "sha256": "c9f300a5666a9265c6be034582b29dad06fbae359fd5425d343a9b8b87d8a24e"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 14).bin",
+      "size": 1676976,
+      "sha256": "cbf7fe4aefbb03f47dd607516743ad0b24374f6a5b690b0bd6deb77096e808ef"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 15).bin",
+      "size": 1900416,
+      "sha256": "b30d32fbd9b7bcd366e6495237ef634cf4c1c066890a47c3008d28fa0e6b6d57"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 16).bin",
+      "size": 2013312,
+      "sha256": "9691a9bd306dd7c225fbeeec0faacbac84459e6fafbd859b5159f151ba268426"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 17).bin",
+      "size": 3763200,
+      "sha256": "7d79cf9481f1da78fe4f9fd3a282b2db51c67341d3f9b901798856fdfdcd6639"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 18).bin",
+      "size": 3530352,
+      "sha256": "069ab977897c6857b23b0148345fabd8e08af9fa74d21469ca9a321e5cd22eaa"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 19).bin",
+      "size": 2655408,
+      "sha256": "ab5b5dbcd92c54b9b136320d01929a2e1132a4552c88c617a0e95dd9808193f6"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 20).bin",
+      "size": 4560528,
+      "sha256": "dbc4fb5f8026ec86f4546bcc9f33b9d09ae092d3991c1860553a7ca289ccbc66"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 21).bin",
+      "size": 1227744,
+      "sha256": "ca261ea53354263da1723a9cb3c146f580bfedd6c583df21e4f8265e780d0d1a"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 22).bin",
+      "size": 40748400,
+      "sha256": "080b6d42aab64a7a0f6466bff38b93186f2eca33a3e320b4b78f8c8231622304"
+    },
+    {
+      "name": "Twisted Metal 4 (Track 23).bin",
+      "size": 1227744,
+      "sha256": "ca261ea53354263da1723a9cb3c146f580bfedd6c583df21e4f8265e780d0d1a"
+    },
+    {
+      "name": "Twisted Metal 4.cue",
+      "size": 2512,
+      "sha256": "c216947e149af57a016f4bd18934fa3e55585b89a951c7d59a441a47fd23367e"
+    }
+  ],
+  "tracks": [
+    {
+      "number": 1,
+      "audio": false,
+      "index": 0,
+      "file": "Twisted Metal 4 (Track 01).bin",
+      "size": 384615504
+    },
+    {
+      "number": 2,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 02).bin",
+      "size": 49175616
+    },
+    {
+      "number": 3,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 03).bin",
+      "size": 47366928
+    },
+    {
+      "number": 4,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 04).bin",
+      "size": 37667280
+    },
+    {
+      "number": 5,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 05).bin",
+      "size": 24093888
+    },
+    {
+      "number": 6,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 06).bin",
+      "size": 45245424
+    },
+    {
+      "number": 7,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 07).bin",
+      "size": 34346256
+    },
+    {
+      "number": 8,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 08).bin",
+      "size": 48326544
+    },
+    {
+      "number": 9,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 09).bin",
+      "size": 3342192
+    },
+    {
+      "number": 10,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 10).bin",
+      "size": 3335136
+    },
+    {
+      "number": 11,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 11).bin",
+      "size": 2279088
+    },
+    {
+      "number": 12,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 12).bin",
+      "size": 2518992
+    },
+    {
+      "number": 13,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 13).bin",
+      "size": 1747536
+    },
+    {
+      "number": 14,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 14).bin",
+      "size": 1676976
+    },
+    {
+      "number": 15,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 15).bin",
+      "size": 1900416
+    },
+    {
+      "number": 16,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 16).bin",
+      "size": 2013312
+    },
+    {
+      "number": 17,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 17).bin",
+      "size": 3763200
+    },
+    {
+      "number": 18,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 18).bin",
+      "size": 3530352
+    },
+    {
+      "number": 19,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 19).bin",
+      "size": 2655408
+    },
+    {
+      "number": 20,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 20).bin",
+      "size": 4560528
+    },
+    {
+      "number": 21,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 21).bin",
+      "size": 1227744
+    },
+    {
+      "number": 22,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 22).bin",
+      "size": 40748400
+    },
+    {
+      "number": 23,
+      "audio": true,
+      "index": 150,
+      "file": "Twisted Metal 4 (Track 23).bin",
+      "size": 1227744
+    }
+  ]
+}

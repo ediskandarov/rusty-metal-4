@@ -1,0 +1,25 @@
+#startup {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  padding: 8vh 8vw;
+  overflow: auto;
+  color: #eee;
+  background: #16191e;
+  font:
+    17px/1.5 system-ui,
+    sans-serif;
+}
+#startup[hidden] {
+  display: none;
+}
+#startup input {
+  max-width: 100%;
+  font: inherit;
+}
+#startup-progress {
+  white-space: pre-wrap;
+}
+#startup-warnings {
+  color: #e9c77f;
+}
