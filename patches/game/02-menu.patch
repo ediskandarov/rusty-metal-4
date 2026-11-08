@@ -1,0 +1,120 @@
+diff --git a/src/modules/menu/car_preview.c b/src/modules/menu/car_preview.c
+--- a/src/modules/menu/car_preview.c
++++ b/src/modules/menu/car_preview.c
+@@ -17,9 +17,14 @@
+     return &MenuCreatedCarList;
+ }
+ 
++static s32 preview_names_equal(const char* first, const char* second)
++{
++    return first == second || (first && second && strcmp(first, second) == 0);
++}
++
+ s32 MenuIsPreviewShowingSelection(s32 index)
+ {
+-    return strcmp(MenuCarPreviews.current[index], MenuCarPreviews.names[index]) == 0;
++    return preview_names_equal(MenuCarPreviews.current[index], MenuCarPreviews.names[index]);
+ }
+ 
+ s32 MenuHasSelectedCarDirectory(s32 index)
+@@ -57,7 +62,7 @@
+     s32 index;
+     const s32 preview_count = ArrayCount(MenuCarPreviews.previous);
+     for (index = 0; index < preview_count; index++) {
+-        if (strcmp(MenuCarPreviews.previous[index], MenuCarPreviews.names[player]) == 0)
++        if (preview_names_equal(MenuCarPreviews.previous[index], MenuCarPreviews.names[player]))
+             return 1;
+     }
+     return 0;
+@@ -65,7 +70,7 @@
+ 
+ s32 MenuArePreviewNamesEqual(void)
+ {
+-    return strcmp(MenuCarPreviews.names[0], MenuCarPreviews.names[1]) == 0;
++    return preview_names_equal(MenuCarPreviews.names[0], MenuCarPreviews.names[1]);
+ }
+ 
+ void MenuUpdateCarPreview(MenuCarList* list, s32 index, char* preview_name)
+diff --git a/src/modules/menu/car_selection.c b/src/modules/menu/car_selection.c
+--- a/src/modules/menu/car_selection.c
++++ b/src/modules/menu/car_selection.c
+@@ -80,6 +80,8 @@
+ 
+ s32 MenuFindCreatedCarByName(char* name)
+ {
++    if (!name)
++        return -1;
+     s32 index;
+     const s32 created_capacity = ArrayCount(MenuCreatedCarEntries);
+     for (index = 0; index < created_capacity; index++) {
+diff --git a/src/modules/menu/cheat_codes.c b/src/modules/menu/cheat_codes.c
+--- a/src/modules/menu/cheat_codes.c
++++ b/src/modules/menu/cheat_codes.c
+@@ -8,9 +8,6 @@
+ 
+ extern char MenuCheatCharacterDirectoryPath[24];
+ extern char MenuCheatWorldDirectoryPath[8];
+-
+-extern s32 rand(void);
+-extern void srand(u32);
+ 
+ void MenuGenerateSeededButtonSequence(u16* codes, u32 seed, s32 count)
+ {
+diff --git a/src/modules/menu/menu.c b/src/modules/menu/menu.c
+--- a/src/modules/menu/menu.c
++++ b/src/modules/menu/menu.c
+@@ -204,7 +204,6 @@
+     MenuResetCarPreviews();
+     ObjectConstructor();
+     ObjectStartupInstance();
+-    VB_StartSync();
+     MenuSetSoundVolume(16);
+     MenuSetMusicVolume(MenuGameState.music_volume);
+     MenuMusicEmitter = ObjectCreate(MenuSoundEmitterClass, 0, MenuMusicEmitterName, 0);
+diff --git a/src/modules/menu/model.c b/src/modules/menu/model.c
+--- a/src/modules/menu/model.c
++++ b/src/modules/menu/model.c
+@@ -121,7 +121,7 @@
+     return ((page << 4) & 0x100) | ((page >> 2) & 0x200);
+ }
+ 
+-void CarRelocateBitStuff(RegistryDirectory* directory, u16 oldx, u16 oldy, u16 x, u16 y)
++void MenuRelocateCarTextures(RegistryDirectory* directory, u16 oldx, u16 oldy, u16 x, u16 y)
+ {
+     u32 ybits;
+     Tm4CardTexture* shadow;
+diff --git a/src/modules/menu/private.h b/src/modules/menu/private.h
+--- a/src/modules/menu/private.h
++++ b/src/modules/menu/private.h
+@@ -2,6 +2,7 @@
+ #define TM4_MENU_PRIVATE_H
+ 
+ #include "tm4/compiler.h"
++#include "tm4/fixed.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+@@ -130,7 +131,7 @@
+ 
+ extern Tm4CardTexture* MenuTextures;
+ #define MenuPortraitUV (MenuTextures[25].uv)
+-#define MenuTexturePageX(page) (((page) << 6) & 0x7c0)
++#define MenuTexturePageX(page) (((page) << 6) & 0x3c0)
+ #define MenuTexturePageY(page) ((((page) << 4) & 0x100) + (((page) >> 2) & 0x200))
+ /* Four, two or one texels share each VRAM word at successive texture depths. */
+ #define MenuTextureWordU(uv, coord)                                                                \
+diff --git a/src/modules/menu/screen_input.c b/src/modules/menu/screen_input.c
+--- a/src/modules/menu/screen_input.c
++++ b/src/modules/menu/screen_input.c
+@@ -17,10 +17,7 @@
+ 
+ static inline MenuChoiceRecord* MenuInputChoice(MenuScreenEntry* screen, s32 index)
+ {
+-    /* Explicit byte offsets preserve PsyQ's address instruction order. */
+-    enum { choices_offset = offsetof(MenuScreenEntry, choices) };
+-    s32 offset = index * sizeof(MenuChoiceRecord);
+-    return (MenuChoiceRecord*)((char*)screen + offset + choices_offset);
++    return &screen->choices[index];
+ }
+ 
+ static inline s32 MenuCurrentChoiceAvailable(void)
