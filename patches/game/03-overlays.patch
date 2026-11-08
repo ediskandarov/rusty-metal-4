@@ -1,0 +1,641 @@
+diff --git a/src/modules/afc/afc.c b/src/modules/afc/afc.c
+--- a/src/modules/afc/afc.c
++++ b/src/modules/afc/afc.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/card.h"
+diff --git a/src/modules/afc/afc_display_gte.h b/src/modules/afc/afc_display_gte.h
+--- a/src/modules/afc/afc_display_gte.h
++++ /dev/null
+@@ -1,12 +0,0 @@
+-#ifndef TM4_AFC_DISPLAY_GTE_H
+-#define TM4_AFC_DISPLAY_GTE_H
+-
+-#define AfcLoadV0(xy, z) __asm__ volatile("mtc2 %0,$0;mtc2 %1,$1" : : "r"(xy), "r"(z))
+-#define AfcReadSZ3(depth) __asm__ volatile("mfc2 %0,$19" : "=r"(depth))
+-
+-#define AfcSetRotation(r0, r1, r2, r3, r4)                                                         \
+-    __asm__ volatile("ctc2 %0,$0;ctc2 %1,$1;ctc2 %2,$2;ctc2 %3,$3;ctc2 %4,$4"                      \
+-                     :                                                                             \
+-                     : "r"(r0), "r"(r1), "r"(r2), "r"(r3), "r"(r4))
+-
+-#endif
+diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
+--- a/src/modules/afc/display.c
++++ b/src/modules/afc/display.c
+@@ -1,11 +1,11 @@
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
++
+ #include "tm4/gpu.h"
+ #include "tm4/gpu_packet.h"
+ #include "tm4_scalar.h"
+ 
+-#include "afc_display_gte.h"
+ #include "tm4/fixed.h"
+ #include "tm4/gte.h"
+ #include "tm4/integer.h"
+@@ -63,19 +63,12 @@
+             object->rotation_angle += object->rotation_step;
+             object->rotation_angle %= ANGLE_FULL_TURN;
+         }
+-        AfcLoadV0((u16)px | ((u32)py << 16), pz);
++        SVECTOR position = { px, py, pz, 0 };
++        gte_ldv0(&position);
+         gte_rtv0tr();
+         RotationMatrixZ(object->rotation_angle, &rotation);
+         GteReadMACVector(x, y, z);
+-        {
+-            const volatile long* words = (const volatile long*)((unsigned long)&rotation & ~3UL);
+-            register long r0 TM4_BIND_REGISTER("$3") = words[0];
+-            register long r1 TM4_BIND_REGISTER("$4") = words[1];
+-            long r2 = words[2];
+-            register long r3 TM4_BIND_REGISTER("$6") = words[3];
+-            long r4 = words[4];
+-            AfcSetRotation(r0, r1, r2, r3, r4);
+-        }
++        SetRotMatrix(&rotation);
+         gte_ldtr(x, y, z);
+         gte_ldv0(&object->vertices[0]);
+         gte_ldv1(&object->vertices[1]);
+@@ -87,7 +80,7 @@
+         gte_ldv0(&object->vertices[3]);
+         gte_rtps();
+         gte_stsxy(&packet->words.vertices[3].xy);
+-        AfcReadSZ3(ordering_depth);
++        gte_stsz(&ordering_depth);
+         ordering_depth >>= 2;
+         if (ordering_depth > 8) {
+             ordering_depth -= 48;
+diff --git a/src/modules/anim/resources.c b/src/modules/anim/resources.c
+--- a/src/modules/anim/resources.c
++++ b/src/modules/anim/resources.c
+@@ -191,7 +191,7 @@
+             AnimClassCount++;
+         } else {
+             char* alias = RegGetFileDataPS(entry, TextAlias);
+-            if (strlen(alias) > 0) {
++            if (alias && alias[0]) {
+                 resized = MemRealloc(AnimAliases, (AnimAliasCount + 1) * sizeof(*AnimAliases));
+                 if (!resized)
+                     return;
+diff --git a/src/modules/bullet/display.c b/src/modules/bullet/display.c
+--- a/src/modules/bullet/display.c
++++ b/src/modules/bullet/display.c
+@@ -13,6 +13,7 @@
+ 
+ #include <INLINE_C.H>
+ #include <LIBGPU.H>
++#include <tm4/gte.h>
+ 
+ typedef char BulletDitherOffsetCheck[offsetof(Tm4GameInfo, dither) == 0x4c ? 1 : -1];
+ 
+diff --git a/src/modules/camera/camera.c b/src/modules/camera/camera.c
+--- a/src/modules/camera/camera.c
++++ b/src/modules/camera/camera.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/geometry.h"
+diff --git a/src/modules/carprt/display.c b/src/modules/carprt/display.c
+--- a/src/modules/carprt/display.c
++++ b/src/modules/carprt/display.c
+@@ -84,7 +84,7 @@
+         screen = screen_batch->vertices;
+         local_vertex = object->local_vertices + frame->first_vertex;
+         for (i = frame->vertex_count; i > 0; i -= 3, local_vertex += 3, screen_batch++) {
+-            gte_ldv3c(local_vertex);
++            WebGteLoadVertexBatch(local_vertex, i);
+             gte_rtpt();
+             gte_stsxy3c(screen_batch->vertices);
+         }
+diff --git a/src/modules/carprt/private.h b/src/modules/carprt/private.h
+--- a/src/modules/carprt/private.h
++++ b/src/modules/carprt/private.h
+@@ -1,6 +1,7 @@
+ #ifndef TM4_CARPRT_PRIVATE_H
+ #define TM4_CARPRT_PRIVATE_H
+ 
++#include "tm4/fixed.h"
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+ 
+diff --git a/src/modules/cars/c_crush/crush.c b/src/modules/cars/c_crush/crush.c
+--- a/src/modules/cars/c_crush/crush.c
++++ b/src/modules/cars/c_crush/crush.c
+@@ -17,6 +17,9 @@
+ 
+ void CarCrusherClassConstructor(RegistryDirectory* directory)
+ {
++    OSRegisterCarPhysics();
++    OSRegisterCarDisplay();
++    OSRegisterSoundEmitter();
+     SVECTOR lower, upper;
+     s32 velocity;
+     CrusherDamage = *(s32*)RegGetFileDataPS(directory, DamageKey);
+@@ -250,3 +253,6 @@
+     CompMatrix(&scratch->car_to_camera, rotation, rotation);
+     return rotation;
+ }
++
++/* Each original overlay owns its own tread tables. */
++#include "../treads.c"
+diff --git a/src/modules/cars/c_minion/minion.c b/src/modules/cars/c_minion/minion.c
+--- a/src/modules/cars/c_minion/minion.c
++++ b/src/modules/cars/c_minion/minion.c
+@@ -27,3 +27,6 @@
+     TreadPolysProcess(car);
+     return 1;
+ }
++
++/* Each original overlay owns its own tread tables. */
++#include "../treads.c"
+diff --git a/src/modules/cars/c_slam/slam.c b/src/modules/cars/c_slam/slam.c
+--- a/src/modules/cars/c_slam/slam.c
++++ b/src/modules/cars/c_slam/slam.c
+@@ -17,6 +17,9 @@
+ 
+ void CarSlamClassConstructor(RegistryDirectory* directory)
+ {
++    OSRegisterCarPhysics();
++    OSRegisterCarDisplay();
++    OSRegisterSoundEmitter();
+     s32 velocity;
+     SlamDamage = *(s32*)RegGetFileDataPS(directory, DamageKey);
+     SlamSlams = *(s32*)RegGetFileDataPS(directory, SlamsKey);
+diff --git a/src/modules/cars/c_tank/tank.c b/src/modules/cars/c_tank/tank.c
+--- a/src/modules/cars/c_tank/tank.c
++++ b/src/modules/cars/c_tank/tank.c
+@@ -27,3 +27,6 @@
+     TreadPolysProcess(car);
+     return 1;
+ }
++
++/* Each original overlay owns its own tread tables. */
++#include "../treads.c"
+diff --git a/src/modules/cars/c_trash/trash.c b/src/modules/cars/c_trash/trash.c
+--- a/src/modules/cars/c_trash/trash.c
++++ b/src/modules/cars/c_trash/trash.c
+@@ -17,6 +17,9 @@
+ 
+ void CarTrashClassConstructor(RegistryDirectory* directory)
+ {
++    OSRegisterCarPhysics();
++    OSRegisterCarDisplay();
++    OSRegisterSoundEmitter();
+     s32 velocity;
+     TrashDamage = *(s32*)RegGetFileDataPS(directory, DamageKey);
+     TrashSlams = *(s32*)RegGetFileDataPS(directory, SlamsKey);
+diff --git a/src/modules/cars/treads.c b/src/modules/cars/treads.c
+--- a/src/modules/cars/treads.c
++++ b/src/modules/cars/treads.c
+@@ -39,7 +39,7 @@
+             CarRenderGroup* group;
+             const s32 frame_count = ArrayCount(group->frames);
+             s32 additional, i;
+-            register CarRenderFrame* frame TM4_BIND_REGISTER("$6");
++            CarRenderFrame* frame;
+             TreadFace* allocation;
+             if (strstr(name, LeftTreadName) == name) {
+                 count = &LeftTreadCount;
+@@ -78,6 +78,8 @@
+         MemFree(LeftTreadFaces);
+     if (RightTreadFaces)
+         MemFree(RightTreadFaces);
++    LeftTreadFaces = RightTreadFaces = NULL;
++    LeftTreadCount = RightTreadCount = 0;
+ }
+ 
+ /* The original face copy accepts byte-aligned serialized face records. */
+diff --git a/src/modules/display_gte.h b/src/modules/display_gte.h
+--- a/src/modules/display_gte.h
++++ b/src/modules/display_gte.h
+@@ -1,10 +1,19 @@
+ #ifndef TM4_DISPLAY_GTE_H
+ #define TM4_DISPLAY_GTE_H
+ 
++#ifdef __EMSCRIPTEN__
++#define BulletReadDepths(first, second) do { (first) = Psyz_GteDataRead(17); (second) = Psyz_GteDataRead(18); } while (0)
++#else
+ #define BulletReadDepths(first, second)                                                            \
+     __asm__ volatile("mfc2 %0,$17;mfc2 %1,$18" : "=r"(first), "=r"(second))
+ 
++#endif
++
++#ifdef __EMSCRIPTEN__
++#define CarpartReadSZ0(depth) ((depth) = Psyz_GteDataRead(16))
++#else
+ #define CarpartReadSZ0(depth) __asm__ volatile("mfc2 %0,$16" : "=r"(depth))
++#endif
+ 
+ #define FragmentSetMatrixLow(r0, r1, r2, r3)                                                       \
+     __asm__ volatile("ctc2 %0,$0;ctc2 %1,$1;ctc2 %2,$2;ctc2 %3,$3"                                 \
+diff --git a/src/modules/expl/collision.c b/src/modules/expl/collision.c
+--- a/src/modules/expl/collision.c
++++ b/src/modules/expl/collision.c
+@@ -21,10 +21,8 @@
+     register s32 azimuth TM4_BIND_REGISTER("$22");
+     s32 sample;
+     register s32 row_offset TM4_BIND_REGISTER("$23");
+-    s32* table;
+     s32 collision_row_offset;
+     Tm4WorldHit* hit;
+-    unsigned long negative_azimuth;
+     SVECTOR* rays;
+ 
+     if (!wave->definition->ray_check)
+@@ -39,39 +37,25 @@
+ 
+         rays = ExplRays[0];
+         hit = &result.hit;
+-        table = rcossin_tbl;
+         center = &ObjectGetHeader(wave)->position;
+         x = center->vx;
+         y = center->vy;
+         z = center->vz;
+-        /* Make the table base available before copying the wave center. */
+-        __asm__("" : "=r"(azimuth) : "0"(azimuth), "r"(table));
+         row_offset = azimuth;
+         center_world.vx = x;
+         to->vy = y;
+         to->vz = z;
+-        negative_azimuth = (unsigned long)table;
+         radius = ObjectGetHeader(wave)->interaction_radius;
+     }
+ 
+     do {
+         s32 azimuth_angle = azimuth * 512;
+-        s32 sine;
+         register s32 ray_offset TM4_BIND_REGISTER("$17");
+         s32 elevation = 1024;
+         s32 column_offset;
+-        s32 packed_azimuth;
+ 
+-        if (azimuth_angle >= 0) {
+-            packed_azimuth = *(volatile s32*)&table[azimuth_angle];
+-            sine = Q12PackedSine(table[azimuth_angle]);
+-        } else {
+-            packed_azimuth = *(s32*)negative_azimuth;
+-            sine = -Q12PackedSine(packed_azimuth);
+-        }
+-
+-        azimuth_sine = sine;
+-        azimuth_cosine = Q12PackedCosine(packed_azimuth);
++        azimuth_sine = Q12Sin(azimuth_angle);
++        azimuth_cosine = Q12Cos(azimuth_angle);
+         sample = 0;
+         ray_offset = row_offset;
+         column_offset = 0;
+@@ -87,7 +71,7 @@
+             /* Each azimuth samples five elevations, stepping down from a quarter turn. */
+             elevation -= 409;
+             absolute_elevation = Int32Abs(elevation);
+-            elevation_cosine = Q12PackedCosine(table[absolute_elevation]);
++            elevation_cosine = Q12Cos(absolute_elevation);
+             horizontal_radius = Q12MulRound(radius, elevation_cosine);
+ 
+             end_world = (SVECTOR*)(ray_offset + (s32)rays);
+@@ -95,21 +79,14 @@
+             component += Q12MulRound(horizontal_radius, azimuth_cosine);
+             end_world->vx = component;
+             y = center_world.vy;
+-            if (elevation >= 0) {
+-                elevation_sine = Q12PackedSine(table[elevation]);
+-                end_world->vy = y - Q12MulRound(horizontal_radius, elevation_sine);
+-            } else {
+-                elevation_sine = -Q12PackedSine(table[-elevation]);
+-                end_world->vy = y - Q12MulRound(horizontal_radius, elevation_sine);
+-            }
++            elevation_sine = Q12Sin(elevation);
++            end_world->vy = y - Q12MulRound(horizontal_radius, elevation_sine);
+ 
+             ray_start_world = &center_world;
+             component = (u16)center_world.vz;
+             z_product = horizontal_radius * azimuth_sine;
+             z_end = (SVECTOR*)(ray_offset + (s32)rays);
+             ray_end_world = (SVECTOR*)(collision_row_offset + (column_offset + (s32)rays));
+-            /* Keep the Z destination and ray origin live together for the collision call. */
+-            __asm__ volatile("" : : "r"(z_end), "r"(ray_start_world));
+             component += Q12Round(z_product);
+             z_end->vz = component;
+ 
+@@ -124,6 +101,5 @@
+         }
+         row_offset += sizeof(ExplRays[0]);
+         azimuth++;
+-        negative_azimuth -= 512 * sizeof(*table);
+     } while (azimuth < EXPLOSION_RAY_AZIMUTH_COUNT);
+ }
+diff --git a/src/modules/expl/resources.c b/src/modules/expl/resources.c
+--- a/src/modules/expl/resources.c
++++ b/src/modules/expl/resources.c
+@@ -4,7 +4,6 @@
+ 
+ #include "tm4/main/memory.h"
+ #include "tm4/main/system.h"
+-
+ #include <STRINGS.H>
+ 
+ ExplosionDefinition* FindExplosionDefinition(char* name)
+diff --git a/src/modules/frag/display.c b/src/modules/frag/display.c
+--- a/src/modules/frag/display.c
++++ b/src/modules/frag/display.c
+@@ -10,9 +10,10 @@
+ #include "tm4/main/geometry.h"
+ #include "tm4/main/render.h"
+ 
++#include <LIBGTE.H>
+ #include <INLINE_C.H>
+ 
+-typedef char FragmentPrimitiveSizeCheck[sizeof(FragmentPrimitive) == 52 ? 1 : -1];
++typedef char FragmentPrimitiveSizeCheck[sizeof(FragmentPrimitive) == sizeof(POLY_GT4) ? 1 : -1];
+ typedef char FragmentPrimitiveOffsetCheck[offsetof(Fragment, primitive) == 0x8c ? 1 : -1];
+ 
+ void FragmentDisplay(
+@@ -24,20 +25,8 @@
+         long ordering_depth;
+         PushMatrix();
+         CompMatrix(world_to_camera, &object->local_to_world, &local_to_camera);
+-        {
+-            const volatile long* words
+-                = (const volatile long*)((unsigned long)&local_to_camera & ~3UL);
+-            register long first TM4_BIND_REGISTER("$3") = words[0];
+-            register long second TM4_BIND_REGISTER("$4") = words[1];
+-            register long third TM4_BIND_REGISTER("$5") = words[2];
+-            long fourth = words[3];
+-            FragmentSetMatrixLow(first, second, third, fourth);
+-            first = words[4];
+-            second = words[5];
+-            third = words[6];
+-            fourth = words[7];
+-            FragmentSetMatrixHigh(first, second, third, fourth);
+-        }
++        SetRotMatrix(&local_to_camera);
++        SetTransMatrix(&local_to_camera);
+         gte_ldv3c(object->local_vertices);
+         gte_rtpt();
+         switch (object->primitive.gt4.code & TM4_FACE_TYPE_MASK) {
+diff --git a/src/modules/interact/damage.c b/src/modules/interact/damage.c
+--- a/src/modules/interact/damage.c
++++ b/src/modules/interact/damage.c
+@@ -13,6 +13,7 @@
+ 
+ #include <LIBGPU.H>
+ #include <STRINGS.H>
++#include <string.h>
+ 
+ void InteractBulletWithDestroyable(Bullet* bullet, Destroyable* destroyable)
+ {
+diff --git a/src/modules/interact/interact.c b/src/modules/interact/interact.c
+--- a/src/modules/interact/interact.c
++++ b/src/modules/interact/interact.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/game.h"
+diff --git a/src/modules/levels/pathing.c b/src/modules/levels/pathing.c
+--- a/src/modules/levels/pathing.c
++++ b/src/modules/levels/pathing.c
+@@ -13,6 +13,8 @@
+ 
+ #include <LIMITS.H>
+ #include <STDDEF.H>
++
++char PathingPathKey[12] = "pathPoints";
+ 
+ SVECTOR* PathingGetPoint(PathingInfo* path, s32 index)
+ {
+diff --git a/src/modules/levels/w_carni/collision.c b/src/modules/levels/w_carni/collision.c
+--- a/src/modules/levels/w_carni/collision.c
++++ b/src/modules/levels/w_carni/collision.c
+@@ -63,7 +63,7 @@
+         y = launch_velocity.vy;
+         z = launch_velocity.vz;
+         setVector(motion, x * SIMULATION_FPS, y * SIMULATION_FPS, z * SIMULATION_FPS);
+-        if (facing_q12 >= Q12PackedSine(rcossin_tbl[ANGLE_FULL_TURN / 6]))
++        if (facing_q12 >= rsin(ANGLE_FULL_TURN / 6))
+             SetVectorDaxpyVV(motion, motion, 0x1800, 12);
+         else {
+             s32 magnitude = VectorLength0(&launch_velocity);
+diff --git a/src/modules/levels/w_neon/collision.c b/src/modules/levels/w_neon/collision.c
+--- a/src/modules/levels/w_neon/collision.c
++++ b/src/modules/levels/w_neon/collision.c
+@@ -63,7 +63,7 @@
+         y = launch_velocity.vy;
+         z = launch_velocity.vz;
+         setVector(motion, x * SIMULATION_FPS, y * SIMULATION_FPS, z * SIMULATION_FPS);
+-        if (facing_q12 >= Q12PackedSine(rcossin_tbl[ANGLE_FULL_TURN / 6]))
++        if (facing_q12 >= rsin(ANGLE_FULL_TURN / 6))
+             SetVectorDaxpyVV(motion, motion, 0x1800, 12);
+         else {
+             s32 magnitude = VectorLength0(&launch_velocity);
+diff --git a/src/modules/levels/w_yard/crane.c b/src/modules/levels/w_yard/crane.c
+--- a/src/modules/levels/w_yard/crane.c
++++ b/src/modules/levels/w_yard/crane.c
+@@ -33,7 +33,9 @@
+ {
+     CraneControl* control = object->control;
+     CameraSetObjectFunction* setCamera;
+-    if (ObjectGetHeader(control)->owner && control->operator_car) {
++    /* The control may be destroyed first during whole-world teardown. */
++    if (control && ObjectValidObject(control) && ObjectGetHeader(control)->owner
++        && control->operator_car) {
+         setCamera = OSSymbolGetAddressAssert(CraneCameraSetName);
+         setCamera(GameInfo.players[control->operator_car->controller_index].camera,
+             control->operator_car);
+diff --git a/src/modules/levels/w_yard/process.c b/src/modules/levels/w_yard/process.c
+--- a/src/modules/levels/w_yard/process.c
++++ b/src/modules/levels/w_yard/process.c
+@@ -58,7 +58,7 @@
+         if (control->operator_car->health < control->saved_health
+             || control->operator_car->freeze_ticks > 0 || (pad->pressed_buttons & PADRup))
+             CraneReleaseControl(object);
+-        if (control->operator_car->health > control->saved_health)
++        else if (control->operator_car->health > control->saved_health)
+             control->saved_health = control->operator_car->health;
+     }
+     if (!control->operator_car)
+diff --git a/src/modules/levels/w_yard/state.c b/src/modules/levels/w_yard/state.c
+--- a/src/modules/levels/w_yard/state.c
++++ b/src/modules/levels/w_yard/state.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+ 
+ AddInventoryToCarFunction* Import_AddInventoryToCar = NULL;
+diff --git a/src/modules/lightn/points.c b/src/modules/lightn/points.c
+--- a/src/modules/lightn/points.c
++++ b/src/modules/lightn/points.c
+@@ -71,8 +71,7 @@
+             s32 random_x = rand() % width;
+             s32 bias = -width / 2;
+             {
+-                register char* point_base TM4_BIND_REGISTER("$3")
+-                    = (char*)bolt + bolt->point_count * sizeof(SVECTOR);
++                register char* point_base TM4_BIND_REGISTER("$3") = (char*)bolt + bolt->point_count * sizeof(SVECTOR);
+                 s32 point_x = bias + random_x;
+                 ((SVECTOR*)(point_base + (s32)offsetof(Lightning, points)))->vx = point_x;
+             }
+diff --git a/src/modules/power/display.c b/src/modules/power/display.c
+--- a/src/modules/power/display.c
++++ b/src/modules/power/display.c
+@@ -12,6 +12,7 @@
+ #include "tm4/main/system.h"
+ #include "tm4/vector.h"
+ 
++#include <libgte.h>
+ #include <INLINE_C.H>
+ #include <LIBETC.H>
+ #include <LIBGPU.H>
+@@ -52,7 +53,7 @@
+     remaining = part->vertex_count;
+     scratch = (Tm4ScreenPoint*)(projected + 1);
+     while (remaining > 0) {
+-        gte_ldv3c(vertices);
++        WebGteLoadVertexBatch(vertices, remaining);
+         projected++;
+         gte_nop();
+         gte_rtpt_b();
+@@ -140,7 +141,7 @@
+ {
+     PowerModelFile* model;
+     MATRIX rotation, combined;
+-    long oldx, oldy;
++    int oldx, oldy;
+     s32 oldscreen, index;
+     s32 i, count;
+     RegistryDirectory* entry = NULL;
+diff --git a/src/modules/power/power.c b/src/modules/power/power.c
+--- a/src/modules/power/power.c
++++ b/src/modules/power/power.c
+@@ -8,6 +8,7 @@
+ #include "tm4/main/object.h"
+ #include "tm4/modules/afc.h"
+ 
++#include <libgte.h>
+ #include <INLINE_C.H>
+ 
+ void PowerupSparkleConstructor(PowerupState* power)
+diff --git a/src/modules/reflection_gte.h b/src/modules/reflection_gte.h
+--- a/src/modules/reflection_gte.h
++++ b/src/modules/reflection_gte.h
+@@ -1,8 +1,7 @@
+ #ifndef TM4_REFLECTION_GTE_H
+ #define TM4_REFLECTION_GTE_H
+-
+-#define ReflectionReadOFX(value) __asm__ volatile("cfc2 %0,$24" : "=r"(value))
+-#define ReflectionReadOFY(value) __asm__ volatile("cfc2 %0,$25" : "=r"(value))
+-#define ReflectionReadIR(x, y) __asm__ volatile("mfc2 %0,$9;mfc2 %1,$10" : "=r"(x), "=r"(y))
+-
++#include <psyz/gte.h>
++#define ReflectionReadOFX(value) ((value) = Psyz_GteCtrlRead(24))
++#define ReflectionReadOFY(value) ((value) = Psyz_GteCtrlRead(25))
++#define ReflectionReadIR(x,y) do { (x)=Psyz_GteDataRead(9); (y)=Psyz_GteDataRead(10); } while(0)
+ #endif
+diff --git a/src/modules/tele/tele.c b/src/modules/tele/tele.c
+--- a/src/modules/tele/tele.c
++++ b/src/modules/tele/tele.c
+@@ -165,12 +165,10 @@
+     angle = object->size_phase;
+     if (angle >= 0) {
+         s32* amplitude = &TeleSizeAmplitude;
+-        object->billboard_size
+-            = TeleBaseSize + Q12MulRound(Q12PackedSine(rcossin_tbl[angle]), *amplitude);
++        object->billboard_size = TeleBaseSize + Q12MulRound(rsin(angle), *amplitude);
+     } else {
+         s32* amplitude = &TeleSizeAmplitude;
+-        object->billboard_size
+-            = TeleBaseSize + Q12MulRound(*amplitude, -Q12PackedSine(rcossin_tbl[-angle]));
++        object->billboard_size = TeleBaseSize + Q12MulRound(*amplitude, -rsin(-angle));
+     }
+ }
+ 
+diff --git a/src/modules/timer/timer.c b/src/modules/timer/timer.c
+--- a/src/modules/timer/timer.c
++++ b/src/modules/timer/timer.c
+@@ -52,7 +52,7 @@
+         return;
+     switch (object->argument_count) {
+     case 0:
+-        object->callback();
++        ((void (*)(void))object->callback)();
+         break;
+     case 1:
+         ((TimerCall1*)object->callback)(object->arguments[0]);
+diff --git a/src/modules/weap/bomb.c b/src/modules/weap/bomb.c
+--- a/src/modules/weap/bomb.c
++++ b/src/modules/weap/bomb.c
+@@ -15,9 +15,6 @@
+ #include <LIMITS.H>
+ #include <STDARG.H>
+ #include <STRINGS.H>
+-
+-/* Linker alias for WeapImports.interact_with_flammable_terrain_poly at +0x8c. */
+-extern InteractWithFlammableTerrainPolyFunction* WeapTerrainInteractionSlot;
+ 
+ WeaponBombType* WeaponFindBombType(char* name)
+ {
+@@ -188,7 +185,7 @@
+         && WeapBombType->ignite_terrain
+         && WorldTrackData[WeapWorldHit.surface.fields.material].flammable) {
+         CopyVectorToShortVectorRoundedQ12(&WeapHitPosition, &WeapWorldHit.position);
+-        WeapTerrainInteractionSlot(WeapWorldHit.polygon, &WeapHitPosition);
++        WeapImports.interact_with_flammable_terrain_poly(WeapWorldHit.polygon, &WeapHitPosition);
+     }
+     if (WeapBombType->explosion && strlen(WeapBombType->explosion) > 0)
+         WeapImports.spawn_explosion(&WeapBombPosition, bomb->type->explosion, 0, 0, 0, -1);
+diff --git a/src/modules/weap/effects.c b/src/modules/weap/effects.c
+--- a/src/modules/weap/effects.c
++++ b/src/modules/weap/effects.c
+@@ -31,7 +31,6 @@
+     SVECTOR position, origin, offset;
+     Tm4ObjectHeader* header = ObjectGetHeader(projectile);
+     register s32 index TM4_BIND_REGISTER("s0") = 0;
+-    const s32* trig = rcossin_tbl;
+     SVECTOR* destination = &position;
+     SVECTOR* relative = &offset;
+     source = &header->position;
+@@ -44,16 +43,16 @@
+         s32 sector = rand() % 8;
+         s32 angle = sector * 512;
+         s32 magnitude = Int32Abs(angle);
+-        s32 cosine = Q12MulRound(Q12PackedCosine(trig[magnitude]), 512);
++        s32 cosine = Q12MulRound(Q12Cos(magnitude), 512);
+         register s32 height TM4_BIND_REGISTER("t1");
+         SVECTOR* vector = &offset;
+         s32 z;
+         s32 scaled_delay;
+         height = sector;
+         if (angle >= 0)
+-            z = Q12MulRound(Q12PackedSine(trig[angle]), 512);
++            z = Q12MulRound(Q12Sin(angle), 512);
+         else
+-            z = Q12MulRound(-Q12PackedSine(trig[-sector * 512]), 512);
++            z = Q12MulRound(-Q12Sin(-sector * 512), 512);
+         scaled_delay = index * 30;
+         setVector(vector, cosine, height, z);
+         {
+diff --git a/src/modules/weap/private.h b/src/modules/weap/private.h
+--- a/src/modules/weap/private.h
++++ b/src/modules/weap/private.h
+@@ -2,6 +2,7 @@
+ #define TM4_WEAP_PRIVATE_H
+ 
+ #include "tm4/compiler.h"
++#include "tm4/fixed.h"
+ #include "tm4/gpu.h"
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
