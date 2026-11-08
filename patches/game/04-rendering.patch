@@ -1,0 +1,1314 @@
+diff --git a/include/tm4/main/render.h b/include/tm4/main/render.h
+--- a/include/tm4/main/render.h
++++ b/include/tm4/main/render.h
+@@ -5,6 +5,9 @@
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/font.h"
++#ifdef __psyz
++#include "port/web/render_sync.h"
++#endif
+ 
+ #include <SYS/TYPES.H>
+ #include <LIBGTE.H>
+@@ -37,7 +40,11 @@
+     DISPENV display_environment;
+     DR_ENV drawing_environment;
+     Tm4OrderingTag ordering_table[0x800];
++#ifdef __psyz
++    POLY_GT4 world_primitives[0x898 * WEB_DRAW_DISTANCE_MAX_SCALE];
++#else
+     POLY_GT4 world_primitives[0x898];
++#endif
+     Tm4FontPrims font_prims;
+     TILE view_tiles[4];
+     TILE background_tiles[2];
+@@ -109,7 +116,12 @@
+ Tm4RenderBuffer* RenderGetDisplayBuffer(void);
+ void RenderBuildFrame(void);
+ void RenderPresent(s32 present);
+-/* Borrows the loaded horizon resource. Drawing updates its packet slots in place. */
++/* Loads a horizon resource; the native renderer copies its PS1 packets into writable packets. */
+ void RenderSetHorizon(Tm4HorizonResource* resource);
++void RenderDrawHorizon(Tm4OrderingTag* ordering_table, MATRIX* world_to_camera, u8 buffer);
++void RenderGetBackgroundColor(u8* red, u8* green, u8* blue);
++struct Camera;
++s32 RenderScene(Tm4OrderingTag* ordering_table, u8* primitive_start, s32 ordering_size,
++    u8* primitive_limit, s32 remaining, struct Camera* view);
+ 
+ #endif
+diff --git a/include/tm4/main/render_polygon.h b/include/tm4/main/render_polygon.h
+--- a/include/tm4/main/render_polygon.h
++++ b/include/tm4/main/render_polygon.h
+@@ -3,7 +3,6 @@
+ 
+ #include "tm4/gte.h"
+ #include "tm4/main/render_scratch.h"
+-
+ #include <INLINE_C.H>
+ 
+ static __inline__ Tm4GteWord Tm4ProjectedScreenAtIndex(
+@@ -86,7 +85,7 @@
+ #define Tm4ProjectVertexTriple(vertices, source, remaining)                                        \
+     do {                                                                                           \
+         (vertices) = (source);                                                                     \
+-        gte_ldv3c(vertices);                                                                       \
++        WebGteLoadVertexBatch(vertices, remaining);                                                \
+         (remaining) -= 3;                                                                          \
+         (vertices) = (source) + 3;                                                                 \
+         gte_rtpt_b();                                                                              \
+diff --git a/src/main/card.c b/src/main/card.c
+--- a/src/main/card.c
++++ b/src/main/card.c
+@@ -57,7 +57,7 @@
+     value = Int32NegativePart(value);
+     count = value + capacity;
+     while (i > 0) {
+-        gte_ldv3c(vertices);
++        WebGteLoadVertexBatch(vertices, i);
+         destination++;
+         gte_nop();
+         gte_rtpt_b();
+diff --git a/src/main/horizon.c b/src/main/horizon.c
+--- /dev/null
++++ b/src/main/horizon.c
+@@ -0,0 +1,181 @@
++#include "tm4/gpu.h"
++#include "tm4/gte.h"
++#include "tm4/main/render.h"
++#include <stdlib.h>
++#include <string.h>
++
++struct Tm4HorizonResource {
++    u8 gouraud_count, flat_count, textured_count, reserved03;
++    CVECTOR color;
++};
++
++/* Horizon records carry four buffer/view packet slots after their vertices. */
++typedef struct Tm4HorizonTexturedRecord {
++    SVECTOR vertices[4];
++    POLY_FT4 packets[4];
++    u_long reservedc0;
++} Tm4HorizonTexturedRecord;
++
++typedef struct Tm4HorizonGouraudRecord {
++    SVECTOR vertices[4];
++    POLY_G4 packets[4];
++} Tm4HorizonGouraudRecord;
++
++typedef struct Tm4HorizonFlatRecord {
++    SVECTOR vertices[4];
++    POLY_F4 packets[4];
++} Tm4HorizonFlatRecord;
++
++static Tm4HorizonTexturedRecord* RenderHorizonTexturedRecords;
++static Tm4HorizonGouraudRecord* RenderHorizonGouraudRecords;
++static Tm4HorizonFlatRecord* RenderHorizonFlatRecords;
++static Tm4HorizonResource horizon_header;
++static Tm4HorizonResource* RenderHorizon = &horizon_header;
++
++/* The file has four-byte PS1 tags; PsyZ keeps length and address separately. */
++static const u8* read_packets(void* output, size_t packet_size, const u8* input)
++{
++    u8* destination = output;
++    size_t payload_size = packet_size - sizeof(Tm4OrderingTag);
++    for (int i = 0; i < 4; ++i) {
++        setlen(destination, input[3]);
++        termPrim(destination);
++        memcpy(destination + sizeof(Tm4OrderingTag), input + 4, payload_size);
++        input += payload_size + 4;
++        destination += packet_size;
++    }
++    return input;
++}
++
++void RenderSetHorizon(Tm4HorizonResource* configuration)
++{
++    free(RenderHorizonGouraudRecords);
++    free(RenderHorizonFlatRecords);
++    free(RenderHorizonTexturedRecords);
++    horizon_header = configuration ? *configuration : (Tm4HorizonResource) { 0 };
++    const u8* cursor = configuration ? (const u8*)(configuration + 1) : NULL;
++    RenderHorizonGouraudRecords
++        = calloc(horizon_header.gouraud_count, sizeof(*RenderHorizonGouraudRecords));
++    RenderHorizonFlatRecords = calloc(horizon_header.flat_count, sizeof(*RenderHorizonFlatRecords));
++    RenderHorizonTexturedRecords
++        = calloc(horizon_header.textured_count, sizeof(*RenderHorizonTexturedRecords));
++    if ((horizon_header.gouraud_count && !RenderHorizonGouraudRecords)
++        || (horizon_header.flat_count && !RenderHorizonFlatRecords)
++        || (horizon_header.textured_count && !RenderHorizonTexturedRecords))
++        abort();
++    for (int i = 0; i < horizon_header.gouraud_count; ++i) {
++        Tm4HorizonGouraudRecord* record = &RenderHorizonGouraudRecords[i];
++        memcpy(record->vertices, cursor, sizeof(record->vertices));
++        cursor = read_packets(
++            record->packets, sizeof(record->packets[0]), cursor + sizeof(record->vertices));
++    }
++    for (int i = 0; i < horizon_header.flat_count; ++i) {
++        Tm4HorizonFlatRecord* record = &RenderHorizonFlatRecords[i];
++        memcpy(record->vertices, cursor, sizeof(record->vertices));
++        cursor = read_packets(
++            record->packets, sizeof(record->packets[0]), cursor + sizeof(record->vertices));
++    }
++    for (int i = 0; i < horizon_header.textured_count; ++i) {
++        Tm4HorizonTexturedRecord* record = &RenderHorizonTexturedRecords[i];
++        memcpy(record->vertices, cursor, sizeof(record->vertices));
++        cursor = read_packets(
++                     record->packets, sizeof(record->packets[0]), cursor + sizeof(record->vertices))
++            + 4;
++    }
++}
++
++void RenderGetBackgroundColor(u8* first, u8* second, u8* third)
++{
++    if (RenderHorizon->color.r || RenderHorizon->color.g || RenderHorizon->color.b) {
++        *first = RenderHorizon->color.r;
++        *second = RenderHorizon->color.g;
++        *third = RenderHorizon->color.b;
++    } else {
++        *first = 50;
++        *second = 54;
++        *third = 55;
++    }
++}
++
++void RenderDrawHorizon(Tm4OrderingTag* ordering_table, MATRIX* world_to_camera, u8 buffer)
++{
++    MATRIX zero_translation;
++    Tm4HorizonTexturedRecord* textured;
++    Tm4HorizonGouraudRecord* gouraud;
++    Tm4HorizonFlatRecord* flat;
++    s32 i;
++    register long ordering_depth;
++    long first_screen_area;
++    long second_screen_area;
++
++    PushMatrix();
++    zero_translation.t[0] = 0;
++    zero_translation.t[1] = 0;
++    zero_translation.t[2] = 0;
++    SetTransMatrix(&zero_translation);
++    for (textured = RenderHorizonTexturedRecords, i = 0; i < RenderHorizon->textured_count;
++         ++i, ++textured) {
++        POLY_FT4* packet = &textured->packets[buffer];
++        gte_ldv3c(textured->vertices);
++        gte_rtpt();
++        GteAverageDepth3();
++        gte_stsxy0(&packet->x0);
++        gte_stsxy1(&packet->x1);
++        gte_stsxy2(&packet->x2);
++        GteReadDepth(ordering_depth);
++        GteClip();
++        GteReadClipArea(first_screen_area);
++        gte_ldv0(&textured->vertices[3]);
++        gte_rtps();
++        GteClip();
++        GteReadClipArea(second_screen_area);
++        if ((second_screen_area <= 0 || first_screen_area > 0) && ordering_depth > 0) {
++            gte_stsxy(&packet->x3);
++            addPrim(ordering_table, packet);
++        }
++    }
++    if (world_to_camera->m[2][1] >= -3199) {
++        for (gouraud = RenderHorizonGouraudRecords, i = 0; i < RenderHorizon->gouraud_count;
++             ++i, ++gouraud) {
++            POLY_G4* packet = &gouraud->packets[buffer];
++            gte_ldv3c(gouraud->vertices);
++            gte_rtpt();
++            GteAverageDepth3();
++            gte_stsxy0(&packet->x0);
++            gte_stsxy1(&packet->x1);
++            gte_stsxy2(&packet->x2);
++            GteReadDepth(ordering_depth);
++            GteClip();
++            GteReadClipArea(first_screen_area);
++            gte_ldv0(&gouraud->vertices[3]);
++            gte_rtps();
++            GteClip();
++            GteReadClipArea(second_screen_area);
++            if ((second_screen_area <= 0 || first_screen_area > 0) && ordering_depth > 0) {
++                gte_stsxy(&packet->x3);
++                addPrim(ordering_table, packet);
++            }
++        }
++    }
++    for (flat = RenderHorizonFlatRecords, i = 0; i < RenderHorizon->flat_count; ++i, ++flat) {
++        POLY_F4* packet = &flat->packets[buffer];
++        gte_ldv3c(flat->vertices);
++        gte_rtpt();
++        GteAverageDepth3();
++        gte_stsxy0(&packet->x0);
++        gte_stsxy1(&packet->x1);
++        gte_stsxy2(&packet->x2);
++        GteReadDepth(ordering_depth);
++        GteClip();
++        GteReadClipArea(first_screen_area);
++        gte_ldv0(&flat->vertices[3]);
++        gte_rtps();
++        GteClip();
++        GteReadClipArea(second_screen_area);
++        if ((second_screen_area <= 0 || first_screen_area > 0) && ordering_depth > 0) {
++            gte_stsxy(&packet->x3);
++            addPrim(ordering_table, packet);
++        }
++    }
++    PopMatrix();
++}
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -26,10 +26,15 @@
+ #include <INLINE_C.H>
+ #include <LIBAPI.H>
+ 
++#ifdef __psyz
++#include "port/web/render_sync.h"
++#endif
++
+ typedef struct Tm4RenderBufferPair {
+     Tm4RenderBuffer* buffers[2];
+ } Tm4RenderBufferPair;
+ 
++#ifndef __psyz
+ /* horiz.bin begins with this header, then its Gouraud, flat and textured record arrays. */
+ struct Tm4HorizonResource {
+     u8 gouraud_count;
+@@ -83,6 +88,8 @@
+ static const Tm4SceneCellOrder RenderSceneCellOrder[16] = {
+ #include "render_cell_order.inc"
+ };
++
++#endif
+ 
+ static Tm4RenderBufferPair RenderBuffers;
+ static Tm4RenderBuffer* RenderDrawBuffer = NULL;
+@@ -94,19 +101,21 @@
+ static s32 RenderMaximumFaceBudget = 0;
+ static s32 RenderFramePhase = 0;
+ u_long otSize = 0;
++#ifndef __psyz
+ static Tm4PsxHorizonTexturedRecord* RenderHorizonTexturedRecords = NULL;
+ static Tm4HorizonResource* RenderHorizon = NULL;
+ static Tm4PsxHorizonGouraudRecord* RenderHorizonGouraudRecords = NULL;
+ static u8* RenderHorizonRecordEnd = NULL;
+ static Tm4PsxHorizonFlatRecord* RenderHorizonFlatRecords = NULL;
+ static Tm4HorizonResource RenderDefaultHorizon;
++#endif
+ 
+ s32 RenderScene(Tm4OrderingTag*, u8*, s32, u8*, s32, Camera*);
+ void RenderInitializeTiles(Tm4RenderBuffer*);
+ void RenderGetBackgroundColor(u8*, u8*, u8*);
+ void RenderDrawHorizon(Tm4OrderingTag*, MATRIX*, u8);
+ 
+-#if !defined(TM4_RENDER_FUNCTION) || TM4_RENDER_FUNCTION == 0x8001E990
++#if !defined(__psyz) && (!defined(TM4_RENDER_FUNCTION) || TM4_RENDER_FUNCTION == 0x8001E990)
+ /* Assembly rationale: [evidence](../../docs/render-scene-assembly.md). */
+ #include "render_scene.s"
+ #endif
+@@ -907,6 +916,7 @@
+         }
+         RenderInitializeTiles(buffer);
+         ClearOTagR(buffer->ordering_table, ArrayCount(buffer->ordering_table));
++
+     }
+ }
+ #endif
+@@ -995,6 +1005,7 @@
+         RenderDrawBuffer = display->alternate_buffer;
+         FontPrimsReset(&RenderDrawBuffer->font_prims);
+         ClearOTagR(RenderDrawBuffer->ordering_table, ArrayCount(RenderDrawBuffer->ordering_table));
++
+     }
+ 
+     if (RenderFramePhase == mode) {
+@@ -1042,6 +1053,7 @@
+         ScreenDisplayOverlays(RenderDrawBuffer);
+         addPrim(RenderDrawBuffer->ordering_table, &RenderDisplayBuffer->drawing_environment);
+     }
++
+     ordering = RenderDrawBuffer->ordering_table - 1;
+     primitives = RenderDrawBuffer->world_primitives;
+     first = RenderFirstView;
+@@ -1057,19 +1069,31 @@
+         primitives += RenderPrimitiveCount;
+         view_state = (Tm4GameInfo*)((u8*)&GameInfo + view * sizeof(Tm4GamePlayer));
+         camera = view_state->players[0].camera;
++
+         GameInfo.active_view = camera;
+         SetRotMatrix(&camera->world_to_camera);
+         SetTransMatrix(&GameInfo.active_view->world_to_camera);
+         ScreenDisplayHud(RenderDrawBuffer, first_ordering, view);
+         setaddr(&RenderDisplayBuffer->players[view].overlay_environment, getaddr(first_ordering));
+         setaddr(first_ordering, &RenderDisplayBuffer->players[view].overlay_environment);
++#ifdef __psyz
++        /* Reserve the largest buffer once; keep the original limits at 1x. */
++        s32 packet_capacity
++            = RenderPrimitiveCount / WEB_DRAW_DISTANCE_MAX_SCALE * WebDrawDistanceScale;
++        RenderScene(first_ordering, (u8*)first_primitive, otSize,
++            (u8*)(first_primitive + packet_capacity), RenderFaceBudget * WebDrawDistanceScale,
++            GameInfo.active_view);
++#else
+         RenderScene(first_ordering, (u8*)first_primitive, otSize, (u8*)primitives, RenderFaceBudget,
+             GameInfo.active_view);
++#endif
+         RenderDrawHorizon(ordering, &GameInfo.active_view->world_to_camera,
+             *(u8*)&RenderDrawBuffer->buffer_index + (view % 2) * 2);
+         setaddr(&RenderDisplayBuffer->players[view].world_environment, getaddr(ordering));
+         setaddr(ordering, &RenderDisplayBuffer->players[view].world_environment);
+-    }
++
++    }
++
+ }
+ #endif
+ 
+@@ -1081,6 +1105,10 @@
+     if (RenderDrawBuffer == NULL) {
+         return;
+     }
++#ifdef __psyz
++    const unsigned int vblank_target = WebRenderWaitForFrame();
++#else
++    const unsigned int vblank_target = 2;
+     if (VB_IsSyncEnabled()) {
+         while (VB_DrawComplete[0] == 0 || VB_FrameVBlanks[0] < 2) { }
+     } else {
+@@ -1089,6 +1117,7 @@
+         VSync(2);
+         VB_FrameVBlanks[0] = 2;
+     }
++#endif
+     if (RenderFirstView == 0) {
+         PutDispEnv(&RenderDisplayBuffer->display_environment);
+     }
+@@ -1096,8 +1125,8 @@
+     if (RenderFramePhase == 0) {
+         VB_DrawComplete[0] = 0;
+     }
+-    if (VB_FrameVBlanks[0] > 2) {
+-        VB_FrameVBlanks[0] = 1;
++    if (VB_FrameVBlanks[0] > vblank_target) {
++        VB_FrameVBlanks[0] = vblank_target - 1;
+         late = 1;
+     } else {
+         VB_FrameVBlanks[0] = 0;
+@@ -1120,12 +1149,18 @@
+         }
+     }
+     if (RenderFramePhase != 2 && present) {
+-        DrawOTag(
+-            &RenderDrawBuffer->ordering_table[ArrayCount(RenderDrawBuffer->ordering_table) - 1]);
+-    }
+-}
+-#endif
+-
++        Tm4OrderingTag* ordering
++            = &RenderDrawBuffer->ordering_table[ArrayCount(RenderDrawBuffer->ordering_table) - 1];
++        DrawOTag(ordering);
++    }
++#ifdef __psyz
++    WebRenderReportFrame(
++        RenderFramePhase, late, RenderFaceBudget, RenderMinimumFaceBudget, RenderMaximumFaceBudget);
++#endif
++}
++#endif
++
++#ifndef __psyz
+ #if !defined(TM4_RENDER_FUNCTION) || TM4_RENDER_FUNCTION == 0x8001FFE8
+ void RenderSetHorizon(Tm4HorizonResource* resource)
+ {
+@@ -1249,12 +1284,12 @@
+ }
+ #endif
+ 
++#endif
++
+ static Tm4RenderBufferPair RenderBuffers = {
+     .buffers = { NULL, NULL },
+ };
+-/* Keep the layout tables between the two private states in the PS1 small-data section. */
+-#include "render_layout.c"
+-
++#ifndef __psyz
+ static Tm4HorizonResource RenderDefaultHorizon = {
+     .gouraud_count = 0,
+     .flat_count = 0,
+@@ -1262,3 +1297,5 @@
+     .reserved03 = 0,
+     .color = { 1, 1, 1, 0 },
+ };
++
++#endif
+diff --git a/src/main/render_scene.c b/src/main/render_scene.c
+--- /dev/null
++++ b/src/main/render_scene.c
+@@ -0,0 +1,385 @@
++#include "port/web/render_sync.h"
++#include "tm4/gpu.h"
++#include "tm4/gte.h"
++#include "tm4/main/object.h"
++#include "tm4/main/render.h"
++#include "tm4/main/render_scratch.h"
++#include "tm4/modules/camera.h"
++#include <assert.h>
++#include <emscripten.h>
++#include <libetc.h>
++#include <stdlib.h>
++#include <string.h>
++#if __has_feature(address_sanitizer)
++#include "object/private.h"
++#endif
++
++typedef struct Tm4SceneCellDelta {
++    s8 x, z;
++} Tm4SceneCellDelta;
++
++/* Shared with arccos: 256 angle units per full turn, indexed by cosine + 256. */
++const u8 ArcCosByteAngles[513] = {
++#include "render_arccos.inc"
++};
++
++/* Each direction partitions 640 X/Z byte pairs into three traversal lists. */
++typedef struct Tm4SceneCellOrder {
++    Tm4SceneCellDelta cells[640];
++    s16 counts[3];
++    s16 reserved506; /* Unread by RenderScene; zero in every original bucket. */
++} Tm4SceneCellOrder;
++
++static const Tm4SceneCellOrder RenderSceneCellOrder[16] = {
++#include "render_cell_order.inc"
++};
++
++/* Scale the original directional footprint, including its high/low-detail transition.
++ * Keep the original lists and their exact traversal order for the 1x setting. */
++typedef struct WebSceneCell {
++    Tm4SceneCellDelta delta;
++    u16 distance_squared;
++    u8 group;
++} WebSceneCell;
++
++enum {
++    SCENE_CELL_DIAMETER = 2 * WORLD_GRID_SIZE - 1,
++    SCENE_CELL_CAPACITY = SCENE_CELL_DIAMETER * SCENE_CELL_DIAMETER
++};
++
++static int compare_scene_cells(const void* left, const void* right)
++{
++    const WebSceneCell* a = left;
++    const WebSceneCell* b = right;
++    if (a->group != b->group)
++        return (int)a->group - b->group;
++    if (a->distance_squared != b->distance_squared)
++        return (int)a->distance_squared - b->distance_squared;
++    if (a->delta.z != b->delta.z)
++        return (int)a->delta.z - b->delta.z;
++    return (int)a->delta.x - b->delta.x;
++}
++
++static int unscale_cell(int offset, int scale)
++{
++    return offset < 0 ? -((-offset + scale / 2) / scale) : (offset + scale / 2) / scale;
++}
++
++static void scene_cell_lists(const Tm4SceneCellOrder* original, unsigned int scale,
++    const Tm4SceneCellDelta* lists[4], int counts[4])
++{
++    static const Tm4SceneCellOrder* cached_original;
++    static unsigned int cached_scale;
++    static WebSceneCell sorted[SCENE_CELL_CAPACITY];
++    static Tm4SceneCellDelta expanded[SCENE_CELL_CAPACITY];
++    static int expanded_counts[3];
++    const Tm4SceneCellDelta* cells = original->cells;
++    const s16* original_counts = original->counts;
++    int group_counts[3] = { original_counts[0], original_counts[1], original_counts[2] };
++    if (scale != 1) {
++        if (original != cached_original || scale != cached_scale) {
++            u8 groups[WORLD_GRID_SIZE][WORLD_GRID_SIZE];
++            memset(groups, 0xff, sizeof(groups));
++            int offset = 0;
++            for (int group = 0; group < 3; ++group) {
++                for (int i = 0; i < original_counts[group]; ++i) {
++                    const Tm4SceneCellDelta* cell = &cells[offset++];
++                    groups[cell->z + WORLD_GRID_ORIGIN][cell->x + WORLD_GRID_ORIGIN] = group;
++                }
++                expanded_counts[group] = 0;
++            }
++            int total = 0;
++            for (int z = 1 - WORLD_GRID_SIZE; z < WORLD_GRID_SIZE; ++z) {
++                for (int x = 1 - WORLD_GRID_SIZE; x < WORLD_GRID_SIZE; ++x) {
++                    int source_x = unscale_cell(x, scale) + WORLD_GRID_ORIGIN;
++                    int source_z = unscale_cell(z, scale) + WORLD_GRID_ORIGIN;
++                    if ((unsigned)source_x >= WORLD_GRID_SIZE
++                        || (unsigned)source_z >= WORLD_GRID_SIZE)
++                        continue;
++                    int group = groups[source_z][source_x];
++                    if (group == 0xff)
++                        continue;
++                    sorted[total++] = (WebSceneCell) { { x, z }, x * x + z * z, group };
++                    ++expanded_counts[group];
++                }
++            }
++            qsort(sorted, total, sizeof(*sorted), compare_scene_cells);
++            for (int i = 0; i < total; ++i)
++                expanded[i] = sorted[i].delta;
++            cached_original = original;
++            cached_scale = scale;
++        }
++        cells = expanded;
++        for (int group = 0; group < 3; ++group)
++            group_counts[group] = expanded_counts[group];
++    }
++    lists[0] = cells;
++    lists[1] = lists[2] = cells + group_counts[0];
++    lists[3] = lists[1] + group_counts[1];
++    counts[0] = group_counts[0];
++    counts[1] = counts[2] = group_counts[1];
++    counts[3] = group_counts[2];
++}
++
++/* Native equivalent of the recovered four-pass renderer. GPU command payloads
++ * stay PS1-compatible; only the linked-list tags use PsyZ's pointer layout. */
++static void project_group(
++    SVECTOR* vertices, int count, RenderScratch* scratch)
++{
++    assert(count > 0 && (count + 2) / 3 * 3 <= RENDER_SCRATCH_PROJECTED_COUNT);
++    for (int i = 0; i < count; i += 3) {
++        WebGteLoadVertexBatch(&vertices[i], count - i);
++        gte_rtpt();
++        for (int j = 0; j < 3; ++j) {
++            Tm4ProjectedVertex* projected = &scratch->projected[i + j];
++            projected->screen.packed = Psyz_GteDataRead(12 + j);
++            projected->vertex_depth = Psyz_GteDataRead(17 + j);
++            scratch->clipped[i + j] = (u16)projected->screen.coordinates.vx > RenderViewWidth;
++        }
++    }
++}
++
++static u8* emit_face(const Tm4DisplayFace* face, const Tm4ProjectedVertex* projected, u8* cursor,
++    Tm4OrderingTag* tag)
++{
++    const u8* indices = face->header.vertex;
++    const Tm4CardQuadTexture* texture;
++    int kind = face->header.color0.components.cd & TM4_FACE_TYPE_MASK;
++    int size;
++    /* Copy packed coordinate, color and UV words without assuming packet offsets. */
++#define SCREEN(packet, n) memcpy(&(packet)->x##n, &projected[indices[n]].screen.packed, 4)
++#define COLOR(packet, n) memcpy(&(packet)->r##n, &face->gouraud.color##n.packed, 4)
++#define UV(packet, n) memcpy(&(packet)->u##n, &texture->pairs.uv##n, 2)
++#define TEXTURE(packet)                                                                            \
++    do {                                                                                           \
++        (packet)->clut = texture->pairs.clut;                                                      \
++        (packet)->tpage = texture->pairs.tpage;                                                    \
++    } while (0)
++    switch (kind) {
++    case TM4_FACE_GT4: {
++        POLY_GT4* packet = (POLY_GT4*)cursor;
++        texture = face->gouraud.texture;
++        SCREEN(packet, 0);
++        SCREEN(packet, 1);
++        SCREEN(packet, 2);
++        SCREEN(packet, 3);
++        COLOR(packet, 0);
++        COLOR(packet, 1);
++        COLOR(packet, 2);
++        COLOR(packet, 3);
++        UV(packet, 0);
++        UV(packet, 1);
++        UV(packet, 2);
++        UV(packet, 3);
++        TEXTURE(packet);
++        size = sizeof(*packet);
++        break;
++    }
++    case TM4_FACE_GT3: {
++        POLY_GT3* packet = (POLY_GT3*)cursor;
++        texture = face->gouraud.texture;
++        SCREEN(packet, 0);
++        SCREEN(packet, 1);
++        SCREEN(packet, 2);
++        COLOR(packet, 0);
++        COLOR(packet, 1);
++        COLOR(packet, 2);
++        UV(packet, 0);
++        UV(packet, 1);
++        UV(packet, 2);
++        TEXTURE(packet);
++        size = sizeof(*packet);
++        break;
++    }
++    case TM4_FACE_FT4: {
++        POLY_FT4* packet = (POLY_FT4*)cursor;
++        texture = face->flat.texture;
++        SCREEN(packet, 0);
++        SCREEN(packet, 1);
++        SCREEN(packet, 2);
++        SCREEN(packet, 3);
++        COLOR(packet, 0);
++        UV(packet, 0);
++        UV(packet, 1);
++        UV(packet, 2);
++        UV(packet, 3);
++        TEXTURE(packet);
++        size = sizeof(*packet);
++        break;
++    }
++    case TM4_FACE_FT3: {
++        POLY_FT3* packet = (POLY_FT3*)cursor;
++        texture = face->flat.texture;
++        SCREEN(packet, 0);
++        SCREEN(packet, 1);
++        SCREEN(packet, 2);
++        COLOR(packet, 0);
++        UV(packet, 0);
++        UV(packet, 1);
++        UV(packet, 2);
++        TEXTURE(packet);
++        size = sizeof(*packet);
++        break;
++    }
++    default:
++        return cursor;
++    }
++#undef SCREEN
++#undef COLOR
++#undef UV
++#undef TEXTURE
++    setlen(cursor, (size - sizeof(Tm4OrderingTag)) / 4);
++    addPrim(tag, cursor);
++    return cursor + size;
++}
++
++static s32 finish_scene(s32 initial, s32 remaining)
++{
++    EM_ASM({ tm4Port.renderedFaces = $0; }, initial - remaining);
++    return remaining;
++}
++
++s32 RenderScene(Tm4OrderingTag* ordering_table, u8* cursor, s32 ordering_size, u8* primitive_end,
++    s32 remaining, Camera* view)
++{
++    s32 initial_remaining = remaining;
++    RenderScratch* scratch = (RenderScratch*)getScratchAddr(0);
++    SVECTOR heading = { -view->camera_to_world.m[0][2], 0, view->camera_to_world.m[2][2], 0 };
++    VectorNormalSS(&heading, &heading);
++    int direction = (heading.vz + 8) >> 4;
++    if (direction > 256)
++        direction = 256;
++    if (direction < -256)
++        direction = -256;
++    unsigned int angle = ArcCosByteAngles[direction + 256];
++    if (heading.vx < 0)
++        angle = 256 - angle;
++    const Tm4SceneCellOrder* bucket = &RenderSceneCellOrder[((angle + 8) >> 4) & 15];
++    const Tm4SceneCellDelta* lists[4];
++    int counts[4];
++    scene_cell_lists(bucket, WebDrawDistanceScale, lists, counts);
++    EM_ASM({ tm4Port.sceneCellCounts = ([ $0, $1, $2 ]); }, counts[0], counts[1], counts[3]);
++    int origin_x = (view->camera_to_world.t[0] >> WORLD_CELL_SHIFT) + WORLD_GRID_ORIGIN;
++    int origin_z = (view->camera_to_world.t[2] >> WORLD_CELL_SHIFT) + WORLD_GRID_ORIGIN;
++    for (int pass = 0; pass < 4; ++pass) {
++        RenderGeometryPass = pass >> 1;
++        for (int i = 0; i < counts[pass]; ++i) {
++            int x = origin_x + lists[pass][i].x;
++            int z = origin_z + lists[pass][i].z;
++            if ((unsigned)x >= WORLD_GRID_SIZE || (unsigned)z >= WORLD_GRID_SIZE)
++                continue;
++            u16 square_index = WorldCells[z][x];
++            if (square_index == 0xffff)
++                continue;
++            Tm4WorldSquare* square = &WorldSquares[square_index];
++            if (pass != 2) {
++                Tm4ObjectHeader* object = square->display_objects;
++                while (object) {
++#if __has_feature(address_sanitizer)
++                    /* A stale grid link can point into a live, reused heap block. */
++                    s32 live = ObjectValidObject(ObjectGetPayload(object));
++                    if (!live)
++                        EM_ASM({ tm4Port.lastDisplay = ({ object : $0, stale : true }); }, object);
++                    assert(live);
++                    assert(object->display);
++                    if (object->class_index >= 0) {
++                        assert(object->class_index < ObjectClassCount);
++                        assert(object->display == ObjectClasses[object->class_index].display);
++                    }
++                    u8* object_output = cursor;
++#endif
++                    Tm4ObjectHeader* next = object->next_display;
++                    SetRotMatrix(&view->world_to_camera);
++                    SetTransMatrix(&view->world_to_camera);
++#if __has_feature(address_sanitizer)
++                    EM_ASM(
++                        {
++                            tm4Port.lastDisplay = ({
++                                name : $0 ? UTF8ToString($0) : null,
++                                object : $1,
++                                callback : $2
++                            });
++                        },
++                        object->name, object, object->display);
++#endif
++                    object->display(ObjectGetPayload(object), ordering_table, &cursor,
++                        primitive_end, &view->world_to_camera);
++#if __has_feature(address_sanitizer)
++                    assert(cursor >= object_output && cursor <= primitive_end);
++#endif
++                    object = next;
++                }
++            }
++            const Tm4WorldSquareGroup* group = &square->display_groups[pass >> 1];
++            if (!group->face_count || remaining <= 0)
++                continue;
++            SVECTOR* vertices = WorldDisplayVertices + group->first_vertex;
++            SetRotMatrix(&view->world_to_camera);
++            SetTransMatrix(&view->world_to_camera);
++            project_group(vertices, group->vertex_count, scratch);
++            const u8* face_bytes = group->face_list.faces;
++            for (int f = 0; f < group->face_count && remaining > 0; ++f) {
++                if (primitive_end - cursor < sizeof(POLY_GT4))
++                    return finish_scene(initial_remaining, remaining);
++                const Tm4DisplayFace* face = (const Tm4DisplayFace*)face_bytes;
++                int code = face->header.color0.components.cd;
++                int kind = code & TM4_FACE_TYPE_MASK;
++                int gouraud = kind == TM4_FACE_GT3 || kind == TM4_FACE_GT4;
++                int quad = kind == TM4_FACE_GT4 || kind == TM4_FACE_FT4;
++                if (!gouraud && kind != TM4_FACE_FT3 && kind != TM4_FACE_FT4)
++                    return 0;
++                face_bytes
++                    += gouraud ? sizeof(Tm4GouraudQuadFaceView) : sizeof(Tm4FlatQuadFaceView);
++                if (pass == 2 && (code & TM4_FACE_SEMITRANSPARENT))
++                    continue;
++                int enabled = gouraud ? face->gouraud.color3.components.cd : face->flat.enabled;
++                if (!enabled)
++                    continue;
++                const u8* indices = face->header.vertex;
++                int clipped = 1;
++                for (int j = 0; j < (quad ? 4 : 3); ++j) {
++                    assert(indices[j] < group->vertex_count);
++                    clipped &= scratch->clipped[indices[j]];
++                }
++                if (clipped)
++                    continue;
++                Tm4ProjectedVertex* projected = scratch->projected;
++                GteLoadScreen3(&projected[indices[0]].screen, &projected[indices[1]].screen,
++                    &projected[indices[2]].screen);
++                gte_nclip();
++                s32 area0 = (s32)Psyz_GteDataRead(24);
++                s32 area1 = 1;
++                if (quad) {
++                    GteLoadScreen(&projected[indices[3]].screen);
++                    gte_nclip();
++                    area1 = (s32)Psyz_GteDataRead(24);
++                }
++                int two_sided = gouraud ? face->gouraud.color2.components.cd : face->flat.two_sided;
++                if (area0 <= 0 && area1 > 0 && !two_sided)
++                    continue;
++                int depth = projected[indices[0]].vertex_depth + projected[indices[1]].vertex_depth
++                    + projected[indices[2]].vertex_depth
++                    + projected[indices[quad ? 3 : 0]].vertex_depth;
++                depth >>= 4;
++                if (depth <= 0)
++                    continue;
++                int bias = gouraud ? face->gouraud.color1.components.cd : face->flat.depth_bias;
++                int ordering_index = depth + bias;
++                if (ordering_index >= ordering_size)
++                    ordering_index = ordering_size - 1;
++                Tm4OrderingTag* tag = &ordering_table[ordering_index];
++                size_t subdivision_size = gouraud ? 4 * (sizeof(POLY_GT4) + sizeof(POLY_GT3))
++                                                  : 4 * (sizeof(POLY_FT4) + sizeof(POLY_FT3));
++                if (quad && depth < 320 && primitive_end - cursor > subdivision_size) {
++                    cursor = gouraud
++                        ? WorldBuildGouraudSubdividedQuad(&face->gouraud, vertices, cursor, tag)
++                        : WorldBuildFlatSubdividedQuad(&face->flat, vertices, cursor, tag);
++                } else {
++                    cursor = emit_face(face, projected, cursor, tag);
++                }
++                --remaining;
++            }
++        }
++    }
++    return finish_scene(initial_remaining, remaining);
++}
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -29,6 +29,7 @@
+ 
+ #include <LIBGPU.H>
+ #include <STRINGS.H>
++#include <libetc.h>
+ 
+ typedef struct ScreenMessageQueue {
+     s32 count;
+@@ -552,11 +553,7 @@
+         ScreenPowerupAngle = (ScreenPowerupAngle + 68) & 4095;
+         angle = (ScreenPulseAngle + 384) & 4095;
+         ScreenPulseAngle = angle;
+-        if (angle >= 0) {
+-            register s32* table TM4_BIND_REGISTER("v1") = rcossin_tbl;
+-            level = Q12PackedSine(table[angle]) + ONE;
+-        } else
+-            level = -Q12PackedSine(rcossin_tbl[-angle]) + ONE;
++        level = Q12Sin(angle) + ONE;
+         brightness = level / 2;
+         ScreenPulseBrightness = brightness;
+         for (player = 0; player < GameInfo.player_count; player++) {
+@@ -579,7 +576,7 @@
+     s32 slot, view;
+ 
+     GameDisplayMode(buffer);
+-    if ((((u32)VB_VBlankCount[0] >> 6) & 1) && GameInfo.mode == GAME_MODE_DEMO) {
++    if ((((u32)VSync(-1) >> 6) & 1) && GameInfo.mode == GAME_MODE_DEMO) {
+         FontPrint(ScreenDemoPrompt, ScreenMediumFontName, 160, 108, &buffer->font_prims,
+             buffer->ordering_table, FONT_PRINT_COLOR | FONT_PRINT_CENTER | FONT_PRINT_SHADOW,
+             ScreenDemoColor->r, ScreenDemoColor->g, ScreenDemoColor->b, 3, 2);
+@@ -756,7 +753,7 @@
+     percent = car->health * 99 / car->maximum_health;
+     if (!percent)
+         percent = 1;
+-    if (percent >= 26 || (((u32)VB_VBlankCount[0] >> 5) & 1)) {
++    if (percent >= 26 || (((u32)VSync(-1) >> 5) & 1)) {
+         sprintf(text, HudDecimalFormat, percent);
+         FontPrint(text, ScreenMessageFontName, 28, RenderViewHeight - 40, statusFont, orderingTable,
+             FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, ScreenAbbrHealthColor->r,
+@@ -808,7 +805,7 @@
+         name = target->name;
+         if (!percent)
+             percent = 1;
+-        if (percent >= 26 || (((u32)VB_VBlankCount[0] >> 5) & 1)) {
++        if (percent >= 26 || (((u32)VSync(-1) >> 5) & 1)) {
+             sprintf(text, HudDecimalFormat, percent);
+             FontPrint(text, ScreenMessageFontName, 28, 32, &buffer->font_prims, orderingTable,
+                 FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, ScreenAbbrHealthColor->r,
+diff --git a/src/main/world.c b/src/main/world.c
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -16,6 +16,7 @@
+ #include "tm4/main/object.h"
+ #include "tm4/main/registry.h"
+ #include "tm4/main/render.h"
++
+ 
+ #include <SYS/TYPES.H>
+ #include <LIBGTE.H>
+@@ -283,6 +284,8 @@
+ extern const Tm4NeighborOffsets WorldNeighborOffsets[];
+ #endif
+ 
++
++
+ #if !defined(TM4_WORLD_FUNCTION) || TM4_WORLD_FUNCTION == 0x8001a8f0
+ u8* WorldBuildGouraudSubdividedQuad(const Tm4GouraudQuadFaceView* face, const SVECTOR* vertices,
+     u8* cursor, Tm4OrderingTag* ordering_tag)
+@@ -349,6 +352,7 @@
+     split[3].screen = scratch->projected[index3].screen.packed;
+     gte_stsxy0(&split[7].screen);
+     gte_stsxy1(&split[8].screen);
++
+ 
+     split[0].uv.packed = texture->pairs.uv0;
+     split[1].uv.packed = texture->pairs.uv1;
+@@ -410,6 +414,7 @@
+         quad->words.vertices[3].color = last_color;
+         quad->quad.tpage = texture->pairs.tpage;
+         quad->quad.clut = texture->pairs.clut;
++
+         GpuLinkPacketSized(ordering_tag, &quad->quad, sizeof(quad->quad));
+         cursor = (u8*)(&quad->quad + 1);
+     }
+@@ -435,6 +440,7 @@
+         triangle->words.vertices[2].color = last_color;
+         triangle->triangle.tpage = texture->pairs.tpage;
+         triangle->triangle.clut = texture->pairs.clut;
++
+         GpuLinkPacketSized(ordering_tag, &triangle->triangle, sizeof(triangle->triangle));
+         cursor = (u8*)(&triangle->triangle + 1);
+     }
+@@ -511,6 +517,7 @@
+     gte_stsxy0(&split[7].screen);
+     gte_stsxy1(&split[8].screen);
+ 
++
+     split[0].uv.packed = texture->pairs.uv0;
+     split[1].uv.packed = texture->pairs.uv1;
+     split[2].uv.packed = texture->pairs.uv2;
+@@ -550,6 +557,7 @@
+         quad->words.vertices[3].xy = last_screen;
+         quad->quad.tpage = texture->pairs.tpage;
+         quad->quad.clut = texture->pairs.clut;
++
+         GpuLinkPacketSized(ordering_tag, &quad->quad, sizeof(quad->quad));
+         cursor = (u8*)(&quad->quad + 1);
+     }
+@@ -573,6 +581,7 @@
+         triangle->words.vertices[2].xy = last_screen;
+         triangle->triangle.tpage = texture->pairs.tpage;
+         triangle->triangle.clut = texture->pairs.clut;
++
+         GpuLinkPacketSized(ordering_tag, &triangle->triangle, sizeof(triangle->triangle));
+         cursor = (u8*)(&triangle->triangle + 1);
+     }
+@@ -584,6 +593,8 @@
+ #if !defined(TM4_WORLD_FUNCTION) || TM4_WORLD_FUNCTION == 0x8001b67c
+ Tm4WorldSquare* WorldFindSquare(s32 x, s32 z)
+ {
++    if (!WorldSquares)
++        return NULL;
+     u16 index;
+     x = (x >> WORLD_CELL_SHIFT) + WORLD_GRID_ORIGIN;
+     z = (z >> WORLD_CELL_SHIFT) + WORLD_GRID_ORIGIN;
+@@ -1353,6 +1364,7 @@
+     register SVECTOR* vertex TM4_BIND_REGISTER("$4");
+     RenderScratch* scratch;
+     Tm4ProjectedVertex* batch;
++
+     register u8* clipped TM4_BIND_REGISTER("$19");
+     u8* clip_batch;
+     register const u8* face_payload TM4_BIND_REGISTER("$16");
+@@ -1412,18 +1424,23 @@
+     vertices = source_vertices + vertex_groups->ranges[lod].first;
+     Tm4ProjectVertexTriple(vertex, vertices, vertex_count);
+     GteStoreProjectedTriple(batch);
++
+     while (vertex_count > 0) {
+         Tm4ProjectNextVertexTriple(vertex, vertex_count);
+         WorldMarkClippedTriple(clip_batch, batch);
+         clip_batch += 3;
+         batch += 3;
+         GteStoreProjectedTriple(batch);
++
+     }
+     WorldMarkClippedTriple(clip_batch, batch);
+     if (count > 0) {
+         face_payload = (const u8*)face + sizeof(Tm4DisplayFaceHeader);
+         for (; count > 0; --count) {
+             s32 code = Tm4DisplayFaceFromPayload(face_payload)->header.color0.components.cd;
++#ifdef __psyz
++            const u8* indices = Tm4DisplayFaceFromPayload(face_payload)->header.vertex;
++#endif
+             s32 i0;
+             register s32 i1 TM4_BIND_REGISTER("$5");
+             register s32 i2 TM4_BIND_REGISTER("$6");
+@@ -1632,6 +1649,7 @@
+                 /* Original failure leaves the pushed matrix and output slot unchanged. */
+                 return 0;
+             }
++
+             GpuLinkPacketFullWord(&ordering_table[ordering_index], &cursor->tag, packet_size);
+             cursor = (Tm4TexturedPolygonPacket*)((u8*)cursor + packet_size);
+         }
+diff --git a/src/modules/car/display.c b/src/modules/car/display.c
+--- a/src/modules/car/display.c
++++ b/src/modules/car/display.c
+@@ -11,6 +11,9 @@
+ #include "car_shadow_gte.h"
+ 
+ #include "tm4/gpu_packet.h"
++#ifdef __psyz
++#include "port/web/car.h"
++#endif
+ #include "tm4/gte.h"
+ #include "tm4/main/card.h"
+ #include "tm4/main/game.h"
+@@ -133,7 +136,13 @@
+     if (count > 0) {
+         CarRenderList* candidate = car->display_lists;
+         do {
+-            if (candidate->max_camera_distance < camera_distance) {
++#ifdef __psyz
++            long long distance_limit
++                = (long long)candidate->max_camera_distance * WebCarLodDistanceScale;
++#else
++            s32 distance_limit = candidate->max_camera_distance;
++#endif
++            if (distance_limit < camera_distance) {
+                 ++level;
+                 ++candidate;
+             } else
+@@ -217,6 +226,7 @@
+     uv1_page = car->shadow_texture->packed.uv1_page;
+     packet->quad.code = 0x2f;
+     GpuSetFlatTextureBox(packet, uv0_clut, uv1_page);
++
+     GpuLinkPacketSized(ordering, &packet->quad, sizeof(packet->quad));
+     ++packet;
+     *next = (u8*)packet;
+diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
+--- a/src/modules/car/wheel_render.c
++++ b/src/modules/car/wheel_render.c
+@@ -8,6 +8,7 @@
+ #include "tm4/modules/car_scratch.h"
+ 
+ #include "../reflection_gte.h"
++
+ 
+ #include "tm4/gpu_packet.h"
+ #include "tm4/gte.h"
+@@ -71,6 +72,7 @@
+     Tm4ScreenPoint* screen_xy;
+     CVECTOR* destination;
+     register Tm4ProjectionBatch* screen_output TM4_BIND_REGISTER("$3");
++
+     Tm4PackedColor* lit;
+     u16* reflections;
+     u16* reflection;
+@@ -181,10 +183,11 @@
+             s32 remaining;
+             vertex = vertices + frame->first_vertex;
+             for (remaining = frame->vertex_count; remaining > 0;) {
+-                gte_ldv3c(vertex);
++                WebGteLoadVertexBatch(vertex, remaining);
+                 screen_output++;
+                 gte_nop();
+                 gte_rtpt_b();
++
+                 remaining -= 3;
+                 vertex += 3;
+                 gte_stsxy3c(screen_output->vertices);
+@@ -318,6 +321,7 @@
+                             layer->packed.uv2 = uv2 + uv0_clut_base;
+                         }
+ 
++
+                         GpuLinkPacketFullWord(
+                             ordering, &layer->triangle.tag, sizeof(layer->triangle));
+                         packet += sizeof(layer->triangle);
+@@ -346,6 +350,7 @@
+                             polygon->words.vertices[1].color = color1;
+                             polygon->words.vertices[2].color = color2;
+                         }
++
+                         GpuLinkPacketFullWord(
+                             ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
+                         packet += sizeof(polygon->triangle);
+@@ -430,6 +435,7 @@
+                             layer->packed.uv3_pad.uv = uv3 + uv0_clut_base;
+                         }
+ 
++
+                         GpuLinkPacketFullWord(ordering, &layer->quad.tag, sizeof(layer->quad));
+                         packet += sizeof(layer->quad);
+                     }
+@@ -462,6 +468,7 @@
+                             polygon->words.vertices[2].color = color2;
+                             polygon->words.vertices[3].color = color3;
+                         }
++
+                         GpuLinkPacketFullWord(ordering, &polygon->quad.tag, sizeof(polygon->quad));
+                         packet += sizeof(polygon->quad);
+                     }
+@@ -501,6 +508,7 @@
+     Tm4ScreenPoint* screen_xy;
+     CVECTOR* destination;
+     register Tm4ProjectionBatch* screen_output TM4_BIND_REGISTER("$3");
++
+     Tm4PackedColor* lit;
+     u16* reflections;
+     u16* reflection;
+@@ -621,10 +629,11 @@
+                 s32 remaining;
+                 vertex = vertices + record.frame->first_vertex;
+                 for (remaining = record.frame->vertex_count; remaining > 0;) {
+-                    gte_ldv3c(vertex);
++                    WebGteLoadVertexBatch(vertex, remaining);
+                     screen_output++;
+                     gte_nop();
+                     gte_rtpt_b();
++
+                     remaining -= 3;
+                     vertex += 3;
+                     gte_stsxy3c(screen_output->vertices);
+@@ -764,6 +773,7 @@
+                                 layer->packed.uv2 = uv2 + uv0_clut_base;
+                             }
+ 
++
+                             GpuLinkPacketFullWord(
+                                 ordering, &layer->triangle.tag, sizeof(layer->triangle));
+                         }
+@@ -777,6 +787,7 @@
+                             setRGB0(tint, 0, alpha, alpha);
+                             setRGB1(tint, 0, 0, alpha);
+                             setRGB2(tint, 0, alpha, alpha);
++
+                             GpuLinkPacketFullWord(ordering, &colors->words.tag, sizeof(*tint));
+                             packet += sizeof(*tint);
+                         }
+@@ -804,6 +815,7 @@
+                                 polygon->words.vertices[1].color = color1;
+                                 polygon->words.vertices[2].color = color2;
+                             }
++
+                             GpuLinkPacketFullWord(
+                                 ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
+                             packet += sizeof(polygon->triangle);
+@@ -896,6 +908,7 @@
+                                 layer->packed.uv3_pad.uv = uv3 + uv0_clut_base;
+                             }
+ 
++
+                             GpuLinkPacketFullWord(ordering, &layer->quad.tag, sizeof(layer->quad));
+                         }
+                         {
+@@ -910,6 +923,7 @@
+                             setRGB1(tint, 0, 0, alpha);
+                             setRGB2(tint, 0, alpha, alpha);
+                             setRGB3(tint, alpha, alpha, alpha);
++
+                             GpuLinkPacketFullWord(ordering, &colors->words.tag, sizeof(*tint));
+                             packet += sizeof(*tint);
+                         }
+@@ -942,6 +956,7 @@
+                                 polygon->words.vertices[2].color = color2;
+                                 polygon->words.vertices[3].color = color3;
+                             }
++
+                             GpuLinkPacketFullWord(
+                                 ordering, &polygon->quad.tag, sizeof(polygon->quad));
+                             packet += sizeof(polygon->quad);
+diff --git a/src/modules/menu/model_display.c b/src/modules/menu/model_display.c
+--- a/src/modules/menu/model_display.c
++++ b/src/modules/menu/model_display.c
+@@ -4,6 +4,7 @@
+ #include "tm4/fixed.h"
+ #include "tm4/gpu.h"
+ #include "tm4/gpu_packet.h"
++
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+ 
+@@ -11,6 +12,7 @@
+ #include "tm4/main/geometry.h"
+ #include "tm4/main/math3d.h"
+ 
++#include "tm4/gte.h"
+ #include <GTEMAC.H>
+ #include <INLINE_C.H>
+ 
+@@ -141,6 +143,7 @@
+     uv1_page = model->shadow_texture->packed.uv1_page;
+     packet->quad.code = 0x2f;
+     GpuSetFlatTextureBox(packet, uv0_clut, uv1_page);
++
+     GpuLinkPacketSized(ot, &packet->quad, sizeof(packet->quad));
+     ++packet;
+     *cursor = packet;
+diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflection.c
+--- a/src/modules/menu/model_reflection.c
++++ b/src/modules/menu/model_reflection.c
+@@ -6,11 +6,13 @@
+ 
+ #include "../reflection_gte.h"
+ 
++
+ #include "tm4/gpu_packet.h"
+ #include "tm4/gte.h"
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/render.h"
+ 
++#include "tm4/gte.h"
+ #include <INLINE_C.H>
+ #include <LIBETC.H>
+ 
+@@ -64,6 +66,7 @@
+     register CVECTOR* model_colors TM4_BIND_REGISTER("$23") = model->colors;
+     CarRenderGroupEntry* parts = model->parts;
+ 
++
+     for (count = *list; count > 0; count--) {
+         /* Each write cursor advances from the preceding word group before the GTE store. */
+         register Tm4ProjectionBatch* xy_cursor TM4_BIND_REGISTER("$3")
+@@ -81,10 +84,11 @@
+         }
+         vertex = vertices + frame->first_vertex;
+         for (vertex_count = frame->vertex_count; vertex_count > 0;) {
+-            gte_ldv3c(vertex);
++            WebGteLoadVertexBatch(vertex, vertex_count);
+             xy_cursor++;
+             gte_nop();
+             gte_rtpt_b();
++
+             vertex_count -= 3;
+             vertex += 3;
+             gte_stsxy3c(xy_cursor->vertices);
+@@ -174,6 +178,7 @@
+                     triangle->packed.uv1_page.uv
+                         = reflection[polygon->normals[1]].packed + uv0_clut_base;
+                     triangle->packed.uv2 = reflection[polygon->normals[2]].packed + uv0_clut_base;
++
+                     GpuLinkPacketSized(ot, &triangle->triangle.tag, sizeof(triangle->triangle));
+                     packet += sizeof(triangle->triangle);
+                 }
+@@ -194,6 +199,7 @@
+                     = colors[polygon->normals[0]].packed | 0x34000000u;
+                 shaded_triangle->words.vertices[1].color = colors[polygon->normals[1]].packed;
+                 shaded_triangle->words.vertices[2].color = colors[polygon->normals[2]].packed;
++
+                 GpuLinkPacketSized(
+                     ot, &shaded_triangle->triangle.tag, sizeof(shaded_triangle->triangle));
+                 packet += sizeof(shaded_triangle->triangle);
+@@ -238,6 +244,7 @@
+                     quad->packed.uv2 = reflection[polygon->normals[2]].packed + uv0_clut_base;
+                     quad->packed.uv3_pad.uv
+                         = reflection[polygon->normals[3]].packed + uv0_clut_base;
++
+                     GpuLinkPacketSized(ot, &quad->quad.tag, sizeof(quad->quad));
+                     packet += sizeof(quad->quad);
+                 }
+@@ -261,6 +268,7 @@
+                 shaded_quad->words.vertices[1].color = colors[polygon->normals[1]].packed;
+                 shaded_quad->words.vertices[2].color = colors[polygon->normals[2]].packed;
+                 shaded_quad->words.vertices[3].color = colors[polygon->normals[3]].packed;
++
+                 GpuLinkPacketSized(ot, &shaded_quad->quad.tag, sizeof(shaded_quad->quad));
+                 packet += sizeof(shaded_quad->quad);
+                 break;
+diff --git a/src/modules/weap/display.c b/src/modules/weap/display.c
+--- a/src/modules/weap/display.c
++++ b/src/modules/weap/display.c
+@@ -9,6 +9,7 @@
+ #include "tm4/main/render.h"
+ #include "tm4/main/render_polygon.h"
+ #include "tm4/main/render_scratch.h"
++
+ 
+ #include <INLINE_C.H>
+ #include <LIBETC.H>
+@@ -137,6 +138,7 @@
+     Tm4ProjectedVertex* projected_vertices;
+     Tm4ProjectedVertex* projection_output;
+ 
++
+     Tm4TexturedPolygonPacket* packet;
+     s32 packet_size;
+     Tm4OrderingTag* ordering_table;
+@@ -157,10 +159,12 @@
+     projection_output = projection_scratch;
+     Tm4ProjectNextVertexTriple(vertices, vertices_remaining);
+     GteStoreProjectedTriple(projection_output);
++
+     while (vertices_remaining > 0) {
+         Tm4ProjectNextVertexTriple(vertices, vertices_remaining);
+         projection_output += 3;
+         GteStoreProjectedTriple(projection_output);
++
+     }
+ 
+     if (faces_remaining > 0) {
+@@ -168,6 +172,9 @@
+         face_payload = (const u8*)face + sizeof(Tm4DisplayFaceHeader);
+         for (; faces_remaining > 0; --faces_remaining) {
+             s32 face_code = Tm4DisplayFaceFromPayload(face_payload)->header.color0.components.cd;
++#ifdef __psyz
++            const u8* indices = Tm4DisplayFaceFromPayload(face_payload)->header.vertex;
++#endif
+ 
+             const Tm4CardQuadTexture* texture;
+             s32 i0, i1, i2, i3;
+@@ -324,6 +331,7 @@
+                 return 0;
+             }
+ 
++
+             GpuLinkPacketFullWord(&ordering_table[ot_index], &packet->tag, packet_size);
+             packet = (Tm4TexturedPolygonPacket*)((u8*)packet + packet_size);
+         }
