@@ -1,0 +1,429 @@
+diff --git a/include/tm4/modules/car.h b/include/tm4/modules/car.h
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -1,6 +1,7 @@
+ #ifndef TM4_MODULES_CAR_H
+ #define TM4_MODULES_CAR_H
+ 
++#include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+ 
+@@ -402,6 +403,7 @@
+ } CarCameraState;
+ 
+ void CarDestructor(Car* car);
++void CarDisplay(Car* car, Tm4OrderingTag* ordering, u8** packets, u8* end, MATRIX* world_to_camera);
+ void CarAiDestructor(Car* car);
+ void CarWeaponDestructor(Car* car);
+ void CarPhysicsDestructor(Car* car);
+@@ -429,4 +431,6 @@
+ typedef void CarControlsFrozenFunction(void* object);
+ CarControlsFrozenFunction CarControlsFrozen;
+ 
++void CarUpdateEngineSound(Car* car);
++
+ #endif
+diff --git a/src/modules/car/ai.c b/src/modules/car/ai.c
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -348,7 +348,11 @@
+             || CarAiTraceEdges(car->ai.area, car->ai.spatial_node, &car->ai.position, &delta, NULL))
+             candidate = CAR_AI_NO_NODE;
+     }
+-    if (candidate < 0 && fallback_index >= 0
++    /* The original indexes this local list with a previous global node index.
++     * Reject an invalid fallback instead of reading unrelated heap contents. */
++    if (candidate < 0 && fallback_index >= 0 && fallback_index < segment->navigation_count
++        && segment->navigation_indices && fallback_index < aiWorldInfo.resource.node_count
++        && segment->navigation_indices[fallback_index] < aiWorldInfo.resource.node_count
+         && aiWorldInfo.resource.nodes[segment->navigation_indices[fallback_index]].enabled) {
+         delta.x = aiWorldInfo.resource.nodes[fallback_index].x - car->ai.position.x;
+         delta.z = aiWorldInfo.resource.nodes[fallback_index].z - car->ai.position.z;
+diff --git a/src/modules/car/ai_control.c b/src/modules/car/ai_control.c
+--- a/src/modules/car/ai_control.c
++++ b/src/modules/car/ai_control.c
+@@ -179,7 +179,8 @@
+     s32 i;
+     for (i = GameInfo.entrant_count - 1; i >= 0; i--)
+         car->ai.attacker_damage[i] = 0;
+-    if (car->ai.target)
++    /* The target can die before our next AI update or destructor; its storage may be reused. */
++    if (car->ai.target && GameIsCarRegistered(car->ai.target))
+         --car->ai.target->ai.targeting_count;
+     car->ai.target = target;
+     car->ai.target_entry = entry;
+diff --git a/src/modules/car/audio.c b/src/modules/car/audio.c
+--- /dev/null
++++ b/src/modules/car/audio.c
+@@ -0,0 +1,13 @@
++#include "tm4/fixed.h"
++#include "tm4/modules/car.h"
++#include "tm4/modules/sound.h"
++
++void CarUpdateEngineSound(Car* car)
++{
++    if (car->engine_sound) {
++        s32 pitch = car->force_sum * 2;
++        if (pitch > ONE)
++            pitch = ONE;
++        SoundEmitterSetPitchScale(car->engine_sound, pitch);
++    }
++}
+diff --git a/src/modules/car/camera.c b/src/modules/car/camera.c
+--- a/src/modules/car/camera.c
++++ b/src/modules/car/camera.c
+@@ -1,6 +1,7 @@
+ 
+ #include "tm4/modules/camera.h"
+ #include "private.h"
++
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -308,6 +309,7 @@
+     look_button = GameInfo.players[((Car*)object)->controller_index]
+                       .bindings[pad->has_analog]
+                       .actions[GameControlLookBack];
++
+     if (pad->buttons & look_button) {
+         if ((u32)car_camera_state(data)->distance_preset < 3) {
+             SVECTOR* car_position;
+diff --git a/src/modules/car/car.c b/src/modules/car/car.c
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -114,7 +114,6 @@
+     char* filename;
+     s32* value;
+     CVECTOR* color;
+-    s32 controller;
+     s32* size;
+     s32 (*constructor)(Car*, void*);
+     if (CarInitializeScales) {
+@@ -151,20 +150,8 @@
+         strcpy(car->filename, filename);
+         car->filename[0] = toupper((u8)car->filename[0]);
+     }
+-    value = CarGetFileData(CarTextDigitalSteeringMaxSpeed);
+-    if (!value)
+-        return 0;
+-    car->controls.digital_steering_max_speed = *value;
+-    if (car->controls.digital_steering_max_speed < 0)
+-        car->controls.digital_steering_max_speed = 0;
+-    value = CarGetFileData(CarTextDigitalSteeringFullTurnTime);
+-    if (!value)
+-        return 0;
+-    car->controls.digital_steering_turn_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
+-    value = CarGetFileData(CarTextDigitalSteeringFullReturnTime);
+-    if (!value)
+-        return 0;
+-    car->controls.digital_steering_return_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
++    if (!CarControlsConstructor(car, type))
++        return 0;
+     color = CarGetFileData(CarTextRadarDotColor);
+     if (!color)
+         return 0;
+@@ -184,37 +171,14 @@
+         car->muzzle_count = 0;
+     else
+         car->muzzle_count = RegGetFileArraySizeS(CarTextMachineGuns);
+-    car->controls.brake_input = 15;
+-    car->controls.gear = CAR_GEAR_FIRST;
+-    car->controls.input_device = 65;
+-    car->controls.input_flags = 192;
+     turbo = CarTurboScale;
+     energy = CarEnergyScale;
+     health = car->maximum_health;
+-    car->controls.action = CarActionNone;
+-    car->controls.steering_input = 0;
+-    car->controls.throttle_input = 0;
+-    car->controls.machine_gun_active = 0;
+-    car->controls.turbo_active = 0;
+-    car->controls.turbo_tap_ticks = 0;
+-    car->controls.ebrake_active = 0;
+     car->muzzle_index = 0;
+     car->muzzle_cooldown = 0;
+     car->turbo_fuel = car->maximum_turbo_fuel = turbo;
+     car->energy = car->maximum_energy = energy;
+     car->health = health;
+-    if (type == CAR_CONTROL_PLAYER) {
+-        controller = car->controller_index;
+-        car->controls.analog_steering_scale = 0x10000000
+-            / (GameInfo.players[controller].bindings[1].axes[2].full_scale
+-                - GameInfo.players[controller].bindings[1].axes[2].deadzone);
+-        car->controls.analog_throttle_scale_3 = 0xf000
+-            / (GameInfo.players[controller].bindings[1].axes[0].full_scale
+-                - GameInfo.players[controller].bindings[1].axes[0].deadzone);
+-        car->controls.analog_throttle_scale_1 = 0xf000
+-            / (GameInfo.players[controller].bindings[1].axes[1].full_scale
+-                - GameInfo.players[controller].bindings[1].axes[1].deadzone);
+-    }
+     if (!CarWeaponConstructor(car, type) || !CarPhysicsConstructor(car, position, heading)
+         || !CarAiConstructor(car, type) || !CarDisplayConstructor(car)
+         || !CarPhysicsConstructorPostDisplayConstructor(car, 0)) {
+@@ -476,12 +440,7 @@
+         }
+     }
+     ObjectSetPosition(car, car->position.vx, car->position.vy, car->position.vz);
+-    if (car->engine_sound) {
+-        s32 pitch = car->force_sum * 2;
+-        if (pitch > ONE)
+-            pitch = ONE;
+-        Import_Car_SoundEmitterSetPitchScale(car->engine_sound, pitch);
+-    }
++    CarUpdateEngineSound(car);
+ }
+ 
+ void CarClearFireEffect(void* object)
+diff --git a/src/modules/car/car_display_gte.h b/src/modules/car/car_display_gte.h
+--- a/src/modules/car/car_display_gte.h
++++ b/src/modules/car/car_display_gte.h
+@@ -1,12 +1,5 @@
+ #ifndef TM4_CAR_DISPLAY_GTE_H
+ #define TM4_CAR_DISPLAY_GTE_H
+-
+-/* The fifth matrix word replaces the pointer after its last load. */
+-#define CarSetDisplayRotation(matrix)                                                              \
+-    __asm__ volatile("lw $3,0(%0);lw $4,4(%0);lw $5,8(%0);lw $6,12(%0);lw %0,16(%0);"              \
+-                     "ctc2 $3,$0;ctc2 $4,$1;ctc2 $5,$2;ctc2 $6,$3;ctc2 %0,$4"                      \
+-                     : "+r"(matrix)                                                                \
+-                     :                                                                             \
+-                     : "$3", "$4", "$5", "$6", "memory")
+-
++#include <libgte.h>
++#define CarSetDisplayRotation(matrix) SetRotMatrix(matrix)
+ #endif
+diff --git a/src/modules/car/car_shadow_gte.h b/src/modules/car/car_shadow_gte.h
+--- a/src/modules/car/car_shadow_gte.h
++++ b/src/modules/car/car_shadow_gte.h
+@@ -1,25 +1,9 @@
+ #ifndef TM4_CAR_SHADOW_GTE_H
+ #define TM4_CAR_SHADOW_GTE_H
+-
++#include <libgte.h>
+ #define CarSetShadowMatrix(matrix)                                                                 \
+-    __asm__ volatile("lw $3,0(%0);"                                                                \
+-                     "lw $4,4(%0);"                                                                \
+-                     "lw $5,8(%0);"                                                                \
+-                     "lw $6,12(%0);"                                                               \
+-                     "ctc2 $3,$0;"                                                                 \
+-                     "ctc2 $4,$1;"                                                                 \
+-                     "ctc2 $5,$2;"                                                                 \
+-                     "ctc2 $6,$3;"                                                                 \
+-                     "lw $3,16(%0);"                                                               \
+-                     "lw $4,20(%0);"                                                               \
+-                     "lw $5,24(%0);"                                                               \
+-                     "lw $6,28(%0);"                                                               \
+-                     "ctc2 $3,$4;"                                                                 \
+-                     "ctc2 $4,$5;"                                                                 \
+-                     "ctc2 $5,$6;"                                                                 \
+-                     "ctc2 $6,$7"                                                                  \
+-                     :                                                                             \
+-                     : "r"(matrix)                                                                 \
+-                     : "$3", "$4", "$5", "$6", "memory")
+-
++    do {                                                                                           \
++        SetRotMatrix(matrix);                                                                      \
++        SetTransMatrix(matrix);                                                                    \
++    } while (0)
+ #endif
+diff --git a/src/modules/car/car_trace_gte.h b/src/modules/car/car_trace_gte.h
+--- a/src/modules/car/car_trace_gte.h
++++ b/src/modules/car/car_trace_gte.h
+@@ -1,13 +1,14 @@
+ #ifndef TM4_CAR_TRACE_GTE_H
+ #define TM4_CAR_TRACE_GTE_H
++#include <psyz/gte.h>
+ 
+-#define CarTraceSetR11R12(value) __asm__ volatile("ctc2 %0,$0" : : "r"(value))
+-#define CarTraceSetR22R23(value) __asm__ volatile("ctc2 %0,$2" : : "r"(value))
+-#define CarTraceSetR33(value) __asm__ volatile("ctc2 %0,$4" : : "r"(value))
+-#define CarTraceSetIR1(value) __asm__ volatile("mtc2 %0,$9" : : "r"(value))
+-#define CarTraceSetIR2(value) __asm__ volatile("mtc2 %0,$10" : : "r"(value))
+-#define CarTraceSetIR3(value) __asm__ volatile("mtc2 %0,$11" : : "r"(value))
+-#define CarTraceReadMAC2(value) __asm__ volatile("mfc2 %0,$26" : "=r"(value))
+-#define CarTraceReadMAC1(value) __asm__ volatile("mfc2 %0,$25" : "=r"(value))
++#define CarTraceSetR11R12(value) Psyz_GteCtrlWrite(0, (value))
++#define CarTraceSetR22R23(value) Psyz_GteCtrlWrite(2, (value))
++#define CarTraceSetR33(value) Psyz_GteCtrlWrite(4, (value))
++#define CarTraceSetIR1(value) Psyz_GteDataWrite(9, (value))
++#define CarTraceSetIR2(value) Psyz_GteDataWrite(10, (value))
++#define CarTraceSetIR3(value) Psyz_GteDataWrite(11, (value))
++#define CarTraceReadMAC2(value) ((value) = (s32)Psyz_GteDataRead(26))
++#define CarTraceReadMAC1(value) ((value) = (s32)Psyz_GteDataRead(25))
+ 
+ #endif
+diff --git a/src/modules/car/input.c b/src/modules/car/input.c
+--- a/src/modules/car/input.c
++++ b/src/modules/car/input.c
+@@ -12,7 +12,7 @@
+ #include "tm4/main/screen.h"
+ #include "tm4/main/system.h"
+ 
+-#include <SYS/TYPES.H>
++#include <stddef.h>
+ 
+ static inline void report_empty_turbo(Car* car)
+ {
+@@ -35,6 +35,50 @@
+     digital_brake = 16,
+     analog_brake = 32
+ };
++
++s32 CarControlsConstructor(Car* car, s32 type)
++{
++    s32* value;
++    s32 controller;
++    value = CarGetFileData(CarTextDigitalSteeringMaxSpeed);
++    if (!value)
++        return 0;
++    car->controls.digital_steering_max_speed = *value;
++    if (car->controls.digital_steering_max_speed < 0)
++        car->controls.digital_steering_max_speed = 0;
++    value = CarGetFileData(CarTextDigitalSteeringFullTurnTime);
++    if (!value)
++        return 0;
++    car->controls.digital_steering_turn_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
++    value = CarGetFileData(CarTextDigitalSteeringFullReturnTime);
++    if (!value)
++        return 0;
++    car->controls.digital_steering_return_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
++    car->controls.brake_input = 15;
++    car->controls.gear = CAR_GEAR_FIRST;
++    car->controls.input_device = 65;
++    car->controls.input_flags = 192;
++    car->controls.action = CarActionNone;
++    car->controls.steering_input = 0;
++    car->controls.throttle_input = 0;
++    car->controls.machine_gun_active = 0;
++    car->controls.turbo_active = 0;
++    car->controls.turbo_tap_ticks = 0;
++    car->controls.ebrake_active = 0;
++    if (type == CAR_CONTROL_PLAYER) {
++        controller = car->controller_index;
++        car->controls.analog_steering_scale = 0x10000000
++            / (GameInfo.players[controller].bindings[1].axes[2].full_scale
++                - GameInfo.players[controller].bindings[1].axes[2].deadzone);
++        car->controls.analog_throttle_scale_3 = 0xf000
++            / (GameInfo.players[controller].bindings[1].axes[0].full_scale
++                - GameInfo.players[controller].bindings[1].axes[0].deadzone);
++        car->controls.analog_throttle_scale_1 = 0xf000
++            / (GameInfo.players[controller].bindings[1].axes[1].full_scale
++                - GameInfo.players[controller].bindings[1].axes[1].deadzone);
++    }
++    return 1;
++}
+ 
+ void CarPlayerInput(Car* car)
+ {
+diff --git a/src/modules/car/jump.c b/src/modules/car/jump.c
+--- a/src/modules/car/jump.c
++++ b/src/modules/car/jump.c
+@@ -58,10 +58,7 @@
+ }
+ 
+ /* Each GPU tag keeps its length byte when its ordering-table link is replaced. */
+-#define LINK_JUMP_PRIMITIVE(bucket, primitive, address_mask, length_mask)                          \
+-    (*(unsigned long*)(primitive)                                                                  \
+-        = (*(unsigned long*)(primitive) & (length_mask)) | (*(bucket) & (address_mask)),           \
+-        *(bucket) = (*(bucket) & (length_mask)) | ((unsigned long)(primitive) & (address_mask)))
++#define LINK_JUMP_PRIMITIVE(bucket, primitive, address_mask, length_mask) addPrim(bucket, primitive)
+ 
+ static inline void store_midpoint(SVECTOR* dest, s32 fixed, SVECTOR* tail, s32 x, s32 y, s32 z,
+     s16 jump_x, s16 jump_y, s16 jump_z)
+diff --git a/src/modules/car/orientation.c b/src/modules/car/orientation.c
+--- a/src/modules/car/orientation.c
++++ b/src/modules/car/orientation.c
+@@ -1,6 +1,7 @@
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
++
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/vector.h"
+@@ -91,6 +92,7 @@
+     s32 i;
+     const s32 particle_count = ArrayCount(car->particles);
+     const s32 wheel_count = ArrayCount(car->wheels);
++
+     car->transform = *matrix;
+     TransformOriginalBox(car);
+     for (i = 0; i < particle_count; i++) {
+diff --git a/src/modules/car/private.h b/src/modules/car/private.h
+--- a/src/modules/car/private.h
++++ b/src/modules/car/private.h
+@@ -3,6 +3,7 @@
+ 
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
++#include <stdarg.h>
+ 
+ #include "tm4/main/game.h"
+ #include "tm4/main/math3d.h"
+@@ -41,6 +42,8 @@
+ void CarClearFireEffect(void* object);
+ 
+ /* input.c */
++void* CarGetFileData(char* path);
++s32 CarControlsConstructor(Car* car, s32 type);
+ void CarPlayerInput(Car* car);
+ 
+ /* ai.c */
+@@ -563,4 +566,8 @@
+ extern CarAiHealthEntry CarHealthPickups[32];
+ extern char CarEmptySuffix[];
+ 
++void CarClassConstructor(RegistryDirectory* registry);
++void CarProcess(Car* car);
++s32 CarConstructor(Car* car, va_list args);
++
+ #endif
+diff --git a/src/modules/car/suspension.c b/src/modules/car/suspension.c
+--- a/src/modules/car/suspension.c
++++ b/src/modules/car/suspension.c
+@@ -382,8 +382,7 @@
+                 }
+                 for (; particle_index < particle_count; particle_index++) {
+                     CarParticle* current = (CarParticle*)((char*)car + particle_offset);
+-                    register const Tm4VectorComponent* velocity TM4_BIND_REGISTER("$4")
+-                        = &current->velocity_q12.vx;
++                    register const Tm4VectorComponent* velocity TM4_BIND_REGISTER("$4") = &current->velocity_q12.vx;
+                     register const s16* axis TM4_BIND_REGISTER("$5") = &direction_pointer->vx;
+                     particle_offset += sizeof(CarParticle);
+                     {
+diff --git a/src/modules/car/weapon_launch.c b/src/modules/car/weapon_launch.c
+--- a/src/modules/car/weapon_launch.c
++++ b/src/modules/car/weapon_launch.c
+@@ -75,13 +75,18 @@
+     return 1;
+ }
+ 
++static void launch_massive_on_timer(Car* car, CarWeaponInstance* weapon, s32 flag, s32 index)
++{
++    CarLaunchMassiveOnTimer(car, weapon, flag, index);
++}
++
+ s32 CarLaunchMassive(Car* car, void* target, CarWeaponInstance* weapon, s32 flag)
+ {
+     s32 i;
+     const s32 weapon_count = ArrayCount(CarMassiveWeaponTypes);
+     weapon->index = 0;
+     for (i = 0; i < weapon_count; i++)
+-        ObjectCreate(CarTextTimer, 0, i * 8, CarLaunchMassiveOnTimer, 4, car, weapon, flag, i);
++        ObjectCreate(CarTextTimer, 0, i * 8, launch_massive_on_timer, 4, car, weapon, flag, i);
+     return 1;
+ }
+ 
+diff --git a/src/modules/car/wheel_physics.c b/src/modules/car/wheel_physics.c
+--- a/src/modules/car/wheel_physics.c
++++ b/src/modules/car/wheel_physics.c
+@@ -460,7 +460,7 @@
+     shocks = 0;
+     ground = 0;
+     i = 0;
+-    wheel_offset = (s32) & ((Car*)0)->wheels;
++    wheel_offset = offsetof(Car, wheels);
+     ApplyMatrix(matrix, &local, displacement);
+     {
+         s32 x = car->transform.t[0];
