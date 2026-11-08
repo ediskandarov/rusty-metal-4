@@ -26,7 +26,7 @@ def main():
     with tarfile.open(fileobj=io.BytesIO(archive)) as files:
         files.extractall(output, filter='data')
     for patch in sorted((ROOT / 'patches/game').glob('*.patch')):
-        subprocess.run(['patch', '--batch', '--fuzz=0', '-p1', '-i', str(patch)],
+        subprocess.run(['patch', '--batch', '--fuzz=0', '-E', '-p1', '-i', str(patch)],
                        cwd=output, check=True)
 
 

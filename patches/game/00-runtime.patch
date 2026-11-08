@@ -1,23 +1,21 @@
 diff --git a/include/tm4/fixed.h b/include/tm4/fixed.h
-index 0b1ba08f..7dfe9f53 100644
 --- a/include/tm4/fixed.h
 +++ b/include/tm4/fixed.h
-@@ -4,6 +4,10 @@
+@@ -3,6 +3,10 @@
+ 
  #include <SYS/TYPES.H>
  #include <LIBGTE.H>
- 
++
 +#ifndef ONE
 +#define ONE 4096
 +#endif
-+
+ 
  #define Q12FromInt(value) ((value) << 12)
  /* Signed values round down, preserving the arithmetic right shift. */
- #define Q12ToInt(value) ((value) >> 12)
 diff --git a/include/tm4/main/math3d.h b/include/tm4/main/math3d.h
-index 75d08e45..e105c49a 100644
 --- a/include/tm4/main/math3d.h
 +++ b/include/tm4/main/math3d.h
-@@ -20,23 +20,13 @@ extern s32 rcossin_tbl[ANGLE_FULL_TURN];
+@@ -20,23 +20,13 @@
  #define Q12PackedSine(entry) ((s32)(s16)(entry))
  #define Q12PackedCosine(entry) ((s32)(entry) >> 16)
  
@@ -48,7 +46,6 @@ index 75d08e45..e105c49a 100644
  /* Returns the Q12 fraction along the segment, or -1 when it misses. */
  s32 PolygonRayParameter(const Tm4CollisionPolygon* polygon, const Tm4WorldRay* ray);
 diff --git a/include/tm4/main/memory.h b/include/tm4/main/memory.h
-index 49ccc110..980205ba 100644
 --- a/include/tm4/main/memory.h
 +++ b/include/tm4/main/memory.h
 @@ -6,6 +6,7 @@
@@ -60,7 +57,6 @@ index 49ccc110..980205ba 100644
  void* MemAlloc(u32 payloadBytes);
  void* MemAllocTail(u32 payloadBytes);
 diff --git a/include/tm4/main/object.h b/include/tm4/main/object.h
-index ceba7d36..83794481 100644
 --- a/include/tm4/main/object.h
 +++ b/include/tm4/main/object.h
 @@ -14,6 +14,7 @@
@@ -72,7 +68,6 @@ index ceba7d36..83794481 100644
  enum Tm4ObjectFlags {
      OBJECT_HAS_OWNER = 1 << 0,
 diff --git a/src/main/font.c b/src/main/font.c
-index 128f52d7..92bfe548 100644
 --- a/src/main/font.c
 +++ b/src/main/font.c
 @@ -15,14 +15,13 @@
@@ -92,7 +87,7 @@ index 128f52d7..92bfe548 100644
      s32 proportional;
      u8 u;
      u8 v;
-@@ -337,7 +336,6 @@ void FontConstructor(const char* name, u8 first_character, const Tm4FontTexture*
+@@ -337,7 +336,6 @@
      else if (!strcmp(name, "memcard"))
          FontTable[FontCount] = &FontMemcard;
      font = FontTable[FontCount++];
@@ -101,7 +96,6 @@ index 128f52d7..92bfe548 100644
      font->tpage = texture->tpage;
      font->clut = texture->clut;
 diff --git a/src/main/geometry/box.c b/src/main/geometry/box.c
-index 3320fd98..3d28c6d6 100644
 --- a/src/main/geometry/box.c
 +++ b/src/main/geometry/box.c
 @@ -11,6 +11,7 @@
@@ -112,7 +106,7 @@ index 3320fd98..3d28c6d6 100644
  #include <INLINE_C.H>
  #include <LIBGPU.H>
  #include <MEMORY.H>
-@@ -259,12 +260,17 @@ void BoxDestructor(void* payload)
+@@ -259,12 +260,17 @@
  #if !defined(TM4_BOX_FUNCTION) || TM4_BOX_FUNCTION == 0x80025F50
  /* Register-form GTE transfers: the supplied pointer-form helpers introduce
   * memory traffic absent from these separating-axis projections. */
@@ -134,7 +128,6 @@ index 3320fd98..3d28c6d6 100644
  
  static struct BoxEdge {
 diff --git a/src/main/geometry/geometry.c b/src/main/geometry/geometry.c
-index cf1dccb7..a47bd452 100644
 --- a/src/main/geometry/geometry.c
 +++ b/src/main/geometry/geometry.c
 @@ -9,6 +9,7 @@
@@ -145,7 +138,7 @@ index cf1dccb7..a47bd452 100644
  #include <INLINE_C.H>
  #include <LIBGPU.H>
  #include <MEMORY.H>
-@@ -91,7 +92,10 @@ s32 VectorNormalSRounded(const VECTOR* input, SVECTOR* output)
+@@ -91,7 +92,10 @@
      } while (0)
  
  #define ReadWideProductWords(product, low, high)                                                   \
@@ -157,7 +150,7 @@ index cf1dccb7..a47bd452 100644
  
  /* Keep the round-bit extraction together before starting the next multiply.
   * The do/while form preserves this scheduling boundary with CC1PSX. */
-@@ -1274,7 +1278,7 @@ s16 RayThruBox(const SVECTOR* offset, const VECTOR* direction, const SVECTOR* mi
+@@ -1274,7 +1278,7 @@
      long origin[3] = { direction->vx, direction->vy, direction->vz };
      s16 faces[3] = { 0 };
      s16 axis;
@@ -166,7 +159,7 @@ index cf1dccb7..a47bd452 100644
      s32 selector;
      long* selectedTime;
      s16 best;
-@@ -1296,7 +1300,7 @@ s16 RayThruBox(const SVECTOR* offset, const VECTOR* direction, const SVECTOR* mi
+@@ -1296,7 +1300,7 @@
          long* timeBase = times;
          long time;
          long* timeAddress;
@@ -175,7 +168,7 @@ index cf1dccb7..a47bd452 100644
          register long* coordinate TM4_BIND_REGISTER("t1");
          register const s16* boundary TM4_BIND_REGISTER("a3");
          s16 minimumValue;
-@@ -1337,7 +1341,7 @@ s16 RayThruBox(const SVECTOR* offset, const VECTOR* direction, const SVECTOR* mi
+@@ -1337,7 +1341,7 @@
          selector = best;
          selectedTime = times + selector;
          if (axis != selector) {
@@ -185,10 +178,9 @@ index cf1dccb7..a47bd452 100644
                  - Q18MulRound(*selectedTime, (&direction->vx)[axis]);
          }
 diff --git a/src/main/geometry/polyhedron.c b/src/main/geometry/polyhedron.c
-index ca6a66a4..f8fd63d9 100644
 --- a/src/main/geometry/polyhedron.c
 +++ b/src/main/geometry/polyhedron.c
-@@ -1007,11 +1007,10 @@ u32 PolyhedronGetVertices(const Polyhedron* polyhedron, SVECTOR* output)
+@@ -1007,11 +1007,10 @@
  #endif
  
  #if !defined(TM4_POLYHEDRON_FUNCTION) || TM4_POLYHEDRON_FUNCTION == 0x8002C32C
@@ -203,31 +195,16 @@ index ca6a66a4..f8fd63d9 100644
  int PolyhedronGetFaces(const Polyhedron* polyhedron, unsigned char* records, SVECTOR* vertices,
      unsigned int* vertexCount)
  {
-@@ -1092,6 +1091,5 @@ int PolyhedronGetFaces(const Polyhedron* polyhedron, unsigned char* records, SVE
+@@ -1092,6 +1091,5 @@
      *vertexCount = PolyhedronGetVertices(polyhedron, vertices);
      return faceCount;
  }
 -*/
 -/* clang-format on */
+-#endif
 +#endif
- #endif
-diff --git a/src/main/image.c b/src/main/image.c
-index 446bb5fd..6e4cf37d 100644
---- a/src/main/image.c
-+++ b/src/main/image.c
-@@ -56,8 +56,8 @@ void LoadTIM(u8* tim)
- {
-     RECT rectangle;
-     TimBlock* palette;
--    register u_long size TM4_BIND_REGISTER("v0");
--    register TimBlock* image TM4_BIND_REGISTER("a1") = (TimBlock*)tim;
-+    u_long size;
-+    TimBlock* image = (TimBlock*)tim;
- 
-     if (tim[4] & 8) {
-         palette = (TimBlock*)(tim + 8);
++#endif
 diff --git a/src/main/loading.c b/src/main/loading.c
-index 5f5dd5fd..b7211866 100644
 --- a/src/main/loading.c
 +++ b/src/main/loading.c
 @@ -1,6 +1,7 @@
@@ -238,7 +215,7 @@ index 5f5dd5fd..b7211866 100644
  
  #include "tm4/fixed.h"
  #include "tm4/main/game.h"
-@@ -70,6 +71,8 @@ void LoadingUpdateProgress(s32 progress)
+@@ -70,6 +71,8 @@
      s32 loaded;
  
      loaded = loadingBytesLoaded + mul64s(loadingBytesCurrent, progress, 12);
@@ -249,8 +226,6 @@ index 5f5dd5fd..b7211866 100644
  }
  #endif
 diff --git a/src/main/math3d_native.c b/src/main/math3d_native.c
-new file mode 100644
-index 00000000..976b26bd
 --- /dev/null
 +++ b/src/main/math3d_native.c
 @@ -0,0 +1,682 @@
@@ -937,10 +912,9 @@ index 00000000..976b26bd
 +{
 +}
 diff --git a/src/main/object/classes.c b/src/main/object/classes.c
-index 161b6e5a..81ce622a 100644
 --- a/src/main/object/classes.c
 +++ b/src/main/object/classes.c
-@@ -55,6 +55,8 @@ Tm4ObjectInteractionCallback ObjectFindInteractionCallback(char* first, char* se
+@@ -55,6 +55,8 @@
  {
      s32 lower = ObjectFindClassIndex(first);
      s32 upper = ObjectFindClassIndex(second);
@@ -949,10 +923,13 @@ index 161b6e5a..81ce622a 100644
      if (upper < lower) {
          s32 swap = lower;
          lower = upper;
-@@ -157,60 +159,6 @@ s32 ObjectRegisterInteractionCallback(
- }
- #endif
- 
+@@ -154,60 +156,6 @@
+         }
+     }
+     return 0;
+-}
+-#endif
+-
 -#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x800197d4
 -/* A failed child lookup leaves the VLA scope before the next iteration. */
 -/* Keep uppercasing sequenced before the second prefix-path_length query. */
@@ -1004,15 +981,10 @@ index 161b6e5a..81ce622a 100644
 -        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
 -    }
 -    return 1;
--}
--#endif
--
- #if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x800199d0
- static __inline__ void ObjectRegisterDirectoryExports(char* name, RegistryDirectory* directory)
- {
+ }
+ #endif
+ 
 diff --git a/src/main/object/directory.c b/src/main/object/directory.c
-new file mode 100644
-index 00000000..cfa50f1a
 --- /dev/null
 +++ b/src/main/object/directory.c
 @@ -0,0 +1,37 @@
@@ -1054,10 +1026,9 @@ index 00000000..cfa50f1a
 +    return 1;
 +}
 diff --git a/src/main/object/interaction.c b/src/main/object/interaction.c
-index 0493ea98..da356127 100644
 --- a/src/main/object/interaction.c
 +++ b/src/main/object/interaction.c
-@@ -359,9 +359,7 @@ void ObjectProcessInteractions(void)
+@@ -359,9 +359,7 @@
                      if (radius < 0 || other_radius < 0)
                          continue;
                      GteReadMACVector(square_x, y_component, z_component);
@@ -1069,10 +1040,9 @@ index 0493ea98..da356127 100644
                      distance_squared += y_component;
                      distance_squared += z_component;
 diff --git a/src/main/object/private.h b/src/main/object/private.h
-index 6368afb6..b8aa0663 100644
 --- a/src/main/object/private.h
 +++ b/src/main/object/private.h
-@@ -74,4 +74,7 @@ void ObjectProcessInteractions(void);
+@@ -74,4 +74,7 @@
  #define OBJECT_EMPTY_PATH ""
  #define OBJECT_INTERACTION_EXTENDER_NAME "interaction extender"
  
@@ -1081,10 +1051,9 @@ index 6368afb6..b8aa0663 100644
 +
  #endif
 diff --git a/src/main/pause.c b/src/main/pause.c
-index 7959bb77..8e9a744f 100644
 --- a/src/main/pause.c
 +++ b/src/main/pause.c
-@@ -74,7 +74,7 @@ void PauseInitializePrimitives(PauseWorkspace* workspace)
+@@ -74,7 +74,7 @@
      {
          s32 width = workspace->texture.u1;
          s32 firstU = workspace->texture.u0;
@@ -1094,10 +1063,9 @@ index 7959bb77..8e9a744f 100644
          workspace->markers[1].w = markerWidth;
          workspace->markers[2].h = markerWidth;
 diff --git a/src/main/sprintf.c b/src/main/sprintf.c
-index 72d8dd79..191eeb2f 100644
 --- a/src/main/sprintf.c
 +++ b/src/main/sprintf.c
-@@ -273,7 +273,7 @@ s32 FormatStringV(char* destination, const char* format, va_list arguments)
+@@ -273,7 +273,7 @@
                          length = options.fields.precision;
                      }
                  } else if (!options.fields.precise) {
@@ -1107,7 +1075,6 @@ index 72d8dd79..191eeb2f 100644
                      u8* end = memchr(text, 0, options.fields.precision);
                      length = end - text;
 diff --git a/src/main/system.c b/src/main/system.c
-index af04edae..a5f21f51 100644
 --- a/src/main/system.c
 +++ b/src/main/system.c
 @@ -1,4 +1,5 @@
@@ -1116,7 +1083,7 @@ index af04edae..a5f21f51 100644
  #include "tm4/main/carresources.h"
  #include "tm4/main/game.h"
  #include "tm4/main/image.h"
-@@ -138,6 +139,12 @@ void srandrand(u32 seed)
+@@ -138,6 +139,12 @@
  {
      SystemRandomRandomState = seed;
  }

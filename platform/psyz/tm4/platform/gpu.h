@@ -11,4 +11,7 @@ typedef OT_TYPE Tm4OrderingTag;
         addPrim(entry, packet);                                                                    \
     } while (0)
 
+#define GpuLinkPacketSized GpuLinkPacketFullWord
+#define GpuLinkPacketFullWordMaskedHead GpuLinkPacketFullWord
+
 #endif
