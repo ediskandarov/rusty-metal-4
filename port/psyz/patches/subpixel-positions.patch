@@ -1,0 +1,140 @@
+--- a/platform/sdl3_draw.h
++++ b/platform/sdl3_draw.h
+@@ -24,8 +24,15 @@
+ }
+ 
+ typedef struct {
++#ifdef PSYZ_FLOAT_VERTEX_POSITION
++    float x, y;
++#else
+     short x, y;
++#endif
+     unsigned short u, v, c, t;
+     unsigned char r, g, b, a;
+     unsigned int twin;
++#ifdef PSYZ_FLOAT_VERTEX_POSITION
++    float inv_depth;
++#endif
+ } Vertex;
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -26,6 +26,8 @@
+ #endif
+ 
+ #include "sdl3_common.h"
++#include "subpixel.h"
++#define PSYZ_FLOAT_VERTEX_POSITION
+ #include "sdl3_draw.h"
+ #include "rgb24.h"
+ static bool display_rgb24;
+@@ -50,10 +52,12 @@
+     "layout(location = 1) in vec4 tex;\n"
+     "layout(location = 2) in vec4 color;\n"
+     "layout(location = 3) in vec4 twin;\n"
++    "layout(location = 4) in float invDepth;\n"
+     "uniform vec2 resolution;\n"
+     "uniform vec2 drawOffset, halfPixel, targetSize;\n"
+     "out vec4 vertexColor;\n"
+     "out vec2 rawUV;\n"
++    "out vec3 weightedUV;\n"
+     "flat out uint tpage;\n"
+     "flat out uint clut;\n"
+     // Pre-computed pixel shader parameters
+@@ -82,7 +86,10 @@
+     "    uint texWord = uint(tex.w);\n"
+     "    tpage = texWord & 0x1FFu;\n"
+     "    dither = (texWord & 0x4000u) != 0u ? 1u : 0u;\n"
+     "    rawUV = tex.xy + shift - halfPixel;\n"
++    // Keep clip W at 1 so coverage and Gouraud colors stay unchanged.
++    // Screen-space interpolation of (uv/z, 1/z) corrects UVs alone.
++    "    weightedUV = vec3(rawUV * invDepth, invDepth);\n"
+     // Determine texture mode and pre-compute parameters
+     "    subPixelMask = 0u;\n"
+     "    texelShift = 0u;\n"
+@@ -116,6 +123,7 @@
+ static const char fragment_shader_body[] = {
+     "in vec4 vertexColor;\n"
+     "in vec2 rawUV;\n"
++    "in vec3 weightedUV;\n"
+     "out vec4 FragColor;\n"
+     "flat in uint clut;\n"
+     "flat in uint tpage;\n"
+@@ -132,7 +140,8 @@
+     "uniform bool maskPass, forceMask, checkMask;\n"
+     "\n"
+     "uvec2 resolveTexel() {\n"
+     "    vec2 uv = rawUV + 1.0 / 512.0;\n"
++    "    if (weightedUV.z > 0.0) uv = weightedUV.xy / weightedUV.z + 1.0 / 512.0;\n"
+     "    uvec2 texel = uvec2(clamp(floor(uv), vec2(0.0), vec2(255.0)));\n"
+     "    return (texel & texWindow.xy) | texWindow.zw;\n"
+     "}\n"
+@@ -1352,7 +1361,7 @@
+         GL_ELEMENT_ARRAY_BUFFER, sizeof(index_buf), index_buf, GL_DYNAMIC_DRAW);
+ 
+     glVertexAttribPointer(
+-        0, 2, GL_SHORT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, x));
++        0, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, x));
+     glEnableVertexAttribArray(0);
+     glVertexAttribPointer(1, 4, GL_UNSIGNED_SHORT, GL_FALSE, sizeof(Vertex),
+                           (void*)offsetof(Vertex, u));
+@@ -1363,10 +1372,14 @@
+     glVertexAttribPointer(3, 4, GL_UNSIGNED_BYTE, GL_FALSE, sizeof(Vertex),
+                           (void*)offsetof(Vertex, twin));
+     glEnableVertexAttribArray(3);
++    glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
++                          (void*)offsetof(Vertex, inv_depth));
++    glEnableVertexAttribArray(4);
+     glBindVertexArray(0);
+ }
+ 
+-int Draw_PushPrim(u_long* packets, int max_len) {
++int Psyz_DrawPushPrimWithPositions(u_long* packets, int max_len,
++    const PsyzSubpixelPosition* positions, unsigned int options) {
+     int len = max_len;
+     int code = (int)(*packets >> 24) & 0xFF;
+     bool isPoly = !(code & 0x40);
+@@ -1445,6 +1458,20 @@
+             }
+ 
+             SET_TC_ALL(vertex_cur, tpage, clut);
++            bool stabilize = positions && (options & PSYZ_STABILIZE_VERTICES);
++            bool perspective = positions && isTextured && (options & PSYZ_PERSPECTIVE_TEXTURES);
++            // A polygon uses one UV mode, including both halves of a quad.
++            if (perspective) {
++                for (int i = 0; i < nVertices; ++i)
++                    perspective &= positions[i].inv_depth > 0.0f;
++            }
++            for (int i = 0; i < nVertices; ++i) {
++                if (stabilize) {
++                    vertex_cur[i].x = positions[i].x;
++                    vertex_cur[i].y = positions[i].y;
++                }
++                vertex_cur[i].inv_depth = perspective ? positions[i].inv_depth : 0.0f;
++            }
+             Draw_EnqueueBuffer(nVertices, nIndices);
+         } else {
+             // shouldn't happen on a normal PSX application
+@@ -1551,6 +1578,7 @@
+                 }
+                 for (int k = 0; k < 4; k++) {
+                     SET_TC(&q[k], lt, -1);
++                    q[k].inv_depth = 0.0f;
+                 }
+                 index_cur[0] = base + 0;
+                 index_cur[1] = base + 1;
+@@ -1632,9 +1660,15 @@
+         index_cur[4] = n_vertices + 3;
+         index_cur[5] = n_vertices + 2;
+         SET_TC_ALL(vertex_cur, tpage, clut);
++        for (int i = 0; i < 4; ++i)
++            vertex_cur[i].inv_depth = 0.0f;
+         Draw_EnqueueBuffer(4, 6);
+     }
+     return max_len - len;
++}
++
++int Draw_PushPrim(u_long* packets, int max_len) {
++    return Psyz_DrawPushPrimWithPositions(packets, max_len, NULL, 0);
+ }
+ 
+ void Draw_SetAreaStart(int x, int y) {
