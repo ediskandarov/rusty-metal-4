@@ -1,0 +1,1131 @@
+diff --git a/include/tm4/fixed.h b/include/tm4/fixed.h
+index 0b1ba08f..7dfe9f53 100644
+--- a/include/tm4/fixed.h
++++ b/include/tm4/fixed.h
+@@ -4,6 +4,10 @@
+ #include <SYS/TYPES.H>
+ #include <LIBGTE.H>
+ 
++#ifndef ONE
++#define ONE 4096
++#endif
++
+ #define Q12FromInt(value) ((value) << 12)
+ /* Signed values round down, preserving the arithmetic right shift. */
+ #define Q12ToInt(value) ((value) >> 12)
+diff --git a/include/tm4/main/math3d.h b/include/tm4/main/math3d.h
+index 75d08e45..e105c49a 100644
+--- a/include/tm4/main/math3d.h
++++ b/include/tm4/main/math3d.h
+@@ -20,23 +20,13 @@ extern s32 rcossin_tbl[ANGLE_FULL_TURN];
+ #define Q12PackedSine(entry) ((s32)(s16)(entry))
+ #define Q12PackedCosine(entry) ((s32)(entry) >> 16)
+ 
+-/* Require -ANGLE_FULL_TURN < angle < ANGLE_FULL_TURN. Pass side-effect-free arguments. */
+-#define Q12Sin(angle)                                                                              \
+-    ((angle) >= 0 ? Q12PackedSine(rcossin_tbl[(angle)]) : -Q12PackedSine(rcossin_tbl[-(angle)]))
+-#define Q12Cos(angle)                                                                              \
+-    Q12PackedCosine(rcossin_tbl[Int32NegateWithMask((angle), Int32SignMask(angle))])
+-
++#define Q12Sin(angle) rsin(angle)
++#define Q12Cos(angle) rcos(angle)
+ #define Q12SinCos(angle, sine, cosine)                                                             \
+-    ({                                                                                             \
+-        if ((angle) >= 0) {                                                                        \
+-            (cosine) = rcossin_tbl[(angle)];                                                       \
+-            (sine) = Q12PackedSine(rcossin_tbl[(angle)]);                                          \
+-        } else {                                                                                   \
+-            (sine) = -Q12PackedSine(rcossin_tbl[-(angle)]);                                        \
+-            (cosine) = rcossin_tbl[-(angle)];                                                      \
+-        }                                                                                          \
+-        (cosine) = Q12PackedCosine(cosine);                                                        \
+-    })
++    do {                                                                                           \
++        (sine) = rsin(angle);                                                                      \
++        (cosine) = rcos(angle);                                                                    \
++    } while (0)
+ 
+ /* Returns the Q12 fraction along the segment, or -1 when it misses. */
+ s32 PolygonRayParameter(const Tm4CollisionPolygon* polygon, const Tm4WorldRay* ray);
+diff --git a/include/tm4/main/memory.h b/include/tm4/main/memory.h
+index 49ccc110..980205ba 100644
+--- a/include/tm4/main/memory.h
++++ b/include/tm4/main/memory.h
+@@ -6,6 +6,7 @@
+ u32 MemGetAlignedStartupAddress(void);
+ void MemSetHeapStartAddress(u32 address);
+ void MemInitDefaultHeap(void);
++void MemInitHeap(u8* heapStart, u32 heapBytes);
+ 
+ void* MemAlloc(u32 payloadBytes);
+ void* MemAllocTail(u32 payloadBytes);
+diff --git a/include/tm4/main/object.h b/include/tm4/main/object.h
+index ceba7d36..83794481 100644
+--- a/include/tm4/main/object.h
++++ b/include/tm4/main/object.h
+@@ -14,6 +14,7 @@
+ #include <STDARG.H>
+ #include <STDDEF.H>
+ #include <STRINGS.H>
++#include <libgpu.h>
+ 
+ enum Tm4ObjectFlags {
+     OBJECT_HAS_OWNER = 1 << 0,
+diff --git a/src/main/font.c b/src/main/font.c
+index 128f52d7..92bfe548 100644
+--- a/src/main/font.c
++++ b/src/main/font.c
+@@ -15,14 +15,13 @@
+ #include <STDDEF.H>
+ #include <STRINGS.H>
+ 
+-/* The original compiler accepts initialized zero-length tails. Grid records have
+- * just the 24-byte header; proportional records append 64 inclusive UV bounds. */
++/* Grid records have only the header; proportional records append glyph bounds. */
+ typedef struct FontGlyphBounds {
+     u8 left, top, right, bottom;
+ } FontGlyphBounds;
+ 
+ typedef struct FontRecord {
+-    char* name;
++    const char* name;
+     s32 proportional;
+     u8 u;
+     u8 v;
+@@ -337,7 +336,6 @@ void FontConstructor(const char* name, u8 first_character, const Tm4FontTexture*
+     else if (!strcmp(name, "memcard"))
+         FontTable[FontCount] = &FontMemcard;
+     font = FontTable[FontCount++];
+-    strcpy(font->name, name);
+     font->first_character = first_character;
+     font->tpage = texture->tpage;
+     font->clut = texture->clut;
+diff --git a/src/main/geometry/box.c b/src/main/geometry/box.c
+index 3320fd98..3d28c6d6 100644
+--- a/src/main/geometry/box.c
++++ b/src/main/geometry/box.c
+@@ -11,6 +11,7 @@
+ #include "tm4/main/stack.h"
+ #include "tm4/vector.h"
+ 
++#include "tm4/gte.h"
+ #include <INLINE_C.H>
+ #include <LIBGPU.H>
+ #include <MEMORY.H>
+@@ -259,12 +260,17 @@ void BoxDestructor(void* payload)
+ #if !defined(TM4_BOX_FUNCTION) || TM4_BOX_FUNCTION == 0x80025F50
+ /* Register-form GTE transfers: the supplied pointer-form helpers introduce
+  * memory traffic absent from these separating-axis projections. */
+-#define BoxLoadAxis(xy, z) __asm__ volatile("ctc2 %0,$0; ctc2 %z1,$1" : : "r"(xy), "rJ"(z))
++#define BoxLoadAxis(xy, z)                                                                         \
++    do {                                                                                           \
++        Psyz_GteCtrlWrite(0, xy);                                                                  \
++        Psyz_GteCtrlWrite(1, z);                                                                   \
++    } while (0)
+ #define BoxDotAxis(result, xy, z)                                                                  \
+     do {                                                                                           \
+-        __asm__ volatile("mtc2 %0,$0; mtc2 %1,$1" : : "r"(xy), "r"(z));                            \
++        Psyz_GteDataWrite(0, xy);                                                                  \
++        Psyz_GteDataWrite(1, z);                                                                   \
+         gte_mvmva(0, 0, 0, 3, 0);                                                                  \
+-        __asm__ volatile("mfc2 %0,$25; nop" : "=r"(result));                                       \
++        (result) = (s32)Psyz_GteDataRead(25);                                                      \
+     } while (0)
+ 
+ static struct BoxEdge {
+diff --git a/src/main/geometry/geometry.c b/src/main/geometry/geometry.c
+index cf1dccb7..a47bd452 100644
+--- a/src/main/geometry/geometry.c
++++ b/src/main/geometry/geometry.c
+@@ -9,6 +9,7 @@
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/render.h"
+ 
++#include "tm4/gte.h"
+ #include <INLINE_C.H>
+ #include <LIBGPU.H>
+ #include <MEMORY.H>
+@@ -91,7 +92,10 @@ s32 VectorNormalSRounded(const VECTOR* input, SVECTOR* output)
+     } while (0)
+ 
+ #define ReadWideProductWords(product, low, high)                                                   \
+-    __asm__ volatile("mflo %0\n\tmfhi %1" : "=r"(low), "=r"(high) : "x"(product))
++    do {                                                                                           \
++        (low) = (u32)(product);                                                                    \
++        (high) = (u32)((unsigned long long)(product) >> 32);                                       \
++    } while (0)
+ 
+ /* Keep the round-bit extraction together before starting the next multiply.
+  * The do/while form preserves this scheduling boundary with CC1PSX. */
+@@ -1274,7 +1278,7 @@ s16 RayThruBox(const SVECTOR* offset, const VECTOR* direction, const SVECTOR* mi
+     long origin[3] = { direction->vx, direction->vy, direction->vz };
+     s16 faces[3] = { 0 };
+     s16 axis;
+-    long* originBase;
++    s32* originBase;
+     s32 selector;
+     long* selectedTime;
+     s16 best;
+@@ -1296,7 +1300,7 @@ s16 RayThruBox(const SVECTOR* offset, const VECTOR* direction, const SVECTOR* mi
+         long* timeBase = times;
+         long time;
+         long* timeAddress;
+-        register long* originStart TM4_BIND_REGISTER("v0");
++        register s32* originStart TM4_BIND_REGISTER("v0");
+         register long* coordinate TM4_BIND_REGISTER("t1");
+         register const s16* boundary TM4_BIND_REGISTER("a3");
+         s16 minimumValue;
+@@ -1337,7 +1341,7 @@ s16 RayThruBox(const SVECTOR* offset, const VECTOR* direction, const SVECTOR* mi
+         selector = best;
+         selectedTime = times + selector;
+         if (axis != selector) {
+-            long* originCoordinate;
++            s32* originCoordinate;
+             (&point->vx)[axis] = *(originCoordinate = originBase + axis)
+                 - Q18MulRound(*selectedTime, (&direction->vx)[axis]);
+         }
+diff --git a/src/main/geometry/polyhedron.c b/src/main/geometry/polyhedron.c
+index ca6a66a4..f8fd63d9 100644
+--- a/src/main/geometry/polyhedron.c
++++ b/src/main/geometry/polyhedron.c
+@@ -1007,11 +1007,10 @@ u32 PolyhedronGetVertices(const Polyhedron* polyhedron, SVECTOR* output)
+ #endif
+ 
+ #if !defined(TM4_POLYHEDRON_FUNCTION) || TM4_POLYHEDRON_FUNCTION == 0x8002C32C
++#if !defined(__EMSCRIPTEN__)
+ #include "polyhedron_get_faces.s"
+-
+-/* clang-format off */
+-/*
+- * Nonmatching C reference; the native assembly above is the executable body.
++#else
++/* Native implementation of the face ordering used by box intersections. */
+ int PolyhedronGetFaces(const Polyhedron* polyhedron, unsigned char* records, SVECTOR* vertices,
+     unsigned int* vertexCount)
+ {
+@@ -1092,6 +1091,5 @@ int PolyhedronGetFaces(const Polyhedron* polyhedron, unsigned char* records, SVE
+     *vertexCount = PolyhedronGetVertices(polyhedron, vertices);
+     return faceCount;
+ }
+-*/
+-/* clang-format on */
++#endif
+ #endif
+diff --git a/src/main/image.c b/src/main/image.c
+index 446bb5fd..6e4cf37d 100644
+--- a/src/main/image.c
++++ b/src/main/image.c
+@@ -56,8 +56,8 @@ void LoadTIM(u8* tim)
+ {
+     RECT rectangle;
+     TimBlock* palette;
+-    register u_long size TM4_BIND_REGISTER("v0");
+-    register TimBlock* image TM4_BIND_REGISTER("a1") = (TimBlock*)tim;
++    u_long size;
++    TimBlock* image = (TimBlock*)tim;
+ 
+     if (tim[4] & 8) {
+         palette = (TimBlock*)(tim + 8);
+diff --git a/src/main/loading.c b/src/main/loading.c
+index 5f5dd5fd..b7211866 100644
+--- a/src/main/loading.c
++++ b/src/main/loading.c
+@@ -1,6 +1,7 @@
+ #include "tm4/main/loading.h"
+ 
+ #include "tm4_scalar.h"
++#include <emscripten.h>
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/main/game.h"
+@@ -70,6 +71,8 @@ void LoadingUpdateProgress(s32 progress)
+     s32 loaded;
+ 
+     loaded = loadingBytesLoaded + mul64s(loadingBytesCurrent, progress, 12);
+-    LoadingDisplay(((loaded << 8) / loadingBytesTotal) << 4);
++    s32 total_progress = ((loaded << 8) / loadingBytesTotal) << 4;
++    EM_ASM({ tm4Port.loading = $0 / 4096; }, total_progress);
++    LoadingDisplay(total_progress);
+ }
+ #endif
+diff --git a/src/main/math3d_native.c b/src/main/math3d_native.c
+new file mode 100644
+index 00000000..976b26bd
+--- /dev/null
++++ b/src/main/math3d_native.c
+@@ -0,0 +1,682 @@
++#include "tm4_scalar.h"
++
++#include "tm4/main/math3d.h"
++
++#include <libgte.h>
++#include "tm4/gte.h"
++#include <psyz/gte.h>
++
++u32 VectorLength12(const VECTOR* vector);
++u32 VectorLengthS12(const SVECTOR* vector);
++u32 VectorLengthSquared12(const VECTOR* vector);
++u32 VectorLengthSquaredS0(const SVECTOR* vector);
++u32 VectorLengthSquaredS12(const SVECTOR* vector);
++VECTOR* Math3dSquareSL12(const SVECTOR* vector, VECTOR* output);
++SVECTOR* ApplyRotMatrixMACShort12(const SVECTOR* input, SVECTOR* output);
++VECTOR* ApplyRotMatrixMAC0(const SVECTOR* input, VECTOR* output);
++void OuterProductSSS0(const SVECTOR* first, const SVECTOR* second, SVECTOR* output);
++void OuterProductSSV12(const SVECTOR* first, const SVECTOR* second, VECTOR* output);
++void OuterProductSSV0(const SVECTOR* first, const SVECTOR* second, VECTOR* output);
++VECTOR* ApplyMatrixWithTranslationMAC(const MATRIX* matrix, const SVECTOR* input, VECTOR* output);
++
++static inline void Math3dLoadAccumulator(long x, long y, long z)
++{
++    Psyz_GteDataWrite(25, x);
++    Psyz_GteDataWrite(26, y);
++    Psyz_GteDataWrite(27, z);
++}
++
++// The first vertex pad holds the edge count; other pads contain unrelated metadata.
++static u32 WebPackedSinCos(s32 angle)
++{
++    return (u16)rsin(angle) | ((u32)(u16)rcos(angle) << 16);
++}
++
++s32 PolygonRayParameter(const Tm4CollisionPolygon* polygon, const Tm4WorldRay* ray)
++{
++    const s32* normal = polygon->normal;
++    const SVECTOR* vertex = polygon->vertices;
++    const SVECTOR* edge = polygon->edge_directions;
++    long long denominator;
++    long long numerator;
++    unsigned long long bits;
++    VECTOR from, to, cross;
++    s32 count = CollisionPolygonVertexCount(polygon);
++
++    bits = (unsigned long long)((long long)ray->displacement.vx * normal[0])
++        + (unsigned long long)((long long)ray->displacement.vy * normal[1])
++        + (unsigned long long)((long long)ray->displacement.vz * normal[2]);
++    denominator = bits;
++    if (denominator >= 0)
++        return -1;
++    bits = (unsigned long long)((long long)(vertex->vx - ray->origin.vx) * normal[0])
++        + (unsigned long long)((long long)(vertex->vy - ray->origin.vy) * normal[1])
++        + (unsigned long long)((long long)(vertex->vz - ray->origin.vz) * normal[2]);
++    numerator = bits;
++    if (numerator > 0 || numerator < denominator)
++        return -1;
++    do {
++        to.vx = ray->origin.vx + ray->displacement.vx - vertex->vx;
++        to.vy = ray->origin.vy + ray->displacement.vy - vertex->vy;
++        to.vz = ray->origin.vz + ray->displacement.vz - vertex->vz;
++        from.vx = ray->origin.vx - vertex->vx;
++        from.vy = ray->origin.vy - vertex->vy;
++        from.vz = ray->origin.vz - vertex->vz;
++        gte_ldopv1(&to);
++        gte_ldopv2(&from);
++        gte_op0();
++        gte_stlvnl(&cross);
++        if ((long long)cross.vx * edge->vx + (long long)cross.vy * edge->vy
++                + (long long)cross.vz * edge->vz
++            < 0)
++            return -1;
++        vertex++;
++        edge++;
++    } while (--count > 0);
++    return (long long)((unsigned long long)numerator << 12) / denominator;
++}
++
++// Sum complete signed products with unsigned low-word carry propagation.
++s32 DotS12_64(const Tm4VectorComponent* first, const s16* second)
++{
++    // The product words follow the target's little-endian order.
++    union {
++        long long value;
++        u32 words[2];
++    } product;
++    s32 component;
++    u32 low, high, next;
++    s32 scaled, round;
++
++    component = second[0];
++    product.value = (long long)first[0] * component;
++    low = product.words[0];
++    high = product.words[1];
++    component = second[1];
++    product.value = (long long)first[1] * component;
++    next = product.words[0];
++    low += next;
++    high += low < next;
++    high += product.words[1];
++    component = second[2];
++    product.value = (long long)first[2] * component;
++    next = product.words[0];
++    low += next;
++    high += low < next;
++    high += product.words[1];
++    // Round Q12 halfway toward positive infinity.
++    low >>= 11;
++    round = low & 1;
++    low >>= 1;
++    scaled = low | high << 20;
++    return scaled + round;
++}
++
++// Sum complete signed products with unsigned low-word carry propagation.
++s32 DotV12_64(const s32* first, const s32* second)
++{
++    // The product words follow the target's little-endian order.
++    union {
++        long long value;
++        u32 words[2];
++    } product;
++    s32 component;
++    u32 low, high, next;
++    s32 scaled, round;
++
++    component = second[0];
++    product.value = (long long)first[0] * component;
++    low = product.words[0];
++    high = product.words[1];
++    component = second[1];
++    product.value = (long long)first[1] * component;
++    next = product.words[0];
++    low += next;
++    high += low < next;
++    high += product.words[1];
++    component = second[2];
++    product.value = (long long)first[2] * component;
++    next = product.words[0];
++    low += next;
++    high += low < next;
++    high += product.words[1];
++    // Round Q12 halfway toward positive infinity.
++    low >>= 11;
++    round = low & 1;
++    low >>= 1;
++    scaled = low | high << 20;
++    return scaled + round;
++}
++
++// Restoring square root, with six fractional bits in the returned value.
++u32 SquareRootInt32(u32 value, ...)
++{
++    s32 leading;
++    s32 count;
++    u32 root = 0, remainder = 0, trial;
++    gte_Lzc(value, &leading);
++    leading >>= 1;
++    count = 22 - leading;
++    value <<= (leading * 2) & 31;
++    do {
++        remainder |= value >> 30;
++        value <<= 2;
++        root <<= 1;
++        trial = (root << 1) + 1;
++        if ((s32)remainder >= (s32)trial) {
++            remainder -= trial;
++            root++;
++        }
++        remainder <<= 2;
++    } while (--count != 0);
++    return root;
++}
++
++// Restoring root of the high/low pair; variable shifts retain R3000 masking.
++u32 SquareRoot64Shifted(u32 high, u32 low, s32 shift)
++{
++    s32 leading;
++    s32 count;
++    u32 root = 0, remainder = 0, trial;
++    gte_Lzc(high, &leading);
++    leading >>= 1;
++    count = ((u32)shift >> 1) + 32 - leading;
++    leading *= 2;
++    high = (high << (leading & 31)) | (low >> ((32 - leading) & 31));
++    low <<= leading & 31;
++    do {
++        remainder |= high >> 30;
++        high = (high << 2) | (low >> 30);
++        low <<= 2;
++        root <<= 1;
++        trial = (root << 1) + 1;
++        if ((s32)remainder >= (s32)trial) {
++            remainder -= trial;
++            root++;
++        }
++        remainder <<= 2;
++    } while (--count != 0);
++    return root;
++}
++
++u32 VectorLengthRounded12(const VECTOR* vector)
++{
++    unsigned long long sum = (long long)vector->vx * vector->vx + (long long)vector->vy * vector->vy
++        + (long long)vector->vz * vector->vz;
++    return SquareRootInt32((sum >> 12) + ((sum >> 11) & 1));
++}
++
++u32 VectorLength64(const VECTOR* vector)
++{
++    unsigned long long sum = (long long)vector->vx * vector->vx + (long long)vector->vy * vector->vy
++        + (long long)vector->vz * vector->vz;
++    return SquareRoot64Shifted(sum >> 32, sum, 0);
++}
++
++u32 VectorLength0(const VECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldlvl(vector);
++    gte_sqr0();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return SquareRoot0(sum);
++}
++
++u32 VectorLength12(const VECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldlvl(vector);
++    gte_sqr12();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return SquareRoot12(sum);
++}
++
++u32 VectorLengthS0(const SVECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldopv2SV(vector);
++    gte_sqr0();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return SquareRoot0(sum);
++}
++
++u32 VectorLengthS12(const SVECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldopv2SV(vector);
++    gte_sqr12();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return SquareRoot12(sum);
++}
++
++u32 VectorLengthSquared0(const VECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldlvl(vector);
++    gte_sqr0();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return sum;
++}
++
++u32 VectorLengthSquared12(const VECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldlvl(vector);
++    gte_sqr12();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return sum;
++}
++
++u32 VectorLengthSquaredS0(const SVECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldopv2SV(vector);
++    gte_sqr0();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return sum;
++}
++
++u32 VectorLengthSquaredS12(const SVECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldopv2SV(vector);
++    gte_sqr12();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return sum;
++}
++
++VECTOR* SquareSL0_bugfree(const SVECTOR* vector, VECTOR* output)
++{
++    gte_ldopv2SV(vector);
++    gte_sqr0();
++    gte_stlvnl(output);
++    return output;
++}
++
++VECTOR* Math3dSquareSL12(const SVECTOR* vector, VECTOR* output)
++{
++    gte_ldopv2SV(vector);
++    gte_sqr12();
++    gte_stlvnl(output);
++    return output;
++}
++
++Tm4VectorXYZ* ApplyRotMatrixMAC12(const SVECTOR* input, Tm4VectorXYZ* output)
++{
++    register Tm4VectorXYZ* destination = output;
++    gte_ldv0(input);
++    gte_rtv0();
++    gte_stlvnl(destination);
++    return destination;
++}
++
++SVECTOR* ApplyRotMatrixMACShort12(const SVECTOR* input, SVECTOR* output)
++{
++    VECTOR transformed;
++    gte_ldv0(input);
++    gte_rtv0();
++    gte_stlvnl(&transformed);
++    output->vx = transformed.vx;
++    output->vy = transformed.vy;
++    output->vz = transformed.vz;
++    return output;
++}
++
++VECTOR* ApplyRotMatrixMAC0(const SVECTOR* input, VECTOR* output)
++{
++    register VECTOR* destination = output;
++    gte_ldv0(input);
++    gte_mvmva(0, 0, 0, 3, 0);
++    gte_stlvnl(destination);
++    return destination;
++}
++
++SVECTOR* ApplyRotMatrixMACShort0(const SVECTOR* input, SVECTOR* output)
++{
++    VECTOR transformed;
++    gte_ldv0(input);
++    gte_mvmva(0, 0, 0, 3, 0);
++    gte_stlvnl(&transformed);
++    output->vx = transformed.vx;
++    output->vy = transformed.vy;
++    output->vz = transformed.vz;
++    return output;
++}
++
++s32 DotSS0(const SVECTOR* first, const SVECTOR* second)
++{
++    s32 result;
++    gte_ldv0(first);
++    gte_ldsvrtrow0(second);
++    gte_mvmva(0, 0, 0, 3, 0);
++    gte_stlvnl0(&result);
++    return result;
++}
++
++s32 DotSS12(const SVECTOR* first, const SVECTOR* second)
++{
++    s32 result;
++    gte_ldv0(first);
++    gte_ldsvrtrow0(second);
++    gte_rtv0();
++    gte_stlvnl0(&result);
++    return result;
++}
++
++u32 DotSelf0(const VECTOR* vector)
++{
++    VECTOR squared;
++    u32 sum;
++    gte_ldlvl(vector);
++    gte_sqr0();
++    gte_stlvnl(&squared);
++    sum = (u32)squared.vx + squared.vy + squared.vz;
++    return sum;
++}
++
++void OuterProductSSS12(const SVECTOR* first, const SVECTOR* second, SVECTOR* output)
++{
++    VECTOR cross;
++    gte_ldopv1SV(first);
++    gte_ldopv2SV(second);
++    gte_op12();
++    gte_stlvnl(&cross);
++    output->vx = cross.vx;
++    output->vy = cross.vy;
++    output->vz = cross.vz;
++}
++
++void OuterProductSSS0(const SVECTOR* first, const SVECTOR* second, SVECTOR* output)
++{
++    VECTOR cross;
++    gte_ldopv1SV(first);
++    gte_ldopv2SV(second);
++    gte_op0();
++    gte_stlvnl(&cross);
++    output->vx = cross.vx;
++    output->vy = cross.vy;
++    output->vz = cross.vz;
++}
++
++void OuterProductSSV12(const SVECTOR* first, const SVECTOR* second, VECTOR* output)
++{
++    gte_ldopv1SV(first);
++    gte_ldopv2SV(second);
++    gte_op12();
++    gte_stlvnl(output);
++}
++
++void OuterProductSSV0(const SVECTOR* first, const SVECTOR* second, VECTOR* output)
++{
++    gte_ldopv1SV(first);
++    gte_ldopv2SV(second);
++    gte_op0();
++    gte_stlvnl(output);
++}
++
++VECTOR* SetVectorDaxpyVS0(VECTOR* output, s32 scale, const SVECTOR* axis)
++{
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpf0();
++    gte_stlvnl(output);
++    return output;
++}
++
++VECTOR* SetVectorDaxpyVS12(VECTOR* output, s32 scale, const SVECTOR* axis)
++{
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpf12();
++    gte_stlvnl(output);
++    return output;
++}
++
++SVECTOR* SetVectorDaxpySS12(SVECTOR* output, s32 scale, const SVECTOR* axis)
++{
++    VECTOR product;
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpf12();
++    gte_stlvnl(&product);
++    output->vx = product.vx;
++    output->vy = product.vy;
++    output->vz = product.vz;
++    return output;
++}
++
++VECTOR* AddVectorDaxpyVSV0(VECTOR* output, s32 scale, const SVECTOR* axis, const VECTOR* base)
++{
++    Math3dLoadAccumulator(base->vx, base->vy, base->vz);
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpl0();
++    gte_stlvnl(output);
++    return output;
++}
++
++VECTOR* AddVectorDaxpyVSV12(
++    Tm4Vector3 output, s32 scale, const SVECTOR* axis, const Tm4Vector3 base)
++{
++    Math3dLoadAccumulator(base[0], base[1], base[2]);
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpl12();
++    gte_stlvnl(output);
++    return (VECTOR*)output;
++}
++
++SVECTOR* AddVectorDaxpySSS12(SVECTOR* output, s32 scale, const SVECTOR* axis, const SVECTOR* base)
++{
++    VECTOR sum;
++    gte_ldopv2SV(base);
++    gte_lddp(1);
++    gte_gpf0();
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpl12();
++    gte_stlvnl(&sum);
++    output->vx = sum.vx;
++    output->vy = sum.vy;
++    output->vz = sum.vz;
++    return output;
++}
++
++Tm4VectorComponent* AddVectorDaxpyVSS12(
++    Tm4Vector3 output, s32 scale, const SVECTOR* axis, const SVECTOR* base)
++{
++    gte_ldopv2SV(base);
++    gte_lddp(1);
++    gte_gpf0();
++    gte_lddp(scale);
++    gte_ldopv2SV(axis);
++    gte_gpl12();
++    gte_stlvnl(output);
++    return output;
++}
++
++SVECTOR* ApplyRotMatrixSV(const SVECTOR* input, SVECTOR* output)
++{
++    gte_ldv0(input);
++    gte_rtv0();
++    gte_stsv(output);
++    return output;
++}
++
++SVECTOR* ApplyMatrixWithTranslationSV(const MATRIX* matrix, const SVECTOR* input, SVECTOR* output)
++{
++    gte_SetRotMatrix(matrix);
++    gte_SetTransMatrix(matrix);
++    gte_ldv0(input);
++    gte_rtv0tr();
++    gte_stsv(output);
++    return output;
++}
++
++VECTOR* ApplyMatrixWithTranslationMAC(const MATRIX* matrix, const SVECTOR* input, VECTOR* output)
++{
++    gte_SetRotMatrix(matrix);
++    gte_SetTransMatrix(matrix);
++    gte_ldv0(input);
++    gte_rtv0tr();
++    gte_stlvnl(output);
++    return output;
++}
++
++void IdentifyMatrix(MATRIX* matrix)
++{
++    u32* words = (u32*)matrix;
++    register u32 identity = 0x1000;
++
++    words[0] = identity;
++    words[1] = 0;
++    words[2] = identity;
++    words[3] = 0;
++    ((u16*)matrix)[8] = identity;
++}
++
++MATRIX* RotationMatrixAngles(s32 x, s32 y, s32 z, MATRIX* matrix)
++{
++    s32 signX = x >> 31;
++    s32 signY = y >> 31;
++    s32 signZ = z >> 31;
++    s32 packedX = WebPackedSinCos(((x + signX) ^ signX) & 4095);
++    s32 packedY = WebPackedSinCos(((y + signY) ^ signY) & 4095);
++    s32 packedZ = WebPackedSinCos(((z + signZ) ^ signZ) & 4095);
++    s32 sx = ((s16)packedX + signX) ^ signX;
++    s32 sy = ((s16)packedY + signY) ^ signY;
++    s32 sz = ((s16)packedZ + signZ) ^ signZ;
++    s32 cx = packedX >> 16, cy = packedY >> 16, cz = packedZ >> 16;
++    VECTOR input, first, second, third, fourth;
++    u32* words = (u32*)matrix;
++    input.vx = sy;
++    input.vy = sz;
++    input.vz = cz;
++    gte_lddp(cx);
++    gte_ldlvl(&input);
++    gte_gpf12();
++    gte_stlvl(&first);
++    gte_lddp(sx);
++    gte_ldlvl(&input);
++    gte_gpf12();
++    gte_stlvl(&second);
++    input.vx = cy;
++    input.vy = second.vx;
++    input.vz = first.vx;
++    gte_lddp(cz);
++    gte_ldlvl(&input);
++    gte_gpf12();
++    gte_stlvl(&third);
++    input.vx = third.vy;
++    gte_lddp(sz);
++    gte_ldlvl(&input);
++    gte_gpf12();
++    gte_stlvl(&fourth);
++    matrix->m[2][2] = (cy * cx) >> 12;
++    words[1] = (sy & 65535) | (u32)(third.vy + first.vy) << 16;
++    words[0] = (third.vx & 65535) | (u32)-fourth.vx << 16;
++    words[2] = ((first.vz - fourth.vy) & 65535) | (u32) - ((cy * sx) >> 12) << 16;
++    words[3] = ((second.vy - third.vz) & 65535) | (u32)(second.vz + fourth.vz) << 16;
++    return matrix;
++}
++
++MATRIX* RotationMatrixX(s32 angle, MATRIX* matrix)
++{
++    s32 sign = angle >> 31;
++    u32 packed = WebPackedSinCos(((angle + sign) ^ sign) & 4095);
++    s32 sine = (s16)packed;
++    u32 cosine = packed >> 16;
++    u32* words = (u32*)matrix;
++    sine = (sine + sign) ^ sign;
++    words[0] = 4096;
++    words[1] = 0;
++    words[2] = cosine | (u32)-sine << 16;
++    words[3] = (u32)sine << 16;
++    matrix->m[2][2] = cosine;
++    return matrix;
++}
++
++MATRIX* RotationMatrixY(s32 angle, MATRIX* matrix)
++{
++    s32 sign = angle >> 31;
++    u32 packed = WebPackedSinCos(((angle + sign) ^ sign) & 4095);
++    s32 sine = (s16)packed;
++    u32 cosine = packed >> 16;
++    u32* words = (u32*)matrix;
++    sine = (sine + sign) ^ sign;
++    words[0] = cosine;
++    words[1] = sine & 65535;
++    words[2] = 4096;
++    words[3] = -sine & 65535;
++    matrix->m[2][2] = cosine;
++    return matrix;
++}
++
++MATRIX* RotationMatrixZ(s32 angle, MATRIX* matrix)
++{
++    s32 sign = angle >> 31;
++    u32 packed = WebPackedSinCos(((angle + sign) ^ sign) & 4095);
++    s32 sine = (s16)packed;
++    u32 cosine = packed >> 16;
++    u32* words = (u32*)matrix;
++    sine = (sine + sign) ^ sign;
++    words[0] = cosine | (u32)-sine << 16;
++    words[1] = (u32)sine << 16;
++    words[2] = cosine;
++    words[3] = 0;
++    matrix->m[2][2] = 4096;
++    return matrix;
++}
++
++MATRIX* RotationMatrixYX(s32 x, s32 y, MATRIX* matrix)
++{
++    s32 signX = x >> 31;
++    s32 signY = y >> 31;
++    s32 packedX = WebPackedSinCos(((x + signX) ^ signX) & 4095);
++    s32 packedY = WebPackedSinCos(((y + signY) ^ signY) & 4095);
++    s32 sx = ((s16)packedX + signX) ^ signX;
++    s32 sy = ((s16)packedY + signY) ^ signY;
++    s32 cx = packedX >> 16;
++    s32 cy = packedY >> 16;
++    VECTOR input, first, second;
++    u32* words = (u32*)matrix;
++    // IR3 remains live across both original GPF commands.
++    gte_stlvl(&input);
++    input.vx = sx;
++    input.vy = cx;
++    gte_lddp(cy);
++    gte_ldlvl(&input);
++    gte_gpf12();
++    gte_stlvl(&first);
++    input.vz = first.vz;
++    gte_lddp(sy);
++    gte_ldlvl(&input);
++    gte_gpf12();
++    gte_stlvl(&second);
++    words[2] = (cx & 65535) | (u32)-sx << 16;
++    words[3] = (-sy & 65535) | (u32)first.vx << 16;
++    matrix->m[2][2] = first.vy;
++    words[0] = (cy & 65535) | (u32)second.vx << 16;
++    words[1] = second.vy & 65535;
++    return matrix;
++}
++
++void func_80025924(void)
++{
++}
+diff --git a/src/main/object/classes.c b/src/main/object/classes.c
+index 161b6e5a..81ce622a 100644
+--- a/src/main/object/classes.c
++++ b/src/main/object/classes.c
+@@ -55,6 +55,8 @@ Tm4ObjectInteractionCallback ObjectFindInteractionCallback(char* first, char* se
+ {
+     s32 lower = ObjectFindClassIndex(first);
+     s32 upper = ObjectFindClassIndex(second);
++    if (lower < 0 || upper < 0)
++        return NULL;
+     if (upper < lower) {
+         s32 swap = lower;
+         lower = upper;
+@@ -157,60 +159,6 @@ s32 ObjectRegisterInteractionCallback(
+ }
+ #endif
+ 
+-#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x800197d4
+-/* A failed child lookup leaves the VLA scope before the next iteration. */
+-/* Keep uppercasing sequenced before the second prefix-path_length query. */
+-/* The SDK char return adds an instruction here; retain the observed int call ABI. */
+-extern s32 func_8003CDB8(s32);
+-/* Registry walk: mutable visitor name lives only through callback and recursion. */
+-void ObjectVisitDirectory(char* prefix, RegistryDirectory* directory, Tm4DirectoryVisitor visitor)
+-{
+-    s32 child_count = RegGetNumberOfDirectoriesP(directory);
+-    s32 i;
+-    for (i = 0; i < child_count; i++) {
+-        char* name = RegGetDirectoryNamePN(directory, i);
+-        if (name != NULL) {
+-            s32 path_length = strlen(prefix) + strlen(name) + 1;
+-            char path[path_length];
+-            RegistryDirectory* child;
+-            s32 uppercase_initial;
+-            strcpy(path, prefix);
+-            strcat(path, name);
+-            uppercase_initial = func_8003CDB8(path[strlen(prefix)]);
+-            path[strlen(prefix)] = uppercase_initial;
+-            child = RegGetDirectoryPtrPN(directory, i);
+-            if (child == NULL)
+-                continue;
+-            if (visitor == NULL || visitor(path, child))
+-                ObjectVisitDirectory(path, child, visitor);
+-        }
+-    }
+-}
+-#endif
+-
+-#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x80019940
+-/* Directory traversal needs the main stack for its variable-length paths. */
+-s32 ObjectDirectoryRecurse(Tm4DirectoryVisitor visitor)
+-{
+-    RegistryDirectory* directory = RegGetDirectoryPtrS(OBJECT_REGISTRY_PATH);
+-    u32 stack;
+-    if (directory == NULL)
+-        return 0;
+-    StackGetPointer(stack);
+-    if (StackIsScratchpad(stack)) {
+-        register void* alternate TM4_BIND_REGISTER("$7") = MainSavedStack;
+-        ObjectDirectorySavedStack = (void*)stack;
+-        StackSetPointer(alternate);
+-        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
+-        alternate = ObjectDirectorySavedStack;
+-        StackSetPointer(alternate);
+-    } else {
+-        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
+-    }
+-    return 1;
+-}
+-#endif
+-
+ #if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x800199d0
+ static __inline__ void ObjectRegisterDirectoryExports(char* name, RegistryDirectory* directory)
+ {
+diff --git a/src/main/object/directory.c b/src/main/object/directory.c
+new file mode 100644
+index 00000000..cfa50f1a
+--- /dev/null
++++ b/src/main/object/directory.c
+@@ -0,0 +1,37 @@
++#include "tm4/main/object.h"
++#include "tm4/main/registry.h"
++#include <ctype.h>
++#include <string.h>
++
++void ObjectVisitDirectory(char* prefix, RegistryDirectory* directory, Tm4DirectoryVisitor visitor)
++{
++    s32 child_count = RegGetNumberOfDirectoriesP(directory);
++    s32 i;
++    for (i = 0; i < child_count; i++) {
++        char* name = RegGetDirectoryNamePN(directory, i);
++        if (name != NULL) {
++            s32 path_length = strlen(prefix) + strlen(name) + 1;
++            char path[path_length];
++            RegistryDirectory* child;
++            s32 uppercase_initial;
++            strcpy(path, prefix);
++            strcat(path, name);
++            uppercase_initial = toupper(path[strlen(prefix)]);
++            path[strlen(prefix)] = uppercase_initial;
++            child = RegGetDirectoryPtrPN(directory, i);
++            if (child == NULL)
++                continue;
++            if (visitor == NULL || visitor(path, child))
++                ObjectVisitDirectory(path, child, visitor);
++        }
++    }
++}
++
++s32 ObjectDirectoryRecurse(Tm4DirectoryVisitor visitor)
++{
++    RegistryDirectory* directory = RegGetDirectoryPtrS("/objects");
++    if (!directory)
++        return 0;
++    ObjectVisitDirectory("", directory, visitor);
++    return 1;
++}
+diff --git a/src/main/object/interaction.c b/src/main/object/interaction.c
+index 0493ea98..da356127 100644
+--- a/src/main/object/interaction.c
++++ b/src/main/object/interaction.c
+@@ -359,9 +359,7 @@ void ObjectProcessInteractions(void)
+                     if (radius < 0 || other_radius < 0)
+                         continue;
+                     GteReadMACVector(square_x, y_component, z_component);
+-                    /* Matching-driven: read the C radius product before the distance sums.
+-                     * l requires LO; the separate =r output is a compiler-selected CPU register. */
+-                    __asm__ volatile("mflo %0" : "=r"(radius_limit) : "l"(radius_squared));
++                    radius_limit = radius_squared;
+                     distance_squared = square_x;
+                     distance_squared += y_component;
+                     distance_squared += z_component;
+diff --git a/src/main/object/private.h b/src/main/object/private.h
+index 6368afb6..b8aa0663 100644
+--- a/src/main/object/private.h
++++ b/src/main/object/private.h
+@@ -74,4 +74,7 @@ void ObjectProcessInteractions(void);
+ #define OBJECT_EMPTY_PATH ""
+ #define OBJECT_INTERACTION_EXTENDER_NAME "interaction extender"
+ 
++s32 ObjectRegisterInteractionCallback(
++    char* first, char* second, Tm4ObjectInteractionCallback callback);
++
+ #endif
+diff --git a/src/main/pause.c b/src/main/pause.c
+index 7959bb77..8e9a744f 100644
+--- a/src/main/pause.c
++++ b/src/main/pause.c
+@@ -74,7 +74,7 @@ void PauseInitializePrimitives(PauseWorkspace* workspace)
+     {
+         s32 width = workspace->texture.u1;
+         s32 firstU = workspace->texture.u0;
+-        register volatile s32 markerWidth TM4_BIND_REGISTER("v1") = 1;
++        volatile s32 markerWidth = 1;
+         workspace->markers[0].w = markerWidth;
+         workspace->markers[1].w = markerWidth;
+         workspace->markers[2].h = markerWidth;
+diff --git a/src/main/sprintf.c b/src/main/sprintf.c
+index 72d8dd79..191eeb2f 100644
+--- a/src/main/sprintf.c
++++ b/src/main/sprintf.c
+@@ -273,7 +273,7 @@ s32 FormatStringV(char* destination, const char* format, va_list arguments)
+                         length = options.fields.precision;
+                     }
+                 } else if (!options.fields.precise) {
+-                    length = strlen(text);
++                    length = strlen((const char*)text);
+                 } else {
+                     u8* end = memchr(text, 0, options.fields.precision);
+                     length = end - text;
+diff --git a/src/main/system.c b/src/main/system.c
+index af04edae..a5f21f51 100644
+--- a/src/main/system.c
++++ b/src/main/system.c
+@@ -1,4 +1,5 @@
+ 
++#include "tm4/fixed.h"
+ #include "tm4/main/carresources.h"
+ #include "tm4/main/game.h"
+ #include "tm4/main/image.h"
+@@ -138,6 +139,12 @@ void srandrand(u32 seed)
+ {
+     SystemRandomRandomState = seed;
+ }
++#ifdef __psyz
++u32 WebRenderEffectRandomState(void)
++{
++    return SystemRandomRandomState;
++}
++#endif
+ #endif
+ 
+ #if !defined(TM4_SYSTEM_FUNCTION) || TM4_SYSTEM_FUNCTION == 0x800101E4

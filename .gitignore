@@ -1,7 +1,7 @@
 /build/
-/orig/
-/disks/
-/.venv/
+/orig
+/disks
+/.venv
 /cmake-build-*/
 /compile_commands.json
 /CMakeUserPresets.json
