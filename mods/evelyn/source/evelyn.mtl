@@ -1,0 +1,7 @@
+newmtl atlas
+Ka 0.35 0.35 0.35
+Kd 1 1 1
+Ks 0 0 0
+d 1
+illum 1
+map_Kd atlas.png
