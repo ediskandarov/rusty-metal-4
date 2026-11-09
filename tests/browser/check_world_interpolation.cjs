@@ -2,6 +2,10 @@
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
 
+const step = Number(process.env.TM4_SMOOTHING_STEP ?? "7");
+assert(Number.isInteger(step) && step >= 0 && step <= 7, "choose a smoothing slider step");
+const lead = step === 7 ? 0 : 1 - (step * 5) / (1000 / 30);
+
 function motionPairs(samples, predicate) {
   const pairs = [];
   const first = new Map();
@@ -65,7 +69,7 @@ function motionPairs(samples, predicate) {
     });
 
     assert.equal(await page.evaluate(() => Module._WebTestPlaceMotionPickups()), 2);
-    const toggle = page.locator("#render-interpolation");
+    const smoothing = page.locator("#render-smoothing");
     await page.locator("#render-settings summary").click();
     const verifyOff = async () => {
       await start();
@@ -77,11 +81,14 @@ function motionPairs(samples, predicate) {
         assert.equal(history, false);
       }
     };
-    assert.equal(await toggle.isChecked(), false);
+    assert.equal(await smoothing.isChecked(), false);
     await verifyOff();
-    await toggle.check();
+    await page.selectOption("#render-limit", "120");
+    await smoothing.check();
+    await page.locator("#render-smoothing-delay").fill(String(step));
     await page.waitForFunction(
-      () => tm4Port.interpolateMotion && tm4Port.renderTiming.vblanks === 1,
+      (lead) => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === lead,
+      lead,
     );
     await start();
     await page.waitForTimeout(1700);
@@ -93,13 +100,15 @@ function motionPairs(samples, predicate) {
       const pairs = motionPairs(pickups, isPickup);
       const example = pairs.find(([a, b]) => a.render[3] !== b.render[3]);
       assert(example, name + " has different rendered angles during one simulation tick");
-      const angleLag = (angle, rendered) => (angle - rendered + 4096) & 4095;
       assert(
-        pairs.some(([a, b]) => b.live[3] < 200 && a.render[3] > 3896),
+        pairs.some(([a]) => Math.abs(a.live[3] - a.render[3]) > 3896),
         name + " crosses angle wrap on the shorter arc",
       );
-      for (const sample of pickups.filter(isPickup))
-        assert(angleLag(sample.live[3], sample.render[3]) <= 200);
+      for (const { live, render, fraction } of pickups.filter(isPickup)) {
+        const angleDelta = ((render[3] - live[3] + 2048) & 4095) - 2048;
+        assert(Math.abs(angleDelta) <= 200);
+        assert(angleDelta * (fraction - 1) >= 0, "pickup rotates in the sampling direction");
+      }
       assert(
         pairs.some(([a, b]) => a.render[1] !== b.render[1]),
         name + " has an intermediate bob height",
@@ -198,16 +207,14 @@ function motionPairs(samples, predicate) {
       const example = pairs.find(([a, b]) => {
         const before = poses.get(a.address + "/" + a.id + "/" + (a.tick - 1));
         if (!before || !a.history || !b.history) return false;
-        const between = (sample) =>
-          sample.render
+        const atPhase = ({ render, live, fraction }) =>
+          render
             .slice(0, 3)
             .every(
-              (value, i) =>
-                value >= Math.min(before[i], sample.live[i]) &&
-                value <= Math.max(before[i], sample.live[i]),
+              (value, i) => Math.abs(value - (before[i] + fraction * (live[i] - before[i]))) <= 1,
             );
         return (
-          between(a) && between(b) && a.render.slice(0, 3).some((value, i) => value !== b.render[i])
+          atPhase(a) && atPhase(b) && a.render.slice(0, 3).some((value, i) => value !== b.render[i])
         );
       });
       assert(example, name + " has different rendered positions during one simulation tick");
@@ -216,10 +223,8 @@ function motionPairs(samples, predicate) {
 
     if (!(await page.locator("#render-settings").evaluate((node) => node.open)))
       await page.locator("#render-settings summary").click();
-    await toggle.uncheck();
-    await page.waitForFunction(
-      () => !tm4Port.interpolateMotion && tm4Port.renderTiming.vblanks === 2,
-    );
+    await smoothing.uncheck();
+    await page.waitForFunction(() => !tm4Port.renderSmoothing);
     assert.equal(await page.evaluate(() => Module._WebTestPlaceMotionPickups()), 2);
     await verifyOff();
     assert.deepEqual(errors, []);

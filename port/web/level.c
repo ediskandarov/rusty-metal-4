@@ -21,6 +21,9 @@
 #include "tm4/main/screen.h"
 #include "tm4/main/sound.h"
 #include "tm4/main/system.h"
+#ifdef TM4_WEB_TEST_HOOKS
+#include "tm4/main/tournament.h"
+#endif
 #include "tm4/main/world.h"
 #include "tm4/modules/camera.h"
 #include <assert.h>
@@ -33,6 +36,7 @@
 
 #ifdef TM4_WEB_TEST_HOOKS
 void WebTestApplyPendingActions(void);
+void WebTestMotionInput(void);
 #endif
 
 /* Browser frame loop for the recovered game session and world renderer. */
@@ -40,7 +44,7 @@ static int active;
 static unsigned int frames;
 static unsigned int simulation_steps;
 static double last_step;
-static int interpolating;
+static WebRenderMotionSettings motion;
 static int demo_draw_enabled;
 
 EMSCRIPTEN_KEEPALIVE unsigned int WebGetSimulationSteps(void)
@@ -73,6 +77,16 @@ void WebLevelStart(void)
     }
     CarResourcesPrepare();
     GamePrepareSession();
+#ifdef TM4_WEB_TEST_HOOKS
+    u32 motion_seed = EM_ASM_INT({ return tm4Port.testMotionSeed || 0; });
+    if (motion_seed && GameInfo.game_type == GAME_TYPE_TOURNAMENT) {
+        /* GamePrepareSession selects the normal roster before the replay supplies its seed. */
+        GameInfo.random_seed = motion_seed;
+        srand(motion_seed);
+        srandrand(motion_seed);
+        TournamentReset(&GameInfo, 1);
+    }
+#endif
     RegistryDirectory* metadata = GameGetWorldNameDirectoryPtr(GameInfo.world_name);
     const char* filename = RegGetFileDataPS(metadata, "filename");
     if (!filename) {
@@ -124,7 +138,7 @@ void WebLevelStart(void)
         PadSetVibrationEnabled(
             i, GameInfo.mode == GAME_MODE_PLAY && GameInfo.players[i].vibration_enabled);
     frames = 0;
-    interpolating = 0;
+    motion = (WebRenderMotionSettings){ 0 };
     WebInterpolationReset();
     demo_draw_enabled = 1;
     last_step = emscripten_get_now();
@@ -144,7 +158,8 @@ void WebLevelStart(void)
                 faces : $2,
                 collisionFaces : $3,
                 levelFrames : 0,
-                interpolateMotion : false,
+                renderSmoothing : false,
+                renderSmoothingLead : 0,
                 simulationTicks : 0,
                 demoFrozen : false,
                 demoDrawEnabled : true
@@ -184,6 +199,7 @@ static void process_level_step(void)
 {
 #ifdef TM4_WEB_TEST_HOOKS
     WebTestApplyPendingActions();
+    WebTestMotionInput();
 #endif
     WebCarStep();
     SoundProcess();
@@ -192,10 +208,10 @@ static void process_level_step(void)
     ++simulation_steps;
 }
 
-static void present_level_frame(Tm4RenderBuffer* buffer, double fraction, int stepped)
+static void present_level_frame(Tm4RenderBuffer* buffer, double phase)
 {
-    if (interpolating)
-        WebInterpolationBeginDraw(fraction, stepped);
+    if (GameInfo.mode != GAME_MODE_DEMO)
+        WebInterpolationBeginDraw(motion, phase);
     RenderBuildFrame();
     WebInterpolationEndDraw();
     WebRenderPresentLevelFrame();
@@ -224,7 +240,7 @@ static void demo_frame(void)
     }
     process_level_step();
     if (demo_draw_enabled)
-        present_level_frame(buffer, 1, 1);
+        present_level_frame(buffer, 1);
     else
         VSync(0);
 
@@ -270,21 +286,34 @@ void WebLevelFrame(void)
     }
     if (!WebRenderBeginLevelFrame())
         return;
-    const double step_ms = 1000.0 / 30;
+    const double step_ms = WEB_SIMULATION_STEP_MS;
     /* Three and four views use two successive render passes and reuse packet storage. */
-    int interpolate = WebInterpolationEnabled() && GameInfo.player_count <= 2;
-    if (interpolating != interpolate) {
-        interpolating = interpolate;
+    WebRenderMotionSettings selected
+        = GameInfo.player_count <= 2 ? WebRenderGetMotionSettings() : (WebRenderMotionSettings){ 0 };
+    int capture = selected.enabled;
+    if (motion.enabled != selected.enabled || motion.lead != selected.lead) {
+        if (motion.enabled != selected.enabled)
+            WebRenderResetTiming();
+        motion = selected;
         WebInterpolationReset();
-        WebRenderResetTiming();
-        EM_ASM({ tm4Port.interpolateMotion = !!$0; }, interpolating);
+        EM_ASM(
+            {
+                tm4Port.renderSmoothing = !!$0;
+                tm4Port.renderSmoothingLead = $1;
+            },
+            motion.enabled, motion.lead);
+        capture = 0;
     }
     double now = emscripten_get_now();
     if (!last_step)
         last_step = now;
     Tm4RenderBuffer* buffer = RenderBeginFrame();
     int catchup = 0;
-    int stepped = 0;
+    /* A stalled callback can run catch-up ticks, but its first draw uses live poses. */
+    if (now - last_step >= step_ms * 5) {
+        WebInterpolationReset();
+        capture = 0;
+    }
     while (now - last_step >= step_ms && catchup++ < 5) {
         PadGetPad(4);
         if (GameInfo.mode == GAME_MODE_PLAY) {
@@ -313,21 +342,29 @@ void WebLevelFrame(void)
             now = emscripten_get_now();
             last_step = now - step_ms;
             /* The first resumed draw should use the current pose. */
-            interpolate = 0;
+            capture = 0;
             if (result == PAUSE_RESULT_QUIT) {
                 GameInfo.next_mode = GAME_MODE_MENU;
                 finish_session();
                 return;
             }
         }
-        if (interpolate)
+        if (capture)
             WebInterpolationBeginStep();
         process_level_step();
         GameProcessMode();
-        if (interpolate)
-            WebInterpolationFinishStep();
-        stepped = 1;
+        if (capture)
+            WebInterpolationFinishStep(motion.lead);
         ++MainFrameCount;
+#ifdef TM4_WEB_TEST_HOOKS
+        EM_ASM(
+            {
+                tm4Port.testMotionSimulation?.push([
+                    $0, $1, tm4Port.cars, tm4Port.weaponAmmo, tm4Port.carSelectedWeapon
+                ]);
+            },
+            MainFrameCount, randseed());
+#endif
         last_step += step_ms;
         if (GameInfo.next_mode)
             break;
@@ -337,7 +374,7 @@ void WebLevelFrame(void)
         WebInterpolationReset();
     }
     EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
-    present_level_frame(buffer, (now - last_step) / step_ms, stepped);
+    present_level_frame(buffer, (now - last_step) / step_ms);
     if (GameInfo.next_mode)
         finish_session();
 }

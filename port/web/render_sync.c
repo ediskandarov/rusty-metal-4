@@ -36,8 +36,8 @@ void WebRenderSetLimit(unsigned int rate)
 
 static unsigned int effective_render_limit(void)
 {
-    /* These paths still advance visual effects once per draw. */
-    if (!WebInterpolationEnabled() || GameInfo.player_count > 2)
+    /* Vanilla presents one pose per tick. Larger splits reuse packet storage. */
+    if (!WebRenderGetMotionSettings().enabled || GameInfo.player_count > 2)
         return 30;
     return render_limit;
 }

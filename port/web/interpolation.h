@@ -2,6 +2,7 @@
 #define TM4_WEB_INTERPOLATION_H
 
 #include <LIBGTE.H>
+#include "tm4/simulation.h"
 #include "tm4_scalar.h"
 
 typedef struct Afc Afc;
@@ -15,15 +16,21 @@ typedef struct RayBeam RayBeam;
 typedef struct WeaponFireball WeaponFireball;
 typedef struct WeaponProjectile WeaponProjectile;
 
+#define WEB_SIMULATION_STEP_MS (1000.0 / SIMULATION_FPS)
+
+typedef struct {
+    double lead;
+    int enabled;
+} WebRenderMotionSettings;
+
 void WebInterpolationReset(void);
 void WebInterpolationBeginStep(void);
-void WebInterpolationFinishStep(void);
+void WebInterpolationFinishStep(double lead);
 void WebInterpolationCutCamera(const Camera* camera);
 void WebInterpolationCutCar(const Car* car);
-void WebInterpolationBeginDraw(double fraction, int stepped);
+void WebInterpolationBeginDraw(WebRenderMotionSettings motion, double phase);
 void WebInterpolationEndDraw(void);
-int WebInterpolationEnabled(void);
-int WebInterpolationAdvanceDisplay(void);
+WebRenderMotionSettings WebRenderGetMotionSettings(void);
 Camera* WebInterpolationCamera(Camera* camera, Camera* pose);
 Car* WebInterpolationCar(Car* car, Car* pose);
 void WebInterpolationPickup(const PowerupState* power, SVECTOR* position, s32* angle);

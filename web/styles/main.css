@@ -84,6 +84,28 @@ body {
 .settings-panel input[type="checkbox"] {
   justify-self: start;
 }
+.settings-panel .smoothing-range {
+  grid-template-columns: 1fr;
+  gap: 4px;
+}
+#render-smoothing-delay {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+#render-smoothing-ends {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: #929faf;
+  font-size: 10px;
+}
+#render-smoothing-readout {
+  display: block;
+  margin-top: 5px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 #fps-counter {
   position: absolute;
   top: 10px;

@@ -31,7 +31,11 @@ const assert = require("node:assert/strict");
     assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
     assert.equal(await page.locator("#subpixel-vertices").isChecked(), true);
     assert.equal(await page.locator("#perspective-textures").isChecked(), true);
-    assert.equal(await page.locator("#render-interpolation").isChecked(), true);
+    const smoothing = page.locator("#render-smoothing");
+    const slider = page.locator("#render-smoothing-delay");
+    const readout = page.locator("#render-smoothing-readout");
+    assert.equal(await smoothing.isChecked(), true);
+    assert.equal(await slider.inputValue(), "7");
     const checkSettings = async (label) => {
       await page.locator("#render-settings summary").click();
       for (const preset of ["ultra", "ps1"]) {
@@ -50,10 +54,14 @@ const assert = require("node:assert/strict");
             tm4Port.perspectiveTextures === enhanced,
           { scale, timing, enhanced },
         );
-        for (const id of ["subpixel-vertices", "perspective-textures", "render-interpolation"])
+        for (const id of ["subpixel-vertices", "perspective-textures"])
           assert.equal(await page.locator(`#${id}`).isChecked(), enhanced);
+        assert.equal(await smoothing.isChecked(), enhanced);
+        assert.equal(await slider.isEnabled(), enhanced);
+        assert.equal(await slider.inputValue(), "7");
+        assert.match(await readout.textContent(), /33\.3 ms.*Full interpolation.*No prediction/);
         if (label === "game")
-          await page.waitForFunction((value) => tm4Port.interpolateMotion === value, enhanced);
+          await page.waitForFunction((on) => tm4Port.renderSmoothing === on, enhanced);
         console.log("PASS", label, "preset", preset);
       }
       await page.selectOption("#render-scale", "2");
@@ -109,11 +117,47 @@ const assert = require("node:assert/strict");
       await page.waitForFunction(() => tm4Port.carLodDistance === 8);
       await page.selectOption("#draw-distance", "8");
       await page.waitForFunction(() => tm4Port.drawDistance === 8);
-      await page.locator("#render-interpolation").check();
-      if (label === "game") await page.waitForFunction(() => tm4Port.interpolateMotion === true);
+      await smoothing.check();
+      for (let step = 6; step >= 0; step--) {
+        await slider.press("ArrowLeft");
+        assert.equal(await slider.inputValue(), String(step));
+        assert.match(await readout.textContent(), new RegExp(`^${step * 5} ms · Up to `));
+        assert.equal(await slider.getAttribute("aria-valuetext"), await readout.textContent());
+        assert.equal(await page.locator("#render-preset").inputValue(), "custom");
+        assert.equal(await page.locator("#render-limit").inputValue(), "60");
+        if (label === "game") {
+          const lead = 1 - (step * 5) / (1000 / 30);
+          await page.waitForFunction(
+            (lead) => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === lead,
+            lead,
+          );
+        }
+      }
+      assert.match(await readout.textContent(), /0 ms · Up to 33\.3 ms prediction/);
+      await slider.press("ArrowRight");
+      assert.equal(await slider.inputValue(), "1");
+      assert.match(await readout.textContent(), /5 ms · Up to 28\.3 ms prediction/);
+      await smoothing.uncheck();
+      assert.equal(await slider.isDisabled(), true);
+      assert.equal(await slider.inputValue(), "1");
+      if (label === "game") await page.waitForFunction(() => !tm4Port.renderSmoothing);
+      await smoothing.check();
+      assert.equal(await slider.inputValue(), "1", "toggle restores the selected delay");
+      if (label === "game")
+        await page.waitForFunction(
+          () => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === 0.85,
+        );
+      await page.locator("#render-preset").selectOption("ultra");
+      await slider.press("ArrowLeft");
+      assert.equal(await slider.inputValue(), "6");
+      assert.equal(await page.locator("#render-preset").inputValue(), "custom");
       await page.locator("#render-reset").click();
-      assert.equal(await page.locator("#render-interpolation").isChecked(), true);
-      if (label === "game") await page.waitForFunction(() => tm4Port.interpolateMotion === true);
+      assert.equal(await smoothing.isChecked(), true);
+      assert.equal(await slider.inputValue(), "7");
+      if (label === "game")
+        await page.waitForFunction(
+          () => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === 0,
+        );
       assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
       assert.equal(await counter.isVisible(), false);
       assert.equal(await page.locator("#render-fps").isChecked(), false);
@@ -182,6 +226,8 @@ const assert = require("node:assert/strict");
     await page.locator("#render-settings summary").click();
     await page.locator("#render-dithering").focus();
     await page.keyboard.press("ArrowDown");
+    await slider.press("ArrowDown");
+    assert.equal(await slider.inputValue(), "6");
     await page.waitForTimeout(300);
     assert.equal(await page.evaluate(() => tm4Port.selected), selection);
     await page.keyboard.press("Escape");
@@ -210,6 +256,10 @@ const assert = require("node:assert/strict");
       const box = document.getElementById("render-panel").getBoundingClientRect();
       return box.x >= 0 && box.right <= innerWidth && box.bottom <= innerHeight - 12;
     });
+    await slider.scrollIntoViewIfNeeded();
+    const range = await slider.boundingBox();
+    const panel = await page.locator("#render-panel").boundingBox();
+    assert(range && panel && range.x >= panel.x && range.x + range.width <= panel.x + panel.width);
     await page.screenshot({ path: "build/checks/render-settings-narrow.png" });
     await page.mouse.click(4, 450);
     assert.equal(await page.locator("#render-settings").evaluate((node) => node.open), false);

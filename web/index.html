@@ -74,12 +74,29 @@
             >Stabilize 3D vertices <input id="subpixel-vertices" type="checkbox" checked
           /></label>
           <p>Retains fractional vertex positions to reduce polygon jitter.</p>
-          <label
-            >Interpolate motion <input id="render-interpolation" type="checkbox" checked
-          /></label>
-          <p>
-            Smooths motion for cars, cameras, pickups, and flying weapons in one- and two-player
-            matches with a short display delay.
+          <label>Motion smoothing <input id="render-smoothing" type="checkbox" checked /></label>
+          <label class="smoothing-range">
+            Smoothing delay
+            <input
+              id="render-smoothing-delay"
+              type="range"
+              min="0"
+              max="7"
+              step="1"
+              value="7"
+              aria-describedby="render-smoothing-note"
+            />
+          </label>
+          <div id="render-smoothing-ends" aria-hidden="true">
+            <span>0 ms · Prediction</span><span>Full interpolation</span>
+          </div>
+          <output id="render-smoothing-readout" for="render-smoothing-delay">
+            33.3 ms · Full interpolation · No prediction
+          </output>
+          <p id="render-smoothing-note">
+            Lower delay makes motion respond sooner and can make corrections more visible. Contact
+            can briefly add pose delay. One simulation frame is 33.3 ms at 30 TPS. Turn smoothing
+            off for Vanilla motion.
           </p>
           <label
             >Perspective-correct textures <input id="perspective-textures" type="checkbox" checked
@@ -123,8 +140,8 @@
             </select>
           </label>
           <p id="render-limit-note">
-            Simulation stays at 30 TPS. Higher frame rates require interpolation and up to two
-            players. Menus and video keep their original timing.
+            Simulation stays at 30 TPS. Higher frame rates are available with motion smoothing and
+            up to two players. Vanilla, menus and video keep their original timing.
           </p>
           <label>Performance graphs <input id="render-fps" type="checkbox" /></label>
           <p>Simulation, render and browser callback rates over the last 15 seconds.</p>

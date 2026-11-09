@@ -8,7 +8,8 @@ export interface GameExports {
   _WebSetRenderLimit(this: void, value: number): void;
   _WebSetSubpixelVertices(this: void, value: number): void;
   _WebSetPerspectiveTextures(this: void, value: number): void;
-  _WebSetRenderInterpolation(this: void, value: number): void;
+  _WebSetRenderSmoothing(this: void, enabled: number): void;
+  _WebSetRenderSmoothingDelay(this: void, milliseconds: number): void;
   _WebGetPresentedFrames(this: void): number;
   _WebGetRenderedFrames(this: void): number;
   _WebGetSimulationSteps(this: void): number;

@@ -1,0 +1,71 @@
+diff --git a/src/modules/afc/afc.c b/src/modules/afc/afc.c
+--- a/src/modules/afc/afc.c
++++ b/src/modules/afc/afc.c
+@@ -3,6 +3,7 @@
+ #include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/card.h"
++#include "tm4/main/math3d.h"
+ #include "tm4/main/object.h"
+ #include "tm4/main/registry.h"
+@@ -50,6 +51,14 @@
+         = object->vertices[3].vy = object->size / 2;
+ }
+ 
++#ifdef __psyz
++static void advance_flare_rotation(void* payload)
++{
++    Afc* flare = payload;
++    flare->rotation_angle = (flare->rotation_angle + flare->rotation_step) % ANGLE_FULL_TURN;
++}
++#endif
++
+ s32 AfcInitialize(Afc* object, SVECTOR* position, CVECTOR* color, s32 rotation, s32 size, s32 light)
+ {
+     if (!object || !position || !color || size <= 0)
+@@ -63,6 +72,11 @@
+     object->base_color = *color;
+     object->rotation_step = rotation;
+     object->rotation_angle = 0;
++#ifdef __psyz
++    /* The display cadence and number of views do not advance the flare animation. */
++    if (rotation)
++        ObjectGetHeader(object)->process = advance_flare_rotation;
++#endif
+     ObjectSetInteractionRadius(object, -1);
+     if (light)
+         ObjectCreate("lightEmitter", 4, object, LIGHT_EMITTER_INTENSITY, color->r, color->g,
+diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
+--- a/src/modules/afc/display.c
++++ b/src/modules/afc/display.c
+@@ -51,6 +51,7 @@
+         py = ObjectGetHeader(payload)->position.vy;
+         pz = ObjectGetHeader(payload)->position.vz;
+         object = payload;
++        s32 angle = object->rotation_angle;
+         /* A zero step selects distance-dependent rotation instead of animation. */
+         if (!object->rotation_step) {
+             s32 dx = px - GameInfo.active_view->camera_to_world.t[0];
+@@ -60,16 +61,15 @@
+             dz = Int32Abs(dz);
+             maximum = Int32Max(dx, dz);
+             minimum = Int32Min(dx, dz);
+-            object->rotation_angle = (maximum + minimum / 2) / 2;
+-#ifdef __psyz
+-        } else if (!GameInfo.pause_player && WebInterpolationAdvanceDisplay()) {
+-#else
++            angle = (maximum + minimum / 2) / 2;
++#ifndef __psyz
++            object->rotation_angle = angle;
+         } else if (!GameInfo.pause_player) {
+-#endif
+             object->rotation_angle += object->rotation_step;
+             object->rotation_angle %= ANGLE_FULL_TURN;
++            angle = object->rotation_angle;
++#endif
+         }
+-        s32 angle = object->rotation_angle;
+         SVECTOR* vertices = object->vertices;
+ #ifdef __psyz
+         SVECTOR render_position;

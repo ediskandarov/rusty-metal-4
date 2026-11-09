@@ -11,6 +11,8 @@
 #include "src/modules/levels/w_yard/private.h"
 #include "overlays.h"
 #include "tm4/main/game.h"
+#include "tm4/main/pad.h"
+#include "tm4/main/system.h"
 #include "tm4/main/tournament.h"
 #include "tm4/modules/camera.h"
 #include "tm4/modules/conveyer.h"
@@ -301,6 +303,43 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestSpawnMotionFireball(void)
         transform->t[2] + forward_z / 16, 0 };
     SVECTOR velocity = { forward_x / 2, -1024, forward_z / 2, 0 };
     return (u32)ObjectCreate("weaponFireball", 0, &position, &velocity);
+}
+
+void WebTestMotionInput(void)
+{
+    if (!EM_ASM_INT({ return !!tm4Port.testMotionSeed; }))
+        return;
+    /* Apply the same digital controls at the same game ticks in each fresh match. */
+    u16* actions = GameInfo.players[0].bindings[0].actions;
+    u16 buttons = 0, previous = 0;
+    s32 tick = GetCurrentTime();
+    if (tick >= 19 && tick < 90)
+        buttons |= actions[GameControlGas];
+    if (tick >= 20 && tick <= 90)
+        previous |= actions[GameControlGas];
+    if (tick >= 37 && tick < 70)
+        buttons |= actions[GameControlSteerRight];
+    if (tick >= 38 && tick <= 70)
+        previous |= actions[GameControlSteerRight];
+    if (tick >= 105 && tick < 109)
+        buttons |= actions[GameControlLookBack];
+    if (tick >= 106 && tick <= 109)
+        previous |= actions[GameControlLookBack];
+    PadCache* pad = &PadJpad[0];
+    pad->buttons = buttons;
+    pad->previous_buttons = previous;
+    pad->pressed_buttons = buttons & ~previous;
+    pad->released_buttons = previous & ~buttons;
+    if (tick == 9)
+        WebTestPlaceMotionPickups();
+    if (tick == 28)
+        WebTestSpawnMotionFireball();
+    if (tick == 112 && GameInfo.players[0].car) {
+        Car* car = GameInfo.players[0].car;
+        MATRIX target = car->transform;
+        target.t[1] -= 128;
+        CarOrientWithMatrix(car, &target);
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE s32 WebTestWeaponTargetHealth(void)

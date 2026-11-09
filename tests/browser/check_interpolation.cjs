@@ -65,18 +65,16 @@ const assert = require("node:assert/strict");
     await page.waitForFunction(() => tm4Port.screen === "level" && tm4Port.levelFrames > 30, null, {
       timeout: 30000,
     });
-    const toggle = page.locator("#render-interpolation");
-    assert.equal(await toggle.isChecked(), false);
-    assert.equal(await page.evaluate(() => tm4Port.interpolateMotion), false);
+    const smoothing = page.locator("#render-smoothing");
+    assert.equal(await smoothing.isChecked(), false);
+    assert.equal(await page.evaluate(() => tm4Port.renderSmoothing), false);
     await measure("OFF", 26, 34);
 
     const rendering = page.locator("#render-settings summary");
     await rendering.click();
-    await toggle.check();
+    await smoothing.check();
     await page.selectOption("#render-limit", "60");
-    await page.waitForFunction(
-      () => tm4Port.interpolateMotion && tm4Port.renderTiming.vblanks === 1,
-    );
+    await page.waitForFunction(() => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === 0);
     await measure("ON", 48, 66);
 
     await rendering.click();
@@ -103,7 +101,7 @@ const assert = require("node:assert/strict");
       (ticks) => !tm4Port.paused && tm4Port.simulationTicks > ticks,
       paused.ticks,
     );
-    assert.equal(await page.evaluate(() => tm4Port.interpolateMotion), true);
+    assert.equal(await page.evaluate(() => tm4Port.renderSmoothing), true);
 
     if (!(await page.locator("#render-settings").evaluate((node) => node.open)))
       await rendering.click();
@@ -111,13 +109,11 @@ const assert = require("node:assert/strict");
     assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
     assert.equal(await page.locator("#fps-counter").isVisible(), false);
     await page.locator("#render-fps").check();
-    assert.equal(await toggle.isChecked(), true);
-    await page.waitForFunction(() => tm4Port.interpolateMotion === true);
+    assert.equal(await smoothing.isChecked(), true);
+    await page.waitForFunction(() => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === 0);
     // Measure baseline cadence independently of Ultra's heavier rendering workload.
     await page.selectOption("#render-preset", "ps1");
-    await page.waitForFunction(
-      () => !tm4Port.interpolateMotion && tm4Port.renderTiming.vblanks === 2,
-    );
+    await page.waitForFunction(() => !tm4Port.renderSmoothing);
     await measure("PS1", 26, 34);
     assert.deepEqual(errors, []);
     console.log("PASS interpolation cadence, driving, pause and Restore defaults");
