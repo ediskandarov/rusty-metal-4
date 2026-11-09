@@ -4,6 +4,9 @@ mkdirSync("build/checks", { recursive: true });
 /* Exercise normal startup: studio is unskippable, Start skips only the intro. */
 module.exports = async function startup(page) {
   await page.waitForFunction(() => globalThis.tm4Port?.movie, null, { timeout: 30000 });
+  const resources = page.locator("#resources");
+  if ((await resources.count()) && (await resources.evaluate((node) => node.open)))
+    await resources.locator(":scope > summary").click();
   const start = page.locator("#tm4-movie-start");
   if (await start.count()) await start.click();
   else await page.locator("canvas").click();

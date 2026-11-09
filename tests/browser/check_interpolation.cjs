@@ -66,6 +66,7 @@ const assert = require("node:assert/strict");
     );
     await measure("ON", 48, 66);
 
+    await rendering.click();
     await page.locator("canvas").click();
     const origin = await page.evaluate(() => [tm4Port.carX, tm4Port.carZ]);
     await page.keyboard.down("x");

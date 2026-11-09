@@ -104,6 +104,7 @@ function motionPairs(samples, predicate) {
       console.log("PICKUP", example);
     }
 
+    await page.locator("#render-settings summary").click();
     await page.locator("canvas").click();
     assert((await page.evaluate(() => Module._WebTestPlaceEnergyTarget(0))) > 0);
     for (const [slot, name] of [
