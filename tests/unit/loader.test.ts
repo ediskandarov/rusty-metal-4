@@ -4,7 +4,7 @@ import reference from "../../config/disc.json";
 import { byteRange, serveFile } from "../../tools/server/files.js";
 import { discTracks, parseCue } from "../../web/src/loader/cue.ts";
 import { Disc } from "../../web/src/loader/disc.ts";
-import { checkRange, localSources } from "../../web/src/loader/sources.ts";
+import { checkRange, directorySources, localSources } from "../../web/src/loader/sources.ts";
 import { sha256, verifyExecutable } from "../../web/src/loader/verify.ts";
 
 const cue =
@@ -40,6 +40,20 @@ test("file reads are bounded and duplicate filenames fail", async () => {
   await expect(source.read(2, 2)).rejects.toThrow("outside disc file");
   expect(() => checkRange(3, -1, 1)).toThrow();
   expect(() => localSources([file, file])).toThrow("Duplicate");
+});
+
+test("folder selection ignores unrelated files and rejects ambiguous filenames", async () => {
+  const cueFile = new File([cue], "disc.CUE");
+  const track = new File([new Uint8Array([1, 2, 3])], "DATA.BIN");
+  const artwork = new File(["cover"], "cover.jpg");
+  const sources = directorySources([artwork, cueFile, track]);
+  expect([...sources.keys()]).toEqual(["disc.cue", "data.bin"]);
+  expect([...(await sources.get("data.bin")!.read(0, 3))]).toEqual([1, 2, 3]);
+  expect(() => directorySources([artwork])).toThrow("No CUE or BIN");
+  expect(() => directorySources([track, new File([], "data.bin")])).toThrow("Duplicate");
+  await expect(
+    discTracks(directorySources([cueFile, new File([cue], "second.cue")]), reference, () => {}),
+  ).rejects.toThrow("only one disc CUE");
 });
 
 test("EXE checksum mismatch fails independently of resources", async () => {

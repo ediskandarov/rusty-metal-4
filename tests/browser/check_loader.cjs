@@ -41,9 +41,14 @@ const { resolve, join } = require("node:path");
       await page.locator("#disc-files").isEnabled(),
       "bad input can be replaced without reloading",
     );
-    await page.locator("#disc-files").setInputFiles(files);
+    if (process.env.TM4_PICK_DIRECTORY === "1")
+      await page.locator("#disc-folder").setInputFiles(directory);
+    else await page.locator("#disc-files").setInputFiles(files);
     await require("./browser_startup.cjs")(page);
     assert(await page.locator("#startup").isHidden());
+    assert(await page.locator("#disc-files").isDisabled());
+    assert(await page.locator("#disc-folder").isDisabled());
+    await require("./check_menu_highlight.cjs")(page, "build/checks/loader-menu");
     assert(
       !requests.some(
         (path) => path.startsWith("/__dev/") || /\.(bin|cue|pcm|STR|data)$/i.test(path),
@@ -51,7 +56,7 @@ const { resolve, join } = require("node:path");
     );
     assert.deepEqual(errors, []);
     console.log(
-      "PASS public file picker, invalid-input recovery, local extraction, movies and menu; no resource downloads",
+      "PASS public disc selection, invalid-input recovery, local extraction, movies and menu; no resource downloads",
     );
   } finally {
     await browser.close();

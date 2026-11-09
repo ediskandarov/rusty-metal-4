@@ -13,6 +13,11 @@
 #startup[hidden] {
   display: none;
 }
+#startup .disc-picker {
+  display: grid;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
 #startup input {
   max-width: 100%;
   font: inherit;

@@ -43,6 +43,11 @@ export function localSources(files: Iterable<File>) {
     })),
   );
 }
+export function directorySources(files: Iterable<File>) {
+  const tracks = [...files].filter((file) => /\.(cue|bin)$/i.test(file.name));
+  if (!tracks.length) throw new Error("No CUE or BIN files found in this folder");
+  return localSources(tracks);
+}
 export async function remoteSources(url: string, { signal }: ReadOptions = {}) {
   const response = await fetch(url, { signal, cache: "no-store" });
   if (!response.ok) throw new Error(`Disc server: HTTP ${response.status}`);

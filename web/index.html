@@ -11,8 +11,27 @@
   <body>
     <section id="startup" aria-live="polite">
       <h1>TM4 Rewired</h1>
-      <p>Select your Twisted Metal 4 CUE and BIN files. Files stay in your browser.</p>
-      <input id="disc-files" type="file" multiple accept=".cue,.bin" aria-label="Game disc files" />
+      <p>Select your Twisted Metal 4 disc files or their folder. Files stay in your browser.</p>
+      <label class="disc-picker" for="disc-files">
+        CUE and BIN files
+        <input
+          id="disc-files"
+          type="file"
+          multiple
+          accept=".cue,.bin"
+          aria-label="Game disc files"
+        />
+      </label>
+      <label class="disc-picker" for="disc-folder">
+        Folder containing one disc
+        <input
+          id="disc-folder"
+          type="file"
+          webkitdirectory
+          multiple
+          aria-label="Game disc folder"
+        />
+      </label>
       <p id="startup-progress"></p>
       <ul id="startup-warnings"></ul>
     </section>
