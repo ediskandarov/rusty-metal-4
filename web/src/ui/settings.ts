@@ -1,31 +1,9 @@
 import type { GameModule } from "../runtime/module.ts";
 import { initializeInputSettings } from "./controls.ts";
 import { element } from "./dom.ts";
+import { initializeRendering } from "./rendering.ts";
 
 type Setting = { reset(): void };
-
-function selectSetting(id: string, set: (value: number) => void, initial: number): Setting {
-  const select = element(id, HTMLSelectElement);
-  select.addEventListener("change", () => set(Number(select.value)));
-  return {
-    reset() {
-      select.value = String(initial);
-      set(initial);
-    },
-  };
-}
-
-function toggleSetting(id: string, set: (value: number) => void, initial: boolean): Setting {
-  const checkbox = element(id, HTMLInputElement);
-  checkbox.checked = initial;
-  checkbox.addEventListener("change", () => set(Number(checkbox.checked)));
-  return {
-    reset() {
-      checkbox.checked = initial;
-      set(Number(initial));
-    },
-  };
-}
 
 function initializeFPS(module: GameModule): Setting {
   const checkbox = element("render-fps", HTMLInputElement);
@@ -120,17 +98,7 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
   input.hidden = false;
   rendering.hidden = false;
   toolbar.hidden = false;
-  const settings = [
-    selectSetting("render-scale", module._WebSetRenderScale, 0),
-    selectSetting("car-lod-distance", module._WebSetCarLodDistance, 1),
-    selectSetting("draw-distance", module._WebSetDrawDistance, 1),
-    selectSetting("render-dithering", module._WebSetRenderDithering, 0),
-    selectSetting("render-vsync", module._WebSetRenderVsync, 2),
-    toggleSetting("subpixel-vertices", module._WebSetSubpixelVertices, true),
-    toggleSetting("perspective-textures", module._WebSetPerspectiveTextures, true),
-    toggleSetting("render-interpolation", module._WebSetRenderInterpolation, false),
-    initializeFPS(module),
-  ];
+  const settings = [initializeRendering(module), initializeFPS(module)];
   element("render-reset", HTMLButtonElement).addEventListener("click", () => {
     for (const setting of settings) setting.reset();
   });

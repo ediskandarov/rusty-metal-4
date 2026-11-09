@@ -27,12 +27,43 @@ const assert = require("node:assert/strict");
     });
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
     await require("./browser_startup.cjs")(page);
-    assert.equal(await page.locator("#render-scale").inputValue(), "0");
+    assert.equal(await page.locator("#render-scale").inputValue(), "8");
+    assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
     assert.equal(await page.locator("#subpixel-vertices").isChecked(), true);
     assert.equal(await page.locator("#perspective-textures").isChecked(), true);
-    assert.equal(await page.locator("#render-interpolation").isChecked(), false);
+    assert.equal(await page.locator("#render-interpolation").isChecked(), true);
     const checkSettings = async (label) => {
       await page.locator("#render-settings summary").click();
+      for (const preset of ["ultra", "ps1"]) {
+        await page.selectOption("#render-preset", preset);
+        const enhanced = preset === "ultra";
+        const scale = enhanced ? 8 : 1;
+        const timing = enhanced ? 3 : 2;
+        await page.waitForFunction(
+          ({ scale, timing, enhanced }) =>
+            tm4Port.renderScale === scale &&
+            tm4Port.carLodDistance === scale &&
+            tm4Port.drawDistance === scale &&
+            tm4Port.renderDithering === 0 &&
+            tm4Port.renderVsync === timing &&
+            tm4Port.subpixelVertices === enhanced &&
+            tm4Port.perspectiveTextures === enhanced,
+          { scale, timing, enhanced },
+        );
+        for (const id of ["subpixel-vertices", "perspective-textures", "render-interpolation"])
+          assert.equal(await page.locator(`#${id}`).isChecked(), enhanced);
+        if (label === "game")
+          await page.waitForFunction((value) => tm4Port.interpolateMotion === value, enhanced);
+        console.log("PASS", label, "preset", preset);
+      }
+      await page.selectOption("#render-scale", "2");
+      assert.equal(await page.locator("#render-preset").inputValue(), "custom");
+      await page.selectOption("#render-preset", "custom");
+      assert.equal(
+        await page.locator("#render-scale").inputValue(),
+        "2",
+        "Custom keeps current values",
+      );
       for (const [id, key, values] of [
         ["car-lod-distance", "carLodDistance", [2, 4, 8, 1]],
         ["draw-distance", "drawDistance", [2, 4, 8, 1]],
@@ -50,6 +81,7 @@ const assert = require("node:assert/strict");
               (tm4Port.screen === "level" ? tm4Port.levelFrames : tm4Port.frames) > before + 2,
             [key, value, before],
           );
+          assert.equal(await page.locator("#render-preset").inputValue(), "custom");
           console.log("PASS", label, id, value);
         }
       }
@@ -80,8 +112,9 @@ const assert = require("node:assert/strict");
       await page.locator("#render-interpolation").check();
       if (label === "game") await page.waitForFunction(() => tm4Port.interpolateMotion === true);
       await page.locator("#render-reset").click();
-      assert.equal(await page.locator("#render-interpolation").isChecked(), false);
-      if (label === "game") await page.waitForFunction(() => tm4Port.interpolateMotion === false);
+      assert.equal(await page.locator("#render-interpolation").isChecked(), true);
+      if (label === "game") await page.waitForFunction(() => tm4Port.interpolateMotion === true);
+      assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
       assert.equal(await counter.isVisible(), false);
       assert.equal(await page.locator("#render-fps").isChecked(), false);
       assert.equal(await page.locator("#subpixel-vertices").isChecked(), true);
@@ -91,18 +124,18 @@ const assert = require("node:assert/strict");
       );
       await page.waitForFunction(
         () =>
-          tm4Port.drawDistance === 1 &&
-          tm4Port.carLodDistance === 1 &&
-          tm4Port.renderScale === 3 &&
+          tm4Port.drawDistance === 8 &&
+          tm4Port.carLodDistance === 8 &&
+          tm4Port.renderScale === 8 &&
           tm4Port.renderDithering === 0 &&
-          tm4Port.renderVsync === 2,
+          tm4Port.renderVsync === 3,
       );
       for (const [id, value] of [
-        ["render-scale", "0"],
+        ["render-scale", "8"],
         ["render-dithering", "0"],
-        ["render-vsync", "2"],
-        ["car-lod-distance", "1"],
-        ["draw-distance", "1"],
+        ["render-vsync", "3"],
+        ["car-lod-distance", "8"],
+        ["draw-distance", "8"],
       ]) {
         assert.equal(await page.locator(`#${id}`).inputValue(), value);
       }
@@ -130,6 +163,9 @@ const assert = require("node:assert/strict");
       console.log("PASS", label, "Escape preserves the renderer and keeps presenting frames");
     };
     await checkSettings("menu");
+    await page.locator("#render-settings summary").click();
+    await page.selectOption("#render-scale", "0");
+    await page.locator("#render-settings summary").click();
     for (const [width, height, scale] of [
       [640, 480, 2],
       [320, 480, 1],
@@ -170,8 +206,10 @@ const assert = require("node:assert/strict");
     await checkSettings("game");
     await page.setViewportSize({ width: 320, height: 480 });
     await page.locator("#render-settings summary").click();
-    const box = await page.locator("#render-panel").boundingBox();
-    assert(box.x >= 0 && box.x + box.width <= 320 && box.y + box.height <= 480);
+    await page.waitForFunction(() => {
+      const box = document.getElementById("render-panel").getBoundingClientRect();
+      return box.x >= 0 && box.right <= innerWidth && box.bottom <= innerHeight - 12;
+    });
     await page.screenshot({ path: "build/checks/render-settings-narrow.png" });
     await page.mouse.click(4, 450);
     assert.equal(await page.locator("#render-settings").evaluate((node) => node.open), false);

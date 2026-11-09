@@ -44,6 +44,9 @@ const assert = require("node:assert/strict");
 
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
     await require("./browser_startup.cjs")(page);
+    await page.locator("#render-settings summary").click();
+    await page.selectOption("#render-preset", "ps1");
+    await page.locator("#render-settings summary").click();
     await page.locator("canvas").click();
     await press("x");
     await menu("newgame");
@@ -93,11 +96,15 @@ const assert = require("node:assert/strict");
     if (!(await page.locator("#render-settings").evaluate((node) => node.open)))
       await rendering.click();
     await page.locator("#render-reset").click();
-    assert.equal(await toggle.isChecked(), false);
+    assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
+    assert.equal(await toggle.isChecked(), true);
+    await page.waitForFunction(() => tm4Port.interpolateMotion === true);
+    // Measure baseline cadence independently of Ultra's heavier rendering workload.
+    await page.selectOption("#render-preset", "ps1");
     await page.waitForFunction(
       () => !tm4Port.interpolateMotion && tm4Port.renderTiming.vblanks === 2,
     );
-    await measure("RESET", 26, 34);
+    await measure("PS1", 26, 34);
     assert.deepEqual(errors, []);
     console.log("PASS interpolation cadence, driving, pause and Restore defaults");
   } finally {

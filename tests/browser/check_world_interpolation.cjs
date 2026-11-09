@@ -51,6 +51,9 @@ function motionPairs(samples, predicate) {
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
     await require("./browser_startup.cjs")(page);
+    await page.locator("#render-settings summary").click();
+    await page.selectOption("#render-preset", "ps1");
+    await page.locator("#render-settings summary").click();
     await page.locator("canvas").click();
     await press("x");
     await menu("newgame");
