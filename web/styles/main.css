@@ -88,7 +88,8 @@ body {
   position: absolute;
   top: 10px;
   left: 12px;
-  padding: 5px 8px;
+  width: min(264px, calc(100vw - 24px));
+  padding: 10px 12px;
   border-radius: 5px;
   background: #000b;
   color: #dce5ef;
@@ -126,4 +127,42 @@ body {
 }
 #status:empty {
   display: none;
+}
+
+.performance-row + .performance-row {
+  margin-top: 8px;
+}
+.performance-row > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.performance-row svg {
+  display: block;
+  width: 100%;
+  height: 36px;
+  margin-top: 4px;
+  overflow: hidden;
+}
+.performance-row polyline {
+  fill: none;
+  stroke: #82d5ac;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.performance-row:nth-child(2) polyline {
+  stroke: #86bfff;
+}
+.performance-row:nth-child(3) polyline {
+  stroke: #e4bd7d;
+}
+.performance-grid {
+  fill: none;
+  stroke: #ffffff18;
+  stroke-width: 1;
+}
+.performance-legend {
+  margin-top: 7px;
+  font-size: 10px;
+  color: #a4b1c0;
 }

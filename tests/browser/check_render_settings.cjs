@@ -96,12 +96,12 @@ const assert = require("node:assert/strict");
       );
       await page.locator("#subpixel-vertices").check();
       await page.waitForFunction(() => tm4Port.subpixelVertices === true);
-      const counter = page.locator("#fps-counter");
+      const counter = page.locator(".performance-row output").nth(1);
       await page.locator("#render-fps").check();
       await page.waitForFunction(() =>
-        /^FPS [0-9]/.test(document.getElementById("fps-counter").textContent),
+        /^[0-9.]+ FPS$/.test(document.querySelectorAll(".performance-row output")[1].textContent),
       );
-      const fps = Number((await counter.textContent()).slice(4));
+      const fps = parseFloat(await counter.textContent());
       assert(fps > 0 && fps < 240, `unexpected FPS ${fps}`);
       console.log("PASS", label, "FPS", fps);
       await page.screenshot({ path: `build/checks/render-settings-${label}.png` });

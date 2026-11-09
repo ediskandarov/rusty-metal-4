@@ -38,9 +38,16 @@ void WebTestApplyPendingActions(void);
 /* Browser frame loop for the recovered game session and world renderer. */
 static int active;
 static unsigned int frames;
+static unsigned int simulation_steps;
 static double last_step;
 static int interpolating;
 static int demo_draw_enabled;
+
+EMSCRIPTEN_KEEPALIVE unsigned int WebGetSimulationSteps(void)
+{
+    return simulation_steps;
+}
+
 static void* require_resource(char* path)
 {
     void* value = RegGetFileDataS(path);
@@ -182,6 +189,7 @@ static void process_level_step(void)
     SoundProcess();
     WorldAnimateTextures();
     ScreenProcess();
+    ++simulation_steps;
 }
 
 static void present_level_frame(Tm4RenderBuffer* buffer, double fraction, int stepped)

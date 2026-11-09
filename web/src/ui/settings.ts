@@ -1,49 +1,8 @@
 import type { GameModule } from "../runtime/module.ts";
 import { initializeInputSettings } from "./controls.ts";
 import { element } from "./dom.ts";
+import { initializePerformance } from "./performance.ts";
 import { initializeRendering } from "./rendering.ts";
-
-type Setting = { reset(): void };
-
-function initializeFPS(module: GameModule): Setting {
-  const checkbox = element("render-fps", HTMLInputElement);
-  const counter = element("fps-counter", HTMLElement);
-  let timer: ReturnType<typeof setInterval> | undefined;
-  let time = 0;
-  let frames = 0;
-  function sample() {
-    time = performance.now();
-    frames = module._WebGetPresentedFrames() >>> 0;
-    counter.textContent = "FPS —";
-  }
-  function update() {
-    clearInterval(timer);
-    counter.hidden = !checkbox.checked;
-    if (!checkbox.checked) return;
-    sample();
-    timer = setInterval(() => {
-      if (document.hidden) return;
-      const now = performance.now();
-      const current = module._WebGetPresentedFrames() >>> 0;
-      const fps = (((current - frames) >>> 0) * 1000) / (now - time);
-      counter.textContent = `FPS ${fps.toFixed(1)}`;
-      frames = current;
-      time = now;
-    }, 500);
-  }
-  checkbox.checked = new URLSearchParams(location.search).get("fps") === "1";
-  checkbox.addEventListener("change", update);
-  document.addEventListener("visibilitychange", () => {
-    if (checkbox.checked) sample();
-  });
-  update();
-  return {
-    reset() {
-      checkbox.checked = false;
-      update();
-    },
-  };
-}
 
 function initializeCheats(module: GameModule, panel: HTMLDetailsElement) {
   const toggles = [...panel.querySelectorAll<HTMLInputElement>("input[data-cheat]")];
@@ -98,7 +57,7 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
   input.hidden = false;
   rendering.hidden = false;
   toolbar.hidden = false;
-  const settings = [initializeRendering(module), initializeFPS(module)];
+  const settings = [initializeRendering(module), initializePerformance(module)];
   element("render-reset", HTMLButtonElement).addEventListener("click", () => {
     for (const setting of settings) setting.reset();
   });

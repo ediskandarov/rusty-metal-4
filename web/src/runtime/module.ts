@@ -10,6 +10,8 @@ export interface GameExports {
   _WebSetPerspectiveTextures(this: void, value: number): void;
   _WebSetRenderInterpolation(this: void, value: number): void;
   _WebGetPresentedFrames(this: void): number;
+  _WebGetRenderedFrames(this: void): number;
+  _WebGetSimulationSteps(this: void): number;
   _WebSetCheat(this: void, index: number, enabled: number): void;
   _WebGetCheats(this: void): number;
   _WebSetInputBlocked(this: void, value: number): void;

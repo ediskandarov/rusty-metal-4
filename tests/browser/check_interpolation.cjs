@@ -1,4 +1,4 @@
-/* global tm4Port */
+/* global tm4Port, Module */
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 
@@ -29,6 +29,8 @@ const assert = require("node:assert/strict");
         ms: performance.now(),
         frames: tm4Port.levelFrames,
         ticks: tm4Port.simulationTicks,
+        renderCounter: Module._WebGetRenderedFrames(),
+        stepCounter: Module._WebGetSimulationSteps(),
       }));
     const measure = async (label, minimum, maximum) => {
       const start = await state();
@@ -38,11 +40,18 @@ const assert = require("node:assert/strict");
       const frames = (end.frames - start.frames) / seconds;
       const ticks = (end.ticks - start.ticks) / seconds;
       console.log(label, { frames, ticks });
+      assert.equal(end.stepCounter - start.stepCounter, end.ticks - start.ticks);
+      assert(Math.abs(end.renderCounter - start.renderCounter - (end.frames - start.frames)) <= 1);
+      assert.equal(await page.locator(".performance-row").count(), 3);
+      for (const line of await page.locator(".performance-row polyline").all())
+        assert((await line.getAttribute("points")).length > 0);
       assert(frames >= minimum && frames <= maximum, label + " fresh frame rate");
       assert(ticks >= 28 && ticks <= 32, label + " simulation tick rate");
     };
 
-    await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
+    const url = new URL(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
+    url.searchParams.set("fps", "1");
+    await page.goto(url.href);
     await require("./browser_startup.cjs")(page);
     await page.locator("#render-settings summary").click();
     await page.selectOption("#render-preset", "ps1");
@@ -86,6 +95,8 @@ const assert = require("node:assert/strict");
     const paused = await state();
     await page.waitForTimeout(600);
     assert.equal((await state()).ticks, paused.ticks, "pause freezes simulation");
+    assert.equal((await state()).stepCounter, paused.stepCounter, "pause freezes TPS counter");
+    assert.equal(await page.locator(".performance-row output").first().textContent(), "0.0 TPS");
     await press("x");
     await page.waitForFunction(
       (ticks) => !tm4Port.paused && tm4Port.simulationTicks > ticks,
@@ -97,6 +108,8 @@ const assert = require("node:assert/strict");
       await rendering.click();
     await page.locator("#render-reset").click();
     assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
+    assert.equal(await page.locator("#fps-counter").isVisible(), false);
+    await page.locator("#render-fps").check();
     assert.equal(await toggle.isChecked(), true);
     await page.waitForFunction(() => tm4Port.interpolateMotion === true);
     // Measure baseline cadence independently of Ultra's heavier rendering workload.

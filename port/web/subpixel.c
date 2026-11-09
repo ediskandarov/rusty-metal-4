@@ -22,7 +22,13 @@ typedef struct {
 
 static BufferPositions buffers[WEB_SUBPIXEL_BUFFER_COUNT];
 static BufferPositions* active;
+static unsigned int rendered_frames;
 static unsigned int requested = PSYZ_STABILIZE_VERTICES | PSYZ_PERSPECTIVE_TEXTURES;
+
+EMSCRIPTEN_KEEPALIVE unsigned int WebGetRenderedFrames(void)
+{
+    return rendered_frames;
+}
 
 #ifdef TM4_WEB_TEST_HOOKS
 static unsigned int submitted, fractional;
@@ -71,6 +77,7 @@ void WebSubpixelDraw(enum WebSubpixelBuffer buffer, OT_TYPE* ordering)
 #endif
     WebSubpixelSelect(buffer);
     DrawOTag(ordering);
+    ++rendered_frames;
     WebSubpixelSelect(WEB_SUBPIXEL_NONE);
     static unsigned int applied = UINT32_MAX;
     if (applied != buffers[buffer].options) {

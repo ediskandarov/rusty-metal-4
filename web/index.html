@@ -34,7 +34,7 @@
     <main id="stage">
       <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
       <div id="status">Loading…</div>
-      <output id="fps-counter" hidden aria-label="Rendered frames per second"></output>
+      <section id="fps-counter" hidden aria-label="Performance metrics"></section>
     </main>
     <div id="video-controls" hidden>
       <details id="render-settings" hidden>
@@ -124,8 +124,8 @@
           <p id="render-timing-note">
             PsyZ setting; browser frame scheduling still takes precedence in this web build.
           </p>
-          <label>Show FPS <input id="render-fps" type="checkbox" /></label>
-          <p>Presented frames per second, averaged over the last half-second.</p>
+          <label>Performance graphs <input id="render-fps" type="checkbox" /></label>
+          <p>Simulation, render and browser callback rates over the last 15 seconds.</p>
           <button id="render-reset" type="button">Restore defaults</button>
         </div>
       </details>
