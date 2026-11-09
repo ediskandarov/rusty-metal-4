@@ -26,17 +26,22 @@ test("AST selection includes definitions, not declarations or locals", async () 
   const compiler = Bun.spawn(
     ["clang", "-x", "c", "-fsyntax-only", "-Xclang", "-ast-dump=json", "-"],
     {
-      stdin: new Blob([
-        `extern int declaration; int prototype(int); int data[3];
-      static int private_data; int function(int argument) { int local; return argument; }`,
-      ]),
+      stdin: "pipe",
       stdout: "pipe",
-      stderr: "pipe",
+      stderr: "inherit",
     },
   );
-  const ast = await new Response(compiler.stdout).json();
+  compiler.stdin.write(`extern int declaration; int prototype(int); int data[3];
+    static int private_data; int function(int argument) { int local; return argument; }`);
+  // Clang waits for EOF before producing its AST; close the input explicitly.
+  compiler.stdin.end();
+  const output = await new Response(compiler.stdout).text();
   expect(await compiler.exited).toBe(0);
-  expect([...findDefinitions(ast)].sort()).toEqual(["data", "function", "private_data"]);
+  expect([...findDefinitions(JSON.parse(output))].sort()).toEqual([
+    "data",
+    "function",
+    "private_data",
+  ]);
 });
 
 test("omitted modules fail before generation", () => {
