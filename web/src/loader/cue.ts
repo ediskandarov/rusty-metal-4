@@ -13,9 +13,6 @@ export function parseCue(text: string): CueTrack[] {
       file = match[1]!;
     } else if ((match = /^TRACK (\d+) (AUDIO|MODE2\/2352)$/i.exec(line))) {
       if (!file) throw new Error("CUE TRACK without FILE");
-      const fileName = file;
-      if (tracks.some((t) => t.file.toLowerCase() === fileName.toLowerCase()))
-        throw new Error("Use the multi-file CUE/BIN dump (one BIN per track)");
       tracks.push({
         number: Number(match[1]),
         index: -1,
@@ -25,8 +22,14 @@ export function parseCue(text: string): CueTrack[] {
     } else if ((match = /^INDEX (00|01) (\d+):(\d+):(\d+)$/i.exec(line))) {
       if (!tracks.length || Number(match[3]) >= 60 || Number(match[4]) >= 75)
         throw new Error("Invalid CUE INDEX");
-      if (match[1] === "01")
-        tracks.at(-1)!.index = (Number(match[2]) * 60 + Number(match[3])) * 75 + Number(match[4]);
+      const index = (Number(match[2]) * 60 + Number(match[3])) * 75 + Number(match[4]);
+      if (match[1] === "01") tracks.at(-1)!.index = index;
+      else tracks.at(-1)!.index0 = index;
+    } else if ((match = /^PREGAP (\d+):([0-5]\d):([0-6]\d|7[0-4])$/i.exec(line))) {
+      if (!tracks.length) throw new Error("CUE metadata without TRACK");
+      tracks.at(-1)!.pregap = (Number(match[1]) * 60 + Number(match[2])) * 75 + Number(match[3]);
+    } else if (/^ISRC \S+$/i.test(line)) {
+      if (!tracks.length) throw new Error("CUE metadata without TRACK");
     } else throw new Error(`Unsupported CUE directive: ${line}`);
   }
   if (!tracks.length || tracks.length > 99) throw new Error("Invalid CUE track count");
@@ -35,7 +38,8 @@ export function parseCue(text: string): CueTrack[] {
       track.number !== i + 1 ||
       track.audio !== i > 0 ||
       !Number.isSafeInteger(track.index) ||
-      track.index < 0
+      track.index < 0 ||
+      (track.index0 !== undefined && track.index0 > track.index)
     )
       throw new Error("Expected one data track, then consecutive audio tracks with INDEX 01");
   });
@@ -52,6 +56,14 @@ export async function discTracks(
   if (cues.length) {
     if (cues[0]!.size > 65536) throw new Error("CUE file is too large");
     tracks = parseCue(new TextDecoder().decode(await cues[0]!.read(0, cues[0]!.size)));
+    if (tracks.some((track) => track.pregap))
+      throw new Error(
+        "Playback does not support synthetic CUE pregaps; resources can still be inspected.",
+      );
+    if (new Set(tracks.map((t) => fileKey(t.file))).size !== tracks.length)
+      throw new Error(
+        "Playback needs one BIN per track; this single-BIN disc can still be inspected in Resources.",
+      );
   } else {
     const bins = [...sources.values()].filter((f) => /\.bin$/i.test(f.name));
     if (bins.length !== 1)

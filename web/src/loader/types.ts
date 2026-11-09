@@ -15,6 +15,8 @@ export interface CueTrack {
   audio: boolean;
   file: string;
   index: number;
+  index0?: number;
+  pregap?: number;
 }
 
 export interface DiscTrack extends CueTrack {

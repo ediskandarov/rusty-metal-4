@@ -4,6 +4,8 @@ import type { DiscSources } from "./loader/types.ts";
 import { prepareIsolation } from "./runtime/isolation.ts";
 import { startGame } from "./runtime/start.ts";
 import { element } from "./ui/dom.ts";
+import { initializePopups } from "./ui/popups.ts";
+import { initializeResources } from "./ui/resources.ts";
 
 const startup = element("startup", HTMLElement);
 const progress = element("startup-progress", HTMLElement);
@@ -11,6 +13,8 @@ const warnings = element("startup-warnings", HTMLElement);
 const picker = element("disc-files", HTMLInputElement);
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
+initializePopups();
+const resources = initializeResources();
 let starting = false;
 let runtimeStarted = false;
 
@@ -27,6 +31,7 @@ async function launch(resolveSources: () => DiscSources) {
   picker.disabled = folderPicker.disabled = true;
   try {
     const sources = resolveSources();
+    await resources.inspect(sources);
     if (!crossOriginIsolated)
       throw new Error("This page needs cross-origin isolation headers to run the game.");
     const assets = await loadDisc(sources, {

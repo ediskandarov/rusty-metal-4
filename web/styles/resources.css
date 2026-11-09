@@ -1,0 +1,94 @@
+#resource-panel {
+  width: min(390px, calc(100vw - 24px));
+  background: #111820;
+}
+#resource-panel label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+#resource-panel > p {
+  margin: 8px 0;
+  color: #aebbc9;
+}
+#resource-summary,
+#resource-notices {
+  white-space: pre-line;
+}
+#resource-notices {
+  color: #edc878 !important;
+}
+#resource-search {
+  width: 100%;
+  padding: 8px;
+  margin: 10px 0;
+}
+#resource-panel input,
+#resource-panel button {
+  font: inherit;
+}
+#resource-panel button {
+  padding: 5px 9px;
+  cursor: pointer;
+}
+#resource-progress {
+  display: block;
+  width: 100%;
+  margin: 10px 0;
+  accent-color: #83c9a3;
+}
+#resource-filters {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.resource-group {
+  margin-top: 12px;
+}
+.resource-group > summary {
+  padding: 5px 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+.resource-row {
+  border-top: 1px solid #2c3541;
+  padding: 7px 0;
+}
+.resource-row > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.resource-row strong {
+  font-family: ui-monospace, monospace;
+}
+.resource-row span {
+  display: block;
+  font-size: 12px;
+  color: #9eacbd;
+}
+.resource-row .resource-state {
+  color: #aebbc9;
+}
+.resource-row[data-status="original"] .resource-state {
+  color: #83c9a3;
+}
+.resource-row[data-status="modified"] .resource-state,
+.resource-row[data-status="unknown"] .resource-state {
+  color: #edc878;
+}
+.resource-row[data-status="error"] .resource-state,
+.resource-row[data-status="missing"] .resource-state {
+  color: #f39a9a;
+}
+.resource-row pre {
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #aebbc9;
+}
+@media (min-width: 850px) {
+  body:has(#resources[open]:not([hidden])) #startup {
+    padding-right: 430px;
+  }
+}

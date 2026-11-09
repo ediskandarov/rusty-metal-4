@@ -100,7 +100,8 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
   const rendering = element("render-settings", HTMLDetailsElement);
   const cheats = element("cheat-settings", HTMLDetailsElement);
   const input = element("input-settings", HTMLDetailsElement);
-  const panels = [rendering, cheats, input];
+  const resources = element("resources", HTMLDetailsElement);
+  const panels = [rendering, cheats, input, resources];
   const closePanels = () => {
     for (const panel of panels) panel.open = false;
   };
@@ -117,6 +118,7 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
   initializeInputSettings(module, toolbar, input, canvas);
   initializeCheats(module, cheats);
   input.hidden = false;
+  rendering.hidden = false;
   toolbar.hidden = false;
   const settings = [
     selectSetting("render-scale", module._WebSetRenderScale, 0),

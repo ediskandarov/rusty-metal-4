@@ -1,7 +1,8 @@
 {
   "executable": {
     "name": "SCUS_945.60",
-    "sha256": "a449ad01f9a4b1fe3d0a9182cd63dc3a174fcb63971e5e73e7412e34c6532be5"
+    "sha256": "a449ad01f9a4b1fe3d0a9182cd63dc3a174fcb63971e5e73e7412e34c6532be5",
+    "size": 303104
   },
   "files": [
     {

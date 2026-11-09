@@ -27,7 +27,7 @@ export class Disc {
       options,
     );
   }
-  async read(lba: number, size: number) {
+  async read(lba: number, size: number, options?: ReadOptions) {
     const output = new Uint8Array(size);
     // Read contiguous chunks: HTTP ranges and local File slices use the same path.
     for (let first = 0; first < sectorCount(size); first += 512) {
@@ -35,6 +35,7 @@ export class Disc {
       const bytes = await this.source.read(
         (this.index + lba + first) * RAW_SECTOR,
         count * RAW_SECTOR,
+        options,
       );
       for (let i = 0; i < count; i++) {
         const sector = bytes.subarray(i * RAW_SECTOR, (i + 1) * RAW_SECTOR);

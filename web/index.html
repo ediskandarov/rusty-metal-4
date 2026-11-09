@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="styles/main.css" />
     <link rel="stylesheet" href="styles/controls.css" />
     <link rel="stylesheet" href="styles/startup.css" />
+    <link rel="stylesheet" href="styles/resources.css" />
   </head>
   <body>
     <section id="startup" aria-live="polite">
@@ -41,166 +42,187 @@
       <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
       <div id="status">Loading…</div>
       <output id="fps-counter" hidden aria-label="Rendered frames per second"></output>
-      <div id="video-controls" hidden>
-        <details id="render-settings">
-          <summary>Rendering</summary>
-          <div id="render-panel" class="settings-panel">
-            <label
-              >Scale
-              <select id="render-scale" aria-label="Rendering resolution">
-                <option value="0" selected>Auto</option>
-                <option value="1">1×</option>
-                <option value="2">2×</option>
-                <option value="3">3×</option>
-                <option value="4">4×</option>
-                <option value="5">5×</option>
-                <option value="6">6×</option>
-                <option value="7">7×</option>
-                <option value="8">8×</option>
-              </select>
-            </label>
-            <p>
-              Auto fits the rendering scale to the window and display pixel density. Textures retain
-              their original detail.
-            </p>
-            <label
-              >Stabilize 3D vertices <input id="subpixel-vertices" type="checkbox" checked
-            /></label>
-            <p>Retains fractional vertex positions to reduce polygon jitter.</p>
-            <label>Interpolate motion <input id="render-interpolation" type="checkbox" /></label>
-            <p>
-              Smooths car and camera motion in one- and two-player matches with a short display
-              delay.
-            </p>
-            <label
-              >Perspective-correct textures
-              <input id="perspective-textures" type="checkbox" checked
-            /></label>
-            <p>Reduces texture warping on 3D surfaces.</p>
-            <label
-              >Car LOD distance
-              <select id="car-lod-distance">
-                <option value="1" selected>1× — Original</option>
-                <option value="2">2×</option>
-                <option value="4">4×</option>
-                <option value="8">8×</option>
-              </select>
-            </label>
-            <p>Keeps detailed car models farther away. Higher values draw more polygons.</p>
-            <label
-              >World draw distance
-              <select id="draw-distance">
-                <option value="1" selected>1× — Original</option>
-                <option value="2">2×</option>
-                <option value="4">4×</option>
-                <option value="8">8×</option>
-              </select>
-            </label>
-            <p>Extends detailed scenery and its polygon budget. Higher values cost performance.</p>
-            <label
-              >Dithering
-              <select id="render-dithering">
-                <option value="0">Game default</option>
-                <option value="1">Off</option>
-              </select>
-            </label>
-            <p>Disabling the PS1 grain can reveal color banding.</p>
-            <label
-              >Frame timing
-              <select id="render-vsync" aria-describedby="render-timing-note">
-                <option value="1">Display sync</option>
-                <option value="2" selected>PS1 timing</option>
-                <option value="3">Uncapped</option>
-              </select>
-            </label>
-            <p id="render-timing-note">
-              PsyZ setting; browser frame scheduling still takes precedence in this web build.
-            </p>
-            <label>Show FPS <input id="render-fps" type="checkbox" /></label>
-            <p>Presented frames per second, averaged over the last half-second.</p>
-            <button id="render-reset" type="button">Restore defaults</button>
-          </div>
-        </details>
-        <details id="input-settings" hidden>
-          <summary>Controls</summary>
-          <div id="input-panel" class="settings-panel">
-            <header>
-              <label for="input-player">Player</label>
-              <select id="input-player">
-                <option value="0">Player 1</option>
-                <option value="1">Player 2</option>
-                <option value="2">Player 3</option>
-                <option value="3">Player 4</option>
-              </select>
-              <button id="input-close" type="button">Close</button>
-            </header>
-            <p id="input-device"></p>
-            <p>
-              Select an input below to change it. To change what a PlayStation button does while
-              driving, open Player Settings in the game.
-            </p>
-            <div class="input-controller">
-              <svg viewBox="0 0 400 184" aria-hidden="true">
-                <path
-                  class="controller-seam"
-                  d="M48 33 V16 Q48 6 57 6 H75 Q84 6 84 16 V33 Z
+    </main>
+    <div id="video-controls" hidden>
+      <details id="render-settings" hidden>
+        <summary>Rendering</summary>
+        <div id="render-panel" class="settings-panel">
+          <label
+            >Scale
+            <select id="render-scale" aria-label="Rendering resolution">
+              <option value="0" selected>Auto</option>
+              <option value="1">1×</option>
+              <option value="2">2×</option>
+              <option value="3">3×</option>
+              <option value="4">4×</option>
+              <option value="5">5×</option>
+              <option value="6">6×</option>
+              <option value="7">7×</option>
+              <option value="8">8×</option>
+            </select>
+          </label>
+          <p>
+            Auto fits the rendering scale to the window and display pixel density. Textures retain
+            their original detail.
+          </p>
+          <label
+            >Stabilize 3D vertices <input id="subpixel-vertices" type="checkbox" checked
+          /></label>
+          <p>Retains fractional vertex positions to reduce polygon jitter.</p>
+          <label>Interpolate motion <input id="render-interpolation" type="checkbox" /></label>
+          <p>
+            Smooths car and camera motion in one- and two-player matches with a short display delay.
+          </p>
+          <label
+            >Perspective-correct textures <input id="perspective-textures" type="checkbox" checked
+          /></label>
+          <p>Reduces texture warping on 3D surfaces.</p>
+          <label
+            >Car LOD distance
+            <select id="car-lod-distance">
+              <option value="1" selected>1× — Original</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="8">8×</option>
+            </select>
+          </label>
+          <p>Keeps detailed car models farther away. Higher values draw more polygons.</p>
+          <label
+            >World draw distance
+            <select id="draw-distance">
+              <option value="1" selected>1× — Original</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+              <option value="8">8×</option>
+            </select>
+          </label>
+          <p>Extends detailed scenery and its polygon budget. Higher values cost performance.</p>
+          <label
+            >Dithering
+            <select id="render-dithering">
+              <option value="0">Game default</option>
+              <option value="1">Off</option>
+            </select>
+          </label>
+          <p>Disabling the PS1 grain can reveal color banding.</p>
+          <label
+            >Frame timing
+            <select id="render-vsync" aria-describedby="render-timing-note">
+              <option value="1">Display sync</option>
+              <option value="2" selected>PS1 timing</option>
+              <option value="3">Uncapped</option>
+            </select>
+          </label>
+          <p id="render-timing-note">
+            PsyZ setting; browser frame scheduling still takes precedence in this web build.
+          </p>
+          <label>Show FPS <input id="render-fps" type="checkbox" /></label>
+          <p>Presented frames per second, averaged over the last half-second.</p>
+          <button id="render-reset" type="button">Restore defaults</button>
+        </div>
+      </details>
+      <details id="input-settings" hidden>
+        <summary>Controls</summary>
+        <div id="input-panel" class="settings-panel">
+          <header>
+            <label for="input-player">Player</label>
+            <select id="input-player">
+              <option value="0">Player 1</option>
+              <option value="1">Player 2</option>
+              <option value="2">Player 3</option>
+              <option value="3">Player 4</option>
+            </select>
+            <button id="input-close" type="button">Close</button>
+          </header>
+          <p id="input-device"></p>
+          <p>
+            Select an input below to change it. To change what a PlayStation button does while
+            driving, open Player Settings in the game.
+          </p>
+          <div class="input-controller">
+            <svg viewBox="0 0 400 184" aria-hidden="true">
+              <path
+                class="controller-seam"
+                d="M48 33 V16 Q48 6 57 6 H75 Q84 6 84 16 V33 Z
                 M316 33 V16 Q316 6 325 6 H343 Q352 6 352 16 V33 Z"
-                />
-                <path
-                  class="controller-shell"
-                  d="M54 36 Q34 38 27 60 L8 144 Q1 174 21 179
+              />
+              <path
+                class="controller-shell"
+                d="M54 36 Q34 38 27 60 L8 144 Q1 174 21 179
                 Q40 185 56 162 L92 121 Q102 112 111 116 Q128 152 150 149
                 Q167 149 182 133 H218 Q233 149 250 149 Q272 152 289 116
                 Q298 112 308 121 L344 162 Q360 185 379 179 Q399 174 392 144
                 L373 60 Q366 38 346 36 Z"
-                />
-                <path
-                  class="controller-seam"
-                  d="M53 37 H347 M174 133 H226
+              />
+              <path
+                class="controller-seam"
+                d="M53 37 H347 M174 133 H226
                 M62 67 H88 V81 H102 V105 H88 V119 H62 V105 H48 V81 H62 Z"
-                />
-                <circle cx="325" cy="92" r="42" class="controller-seam" />
-                <circle cx="149" cy="114" r="25" class="controller-seam" />
-                <circle cx="251" cy="114" r="25" class="controller-seam" />
-              </svg>
-            </div>
-            <div id="input-capture" hidden>
-              <span id="input-capture-prompt"></span>
-              <button id="input-cancel" type="button">Cancel</button>
-            </div>
-            <p id="input-message" role="status"></p>
-            <div id="input-map"></div>
-            <p id="input-sticks" hidden>
-              Sticks keep the game’s analog controls. Triggers can be assigned as buttons.
-            </p>
-            <button id="input-reset" type="button">Restore all input defaults</button>
+              />
+              <circle cx="325" cy="92" r="42" class="controller-seam" />
+              <circle cx="149" cy="114" r="25" class="controller-seam" />
+              <circle cx="251" cy="114" r="25" class="controller-seam" />
+            </svg>
           </div>
-        </details>
-        <details id="cheat-settings" hidden>
-          <summary>Cheats</summary>
-          <div id="cheat-panel" class="settings-panel">
-            <p>Original game cheats. Changes made while paused apply after resuming.</p>
-            <label title="Original protection; lethal hits can still kill."
-              >God mode <input type="checkbox" data-cheat="16"
-            /></label>
-            <label>Stronger projectile knockback <input type="checkbox" data-cheat="8" /></label>
-            <label>Unlock all cars <input type="checkbox" data-cheat="21" /></label>
-            <h3>Next match</h3>
-            <p>Choose before loading a match. Disabling does not undo changes already applied.</p>
-            <label>Start with 99 ammo <input type="checkbox" data-cheat="1" /></label>
-            <label>Start with 99 freeze shots <input type="checkbox" data-cheat="2" /></label>
-            <label>Start with 99 massive shots <input type="checkbox" data-cheat="3" /></label>
-            <label>Improved homing <input type="checkbox" data-cheat="4" /></label>
-            <label>Faster special recharge <input type="checkbox" data-cheat="5" /></label>
-            <label>Faster projectiles <input type="checkbox" data-cheat="6" /></label>
-            <label>Enemies focus on players <input type="checkbox" data-cheat="7" /></label>
-            <label>Stronger power missiles <input type="checkbox" data-cheat="9" /></label>
-            <label>Low traction <input type="checkbox" data-cheat="15" /></label>
-            <button id="cheat-reset" type="button">Disable cheats</button>
+          <div id="input-capture" hidden>
+            <span id="input-capture-prompt"></span>
+            <button id="input-cancel" type="button">Cancel</button>
           </div>
-        </details>
-      </div>
-    </main>
+          <p id="input-message" role="status"></p>
+          <div id="input-map"></div>
+          <p id="input-sticks" hidden>
+            Sticks keep the game’s analog controls. Triggers can be assigned as buttons.
+          </p>
+          <button id="input-reset" type="button">Restore all input defaults</button>
+        </div>
+      </details>
+      <details id="cheat-settings" hidden>
+        <summary>Cheats</summary>
+        <div id="cheat-panel" class="settings-panel">
+          <p>Original game cheats. Changes made while paused apply after resuming.</p>
+          <label title="Original protection; lethal hits can still kill."
+            >God mode <input type="checkbox" data-cheat="16"
+          /></label>
+          <label>Stronger projectile knockback <input type="checkbox" data-cheat="8" /></label>
+          <label>Unlock all cars <input type="checkbox" data-cheat="21" /></label>
+          <h3>Next match</h3>
+          <p>Choose before loading a match. Disabling does not undo changes already applied.</p>
+          <label>Start with 99 ammo <input type="checkbox" data-cheat="1" /></label>
+          <label>Start with 99 freeze shots <input type="checkbox" data-cheat="2" /></label>
+          <label>Start with 99 massive shots <input type="checkbox" data-cheat="3" /></label>
+          <label>Improved homing <input type="checkbox" data-cheat="4" /></label>
+          <label>Faster special recharge <input type="checkbox" data-cheat="5" /></label>
+          <label>Faster projectiles <input type="checkbox" data-cheat="6" /></label>
+          <label>Enemies focus on players <input type="checkbox" data-cheat="7" /></label>
+          <label>Stronger power missiles <input type="checkbox" data-cheat="9" /></label>
+          <label>Low traction <input type="checkbox" data-cheat="15" /></label>
+          <button id="cheat-reset" type="button">Disable cheats</button>
+        </div>
+      </details>
+      <details id="resources" hidden>
+        <summary>Resources</summary>
+        <aside id="resource-panel" class="settings-panel" aria-label="Disc resources">
+          <p id="resource-summary" role="status"></p>
+          <progress id="resource-progress" aria-label="Resource checks"></progress>
+          <p>
+            Original means an exact SHA-256 match. Modified files may still work; their
+            compatibility is unknown. Missing optional resources do not block startup.
+          </p>
+          <p id="resource-notices"></p>
+          <input
+            id="resource-search"
+            type="search"
+            placeholder="Find a resource…"
+            aria-label="Find a resource"
+          />
+          <div id="resource-filters">
+            <label><input id="resource-issues" type="checkbox" /> Differences only</label>
+            <button id="resource-check" type="button" disabled>Pause checks</button>
+          </div>
+          <div id="resource-list"></div>
+        </aside>
+      </details>
+    </div>
     <script type="module" src="web.js"></script>
   </body>
 </html>
