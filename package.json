@@ -6,6 +6,7 @@
     "build": "bun tools/build.js",
     "build:dev": "bun tools/build.js --dev",
     "dev": "bun tools/serve.js",
+    "match": "bun tools/network/run.ts",
     "test": "bun test tests/unit",
     "fmt": "bun fmt --no-script tools web tests package.json config tsconfig.json bunfig.toml",
     "fmt:check": "bun fmt --no-script --check tools web tests package.json config tsconfig.json bunfig.toml",

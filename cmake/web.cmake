@@ -194,6 +194,7 @@ add_executable(tm4_web
     "${TM4_WEB}/interpolation.c"
     "${TM4_WEB}/subpixel.c"
     "${TM4_WEB}/level.c"
+    "${TM4_WEB}/net_match.c"
     "${TM4_WEB}/car.c"
     "${TM4_WEB}/menu_runtime.c"
     "${TM4_WEB}/car_exports.c"

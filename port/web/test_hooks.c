@@ -215,6 +215,21 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceWeaponTarget(s32 distance)
     return test_weapon_target->health;
 }
 
+/* Use ordinary weapon impacts to finish a network test round. */
+EMSCRIPTEN_KEEPALIVE s32 WebTestPrepareNetworkDuel(s32 distance)
+{
+    if (WebTestPlaceWeaponTarget(distance) <= 0)
+        return 0;
+    test_weapon_target->health = 1;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestNetworkCarContact(void)
+{
+    Car* player = GameInfo.players[0].car;
+    return player && player->collision_history != NULL;
+}
+
 /* Keep radial-wave targets on the player's floor and outside walls or ledges. */
 EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceRadialWeaponTarget(s32 distance)
 {

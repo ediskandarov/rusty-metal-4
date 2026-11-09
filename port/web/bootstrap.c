@@ -4,6 +4,7 @@
 #include "loading.h"
 #include "movie.h"
 #include "music.h"
+#include "net_match.h"
 #include "overlays.h"
 #include "render_sync.h"
 #include "subpixel.h"
@@ -369,7 +370,7 @@ static void browser_frame(void)
         WebMovieFrame();
     else if (WebLevelActive())
         WebLevelFrame();
-    else {
+    else if (!WebNetMatchStartPending()) {
         static double next_frame;
         double now = emscripten_get_now();
         if (now >= next_frame) {

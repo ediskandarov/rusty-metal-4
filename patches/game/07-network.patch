@@ -1,0 +1,33 @@
+diff --git a/src/main/game.c b/src/main/game.c
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -541,7 +541,7 @@
+     ++game->car_count;
+     if (car->index < game->player_car_count) {
+         ++game->active_player_count;
+-        if (car->controller_index < GameInfo.player_count) {
++        if (game->players[car->controller_index].camera) {
+             CameraSetObjectFunction* attach;
+             game->players[car->controller_index].car = car;
+             attach = OSSymbolGetAddressAssert(GAME_CAMERA_SET_OBJECT);
+@@ -564,8 +564,9 @@
+     }
+     if (GameInfo.cars[index] != car)
+         return;
+-    for (player = 0; player < GameInfo.player_count; ++player) {
+-        if (car == GameInfo.players[player].camera->object) {
++    for (player = 0; player < ArrayCount(GameInfo.players); ++player) {
++        Camera* camera = GameInfo.players[player].camera;
++        if (camera && car == camera->object) {
+             CameraSetObjectFunction* attach;
+             if (!player && GameInfo.mode == GAME_MODE_DEMO) {
+                 attach = OSSymbolGetAddressAssert(GAME_CAMERA_SET_OBJECT);
+@@ -585,7 +586,7 @@
+     --GameInfo.car_count;
+     if (car->index < GameInfo.player_car_count) {
+         --GameInfo.active_player_count;
+-        if (car->controller_index < GameInfo.player_count) {
++        if (GameInfo.players[car->controller_index].camera) {
+             CameraSetObjectFunction* attach;
+             if (GameInfo.mode == GAME_MODE_DEMO) {
+                 GameInfo.players[0].car = GameInfo.cars[0];

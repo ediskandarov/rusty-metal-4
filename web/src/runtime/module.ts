@@ -1,6 +1,7 @@
 import type { DiscAssets } from "../loader/types.ts";
+import type { NetworkEngine } from "../network/protocol.ts";
 
-export interface GameExports {
+export interface GameExports extends NetworkEngine {
   _WebSetRenderScale(this: void, value: number): void;
   _WebSetCarLodDistance(this: void, value: number): void;
   _WebSetDrawDistance(this: void, value: number): void;
