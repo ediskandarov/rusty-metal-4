@@ -8,7 +8,7 @@ interface DiscRecord {
 export interface DiscEntry extends DiscRecord {
   path: string;
 }
-import { RAW_SECTOR } from "./cue.ts";
+import { RAW_SECTOR } from "./tracks.ts";
 export const DATA_SECTOR = 2048;
 const decoder = new TextDecoder("ascii", { fatal: true });
 const sectorCount = (size: number) => Math.ceil(size / DATA_SECTOR);

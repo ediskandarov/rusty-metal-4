@@ -10,7 +10,7 @@ export interface DiscSource {
 
 export type DiscSources = Map<string, DiscSource>;
 
-export interface CueTrack {
+export interface TrackLayout {
   number: number;
   audio: boolean;
   file: string;
@@ -19,7 +19,7 @@ export interface CueTrack {
   pregap?: number;
 }
 
-export interface DiscTrack extends CueTrack {
+export interface DiscTrack extends TrackLayout {
   source: DiscSource | undefined;
   start: number;
   end: number;
@@ -28,7 +28,7 @@ export interface DiscTrack extends CueTrack {
 
 export interface DiscReference {
   executable: { name: string; sha256: string };
-  tracks: (CueTrack & { size: number })[];
+  tracks: (TrackLayout & { size: number })[];
 }
 
 export interface DiscAssets {

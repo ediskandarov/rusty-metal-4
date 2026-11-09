@@ -1,7 +1,7 @@
 import reference from "../../../config/disc.json";
 import { checkResource, requireResources, resourceReference } from "../compatibility/index.ts";
-import { discTracks } from "./cue.ts";
 import { Disc } from "./disc.ts";
+import { discTracks } from "./tracks.ts";
 import type { DiscAssets, DiscSources, LoaderProgress } from "./types.ts";
 export async function loadDisc(
   sources: DiscSources,

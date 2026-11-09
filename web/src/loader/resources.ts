@@ -1,8 +1,8 @@
 import discReference from "../../../config/disc.json";
 import type { ResourceCandidate } from "../compatibility/index.ts";
-import { discTracks, RAW_SECTOR } from "./cue.ts";
 import { Disc } from "./disc.ts";
 import { checkRange } from "./sources.ts";
+import { discTracks, RAW_SECTOR } from "./tracks.ts";
 import type { DiscSource, DiscSources } from "./types.ts";
 
 const maxResourceBytes = 128 * 1024 * 1024;

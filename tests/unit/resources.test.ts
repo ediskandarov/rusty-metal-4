@@ -4,8 +4,9 @@ import reference from "../../config/disc.json";
 import resources from "../../config/resources.json";
 import { checkResources, resourceRows, sha256 } from "../../web/src/compatibility/index.ts";
 import type { ResourceCandidate } from "../../web/src/compatibility/index.ts";
-import { discTracks, parseCue } from "../../web/src/loader/cue.ts";
+import { parseCue } from "../../web/src/loader/cue.ts";
 import { localSources } from "../../web/src/loader/sources.ts";
+import { discTracks } from "../../web/src/loader/tracks.ts";
 
 const bytes = new Uint8Array([1, 2, 3]);
 const candidate = (id: string): ResourceCandidate => ({

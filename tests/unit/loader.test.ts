@@ -2,9 +2,10 @@ import { expect, test } from "bun:test";
 
 import reference from "../../config/disc.json";
 import { byteRange, serveFile } from "../../tools/server/files.js";
-import { discTracks, parseCue } from "../../web/src/loader/cue.ts";
+import { parseCue } from "../../web/src/loader/cue.ts";
 import { Disc } from "../../web/src/loader/disc.ts";
 import { checkRange, directorySources, localSources } from "../../web/src/loader/sources.ts";
+import { discTracks } from "../../web/src/loader/tracks.ts";
 
 const cue =
   'FILE "data.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\nFILE "audio.bin" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:02:00\n';
@@ -48,7 +49,7 @@ test("folder selection ignores unrelated files and rejects ambiguous filenames",
   const sources = directorySources([artwork, cueFile, track]);
   expect([...sources.keys()]).toEqual(["disc.cue", "data.bin"]);
   expect([...(await sources.get("data.bin")!.read(0, 3))]).toEqual([1, 2, 3]);
-  expect(() => directorySources([artwork])).toThrow("No CUE or BIN");
+  expect(() => directorySources([artwork])).toThrow("No CUE, BIN, CCD or IMG");
   expect(() => directorySources([track, new File([], "data.bin")])).toThrow("Duplicate");
   await expect(
     discTracks(directorySources([cueFile, new File([cue], "second.cue")]), reference, () => {}),

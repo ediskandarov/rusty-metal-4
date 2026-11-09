@@ -76,8 +76,8 @@ export function localSources(files: Iterable<File>) {
   );
 }
 export function directorySources(files: Iterable<File>) {
-  const tracks = [...files].filter((file) => /\.(cue|bin)$/i.test(file.name));
-  if (!tracks.length) throw new Error("No CUE or BIN files found in this folder");
+  const tracks = [...files].filter((file) => /\.(cue|bin|ccd|img|sub)$/i.test(file.name));
+  if (!tracks.length) throw new Error("No CUE, BIN, CCD or IMG files found in this folder");
   return localSources(tracks);
 }
 export async function remoteSources(url: string, { signal }: ReadOptions = {}) {

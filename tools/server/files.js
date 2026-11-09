@@ -59,9 +59,11 @@ export async function inspectDisc(directory, reference) {
   const root = await realpath(directory);
   const files = [];
   const warnings = [];
-  const names = (await readdir(root)).filter((name) => /\.(cue|bin)$/i.test(name)).sort();
-  if (!names.some((name) => /\.bin$/i.test(name)))
-    throw new Error("No BIN files in the disc directory");
+  const names = (await readdir(root))
+    .filter((name) => /\.(cue|bin|ccd|img|sub)$/i.test(name))
+    .sort();
+  if (!names.some((name) => /\.(bin|img)$/i.test(name)))
+    throw new Error("No BIN or IMG files in the disc directory");
   for (const name of names) {
     const path = await realpath(resolve(root, name));
     if (relative(root, path).startsWith(".."))
