@@ -1,0 +1,123 @@
+diff --git a/src/modules/anim/display.c b/src/modules/anim/display.c
+--- a/src/modules/anim/display.c
++++ b/src/modules/anim/display.c
+@@ -71,9 +71,12 @@
+             continue;
+         if (object->parts[i].texture_elapsed_frames == ANIM_TEXTURE_FINISHED)
+             continue;
++        s32 width = object->parts[i].width, height = object->parts[i].height;
++#ifdef __psyz
++        WebInterpolationAnimSize(object, i, &width, &height);
++#endif
+         AnimBuildQuad(billboard_vertices, &object->parts[i].billboard_offset.vector,
+-            object->type->parts[i].roll_angle, object->parts[i].width, object->parts[i].height,
+-            object->type->center);
++            object->type->parts[i].roll_angle, width, height, object->type->center);
+         DisplayAnimCard(billboard_vertices,
+             object->type->parts[i].animation->textures[object->parts[i].texture_frame],
+             object->type->parts[i].color->packed, object->type->parts[i].blend, ordering, output,
+diff --git a/src/modules/tele/tele.c b/src/modules/tele/tele.c
+--- a/src/modules/tele/tele.c
++++ b/src/modules/tele/tele.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4/gpu_packet.h"
+ #include "tm4_scalar.h"
+@@ -172,7 +175,7 @@
+     }
+ }
+ 
+-void TeleBuildQuad(SVECTOR*, Teleporter*);
++void TeleBuildQuad(SVECTOR*, s32);
+ void TeleporterDisplay(void* payload, Tm4OrderingTag* ordering, u8** buffer, u8* end, MATRIX* view)
+ {
+     Teleporter* object = payload;
+@@ -190,7 +193,11 @@
+         RotTrans(&entrance_world, (VECTOR*)object->billboard_to_camera.t, &flag);
+         SetRotMatrix(&object->billboard_to_camera);
+         SetTransMatrix(&object->billboard_to_camera);
+-        TeleBuildQuad(billboard_vertices, object);
++        s32 size = object->billboard_size;
++#ifdef __psyz
++        size = WebInterpolationPortalSize(object, size);
++#endif
++        TeleBuildQuad(billboard_vertices, size);
+         ot_depth = RotTransPers4(billboard_vertices, billboard_vertices + 1, billboard_vertices + 2,
+             billboard_vertices + 3, &((Tm4FlatTexturedPacket*)*buffer)->words.vertices[0].xy,
+             &((Tm4FlatTexturedPacket*)*buffer)->words.vertices[1].xy,
+@@ -218,16 +225,16 @@
+         PopMatrix();
+     }
+ }
+-void TeleBuildQuad(SVECTOR* vertices, Teleporter* object)
+-{
+-    vertices[0].vx = -object->billboard_size / 2;
+-    vertices[0].vy = -object->billboard_size / 2;
+-    vertices[1].vx = object->billboard_size / 2;
+-    vertices[1].vy = -object->billboard_size / 2;
+-    vertices[2].vx = -object->billboard_size / 2;
+-    vertices[2].vy = object->billboard_size / 2;
+-    vertices[3].vx = object->billboard_size / 2;
+-    vertices[3].vy = object->billboard_size / 2;
++void TeleBuildQuad(SVECTOR* vertices, s32 size)
++{
++    vertices[0].vx = -size / 2;
++    vertices[0].vy = -size / 2;
++    vertices[1].vx = size / 2;
++    vertices[1].vy = -size / 2;
++    vertices[2].vx = -size / 2;
++    vertices[2].vy = size / 2;
++    vertices[3].vx = size / 2;
++    vertices[3].vy = size / 2;
+     vertices[0].vz = vertices[1].vz = vertices[2].vz = vertices[3].vz = 0;
+ }
+ static void* TeleGetOrDefault(RegistryDirectory* registry, char* name, void* fallback)
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -635,8 +635,13 @@
+     s32 x, y, distanceSquared;
+ 
+     {
+-        s32 coordinateX = origin->transform.m[0][2];
+-        s32 coordinateZ = origin->transform.m[2][2];
++        MATRIX* transform = &origin->transform;
++#ifdef __psyz
++        MATRIX render_pose;
++        transform = WebInterpolationCarTransform(origin, &render_pose);
++#endif
++        s32 coordinateX = transform->m[0][2];
++        s32 coordinateZ = transform->m[2][2];
+         setVector(direction, coordinateX, 0, coordinateZ);
+     }
+     VectorNormalSS(direction, direction);
+@@ -661,6 +666,10 @@
+         originPosition.vx = coordinateX;
+         initialPosition->vz = coordinateZ;
+         initialPosition->vy = coordinateY;
++#ifdef __psyz
++        originPosition.pad = 0;
++        WebInterpolationCarPoint(origin, &originPosition, &originPosition);
++#endif
+     }
+     area_identifier = origin->ai.area->identifier;
+     for (index = 0; index < GameInfo.car_count; index++) {
+@@ -691,6 +700,13 @@
+             coordinateY = coordinates->vy;
+             coordinateZ = coordinates->vz;
+             setVector(target, coordinateX, coordinateY, coordinateZ);
++#ifdef __psyz
++            targetPosition.pad = 0;
++            WebInterpolationCarPoint(object, target, target);
++            coordinateX = target->vx;
++            coordinateY = target->vy;
++            coordinateZ = target->vz;
++#endif
+             positionX = originPosition.vx;
+             positionY = (u16)position->vy;
+             deltaX = coordinateX - positionX;

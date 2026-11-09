@@ -1,0 +1,232 @@
+diff --git a/src/modules/cars/auger/auger.c b/src/modules/cars/auger/auger.c
+--- a/src/modules/cars/auger/auger.c
++++ b/src/modules/cars/auger/auger.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+ 
+@@ -159,7 +162,11 @@
+     SVECTOR* center = &group->center.vector;
+     Tm4VectorXYZ* translation = (Tm4VectorXYZ*)rotation->t;
+     CopyVectorXYZ(translation, center);
++#ifdef __psyz
++    RotationMatrixZ(WebInterpolationCarAccessory(car, 0, drill->angle), rotation);
++#else
+     RotationMatrixZ(drill->angle, rotation);
++#endif
+     MulMatrix0(transform, rotation, &light);
+     SetLightMatrix(&light);
+     CompMatrix(&scratch->car_to_camera, rotation, rotation);
+diff --git a/src/modules/cars/c_slam/slam.c b/src/modules/cars/c_slam/slam.c
+--- a/src/modules/cars/c_slam/slam.c
++++ b/src/modules/cars/c_slam/slam.c
+@@ -1,6 +1,9 @@
+ 
+ #include "../particle_velocity.h"
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/fixed.h"
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+@@ -206,7 +209,11 @@
+     SVECTOR* center = &group->center.vector;
+     Tm4VectorXYZ* translation = (Tm4VectorXYZ*)rotation->t;
+     CopyVectorXYZ(translation, center);
++#ifdef __psyz
++    RotationMatrixX(WebInterpolationCarAccessory(car, 0, shovel->angle), rotation);
++#else
+     RotationMatrixX(shovel->angle, rotation);
++#endif
+     MulMatrix0(transform, rotation, &light);
+     SetLightMatrix(&light);
+     CompMatrix(&scratch->car_to_camera, rotation, rotation);
+diff --git a/src/modules/cars/c_trash/trash.c b/src/modules/cars/c_trash/trash.c
+--- a/src/modules/cars/c_trash/trash.c
++++ b/src/modules/cars/c_trash/trash.c
+@@ -1,6 +1,9 @@
+ 
+ #include "../particle_velocity.h"
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/fixed.h"
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+@@ -212,7 +215,11 @@
+     SVECTOR* center = &group->center.vector;
+     Tm4VectorXYZ* translation = (Tm4VectorXYZ*)rotation->t;
+     CopyVectorXYZ(translation, center);
++#ifdef __psyz
++    RotationMatrixX(WebInterpolationCarAccessory(car, 0, shovel->angle), rotation);
++#else
+     RotationMatrixX(shovel->angle, rotation);
++#endif
+     MulMatrix0(transform, rotation, &light);
+     SetLightMatrix(&light);
+     CompMatrix(&scratch->car_to_camera, rotation, rotation);
+diff --git a/src/modules/cars/c_toy/toy.c b/src/modules/cars/c_toy/toy.c
+--- a/src/modules/cars/c_toy/toy.c
++++ b/src/modules/cars/c_toy/toy.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+ 
+@@ -38,7 +41,11 @@
+     MATRIX* rotation = &scratch->group;
+     Tm4VectorXYZ* translation;
+     SVECTOR* center;
++#ifdef __psyz
++    AxisAngleToRotMatrix(ToyWindupAxis, WebInterpolationCarAccessory(car, 0, windup->angle), rotation);
++#else
+     AxisAngleToRotMatrix(ToyWindupAxis, windup->angle, rotation);
++#endif
+     translation = (Tm4VectorXYZ*)rotation->t;
+     center = &group->center.vector;
+     CopyVectorXYZ(translation, center);
+diff --git a/src/modules/cars/c_crush/crush.c b/src/modules/cars/c_crush/crush.c
+--- a/src/modules/cars/c_crush/crush.c
++++ b/src/modules/cars/c_crush/crush.c
+@@ -1,6 +1,9 @@
+ 
+ #include "../particle_velocity.h"
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+ 
+@@ -247,7 +250,11 @@
+     translation = (Tm4VectorXYZ*)rotation->t;
+     center = &group->center.vector;
+     CopyVectorXYZ(translation, center);
++#ifdef __psyz
++    RotationMatrixX(WebInterpolationCarAccessory(car, number == 5, angle), rotation);
++#else
+     RotationMatrixX(angle, rotation);
++#endif
+     MulMatrix0(transform, rotation, &light);
+     SetLightMatrix(&light);
+     CompMatrix(&scratch->car_to_camera, rotation, rotation);
+diff --git a/src/modules/ray/display.c b/src/modules/ray/display.c
+--- a/src/modules/ray/display.c
++++ b/src/modules/ray/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+@@ -16,7 +19,7 @@
+     MATRIX beam_to_camera;
+     MATRIX* transform;
+     SVECTOR *first, *second, *third, *fourth;
+-    s32 tip_z;
++    s32 tip_z, length = beam->length;
+     s32 i;
+     s32 width, negative, positive;
+     RayOrdering = ordering;
+@@ -27,7 +30,12 @@
+     width = beam->type->width;
+     PushMatrix();
+     transform = &beam_to_camera;
+-    CompMatrix(world_to_camera, &beam->beam_to_world, transform);
++    MATRIX* model = &beam->beam_to_world;
++#ifdef __psyz
++    MATRIX sample;
++    model = WebInterpolationRay(beam, model, &sample, &length);
++#endif
++    CompMatrix(world_to_camera, model, transform);
+     SetRotMatrix(transform);
+     SetTransMatrix(transform);
+     negative = -width / 2;
+@@ -38,16 +46,16 @@
+         second = &local_vertices[1];
+         if (i) {
+             SetShortVectorXYZ(first, negative, negative, 0);
+-            SetShortVectorXYZ(third, negative, negative, beam->length);
++            SetShortVectorXYZ(third, negative, negative, length);
+             SetShortVectorXYZ(second, positive, positive, 0);
+-            tip_z = beam->length;
++            tip_z = length;
+             fourth = &local_vertices[3];
+             SetShortVectorXYZ(fourth, positive, positive, tip_z);
+         } else {
+             SetShortVectorXYZ(first, negative, positive, 0);
+-            SetShortVectorXYZ(third, negative, positive, beam->length);
++            SetShortVectorXYZ(third, negative, positive, length);
+             SetShortVectorXYZ(second, positive, negative, 0);
+-            tip_z = beam->length;
++            tip_z = length;
+             fourth = &local_vertices[3];
+             SetShortVectorXYZ(fourth, positive, negative, tip_z);
+         }
+diff --git a/src/modules/lightn/display.c b/src/modules/lightn/display.c
+--- a/src/modules/lightn/display.c
++++ b/src/modules/lightn/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+@@ -37,26 +40,33 @@
+     SVECTOR vertices[4];
+     SVECTOR *first, *second, *third, *fourth;
+     s32 i;
+-    s32 point_offset;
++    MATRIX* model = &bolt->matrix;
++    SVECTOR* points = bolt->points;
++#ifdef __psyz
++    MATRIX render_model;
++    SVECTOR render_points[LIGHTNING_POINT_CAPACITY];
++    if (WebInterpolationLightning(bolt, &render_model, render_points)) {
++        model = &render_model;
++        points = render_points;
++    }
++#endif
+     PushMatrix();
+-    CompMatrix(camera, &bolt->matrix, &combined);
++    CompMatrix(camera, model, &combined);
+     SetRotMatrix(&combined);
+     SetTransMatrix(&combined);
+     LightningDrawContactSprite(
+-        type, &bolt->points[bolt->point_count - 1], ordering, output, end, camera);
++        type, &points[bolt->point_count - 1], ordering, output, end, camera);
+     for (i = 1; i < bolt->point_count; i++) {
+         first = &vertices[0];
+         second = &vertices[1];
+-        point_offset
+-            = i * (s32)sizeof(SVECTOR) + (s32)offsetof(Lightning, points) - (s32)sizeof(SVECTOR);
+-        CopyShortVectorXYZ(first, (SVECTOR*)((char*)bolt + point_offset));
++        CopyShortVectorXYZ(first, &points[i - 1]);
+         if (i == 1)
+             CopyShortVectorXYZ(second, &vertices[0]);
+         else
+             SetShortVectorXYZ(
+                 second, vertices[0].vx + type->thickness, vertices[0].vy, vertices[0].vz);
+         third = &vertices[2];
+-        SetShortVectorXYZ(third, bolt->points[i].vx, bolt->points[i].vy, bolt->points[i].vz);
++        SetShortVectorXYZ(third, points[i].vx, points[i].vy, points[i].vz);
+         fourth = &vertices[3];
+         SetShortVectorXYZ(fourth, vertices[2].vx + type->thickness, vertices[2].vy, vertices[2].vz);
+         DisplayAnimCard(

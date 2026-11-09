@@ -1,0 +1,28 @@
+diff --git a/src/modules/bullet/display.c b/src/modules/bullet/display.c
+--- a/src/modules/bullet/display.c
++++ b/src/modules/bullet/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+@@ -35,8 +38,15 @@
+         DR_TPAGE* mode;
+         long current_vertex_depth, previous_vertex_depth;
+         s32 ordering_depth, ordering_count;
++#ifdef __psyz
++        SVECTOR head, tail;
++        WebInterpolationBullet(object, &head, &tail);
++        gte_ldv0(&head);
++        gte_ldv1(&tail);
++#else
+         gte_ldv0(&object->current_world);
+         gte_ldv1(&object->previous_world);
++#endif
+         gte_rtpt();
+         mode = &packet->page;
+         *(unsigned long*)&line->r0 = 0x5264c8c8;

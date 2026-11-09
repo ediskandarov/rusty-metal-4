@@ -1,0 +1,31 @@
+diff --git a/src/modules/weap/display.c b/src/modules/weap/display.c
+--- a/src/modules/weap/display.c
++++ b/src/modules/weap/display.c
+@@ -28,6 +28,10 @@
+     s32 index, i;
+     u_long step;
+     Tm4CardTexture* texture;
++#ifdef __psyz
++    SVECTOR trail_tip[4];
++    int sample_tip = WebInterpolationTrailTip(projectile, trail_tip);
++#endif
+     memset(colors, 0, sizeof(colors));
+     index = projectile->trail_sample_index + 1;
+     texture = projectile->type->trail_texture;
+@@ -62,6 +66,16 @@
+         second_world[3].vx = projectile->trail_world[3][index].vx;
+         second_world[3].vy = projectile->trail_world[3][index].vy;
+         second_world[3].vz = projectile->trail_world[3][index].vz;
++#ifdef __psyz
++        /* The older ribbon samples stay fixed in world space. Its newest edge follows
++         * the flight phase even when the simulation advances the ring index. */
++        if (sample_tip && index == projectile->trail_sample_index) {
++            first_world[2] = trail_tip[0];
++            first_world[3] = trail_tip[1];
++            second_world[2] = trail_tip[2];
++            second_world[3] = trail_tip[3];
++        }
++#endif
+         colors[2] += step;
+         colors[3] = colors[2];
+         DisplayAnimCardG(second_world, texture, colors, 1, ordering, cursor, limit, 128);

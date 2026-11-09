@@ -110,6 +110,41 @@ function motionPairs(samples, predicate) {
     await page.locator("#render-settings summary").click();
     await page.locator("canvas").click();
     assert((await page.evaluate(() => Module._WebTestPlaceEnergyTarget(0))) > 0);
+    const gunMask = await page.evaluate(() => tm4Port.controlBindings[8]);
+    const keys = [
+      "w",
+      "e",
+      "q",
+      "r",
+      "s",
+      "d",
+      "x",
+      "z",
+      "Backspace",
+      "1",
+      "2",
+      "Enter",
+      "ArrowUp",
+      "ArrowRight",
+      "ArrowDown",
+      "ArrowLeft",
+    ];
+    const gun = keys[Math.log2(gunMask)];
+    assert(gun, "machine guns have one digital binding");
+    const impacts = await page.evaluate(() => tm4Port.bulletImpacts || 0);
+    await start();
+    await press(gun, 700);
+    await page.waitForFunction((impacts) => tm4Port.bulletImpacts > impacts, impacts);
+    await page.waitForTimeout(350);
+    const tracers = await stop();
+    verifyFlight(tracers, "bullet head");
+    verifyFlight(tracers, "bullet tail");
+    for (const shot of tracers.filter(
+      (sample) => sample.name.startsWith("bullet ") && sample.impact,
+    )) {
+      assert.deepEqual(shot.live, shot.render, "clipped tracer uses its impact segment");
+      assert.equal(shot.history, false);
+    }
     for (const [slot, name] of [
       [6, "Speed"],
       [7, "Rain"],

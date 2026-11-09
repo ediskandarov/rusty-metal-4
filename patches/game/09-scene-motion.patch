@@ -1,0 +1,631 @@
+diff --git a/src/modules/levels/w_neon/train.c b/src/modules/levels/w_neon/train.c
+--- a/src/modules/levels/w_neon/train.c
++++ b/src/modules/levels/w_neon/train.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+@@ -48,7 +51,13 @@
+ {
+     MATRIX local_to_camera;
+     PushMatrix();
++#ifdef __psyz
++    MATRIX render_pose;
++    CompMatrix(world_to_camera,
++        WebInterpolationSceneModel(object, &object->path.local_to_world, &render_pose), &local_to_camera);
++#else
+     CompMatrix(world_to_camera, &object->path.local_to_world, &local_to_camera);
++#endif
+     WorldObjectDisplay(TrainWorldInfo, orderingTable, cursor, end, &local_to_camera);
+     PopMatrix();
+ }
+diff --git a/src/modules/levels/w_carni/coaster.c b/src/modules/levels/w_carni/coaster.c
+--- a/src/modules/levels/w_carni/coaster.c
++++ b/src/modules/levels/w_carni/coaster.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+@@ -48,7 +51,13 @@
+ {
+     MATRIX local_to_camera;
+     PushMatrix();
++#ifdef __psyz
++    MATRIX render_pose;
++    CompMatrix(world_to_camera,
++        WebInterpolationSceneModel(object, &object->path.local_to_world, &render_pose), &local_to_camera);
++#else
+     CompMatrix(world_to_camera, &object->path.local_to_world, &local_to_camera);
++#endif
+     WorldObjectDisplay(CoasterWorldInfo, orderingTable, cursor, end, &local_to_camera);
+     PopMatrix();
+ }
+diff --git a/src/modules/carprt/display.c b/src/modules/carprt/display.c
+--- a/src/modules/carprt/display.c
++++ b/src/modules/carprt/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+@@ -63,7 +66,13 @@
+         return;
+     PushMatrix();
+     color = 0x60707f;
++#ifdef __psyz
++    MATRIX render_pose;
++    CompMatrix(world_to_camera,
++        WebInterpolationSceneModel(object, &object->local_to_world, &render_pose), &local_to_camera);
++#else
+     CompMatrix(world_to_camera, &object->local_to_world, &local_to_camera);
++#endif
+     WorldSetTransformMatrix(&local_to_camera, "$5");
+     gte_ldv0(&object->collision_origin);
+     gte_rtv0tr();
+diff --git a/src/modules/frag/display.c b/src/modules/frag/display.c
+--- a/src/modules/frag/display.c
++++ b/src/modules/frag/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+@@ -24,7 +27,13 @@
+         MATRIX local_to_camera;
+         long ordering_depth;
+         PushMatrix();
++#ifdef __psyz
++        MATRIX render_pose;
++        CompMatrix(world_to_camera,
++            WebInterpolationSceneModel(object, &object->local_to_world, &render_pose), &local_to_camera);
++#else
+         CompMatrix(world_to_camera, &object->local_to_world, &local_to_camera);
++#endif
+         SetRotMatrix(&local_to_camera);
+         SetTransMatrix(&local_to_camera);
+         gte_ldv3c(object->local_vertices);
+diff --git a/src/modules/levels/w_oil/helicopter.c b/src/modules/levels/w_oil/helicopter.c
+--- a/src/modules/levels/w_oil/helicopter.c
++++ b/src/modules/levels/w_oil/helicopter.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+@@ -134,11 +137,34 @@
+     MATRIX local_to_camera;
+     MATRIX blade_to_camera;
+     PushMatrix();
++#ifdef __psyz
++    MATRIX render_pose;
++    CompMatrix(world_to_camera,
++        WebInterpolationSceneModel(object, &object->path.local_to_world, &render_pose), &local_to_camera);
++#else
+     CompMatrix(world_to_camera, &object->path.local_to_world, &local_to_camera);
++#endif
+     WorldObjectDisplay(HelicopterWorldInfo, table, cursor, end, &local_to_camera);
+-    CompMatrix(&local_to_camera, &object->top_blade_rotation, &blade_to_camera);
++    MATRIX* top = &object->top_blade_rotation;
++    MATRIX* tail = &object->tail_blade_rotation;
++#ifdef __psyz
++    MATRIX top_pose, tail_pose;
++    s32 top_angle = object->top_blade_angle, tail_angle = object->tail_blade_angle;
++    WebInterpolationSceneRotors(object, &top_angle, &tail_angle);
++    if (top_angle != object->top_blade_angle) {
++        AnyAxisAngleToRotMatrix(&HelicopterBladeTopCenter, &HelicopterBladeTopAxis,
++            top_angle, &top_pose);
++        top = &top_pose;
++    }
++    if (tail_angle != object->tail_blade_angle) {
++        AnyAxisAngleToRotMatrix(&HelicopterBladeBackCenter, &HelicopterBladeBackAxis,
++            tail_angle, &tail_pose);
++        tail = &tail_pose;
++    }
++#endif
++    CompMatrix(&local_to_camera, top, &blade_to_camera);
+     WorldObjectDisplay(HelicopterBladeTopInfo, table, cursor, end, &blade_to_camera);
+-    CompMatrix(&local_to_camera, &object->tail_blade_rotation, &blade_to_camera);
++    CompMatrix(&local_to_camera, tail, &blade_to_camera);
+     WorldObjectDisplay(HelicopterBladeBackInfo, table, cursor, end, &blade_to_camera);
+     PopMatrix();
+ }
+diff --git a/src/modules/levels/w_neon/ufo.c b/src/modules/levels/w_neon/ufo.c
+--- a/src/modules/levels/w_neon/ufo.c
++++ b/src/modules/levels/w_neon/ufo.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+@@ -35,6 +38,10 @@
+ 
+ void UfoReleaseCar(Ufo* object)
+ {
++#ifdef __psyz
++    if (object->car && GameIsCarRegistered(object->car))
++        WebInterpolationCutCar(object->car);
++#endif
+     object->car = NULL;
+     ObjectSetOwner(object, NULL);
+     if (object->beam_sound) {
+@@ -85,6 +92,9 @@
+                 }
+                 if (candidate) {
+                     object->car = candidate;
++#ifdef __psyz
++                    WebInterpolationCutCar(candidate);
++#endif
+                     ObjectSetOwner(object, candidate);
+                     ObjectCreate(TrainSoundEmitterName, 4, object->car, UfoCaptureSoundName, 0);
+                     if (!object->beam_sound)
+@@ -216,14 +226,22 @@
+ {
+     MATRIX local_to_camera;
+     PushMatrix();
+-    CompMatrix(world_to_camera, &object->path.local_to_world, &local_to_camera);
++    MATRIX* world_pose = &object->path.local_to_world;
++#ifdef __psyz
++    MATRIX render_pose;
++    world_pose = WebInterpolationSceneModel(object, world_pose, &render_pose);
++#endif
++    CompMatrix(world_to_camera, world_pose, &local_to_camera);
+     WorldObjectDisplay(UfoWorldInfo, table, cursor, end, &local_to_camera);
+     PopMatrix();
+     if (object->car) {
+         s32 brightness_q12 = Q12Round(rsin(GetCurrentTime() << 9) << 10);
+-        UfoConeDisplay(object, table, cursor, end, world_to_camera,
+-            ObjectGetHeader(object->car)->interaction_radius, &object->car->position,
+-            brightness_q12 + 0xc00);
++        SVECTOR target = object->car->position;
++#ifdef __psyz
++        WebInterpolationCarPoint(object->car, &object->car->position, &target);
++#endif
++        UfoConeDisplay(world_pose, table, cursor, end, world_to_camera,
++            ObjectGetHeader(object->car)->interaction_radius, &target, brightness_q12 + 0xc00);
+     }
+ }
+ 
+diff --git a/src/modules/levels/w_neon/beam.c b/src/modules/levels/w_neon/beam.c
+--- a/src/modules/levels/w_neon/beam.c
++++ b/src/modules/levels/w_neon/beam.c
+@@ -12,7 +12,7 @@
+ 
+ #include <LIBGPU.H>
+ 
+-void UfoConeDisplay(Ufo* object, Tm4OrderingTag* table, u8** cursor, u8* end,
++void UfoConeDisplay(MATRIX* pose, Tm4OrderingTag* table, u8** cursor, u8* end,
+     MATRIX* world_to_camera, s32 radius, SVECTOR* target_world, s32 intensity_q12)
+ {
+     Tm4VectorComponent* center;
+@@ -41,7 +41,7 @@
+     if ((u8*)polygon + (segmentCount + 1) * sizeof(polygon->quad) >= end)
+         return;
+     PushMatrix();
+-    center = object->path.local_to_world.t;
++    center = pose->t;
+     BeamSet(&anchor_world, center[0], center[1], center[2]);
+     PointsAngleToRotMatrix(target_world, &anchor_world, 0x333, &rotate_about_beam);
+     PopMatrix();
+diff --git a/src/modules/levels/w_neon/private.h b/src/modules/levels/w_neon/private.h
+--- a/src/modules/levels/w_neon/private.h
++++ b/src/modules/levels/w_neon/private.h
+@@ -58,7 +58,7 @@
+ extern Tm4CardTexture* UfoBeamTexture;
+ void UfoProcess(Ufo*);
+ void UfoReleaseCar(Ufo*);
+-void UfoConeDisplay(Ufo*, Tm4OrderingTag*, u8**, u8*, MATRIX*, s32, SVECTOR*, s32);
++void UfoConeDisplay(MATRIX*, Tm4OrderingTag*, u8**, u8*, MATRIX*, s32, SVECTOR*, s32);
+ extern char UfoBeamTextureName[];
+ extern char UfoCaptureSoundName[];
+ extern char UfoBeamSoundName[];
+diff --git a/src/modules/levels/w_yard/display.c b/src/modules/levels/w_yard/display.c
+--- a/src/modules/levels/w_yard/display.c
++++ b/src/modules/levels/w_yard/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu_packet.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+@@ -8,6 +11,7 @@
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/main/render.h"
++#include "tm4/main/math3d.h"
+ #include "tm4/main/system.h"
+ 
+ #include <LIBGPU.H>
+@@ -63,19 +67,30 @@
+     SVECTOR position;
+     s32 intensity_q12;
+     PushMatrix();
+-    CompMatrix(view, &object->transform, &matrix);
++    MATRIX* world_pose = &object->transform;
++    SVECTOR magnet = object->magnet_position;
++    s32 ground_y = object->ground_y;
++#ifdef __psyz
++    MATRIX render_pose;
++    world_pose = WebInterpolationSceneModel(object, world_pose, &render_pose);
++    if (world_pose == &render_pose) {
++        ApplyMatrixWithTranslationSV(world_pose, CraneMagnetPoint, &magnet);
++        ground_y = WebInterpolationCraneGround(object, ground_y);
++    }
++#endif
++    CompMatrix(view, world_pose, &matrix);
+     WorldObjectDisplay(CraneWorldInfo, table, cursor, end, &matrix);
+     PopMatrix();
+     if (!ObjectGetHeader(object)->owner) {
+         SVECTOR* ground = &position;
+         s16 x, z;
+         s32 y;
+-        z = object->magnet_position.vz;
+-        y = object->ground_y;
+-        x = object->magnet_position.vx;
++        z = magnet.vz;
++        y = ground_y;
++        x = magnet.vx;
+         SetShortVectorXYZ(ground, x, y, z);
+         if (object->miss_effect_ticks > 0)
+-            CraneConeDisplay(object, table, cursor, end, view, object->magnet_radius, ground,
++            CraneConeDisplay(&magnet, table, cursor, end, view, object->magnet_radius, ground,
+                 Q12Div(object->miss_effect_ticks, CRANE_MISS_EFFECT_TICKS));
+         if (GameInfo.active_view->object == object) {
+             intensity_q12 = Q12Round(rsin(GetCurrentTime() << 9) << 10) + 0xc00;
+@@ -84,8 +99,11 @@
+         }
+     } else {
+         intensity_q12 = Q12Round(rsin(GetCurrentTime() << 9) << 10) + 0xc00;
+-        CraneConeDisplay(object, table, cursor, end, view,
+-            ObjectGetHeader(object->held_car)->interaction_radius, &object->held_car->position,
+-            intensity_q12);
++        SVECTOR target = object->held_car->position;
++#ifdef __psyz
++        WebInterpolationCarPoint(object->held_car, &object->held_car->position, &target);
++#endif
++        CraneConeDisplay(&magnet, table, cursor, end, view,
++            ObjectGetHeader(object->held_car)->interaction_radius, &target, intensity_q12);
+     }
+ }
+diff --git a/src/modules/levels/w_yard/beam.c b/src/modules/levels/w_yard/beam.c
+--- a/src/modules/levels/w_yard/beam.c
++++ b/src/modules/levels/w_yard/beam.c
+@@ -12,7 +12,7 @@
+ 
+ #include <LIBGPU.H>
+ 
+-void CraneConeDisplay(Crane* object, Tm4OrderingTag* table, u8** cursor, u8* end, MATRIX* view,
++void CraneConeDisplay(SVECTOR* magnet, Tm4OrderingTag* table, u8** cursor, u8* end, MATRIX* view,
+     s32 radius, SVECTOR* target, s32 intensity_q12)
+ {
+     s32 dx, dy, dz;
+@@ -26,7 +26,6 @@
+     SVECTOR normal;
+     SVECTOR difference;
+     SVECTOR step;
+-    SVECTOR* magnet;
+     SVECTOR nearStart;
+     SVECTOR farStart;
+     s32 color;
+@@ -42,7 +41,6 @@
+     if ((u8*)polygon + 15 * sizeof(polygon->quad) >= end)
+         return;
+     PushMatrix();
+-    magnet = &object->magnet_position;
+     PointsAngleToRotMatrix(target, magnet, 0x333, &rotation);
+     PopMatrix();
+     BeamCombine(subtract_position, &difference, target, magnet);
+@@ -55,7 +53,7 @@
+     AddVectorDaxpySS(&difference, &normal, radius, 12);
+     SetVectorDaxpySS(&near, &normal, 0x166, 12);
+     BeamAdjust(subtract_position, &difference, &near);
+-    BeamAdjust(add_position, &near, &object->magnet_position);
++    BeamAdjust(add_position, &near, magnet);
+     dx = difference.vx / layerCount;
+     dy = difference.vy / layerCount;
+     dz = difference.vz / layerCount;
+diff --git a/src/modules/levels/w_yard/private.h b/src/modules/levels/w_yard/private.h
+--- a/src/modules/levels/w_yard/private.h
++++ b/src/modules/levels/w_yard/private.h
+@@ -94,6 +94,6 @@
+ extern char CraneRotationStopSoundName[];
+ extern char CraneRotationLoopSoundName[];
+ extern char CraneMagnetLoopSoundName[];
+-void CraneConeDisplay(Crane*, Tm4OrderingTag*, u8**, u8*, MATRIX*, s32, SVECTOR*, s32);
++void CraneConeDisplay(SVECTOR*, Tm4OrderingTag*, u8**, u8*, MATRIX*, s32, SVECTOR*, s32);
+ void CraneMarkerDisplay(Crane*, Tm4OrderingTag*, u8**, u8*, MATRIX*, s32, SVECTOR*, s32);
+ #endif
+diff --git a/src/modules/levels/w_yard/process.c b/src/modules/levels/w_yard/process.c
+--- a/src/modules/levels/w_yard/process.c
++++ b/src/modules/levels/w_yard/process.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/simulation.h"
+ #include "tm4_scalar.h"
+ 
+@@ -141,6 +144,9 @@
+             }
+             if (candidate) {
+                 object->held_car = candidate;
++#ifdef __psyz
++                WebInterpolationCutCar(candidate);
++#endif
+                 ObjectSetOwner(object, candidate);
+                 ObjectCreate(CraneSoundEmitterName, 2, object, CraneMagnetHitSoundName,
+                     SOUND_EMITTER_POSITION, candidate->position.vx, candidate->position.vy,
+diff --git a/src/modules/levels/w_yard/crane.c b/src/modules/levels/w_yard/crane.c
+--- a/src/modules/levels/w_yard/crane.c
++++ b/src/modules/levels/w_yard/crane.c
+@@ -1,11 +1,15 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+ 
+ #include "../car_vector.h"
+ 
+ #include "tm4/main/math3d.h"
++#include "tm4/main/game.h"
+ #include "tm4/main/os.h"
+ 
+ void CraneReleaseCar(Crane* object)
+@@ -21,6 +25,10 @@
+             SOUND_EMITTER_POSITION, object->held_car->position.vx, object->held_car->position.vy,
+             object->held_car->position.vz);
+     }
++#ifdef __psyz
++    if (object->held_car && GameIsCarRegistered(object->held_car))
++        WebInterpolationCutCar(object->held_car);
++#endif
+     object->held_car = NULL;
+     ObjectSetOwner(object, NULL);
+     if (object->magnet_sound) {
+diff --git a/src/modules/anim/display.c b/src/modules/anim/display.c
+--- a/src/modules/anim/display.c
++++ b/src/modules/anim/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+@@ -53,7 +56,11 @@
+     if (sizeof(POLY_FT4) * ((Anim*)payload)->type->part_count + *output + sizeof(DR_TPAGE) >= end)
+         return;
+     PushMatrix();
++#ifdef __psyz
++    WebInterpolationObjectPosition(payload, &world_position);
++#else
+     ObjectCopyPosition(&world_position, payload);
++#endif
+     RotTrans(&world_position, (VECTOR*)billboard_to_camera.t, &flag);
+     SetIdentityRotation(&billboard_to_camera);
+     SetRotMatrix(&billboard_to_camera);
+diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
+--- a/src/modules/afc/display.c
++++ b/src/modules/afc/display.c
+@@ -69,21 +69,39 @@
+             object->rotation_angle += object->rotation_step;
+             object->rotation_angle %= ANGLE_FULL_TURN;
+         }
++        s32 angle = object->rotation_angle;
++        SVECTOR* vertices = object->vertices;
++#ifdef __psyz
++        SVECTOR render_position;
++        Afc pose;
++        s16 size = object->size;
++        WebInterpolationObjectPosition(payload, &render_position);
++        WebInterpolationAfc(object, &angle, &size);
++        if (size != object->size) {
++            pose = *object;
++            pose.size = size;
++            AfcSetQuadSize(&pose);
++            vertices = pose.vertices;
++        }
++        px = render_position.vx;
++        py = render_position.vy;
++        pz = render_position.vz;
++#endif
+         SVECTOR position = { px, py, pz, 0 };
+         gte_ldv0(&position);
+         gte_rtv0tr();
+-        RotationMatrixZ(object->rotation_angle, &rotation);
++        RotationMatrixZ(angle, &rotation);
+         GteReadMACVector(x, y, z);
+         SetRotMatrix(&rotation);
+         gte_ldtr(x, y, z);
+-        gte_ldv0(&object->vertices[0]);
+-        gte_ldv1(&object->vertices[1]);
+-        gte_ldv2(&object->vertices[2]);
++        gte_ldv0(&vertices[0]);
++        gte_ldv1(&vertices[1]);
++        gte_ldv2(&vertices[2]);
+         gte_rtpt();
+         gte_stsxy0(&packet->words.vertices[0].xy);
+         gte_stsxy1(&packet->words.vertices[1].xy);
+         gte_stsxy2(&packet->words.vertices[2].xy);
+-        gte_ldv0(&object->vertices[3]);
++        gte_ldv0(&vertices[3]);
+         gte_rtps();
+         gte_stsxy(&packet->words.vertices[3].xy);
+         gte_stsz(&ordering_depth);
+diff --git a/src/modules/expl/display.c b/src/modules/expl/display.c
+--- a/src/modules/expl/display.c
++++ b/src/modules/expl/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+@@ -24,6 +27,9 @@
+     center_y = center->vy;
+     center_z = center->vz;
+     setVector(point, center_x, center_y, center_z);
++#ifdef __psyz
++    WebInterpolationObjectPosition(wave, point);
++#endif
+     if (d->display_mode == EXPLOSION_DISPLAY_WORLD_ORIENTED
+         || d->display_mode == EXPLOSION_DISPLAY_BOTH) {
+         MATRIX* wave_to_world;
+@@ -63,17 +69,20 @@
+     ExplosionWave* wave, Tm4OrderingTag* ordering_table, u8** cursor, u8* limit)
+ {
+     SVECTOR local_vertices[4];
+-    s32 i, outer = wave->outer_radius, inner = wave->inner_radius;
++    s32 i, outer = wave->outer_radius, inner = wave->inner_radius, height = wave->height;
++#ifdef __psyz
++    WebInterpolationWave(wave, &outer, &inner, &height);
++#endif
+     ExplosionDefinition* d = wave->definition;
+     setVector(&local_vertices[0], Q12MulRound(wave->points[0].cosine_q12, outer), 0,
+         Q12MulRound(wave->points[0].sine_q12, outer));
+-    setVector(&local_vertices[2], Q12MulRound(wave->points[0].cosine_q12, inner), -wave->height,
++    setVector(&local_vertices[2], Q12MulRound(wave->points[0].cosine_q12, inner), -height,
+         Q12MulRound(wave->points[0].sine_q12, inner));
+     for (i = 1; i < d->sides; i++) {
+         ExplosionPoint* point = &wave->points[i];
+         setVector(&local_vertices[1], Q12MulRound(point->cosine_q12, outer), 0,
+             Q12MulRound(point->sine_q12, outer));
+-        setVector(&local_vertices[3], Q12MulRound(point->cosine_q12, inner), -wave->height,
++        setVector(&local_vertices[3], Q12MulRound(point->cosine_q12, inner), -height,
+             Q12MulRound(point->sine_q12, inner));
+         DisplayAnimCard(local_vertices, wave->texture, wave->color.packed, (s16)d->blend_mode,
+             ordering_table, cursor, limit, 128);
+@@ -82,7 +91,7 @@
+     }
+     setVector(&local_vertices[1], Q12MulRound(wave->points[0].cosine_q12, outer), 0,
+         Q12MulRound(wave->points[0].sine_q12, outer));
+-    setVector(&local_vertices[3], Q12MulRound(wave->points[0].cosine_q12, inner), -wave->height,
++    setVector(&local_vertices[3], Q12MulRound(wave->points[0].cosine_q12, inner), -height,
+         Q12MulRound(wave->points[0].sine_q12, inner));
+     DisplayAnimCard(local_vertices, wave->texture, wave->color.packed, (s16)d->blend_mode,
+         ordering_table, cursor, limit, 128);
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -38,8 +38,23 @@
+ } ScreenMessageQueue;
+ 
+ static s32 ScreenPowerupAngle = 0;
++#ifdef __psyz
++#include "port/web/interpolation.h"
++static s32 PreviousScreenPowerupAngle;
++static s32 PreviousScreenPulseAngle;
++#endif
+ static s32 ScreenPulseAngle = 0;
+ static s32 ScreenPulseBrightness = 0;
++
++static s32 RenderPulseBrightness(void)
++{
++#ifdef __psyz
++    s32 angle = WebInterpolationAngle(PreviousScreenPulseAngle, ScreenPulseAngle);
++    if (angle != ScreenPulseAngle)
++        return (Q12Sin(angle) + ONE) / 2;
++#endif
++    return ScreenPulseBrightness;
++}
+ static s32 ScreenLocalMessageLimit = 0;
+ static CVECTOR* ScreenAbbrEnemyNameColor = NULL;
+ static CVECTOR* ScreenEnemyNameColor = NULL;
+@@ -550,6 +565,10 @@
+     if (!GameInfo.pause_player) {
+         /* Keep the brightness shift ahead of the player-count load. */
+         register s32 brightness TM4_BIND_REGISTER("v1");
++#ifdef __psyz
++        PreviousScreenPowerupAngle = ScreenPowerupAngle;
++        PreviousScreenPulseAngle = ScreenPulseAngle;
++#endif
+         ScreenPowerupAngle = (ScreenPowerupAngle + 68) & 4095;
+         angle = (ScreenPulseAngle + 384) & 4095;
+         ScreenPulseAngle = angle;
+@@ -885,7 +904,11 @@
+             name = weapon->descriptor->hud_name;
+         }
+         primitive = primitives->weapon_model;
+-        ScreenPowerupDisplayCallback(weapon->descriptor->name, ScreenPowerupAngle,
++        s32 render_angle = ScreenPowerupAngle;
++#ifdef __psyz
++        render_angle = WebInterpolationAngle(PreviousScreenPowerupAngle, ScreenPowerupAngle);
++#endif
++        ScreenPowerupDisplayCallback(weapon->descriptor->name, render_angle,
+             RenderViewWidth - 37, RenderViewHeight - 39, 2048, orderingTable, &primitive,
+             primitives->weapon_model + sizeof(primitives->weapon_model));
+     }
+@@ -895,7 +918,7 @@
+     ratio = Q12Div(car->energy, car->maximum_energy);
+     pulse = 0;
+     if (ratio <= 1024)
+-        pulse = ScreenPulseBrightness;
++        pulse = RenderPulseBrightness();
+     ScreenInterpolateColor(&ScreenHudNeutralColor, ScreenComboStickerCriticalColor, pulse,
+         &primitives->combo_sticker.r0);
+     addPrim(orderingTable, &primitives->combo_sticker);
+@@ -937,7 +960,7 @@
+         ratio = car->turbo_fuel * 99 / car->maximum_turbo_fuel;
+         pulse = 0;
+         if (ratio < 25)
+-            pulse = ScreenPulseBrightness;
++            pulse = RenderPulseBrightness();
+         ScreenInterpolateColor(
+             ScreenPlayerTurboColor, ScreenPlayerTurboCriticalColor, pulse, &color.r);
+         sprintf(text, HudDecimalFormat, ratio);
+@@ -947,7 +970,7 @@
+     ratio = Q12Div(car->health, car->maximum_health);
+     pulse = 0;
+     if (ratio <= 1024)
+-        pulse = ScreenPulseBrightness;
++        pulse = RenderPulseBrightness();
+     ScreenInterpolateColor(&ScreenHudNeutralColor, ScreenHealthStickerCriticalColor, pulse,
+         &primitives->health_sticker.r0);
+     addPrim(orderingTable, &primitives->health_sticker);
+@@ -996,7 +1019,7 @@
+     if (target) {
+         ratio = Q12Div(target->health, target->maximum_health);
+         if (ratio <= 1024)
+-            pulse = ScreenPulseBrightness;
++            pulse = RenderPulseBrightness();
+         else
+             pulse = 0;
+     } else {

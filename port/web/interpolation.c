@@ -1,13 +1,28 @@
 #include <LIBGTE.H>
 #include "interpolation.h"
+#include "src/modules/afc/private.h"
+#include "src/modules/anim/private.h"
+#include "src/modules/carprt/private.h"
+#include "src/modules/cars/c_crush/private.h"
+#include "src/modules/cars/c_toy/private.h"
+#include "src/modules/cars/shovel.h"
+#include "src/modules/frag/private.h"
+#include "src/modules/levels/w_carni/private.h"
+#include "src/modules/levels/w_neon/private.h"
+#include "src/modules/levels/w_oil/private.h"
+#include "src/modules/levels/w_yard/private.h"
+#include "src/modules/lightn/private.h"
 #include "src/modules/weap/private.h"
 #include "tm4/fixed.h"
 #include "tm4/main/game.h"
 #include "tm4/main/math3d.h"
 #include "tm4/main/object.h"
 #include "tm4/main/system.h"
+#include "tm4/modules/auger.h"
 #include "tm4/modules/camera.h"
 #include "tm4/modules/car.h"
+#include "tm4/modules/ray.h"
+#include "tm4/modules/tele.h"
 #include <emscripten.h>
 #include <math.h>
 #include <stdint.h>
@@ -17,7 +32,10 @@
 
 typedef struct {
     u32 serial;
+    uintptr_t address;
     MATRIX transform;
+    const void* accessory;
+    s32 accessory_angles[2];
     struct {
         s16 rotation, steering;
         s8 suspension;
@@ -33,7 +51,32 @@ typedef struct {
 typedef struct {
     uintptr_t address;
     s32 serial;
+    SVECTOR position;
     union {
+        struct {
+            MATRIX transform;
+            uintptr_t rider;
+            s32 top_angle, tail_angle, ground;
+        } scene;
+        struct {
+            MATRIX transform;
+            s32 length;
+            uintptr_t owner;
+        } ray;
+        struct {
+            SVECTOR start, end;
+            uintptr_t target;
+        } lightning;
+        struct {
+            s16 angle, size;
+        } afc;
+        struct {
+            size_t first, count;
+        } anim;
+        s32 portal_size;
+        struct {
+            u16 outer, inner, height;
+        } wave;
         struct {
             SVECTOR position;
             s16 angle;
@@ -42,11 +85,23 @@ typedef struct {
             MATRIX transform;
             SVECTOR shadow;
             u32 age;
+            SVECTOR trail_tip[4];
+            int has_ribbon;
         } projectile;
+        struct {
+            SVECTOR head, tail;
+        } bullet;
         SVECTOR fireball;
     };
 } ObjectPose;
 
+typedef struct {
+    s16 width, height;
+    int visible;
+} AnimSize;
+
+static AnimSize* anim_sizes;
+static size_t anim_size_count, anim_size_capacity;
 static ObjectPose* objects;
 static size_t object_count, object_capacity;
 static CarPose cars[ArrayCount(GameInfo.cars)];
@@ -59,6 +114,10 @@ static const Car* car_identity;
 static const Car* car_pose;
 
 u32 WebRenderEffectRandomState(void);
+MATRIX* CarCrusherDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
+MATRIX* CarSlamDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
+MATRIX* CarToyDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
+MATRIX* CarTrashDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
 
 EMSCRIPTEN_KEEPALIVE void WebSetRenderInterpolation(int on)
 {
@@ -80,6 +139,7 @@ void WebInterpolationReset(void)
     have_effect_seed = 0;
     completed = 0;
     object_count = 0;
+    anim_size_count = 0;
     memset(cars, 0, sizeof(cars));
     memset(cameras, 0, sizeof(cameras));
 }
@@ -93,10 +153,27 @@ static SVECTOR fireball_position(const WeaponFireball* fireball)
         (previous->vz + current->vz) / 2 };
 }
 
+static int bullet_in_flight(const Bullet* bullet)
+{
+    return !bullet->hit_object && !bullet->motion.fields.world_impact;
+}
+
+static int trail_tip(const WeaponProjectile* projectile, SVECTOR tip[4])
+{
+    s32 index = projectile->trail_sample_index;
+    if (projectile->trail_color_step.channels.mode != WEAPON_TRAIL_RIBBON || index < 0
+        || index >= projectile->trail_sample_count || index >= WEAPON_TRAIL_SAMPLE_CAPACITY)
+        return 0;
+    for (s32 i = 0; i < 4; ++i) {
+        const WeaponTrailPoint* point = &projectile->trail_world[i][index];
+        tip[i] = (SVECTOR){ point->vx, point->vy, point->vz };
+    }
+    return 1;
+}
+
 static int projectile_in_flight(const WeaponProjectile* projectile)
 {
-    return !projectile->expiry_frames_left && !projectile->bullet.hit_object
-        && !projectile->bullet.motion.fields.world_impact;
+    return !projectile->expiry_frames_left && bullet_in_flight(&projectile->bullet);
 }
 
 static ObjectPose* append_object(const Tm4ObjectHeader* header)
@@ -112,12 +189,63 @@ static ObjectPose* append_object(const Tm4ObjectHeader* header)
     ObjectPose* pose = &objects[object_count++];
     pose->address = (uintptr_t)header;
     pose->serial = header->serial;
+    pose->position = (SVECTOR){ header->position.vx, header->position.vy, header->position.vz };
     return pose;
+}
+
+static void capture_model(const Tm4ObjectHeader* header, const MATRIX* transform,
+    s32 top_angle, s32 tail_angle, s32 ground)
+{
+    ObjectPose* pose = append_object(header);
+    if (!pose)
+        return;
+    pose->scene.transform = *transform;
+    pose->scene.rider = (uintptr_t)header->owner;
+    pose->scene.top_angle = top_angle;
+    pose->scene.tail_angle = tail_angle;
+    pose->scene.ground = ground;
+}
+
+static void capture_anim(const Tm4ObjectHeader* header, const Anim* anim)
+{
+    ObjectPose* pose = append_object(header);
+    if (!pose)
+        return;
+    pose->anim.first = anim_size_count;
+    pose->anim.count = 0;
+    size_t count = anim->type->part_count;
+    if (anim_size_count + count > anim_size_capacity) {
+        size_t capacity = anim_size_capacity ? anim_size_capacity * 2 : 64;
+        if (capacity < anim_size_count + count)
+            capacity = anim_size_count + count;
+        AnimSize* sizes = realloc(anim_sizes, capacity * sizeof(*anim_sizes));
+        if (!sizes)
+            return;
+        anim_sizes = sizes;
+        anim_size_capacity = capacity;
+    }
+    pose->anim.count = count;
+    for (size_t i = 0; i < count; ++i) {
+        const AnimPart* part = &anim->parts[i];
+        AnimSize* size = &anim_sizes[anim_size_count++];
+        size->width = part->width;
+        size->height = part->height;
+        size->visible = anim->type->parts[i].start_frame < anim->age_frames
+            && part->texture_elapsed_frames != ANIM_TEXTURE_FINISHED;
+    }
+}
+
+static int compare_object_address(const void* left, const void* right)
+{
+    const ObjectPose* a = left;
+    const ObjectPose* b = right;
+    return (a->address > b->address) - (a->address < b->address);
 }
 
 static void capture_objects(void)
 {
     object_count = 0;
+    anim_size_count = 0;
     for (const Tm4ObjectHeader* header = ObjectLists[OBJECT_LIST_DEFAULT].first; header;
          header = header->next) {
         if (!header->display || (header->flags & OBJECT_CUSTOM_CLASS))
@@ -141,6 +269,16 @@ static void capture_objects(void)
                 pose->projectile.transform = projectile->model_to_world;
                 pose->projectile.shadow = projectile->bullet.current_world;
                 pose->projectile.age = projectile->age_frames;
+                pose->projectile.has_ribbon = trail_tip(projectile, pose->projectile.trail_tip);
+            }
+        } else if (!strcasecmp(header->name, "bullet")) {
+            const Bullet* bullet = object;
+            if (!bullet_in_flight(bullet))
+                continue;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->bullet.head = bullet->current_world;
+                pose->bullet.tail = bullet->previous_world;
             }
         } else if (!strcasecmp(header->name, "weaponFireball")) {
             SVECTOR position = fireball_position(object);
@@ -151,8 +289,72 @@ static void capture_objects(void)
             ObjectPose* pose = append_object(header);
             if (pose)
                 pose->fireball = position;
+        } else if (!strcasecmp(header->name, "weaponRayBeam")) {
+            const RayBeam* ray = object;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->ray.transform = ray->beam_to_world;
+                pose->ray.length = ray->length;
+                pose->ray.owner = (uintptr_t)header->owner;
+            }
+        } else if (!strcasecmp(header->name, "weaponLightning")) {
+            const Lightning* bolt = object;
+            if (!bolt->point_count)
+                continue;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->lightning.start = bolt->start;
+                pose->lightning.end = bolt->end;
+                pose->lightning.target = (uintptr_t)bolt->target;
+            }
+        } else if (!strcasecmp(header->name, "train")) {
+            const Train* train = object;
+            capture_model(header, &train->path.local_to_world, 0, 0, 0);
+        } else if (!strcasecmp(header->name, "coaster")) {
+            const Coaster* coaster = object;
+            capture_model(header, &coaster->path.local_to_world, 0, 0, 0);
+        } else if (!strcasecmp(header->name, "ufo")) {
+            const Ufo* ufo = object;
+            capture_model(header, &ufo->path.local_to_world, 0, 0, 0);
+        } else if (!strcasecmp(header->name, "helicopter")) {
+            const Helicopter* helicopter = object;
+            capture_model(header, &helicopter->path.local_to_world, helicopter->top_blade_angle,
+                helicopter->tail_blade_angle, 0);
+        } else if (!strcasecmp(header->name, "crane")) {
+            const Crane* crane = object;
+            capture_model(header, &crane->transform, 0, 0, crane->ground_y);
+        } else if (!strcasecmp(header->name, "fragment")) {
+            const Fragment* fragment = object;
+            capture_model(header, &fragment->local_to_world, 0, 0, 0);
+        } else if (!strcasecmp(header->name, "carpart")) {
+            const Carpart* part = object;
+            capture_model(header, &part->local_to_world, 0, 0, 0);
+        } else if (!strcasecmp(header->name, "afc")) {
+            const Afc* flare = object;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->afc.angle = flare->rotation_angle;
+                pose->afc.size = flare->size;
+            }
+        } else if (!strcasecmp(header->name, "anim")) {
+            capture_anim(header, object);
+        } else if (!strcasecmp(header->name, "teleporter")) {
+            const Teleporter* portal = object;
+            ObjectPose* pose = append_object(header);
+            if (pose)
+                pose->portal_size = portal->billboard_size;
+        } else if (!strcasecmp(header->name, "explosionShockWave")) {
+            const ExplosionWave* wave = object;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->wave.outer = wave->outer_radius;
+                pose->wave.inner = wave->inner_radius;
+                pose->wave.height = wave->height;
+            }
         }
     }
+    if (object_count > 1)
+        qsort(objects, object_count, sizeof(*objects), compare_object_address);
 }
 
 static const ObjectPose* previous_object(const void* object)
@@ -160,11 +362,36 @@ static const ObjectPose* previous_object(const void* object)
     if (!drawing || !completed || fraction >= 1)
         return NULL;
     const Tm4ObjectHeader* header = ObjectGetHeader(object);
-    for (size_t i = 0; i < object_count; ++i) {
-        if (objects[i].address == (uintptr_t)header && objects[i].serial == header->serial)
-            return &objects[i];
+    if (!object_count)
+        return NULL;
+    const ObjectPose key = { .address = (uintptr_t)header };
+    const ObjectPose* pose
+        = bsearch(&key, objects, object_count, sizeof(*objects), compare_object_address);
+    return pose && pose->serial == header->serial ? pose : NULL;
+}
+
+static void capture_accessory(const Car* car, CarPose* pose)
+{
+    const void* context = car->callback_context;
+    if (!context)
+        return;
+    if (car->render_callback == CarAugerDisplaySpecialGroupDisplay) {
+        const AugerDrill* drill = context;
+        pose->accessory_angles[0] = drill->angle;
+    } else if (car->render_callback == CarToyDisplaySpecialGroupDisplay) {
+        const ToyWindup* windup = context;
+        pose->accessory_angles[0] = windup->angle;
+    } else if (car->render_callback == CarSlamDisplaySpecialGroupDisplay || car->render_callback == CarTrashDisplaySpecialGroupDisplay) {
+        const CarShovelState* shovel = context;
+        pose->accessory_angles[0] = shovel->angle;
+    } else if (car->render_callback == CarCrusherDisplaySpecialGroupDisplay) {
+        const CrusherPinchers* pinchers = context;
+        pose->accessory_angles[0] = pinchers->upper_angle;
+        pose->accessory_angles[1] = pinchers->lower_angle;
+    } else {
+        return;
     }
-    return NULL;
+    pose->accessory = context;
 }
 
 void WebInterpolationBeginStep(void)
@@ -178,7 +405,9 @@ void WebInterpolationBeginStep(void)
         const Car* car = GameInfo.cars[i];
         CarPose* pose = &cars[i];
         pose->serial = serial(car);
+        pose->address = (uintptr_t)car;
         pose->transform = car->transform;
+        capture_accessory(car, pose);
         for (s32 wheel = 0; wheel < ArrayCount(car->wheels); ++wheel) {
             pose->wheels[wheel].rotation = car->wheels[wheel].rotation;
             pose->wheels[wheel].steering = car->wheels[wheel].steering;
@@ -315,18 +544,25 @@ Camera* WebInterpolationCamera(Camera* camera, Camera* pose)
     return camera;
 }
 
-Car* WebInterpolationCar(Car* car, Car* pose)
+static const CarPose* previous_car(const Car* car)
 {
     if (!drawing || !completed || fraction >= 1)
-        return car;
+        return NULL;
     u32 id = serial(car);
     for (s32 i = 0; i < ArrayCount(cars); ++i) {
-        const CarPose* previous = &cars[i];
-        if (previous->serial != id)
-            continue;
+        if (cars[i].serial == id && cars[i].address == (uintptr_t)car)
+            return &cars[i];
+    }
+    return NULL;
+}
+
+Car* WebInterpolationCar(Car* car, Car* pose)
+{
+    const CarPose* previous = previous_car(car);
+    if (previous) {
         *pose = *car;
         if (!interpolate_matrix(&previous->transform, &car->transform, &pose->transform, 1024))
-            break;
+            return car;
         for (s32 wheel = 0; wheel < ArrayCount(car->wheels); ++wheel) {
             pose->wheels[wheel].rotation
                 = lerp_angle(previous->wheels[wheel].rotation, car->wheels[wheel].rotation);
@@ -435,6 +671,44 @@ void WebInterpolationProjectile(const WeaponProjectile* projectile, MATRIX* mode
 #endif
 }
 
+void WebInterpolationBullet(const Bullet* bullet, SVECTOR* head, SVECTOR* tail)
+{
+    *head = bullet->current_world;
+    *tail = bullet->previous_world;
+    const ObjectPose* previous = previous_object(bullet);
+    int in_flight = bullet_in_flight(bullet);
+    SVECTOR render_head = *head, render_tail = *tail;
+    /* Sample both ends of the visible segment together. An impact keeps the clipped
+     * segment and follows its original removal tick. */
+    int sampled = previous && in_flight
+        && interpolate_position(&previous->bullet.head, head, &render_head, 2048)
+        && interpolate_position(&previous->bullet.tail, tail, &render_tail, 2048);
+    if (sampled) {
+        *head = render_head;
+        *tail = render_tail;
+    }
+#ifdef TM4_WEB_TEST_HOOKS
+    trace_motion(bullet, "bullet head", bullet->current_world.vx, bullet->current_world.vy,
+        bullet->current_world.vz, 0, head->vx, head->vy, head->vz, 0, sampled | (!in_flight << 1));
+    trace_motion(bullet, "bullet tail", bullet->previous_world.vx, bullet->previous_world.vy,
+        bullet->previous_world.vz, 0, tail->vx, tail->vy, tail->vz, 0, sampled | (!in_flight << 1));
+#endif
+}
+
+int WebInterpolationTrailTip(const WeaponProjectile* projectile, SVECTOR tip[4])
+{
+    const ObjectPose* previous = previous_object(projectile);
+    SVECTOR current[4];
+    if (!previous || !previous->projectile.has_ribbon || !projectile_in_flight(projectile)
+        || !trail_tip(projectile, current))
+        return 0;
+    for (s32 i = 0; i < 4; ++i) {
+        if (!interpolate_position(&previous->projectile.trail_tip[i], &current[i], &tip[i], 2048))
+            return 0;
+    }
+    return 1;
+}
+
 void WebInterpolationFireball(const WeaponFireball* fireball, SVECTOR* position)
 {
     *position = (SVECTOR){ 0 };
@@ -447,6 +721,186 @@ void WebInterpolationFireball(const WeaponFireball* fireball, SVECTOR* position)
         position->vy, position->vz, 0, sampled);
 #endif
     (void)sampled;
+}
+
+MATRIX* WebInterpolationSceneModel(const void* object, MATRIX* live, MATRIX* sample)
+{
+    const ObjectPose* previous = previous_object(object);
+    const Tm4ObjectHeader* header = ObjectGetHeader(object);
+    int sampled = previous && previous->scene.rider == (uintptr_t)header->owner
+        && interpolate_matrix(&previous->scene.transform, live, sample, 1024);
+    MATRIX* result = sampled ? sample : live;
+#ifdef TM4_WEB_TEST_HOOKS
+    trace_motion(object, header->name, live->t[0], live->t[1], live->t[2], live->m[0][0],
+        result->t[0], result->t[1], result->t[2], result->m[0][0], sampled);
+#endif
+    return result;
+}
+
+s32 WebInterpolationAngle(s32 previous, s32 current)
+{
+    return drawing && completed && fraction < 1 ? lerp_angle(previous, current) : current;
+}
+
+void WebInterpolationSceneRotors(const void* object, s32* top, s32* tail)
+{
+    const ObjectPose* previous = previous_object(object);
+    if (previous) {
+        *top = lerp_angle(previous->scene.top_angle, *top);
+        *tail = lerp_angle(previous->scene.tail_angle, *tail);
+    }
+}
+
+s32 WebInterpolationCraneGround(const void* crane, s32 current)
+{
+    const ObjectPose* previous = previous_object(crane);
+    if (previous && previous->scene.rider == (uintptr_t)ObjectGetHeader(crane)->owner
+        && abs(previous->scene.ground - current) <= 128)
+        return lerp(previous->scene.ground, current);
+    return current;
+}
+
+s32 WebInterpolationCarAccessory(const Car* car, s32 slot, s32 angle)
+{
+    const Car* identity = WebInterpolationCarIdentity(car);
+    const CarPose* previous = previous_car(identity);
+    int sampled = previous && previous->accessory && previous->accessory == car->callback_context;
+    s32 render = sampled ? lerp_angle(previous->accessory_angles[slot], angle) : angle;
+#ifdef TM4_WEB_TEST_HOOKS
+    trace_motion(identity, slot ? "car accessory lower" : "car accessory", 0, 0, 0, angle,
+        0, 0, 0, render, sampled);
+#endif
+    return render;
+}
+
+MATRIX* WebInterpolationCarTransform(const Car* car, MATRIX* sample)
+{
+    const CarPose* previous = previous_car(car);
+    if (!previous || !interpolate_matrix(&previous->transform, &car->transform, sample, 1024))
+        *sample = car->transform;
+    return sample;
+}
+
+void WebInterpolationCarPoint(const Car* car, const SVECTOR* point, SVECTOR* sample)
+{
+    MATRIX transform;
+    WebInterpolationCarTransform(car, &transform);
+    *sample = *point;
+    sample->vx += transform.t[0] - car->transform.t[0];
+    sample->vy += transform.t[1] - car->transform.t[1];
+    sample->vz += transform.t[2] - car->transform.t[2];
+}
+
+MATRIX* WebInterpolationRay(const RayBeam* ray, MATRIX* live, MATRIX* sample, s32* length)
+{
+    const ObjectPose* previous = previous_object(ray);
+    const Tm4ObjectHeader* header = ObjectGetHeader(ray);
+    s32 live_length = *length;
+    int sampled = previous && previous->ray.owner == (uintptr_t)header->owner
+        && live_length >= previous->ray.length
+        && interpolate_matrix(&previous->ray.transform, live, sample, 2048);
+    if (sampled)
+        *length = lerp(previous->ray.length, live_length);
+    MATRIX* result = sampled ? sample : live;
+#ifdef TM4_WEB_TEST_HOOKS
+    trace_motion(ray, header->name, live->t[0], live->t[1], live->t[2], live_length,
+        result->t[0], result->t[1], result->t[2], *length, sampled);
+#endif
+    return result;
+}
+
+static double bolt_distance(const SVECTOR* start, const SVECTOR* end)
+{
+    double x = end->vx - start->vx, y = end->vy - start->vy, z = end->vz - start->vz;
+    return sqrt(x * x + y * y + z * z);
+}
+
+int WebInterpolationLightning(const Lightning* bolt, MATRIX* transform, SVECTOR* points)
+{
+    const ObjectPose* previous = previous_object(bolt);
+    SVECTOR start, end;
+    if (!previous || previous->lightning.target != (uintptr_t)bolt->target
+        || !bolt->point_count || bolt->point_count > LIGHTNING_POINT_CAPACITY
+        || !interpolate_position(&previous->lightning.start, &bolt->start, &start, 2048)
+        || !interpolate_position(&previous->lightning.end, &bolt->end, &end, 2048))
+        return 0;
+    double live_length = bolt_distance(&bolt->start, &bolt->end);
+    double length = bolt_distance(&start, &end);
+    if (live_length < 1 || length < 1)
+        return 0;
+    *transform = bolt->matrix;
+    transform->t[0] = start.vx;
+    transform->t[1] = start.vy;
+    transform->t[2] = start.vz;
+    transform->m[0][1] = lround(ONE * (end.vx - start.vx) / length);
+    transform->m[1][1] = lround(ONE * (end.vy - start.vy) / length);
+    transform->m[2][1] = lround(ONE * (end.vz - start.vz) / length);
+    transform->m[0][0] = transform->m[2][1];
+    transform->m[1][0] = 0;
+    transform->m[2][0] = -transform->m[0][1];
+    if (!transform->m[0][0] && !transform->m[2][0])
+        transform->m[0][0] = ONE;
+    PushMatrix();
+    NormalizeMatrixWithBasis(transform, 1, 0);
+    PopMatrix();
+    /* The jagged points come from this simulation tick. Slide them along the new
+     * span so their flicker and the contact sprite retain the same sampled anchor. */
+    for (s32 i = 0; i < bolt->point_count; ++i) {
+        points[i] = bolt->points[i];
+        points[i].vy = lround(points[i].vy * length / live_length);
+    }
+#ifdef TM4_WEB_TEST_HOOKS
+    trace_motion(bolt, "lightning endpoint", bolt->end.vx, bolt->end.vy, bolt->end.vz, 0,
+        end.vx, end.vy, end.vz, 0, 1);
+#endif
+    return 1;
+}
+
+void WebInterpolationObjectPosition(const void* object, SVECTOR* position)
+{
+    *position = (SVECTOR){ 0 };
+    ObjectCopyPosition(position, object);
+    const ObjectPose* previous = previous_object(object);
+    if (previous)
+        interpolate_position(&previous->position, position, position, 1024);
+}
+
+void WebInterpolationAfc(const Afc* object, s32* angle, s16* size)
+{
+    const ObjectPose* previous = previous_object(object);
+    if (previous) {
+        if (object->rotation_step)
+            *angle = lerp_angle(previous->afc.angle, *angle);
+        *size = lerp(previous->afc.size, *size);
+    }
+}
+
+s32 WebInterpolationPortalSize(const void* portal, s32 size)
+{
+    const ObjectPose* previous = previous_object(portal);
+    return previous ? lerp(previous->portal_size, size) : size;
+}
+
+void WebInterpolationAnimSize(const void* animation, s32 part, s32* width, s32* height)
+{
+    const ObjectPose* previous = previous_object(animation);
+    if (!previous || (size_t)part >= previous->anim.count)
+        return;
+    const AnimSize* size = &anim_sizes[previous->anim.first + part];
+    if (size->visible) {
+        *width = lerp(size->width, *width);
+        *height = lerp(size->height, *height);
+    }
+}
+
+void WebInterpolationWave(const ExplosionWave* wave, s32* outer, s32* inner, s32* height)
+{
+    const ObjectPose* previous = previous_object(wave);
+    if (previous) {
+        *outer = lerp(previous->wave.outer, *outer);
+        *inner = lerp(previous->wave.inner, *inner);
+        *height = lerp(previous->wave.height, *height);
+    }
 }
 
 void WebInterpolationEndCarDraw(void)
