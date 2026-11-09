@@ -63,7 +63,7 @@ const { chromium } = require("playwright");
     page.on("request", (request) => requests.push(new URL(request.url()).pathname));
     await page.goto(url);
     await page.waitForFunction(
-      () => crossOriginIsolated && !document.getElementById("disc-files").disabled,
+      () => crossOriginIsolated && !document.getElementById("disc-folder").disabled,
       null,
       { timeout: 30000 },
     );

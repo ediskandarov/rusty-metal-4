@@ -49,8 +49,8 @@ function cueTime(sector) {
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8121/");
-    await page.waitForFunction(() => !document.getElementById("disc-files").disabled);
-    await page.locator("#disc-files").setInputFiles([cuePath, bin]);
+    await page.waitForFunction(() => !document.getElementById("disc-folder").disabled);
+    await page.locator("#disc-folder").setInputFiles(temporary);
     await require("./browser_startup.cjs")(page);
     await page.waitForFunction(
       () =>

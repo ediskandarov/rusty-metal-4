@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
-const { readdirSync, readFileSync } = require("node:fs");
-const { join, resolve } = require("node:path");
+const { readFileSync } = require("node:fs");
+const { resolve } = require("node:path");
 const { chromium } = require("playwright");
 
 (async () => {
@@ -28,15 +28,11 @@ const { chromium } = require("playwright");
       });
     });
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8121/");
-    await page.waitForFunction(() => !document.getElementById("disc-files").disabled);
+    await page.waitForFunction(() => !document.getElementById("disc-folder").disabled);
     const directory = resolve(
       process.env.TM4_DISC_DIR || JSON.parse(readFileSync(".local/dev.json", "utf8")).discDirectory,
     );
-    await page.locator("#disc-files").setInputFiles(
-      readdirSync(directory)
-        .filter((name) => /\.(cue|bin)$/i.test(name))
-        .map((name) => join(directory, name)),
-    );
+    await page.locator("#disc-folder").setInputFiles(directory);
     await page.waitForFunction(
       () => globalThis.tm4Port?.screen === "main" && globalThis.tm4Port.menuReady,
       null,

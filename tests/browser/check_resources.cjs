@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
-const { readdirSync, readFileSync, mkdirSync } = require("node:fs");
-const { resolve, join } = require("node:path");
+const { readFileSync, mkdirSync } = require("node:fs");
+const { resolve } = require("node:path");
 const { chromium } = require("playwright");
 
 (async () => {
@@ -16,7 +16,7 @@ const { chromium } = require("playwright");
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8121/");
-    await page.waitForFunction(() => !document.getElementById("disc-files").disabled);
+    await page.waitForFunction(() => !document.getElementById("disc-folder").disabled);
     const variant = process.env.TM4_VARIANT_DISC_DIR;
     if (variant) {
       await page.locator("#disc-folder").setInputFiles(resolve(variant));
@@ -28,7 +28,7 @@ const { chromium } = require("playwright");
         { timeout: 90000 },
       );
       assert(await page.locator("#startup").isVisible());
-      assert(await page.locator("#disc-files").isEnabled());
+      assert(await page.locator("#disc-folder").isEnabled());
       const summary = await page.locator("#resource-summary").textContent();
       console.log("Variant:", summary);
       await page.locator("#resource-search").fill("SCUS_945.60");
@@ -64,10 +64,7 @@ const { chromium } = require("playwright");
     const directory = resolve(
       process.env.TM4_DISC_DIR || JSON.parse(readFileSync(".local/dev.json", "utf8")).discDirectory,
     );
-    const files = readdirSync(directory)
-      .filter((name) => /\.(cue|bin)$/i.test(name))
-      .map((name) => join(directory, name));
-    await page.locator("#disc-files").setInputFiles(files);
+    await page.locator("#disc-folder").setInputFiles(directory);
     await page.waitForFunction(
       () =>
         document.getElementById("resource-check").textContent === "Pause checks" &&

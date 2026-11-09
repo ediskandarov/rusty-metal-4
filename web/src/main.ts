@@ -1,5 +1,5 @@
 import { loadDisc } from "./loader/loader.ts";
-import { directorySources, localSources, remoteSources } from "./loader/sources.ts";
+import { directorySources, remoteSources } from "./loader/sources.ts";
 import type { DiscSources } from "./loader/types.ts";
 import { prepareIsolation } from "./runtime/isolation.ts";
 import { startGame } from "./runtime/start.ts";
@@ -10,7 +10,6 @@ import { initializeResources } from "./ui/resources.ts";
 const startup = element("startup", HTMLElement);
 const progress = element("startup-progress", HTMLElement);
 const warnings = element("startup-warnings", HTMLElement);
-const picker = element("disc-files", HTMLInputElement);
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
 initializePopups();
@@ -28,7 +27,7 @@ function warn(message: string) {
 async function launch(resolveSources: () => DiscSources) {
   if (starting) return;
   starting = true;
-  picker.disabled = folderPicker.disabled = true;
+  folderPicker.disabled = true;
   try {
     const sources = resolveSources();
     await resources.inspect(sources);
@@ -54,15 +53,10 @@ async function launch(resolveSources: () => DiscSources) {
     console.error(error);
   } finally {
     starting = runtimeStarted;
-    picker.disabled = folderPicker.disabled = runtimeStarted;
+    folderPicker.disabled = runtimeStarted;
   }
 }
 
-picker.addEventListener("change", () => {
-  warnings.replaceChildren();
-  const files = picker.files;
-  if (files?.length) void launch(() => localSources(files));
-});
 folderPicker.addEventListener("change", () => {
   warnings.replaceChildren();
   const files = folderPicker.files;
@@ -70,7 +64,7 @@ folderPicker.addEventListener("change", () => {
 });
 canvas.addEventListener("pointerdown", () => canvas.focus());
 
-picker.disabled = folderPicker.disabled = !crossOriginIsolated;
+folderPicker.disabled = !crossOriginIsolated;
 if (!crossOriginIsolated) {
   progress.textContent =
     isSecureContext && "serviceWorker" in navigator
@@ -91,6 +85,6 @@ if (TM4_DEV && crossOriginIsolated) {
     messages.forEach(warn);
     await launch(() => sources);
   } catch (error) {
-    progress.textContent = `Local disc unavailable. You can select files instead.\n${error instanceof Error ? error.message : String(error)}`;
+    progress.textContent = `Local disc unavailable. You can select a disc folder instead.\n${error instanceof Error ? error.message : String(error)}`;
   }
 }

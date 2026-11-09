@@ -31,7 +31,7 @@ const server = Bun.serve({
     if (url.pathname === "/__dev/disc.json") {
       if (!disc)
         return respond(
-          "Configure --disc-dir or TM4_DISC_DIR, or select files in the browser.",
+          "Configure --disc-dir or TM4_DISC_DIR, or select a disc folder in the browser.",
           404,
         );
       return Response.json(
@@ -66,4 +66,4 @@ const server = Bun.serve({
   },
 });
 console.log(`Open ${server.url}`);
-if (!disc) console.log("No local disc configured; use the browser file picker.");
+if (!disc) console.log("No local disc configured; use the browser folder picker.");
