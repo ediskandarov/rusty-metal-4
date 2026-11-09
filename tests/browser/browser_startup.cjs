@@ -3,6 +3,8 @@ mkdirSync("build/checks", { recursive: true });
 /* global tm4Port */
 /* Exercise normal startup: studio is unskippable, Start skips only the intro. */
 module.exports = async function startup(page) {
+  if (process.env.TM4_DISC_DIR)
+    await page.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
   await page.waitForFunction(() => globalThis.tm4Port?.movie, null, { timeout: 30000 });
   const resources = page.locator("#resources");
   if ((await resources.count()) && (await resources.evaluate((node) => node.open)))

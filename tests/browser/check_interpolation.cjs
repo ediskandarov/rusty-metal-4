@@ -73,6 +73,7 @@ const assert = require("node:assert/strict");
     const rendering = page.locator("#render-settings summary");
     await rendering.click();
     await toggle.check();
+    await page.selectOption("#render-limit", "60");
     await page.waitForFunction(
       () => tm4Port.interpolateMotion && tm4Port.renderTiming.vblanks === 1,
     );

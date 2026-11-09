@@ -47,7 +47,7 @@ export function initializeRendering(module: GameModule) {
     selectSetting("car-lod-distance", module._WebSetCarLodDistance, { ultra: 8, ps1: 1 }, changed),
     selectSetting("draw-distance", module._WebSetDrawDistance, { ultra: 8, ps1: 1 }, changed),
     selectSetting("render-dithering", module._WebSetRenderDithering, { ultra: 0, ps1: 0 }, changed),
-    selectSetting("render-vsync", module._WebSetRenderVsync, { ultra: 3, ps1: 2 }, changed),
+    selectSetting("render-limit", module._WebSetRenderLimit, { ultra: 120, ps1: 30 }, changed),
     toggleSetting(
       "subpixel-vertices",
       module._WebSetSubpixelVertices,

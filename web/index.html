@@ -114,15 +114,17 @@
           </label>
           <p>Disabling the PS1 grain can reveal color banding.</p>
           <label
-            >Frame timing
-            <select id="render-vsync" aria-describedby="render-timing-note">
-              <option value="1">Display sync</option>
-              <option value="2">PS1 timing</option>
-              <option value="3" selected>Uncapped</option>
+            >Render limit
+            <select id="render-limit" aria-describedby="render-limit-note">
+              <option value="30">30 FPS</option>
+              <option value="60">60 FPS</option>
+              <option value="120" selected>120 FPS</option>
+              <option value="0">Display refresh rate</option>
             </select>
           </label>
-          <p id="render-timing-note">
-            PsyZ setting; browser frame scheduling still takes precedence in this web build.
+          <p id="render-limit-note">
+            Simulation stays at 30 TPS. Higher frame rates require interpolation and up to two
+            players. Menus and video keep their original timing.
           </p>
           <label>Performance graphs <input id="render-fps" type="checkbox" /></label>
           <p>Simulation, render and browser callback rates over the last 15 seconds.</p>

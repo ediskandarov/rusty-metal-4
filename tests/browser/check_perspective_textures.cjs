@@ -248,7 +248,7 @@ async function preview(page, angle, scale, stabilize, perspective, baseline = fa
     await page.locator("#render-reset").click();
     assert.equal(await page.locator("#perspective-textures").isChecked(), true);
     assert.equal(await page.locator("#subpixel-vertices").isChecked(), true);
-    assert.equal(await page.locator("#render-vsync").inputValue(), "2");
+    assert.equal(await page.locator("#render-limit").inputValue(), "30");
     assert.equal(await page.locator("#render-fps").isChecked(), false);
     assert.equal(await page.locator("#cheat-settings").isVisible(), true);
     await page.waitForFunction(

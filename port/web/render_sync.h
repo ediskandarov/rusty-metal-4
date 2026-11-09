@@ -5,8 +5,10 @@
 
 extern unsigned int WebDrawDistanceScale;
 
+void WebRenderSetLimit(unsigned int rate);
 void WebRenderResetTiming(void);
-void WebRenderPresentLevelFrame(int interpolate);
+int WebRenderBeginLevelFrame(void);
+void WebRenderPresentLevelFrame(void);
 unsigned int WebRenderWaitForFrame(void);
 void WebRenderReportFrame(int phase, int late, int face_budget, int minimum, int maximum);
 

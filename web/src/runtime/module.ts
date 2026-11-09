@@ -5,7 +5,7 @@ export interface GameExports {
   _WebSetCarLodDistance(this: void, value: number): void;
   _WebSetDrawDistance(this: void, value: number): void;
   _WebSetRenderDithering(this: void, value: number): void;
-  _WebSetRenderVsync(this: void, value: number): void;
+  _WebSetRenderLimit(this: void, value: number): void;
   _WebSetSubpixelVertices(this: void, value: number): void;
   _WebSetPerspectiveTextures(this: void, value: number): void;
   _WebSetRenderInterpolation(this: void, value: number): void;

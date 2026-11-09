@@ -47,10 +47,10 @@ static int menu_directory_saved;
 static struct {
     unsigned int scale;
     PsyzDitherMode dithering;
-    PsyzVsyncMode vsync;
+    unsigned int limit;
     unsigned int car_lod_distance;
     unsigned int draw_distance;
-} render_settings = { PSYZ_INTERNAL_RES_AUTO, PSYZ_DITHER_AUTO, PSYZ_VSYNC_OFF, 1, 1 };
+} render_settings = { PSYZ_INTERNAL_RES_AUTO, PSYZ_DITHER_AUTO, 120, 1, 1 };
 unsigned int WebCarLodDistanceScale = 1;
 unsigned int WebDrawDistanceScale = 1;
 static int render_settings_pending = 1;
@@ -97,10 +97,10 @@ EMSCRIPTEN_KEEPALIVE void WebSetRenderDithering(int mode)
     }
 }
 
-EMSCRIPTEN_KEEPALIVE void WebSetRenderVsync(int mode)
+EMSCRIPTEN_KEEPALIVE void WebSetRenderLimit(unsigned int rate)
 {
-    if (mode >= PSYZ_VSYNC_ON && mode <= PSYZ_VSYNC_LIMITLESS) {
-        render_settings.vsync = mode;
+    if (rate == 0 || rate == 30 || rate == 60 || rate == 120) {
+        render_settings.limit = rate;
         render_settings_pending = 1;
     }
 }
@@ -111,24 +111,22 @@ static void apply_render_settings(void)
         return;
     const unsigned int scale = render_settings.scale;
     const PsyzDitherMode dithering = render_settings.dithering;
-    const PsyzVsyncMode vsync = render_settings.vsync;
     render_settings_pending = 0;
+    WebRenderSetLimit(render_settings.limit);
     WebCarLodDistanceScale = render_settings.car_lod_distance;
     WebDrawDistanceScale = render_settings.draw_distance;
     Psyz_VideoSetInternalResolution(scale);
     Psyz_VideoSetDitheringMode(dithering);
-    if (Psyz_VideoGetVsyncMode() != vsync)
-        Psyz_VideoSetVsyncMode(vsync);
     EM_ASM(
         {
             tm4Port.renderScale = $0;
             tm4Port.renderDithering = $1;
-            tm4Port.renderVsync = $2;
-            tm4Port.carLodDistance = $3;
-            tm4Port.drawDistance = $4;
+            tm4Port.carLodDistance = $2;
+            tm4Port.drawDistance = $3;
+            tm4Port.renderLimit = $4;
         },
-        Psyz_VideoGetInternalResolution(), Psyz_VideoGetDitheringMode(), Psyz_VideoGetVsyncMode(),
-        WebCarLodDistanceScale, WebDrawDistanceScale);
+        Psyz_VideoGetInternalResolution(), Psyz_VideoGetDitheringMode(),
+        WebCarLodDistanceScale, WebDrawDistanceScale, render_settings.limit);
 }
 
 static unsigned int presented_frames;
@@ -345,6 +343,12 @@ static void browser_frame(void)
         SoundInitializeSpu();
         WebMovieStart("N89STUDI", 0, startup_intro);
         initialized = 1;
+        /* SDL swap interval zero switches the entire main loop to timers. */
+        Psyz_VideoSetVsyncMode(PSYZ_VSYNC_ON);
+        emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
+        emscripten_pause_main_loop();
+        emscripten_resume_main_loop();
+        return;
     }
     apply_render_settings();
     WebApplyCheats();

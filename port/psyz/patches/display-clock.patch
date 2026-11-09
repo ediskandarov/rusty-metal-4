@@ -1,0 +1,57 @@
+--- a/psyz/libapi.c
++++ b/psyz/libapi.c
+@@ -44,6 +44,30 @@
+ }
+ 
+ static PsyzVSyncCb g_PsyzVsyncCb = NULL;
++static unsigned int display_vblank_clock;
++
++void Psyz_ResetDisplayClock(void) {
++    display_vblank_clock = (unsigned int)Psyz_VideoVSync(-1);
++}
++
++/* Advance emulated VBlanks independently of presentation. */
++unsigned int Psyz_PollDisplayClock(void) {
++    unsigned int now = (unsigned int)Psyz_VideoVSync(-1);
++    unsigned int elapsed = now - display_vblank_clock;
++    display_vblank_clock = now;
++    Psyz_KernelPoll();
++    /* Do not replay a background tab's entire interrupt backlog. */
++    if (elapsed > 8) elapsed = 0;
++    if (elapsed) {
++        pads_sampled = 0;
++        ReadPadsOnVsync();
++    }
++    for (unsigned int i = 0; i < elapsed; ++i) {
++        if (g_PsyzVsyncCb) g_PsyzVsyncCb();
++        Psyz_KernelVBlank();
++    }
++    return elapsed;
++}
+ PsyzVSyncCb Psyz_SetVSyncCb(PsyzVSyncCb cb) {
+     PsyzVSyncCb prev = g_PsyzVsyncCb;
+     g_PsyzVsyncCb = cb;
+@@ -62,6 +86,7 @@
+     }
+     n = mode > 0 ? mode : 1;
+     elapsed = Psyz_VideoVSync(mode);
++    Psyz_ResetDisplayClock();
+     pads_sampled = 0;
+     if (g_PsyzVsyncCb) {
+         g_PsyzVsyncCb();
+--- a/platform/sdl3_common.h
++++ b/platform/sdl3_common.h
+@@ -691,6 +691,13 @@
+     gpu_stats.using_driver_vsync = use_driver_vsync;
+ 
+     last_frame_time = frame_end_time;
++}
++
++/* Non-waiting presentation; the host owns its animation loop. */
++void Psyz_VideoPresentFrame(void) {
++    Sdl3Common_ApplyPendingTimingReset();
++    PlatformBackend_Present();
++    PollEvents();
+ }
+ 
+ int Psyz_VideoVSync(int mode) {

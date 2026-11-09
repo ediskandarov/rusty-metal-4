@@ -1,4 +1,5 @@
 #include "render_sync.h"
+#include "interpolation.h"
 #include "tm4/main/game.h"
 #include "tm4/main/render.h"
 #include "tm4/main/sync.h"
@@ -6,7 +7,9 @@
 #include <libetc.h>
 #include <libgpu.h>
 
-static int interpolation_frame;
+static unsigned int render_limit = 120;
+static double render_deadline;
+static int level_frame;
 static unsigned int last_vblank;
 static unsigned int elapsed_vblanks;
 #ifdef TM4_WEB_TEST_HOOKS
@@ -18,37 +21,84 @@ EMSCRIPTEN_KEEPALIVE void WebTestRenderDelay(unsigned int milliseconds)
 }
 #endif
 
-void WebRenderPresentLevelFrame(int interpolate)
+/* Local PsyZ extensions: presentation and emulated VBlank advance independently. */
+void Psyz_VideoPresentFrame(void);
+void Psyz_ResetDisplayClock(void);
+unsigned int Psyz_PollDisplayClock(void);
+
+void WebRenderSetLimit(unsigned int rate)
 {
-    interpolation_frame = interpolate;
+    if (render_limit != rate) {
+        render_limit = rate;
+        render_deadline = 0;
+    }
+}
+
+static unsigned int effective_render_limit(void)
+{
+    /* These paths still advance visual effects once per draw. */
+    if (!WebInterpolationEnabled() || GameInfo.player_count > 2)
+        return 30;
+    return render_limit;
+}
+
+int WebRenderBeginLevelFrame(void)
+{
+    unsigned int rate = effective_render_limit();
+    if (!rate)
+        return 1;
+    double now = emscripten_get_now();
+    double interval = 1000.0 / rate;
+    if (!render_deadline)
+        render_deadline = now;
+    if (now < render_deadline)
+        return 0;
+    render_deadline += interval;
+    if (render_deadline < now - interval)
+        render_deadline = now + interval;
+    return 1;
+}
+
+void WebRenderPresentLevelFrame(void)
+{
+    level_frame = GameInfo.mode != GAME_MODE_DEMO;
     RenderPresent(1);
-    interpolation_frame = 0;
+    level_frame = 0;
 }
 
 void WebRenderResetTiming(void)
 {
     last_vblank = VSync(-1);
+    Psyz_ResetDisplayClock();
+    render_deadline = 0;
     VB_FrameVBlanks[0] = 0;
     VB_DrawComplete[0] = 1;
 }
 
 unsigned int WebRenderWaitForFrame(void)
 {
-    unsigned int target = interpolation_frame ? 1 : 2;
+    unsigned int target = effective_render_limit() == 30 ? 2 : 1;
 #ifdef TM4_WEB_TEST_HOOKS
     if (test_delay_ms && !GameInfo.pause_player)
         emscripten_sleep(test_delay_ms);
 #endif
     DrawSync(0);
+    if (level_frame && !GameInfo.pause_player) {
+        Psyz_VideoPresentFrame();
+        elapsed_vblanks = Psyz_PollDisplayClock();
+        last_vblank = VSync(-1);
+        VB_FrameVBlanks[0] = elapsed_vblanks;
+        VB_DrawComplete[0] = 1;
+        return target;
+    }
+    /* Pause, demo and teardown retain their original blocking cadence. */
+    target = 2;
     if (GameInfo.pause_player) {
-        /* MAIN disables its adaptive VBlank callbacks while PauseMenu runs. */
         VSync(2);
         last_vblank = VSync(-1);
         VB_FrameVBlanks[0] = 2;
     } else {
         unsigned int now;
-        /* Present/yield at least once. Browser refresh rates need not be 60 Hz;
-         * count emulated VBlanks, not requestAnimationFrame callbacks. */
         do {
             VSync(0);
             now = VSync(-1);

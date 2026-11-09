@@ -38,14 +38,14 @@ const assert = require("node:assert/strict");
         await page.selectOption("#render-preset", preset);
         const enhanced = preset === "ultra";
         const scale = enhanced ? 8 : 1;
-        const timing = enhanced ? 3 : 2;
+        const timing = enhanced ? 120 : 30;
         await page.waitForFunction(
           ({ scale, timing, enhanced }) =>
             tm4Port.renderScale === scale &&
             tm4Port.carLodDistance === scale &&
             tm4Port.drawDistance === scale &&
             tm4Port.renderDithering === 0 &&
-            tm4Port.renderVsync === timing &&
+            tm4Port.renderLimit === timing &&
             tm4Port.subpixelVertices === enhanced &&
             tm4Port.perspectiveTextures === enhanced,
           { scale, timing, enhanced },
@@ -68,7 +68,7 @@ const assert = require("node:assert/strict");
         ["car-lod-distance", "carLodDistance", [2, 4, 8, 1]],
         ["draw-distance", "drawDistance", [2, 4, 8, 1]],
         ["render-dithering", "renderDithering", [1, 0]],
-        ["render-vsync", "renderVsync", [1, 3, 2]],
+        ["render-limit", "renderLimit", [30, 60, 120, 0]],
       ]) {
         for (const value of values) {
           const before = await page.evaluate(() =>
@@ -89,10 +89,10 @@ const assert = require("node:assert/strict");
       await page.waitForFunction(() => tm4Port.renderScale === 3);
       await page.selectOption("#render-scale", "3");
       await page.selectOption("#render-dithering", "1");
-      await page.selectOption("#render-vsync", "2");
+      await page.selectOption("#render-limit", "60");
       await page.waitForFunction(
         () =>
-          tm4Port.renderScale === 3 && tm4Port.renderDithering === 1 && tm4Port.renderVsync === 2,
+          tm4Port.renderScale === 3 && tm4Port.renderDithering === 1 && tm4Port.renderLimit === 60,
       );
       await page.locator("#subpixel-vertices").check();
       await page.waitForFunction(() => tm4Port.subpixelVertices === true);
@@ -128,18 +128,18 @@ const assert = require("node:assert/strict");
           tm4Port.carLodDistance === 8 &&
           tm4Port.renderScale === 8 &&
           tm4Port.renderDithering === 0 &&
-          tm4Port.renderVsync === 3,
+          tm4Port.renderLimit === 120,
       );
       for (const [id, value] of [
         ["render-scale", "8"],
         ["render-dithering", "0"],
-        ["render-vsync", "3"],
+        ["render-limit", "120"],
         ["car-lod-distance", "8"],
         ["draw-distance", "8"],
       ]) {
         assert.equal(await page.locator(`#${id}`).inputValue(), value);
       }
-      await page.locator("#render-vsync").focus();
+      await page.locator("#render-limit").focus();
       await page.keyboard.press("Escape");
       assert.equal(await page.locator("#render-settings").evaluate((node) => node.open), false);
       assert.equal(await page.evaluate(() => document.activeElement.id), "canvas");

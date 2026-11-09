@@ -198,7 +198,7 @@ static void present_level_frame(Tm4RenderBuffer* buffer, double fraction, int st
         WebInterpolationBeginDraw(fraction, stepped);
     RenderBuildFrame();
     WebInterpolationEndDraw();
-    WebRenderPresentLevelFrame(interpolating);
+    WebRenderPresentLevelFrame();
     ++frames;
     EM_ASM(
         { tm4Port.hudGlyphs = $0; }, buffer->font_prims.next_sprite - buffer->font_prims.sprites);
@@ -268,6 +268,8 @@ void WebLevelFrame(void)
         demo_frame();
         return;
     }
+    if (!WebRenderBeginLevelFrame())
+        return;
     const double step_ms = 1000.0 / 30;
     /* Three and four views use two successive render passes and reuse packet storage. */
     int interpolate = WebInterpolationEnabled() && GameInfo.player_count <= 2;

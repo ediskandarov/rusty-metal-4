@@ -83,10 +83,11 @@ execute_process(COMMAND "${BUN_EXECUTABLE}" "${TM4_ROOT}/tools/prepare/psyz.js"
     --source "${TM4_ROOT}/external/psyz/psyz/src" --output "${TM4_PSYZ_RUNTIME}"
     COMMAND_ERROR_IS_FATAL ANY)
 get_target_property(TM4_PSYZ_SOURCES psyz SOURCES)
-list(REMOVE_ITEM TM4_PSYZ_SOURCES src/platform/sdl3_gl.c src/psyz/libgpu.c)
+list(REMOVE_ITEM TM4_PSYZ_SOURCES src/platform/sdl3_gl.c src/psyz/libgpu.c src/psyz/libapi.c)
 set_property(TARGET psyz PROPERTY SOURCES "${TM4_PSYZ_SOURCES}")
 target_sources(psyz PRIVATE "${TM4_PSYZ_RUNTIME}/platform/sdl3_gl.c"
-    "${TM4_PSYZ_RUNTIME}/psyz/libgpu.c")
+    "${TM4_PSYZ_RUNTIME}/psyz/libgpu.c"
+    "${TM4_PSYZ_RUNTIME}/psyz/libapi.c")
 target_include_directories(psyz PRIVATE "${TM4_ROOT}/port/psyz")
 set(TM4_SDK_ALIASES "${CMAKE_CURRENT_BINARY_DIR}/sdk-includes")
 file(GLOB TM4_PSYZ_HEADERS CONFIGURE_DEPENDS "${TM4_ROOT}/external/psyz/psyz/include/*.h")
