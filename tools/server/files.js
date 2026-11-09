@@ -75,7 +75,7 @@ export async function inspectDisc(directory, reference) {
     );
     if (!expected || expected.sha256 !== sha256)
       warnings.push(
-        `Modified or unrecognized disc file: ${name}. EXE will be checked in the browser.`,
+        `Modified or unrecognized disc file: ${name}. Resource compatibility will be checked in the browser.`,
       );
     files.push({ name, size: file.size, sha256, file });
     console.log(`${expected?.sha256 === sha256 ? "OK" : "Modified"} ${name}`);

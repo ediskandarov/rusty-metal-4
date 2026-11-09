@@ -1,18 +1,21 @@
-import disc from "../../../config/disc.json";
-import reference from "../../../config/resources.json";
-import { checkResources, discoverResources, resourceRows } from "../loader/resources.ts";
-import type { ResourceCandidate, ResourceRow, ResourceStatus } from "../loader/resources.ts";
+import {
+  checkResources,
+  compatibilityReport,
+  executableSizeTolerancePercent,
+  resourceReference,
+  resourceRows,
+} from "../compatibility/index.ts";
+import type { ResourceCandidate, ResourceRow, ResourceStatus } from "../compatibility/index.ts";
+import { discoverResources } from "../loader/resources.ts";
 import type { DiscSources } from "../loader/types.ts";
 import { element } from "./dom.ts";
 
 const labels: Record<ResourceStatus, string> = {
   pending: "Not checked",
   checking: "Checking…",
-  original: "Original",
-  modified: "Modified · compatibility unknown",
-  missing: "Missing",
-  unknown: "No reference · compatibility unknown",
-  error: "Read error",
+  compatible: "Compatible",
+  warning: "Warning",
+  uncompatible: "Uncompatible",
 };
 const names: Record<string, string> = {
   MAIN: "Initial registry",
@@ -71,7 +74,11 @@ function describe(id: string) {
       description: "CD audio · PCM after INDEX 01",
     };
   if (id === "/SCUS_945.60")
-    return { group: "Core", name: file, description: "Required executable · must match to start" };
+    return {
+      group: "Core",
+      name: file,
+      description: `Required PS-X EXE · size tolerance ±${executableSizeTolerancePercent}%`,
+    };
   if (/\.STR$/.test(id))
     return { group: "Video", name: file, description: "STR movie · raw CD sectors" };
   if (file.endsWith(".MR") && ["MAIN", "GAME", "MENU", "MOVIE"].includes(stem))
@@ -140,8 +147,7 @@ export function initializeResources() {
       const entry = nodes.get(row.id)!;
       entry.node.hidden =
         !entry.text.includes(query) ||
-        (issues.checked &&
-          (row.status === "original" || row.status === "pending" || row.status === "checking"));
+        (issues.checked && row.status !== "warning" && row.status !== "uncompatible");
     }
     for (const [group, section] of sections) {
       const visible = rows.filter(
@@ -157,28 +163,20 @@ export function initializeResources() {
       const entry = nodes.get(row.id)!;
       entry.status.textContent = labels[row.status];
       entry.node.dataset.status = row.status;
-      entry.info.textContent = [
-        row.id,
-        `Size: ${bytes(row.size)}${row.expected ? ` · reference ${bytes(row.expected.size)}` : ""}`,
-        row.hash ? `SHA-256: ${row.hash}` : "",
-        row.expected ? `Reference: ${row.expected.sha256}` : "",
-        row.error ?? "",
-      ]
+      entry.info.textContent = [row.id, `Size: ${bytes(row.size)}`, row.message]
         .filter(Boolean)
         .join("\n");
     }
     if (rowOnly) return;
     const count = (status: ResourceStatus) => rows.filter((row) => row.status === status).length;
-    const checked = rows.length - count("pending") - count("checking") - count("missing");
-    progress.max = rows.length - count("missing") || 1;
+    const checked = rows.length - count("pending") - count("checking");
+    progress.max = rows.length || 1;
     progress.value = checked;
-    const totals = (["original", "modified", "missing", "unknown", "error"] as const)
+    const totals = (["compatible", "warning", "uncompatible"] as const)
       .filter((status) => count(status) > 0)
-      .map(
-        (status) =>
-          `${count(status)} ${status === "unknown" ? "no reference" : status === "error" ? "read errors" : status}`,
-      );
-    summary.textContent = `${totals.join(" · ") || "Checking resources…"}\n${checked}/${rows.length - count("missing")} checked${!running && count("pending") ? " · paused" : ""}`;
+      .map((status) => `${count(status)} ${status}`);
+    const report = compatibilityReport(rows);
+    summary.textContent = `${labels[report.status]}\n${totals.join(" · ") || "Checking resources…"}\n${checked}/${rows.length} checked${!running && count("pending") ? " · paused" : ""}`;
     action.textContent = running
       ? "Pause checks"
       : count("pending")
@@ -286,10 +284,7 @@ export function initializeResources() {
         if (controller !== current) return;
         candidates = found.resources;
         notices.textContent = found.notices.join("\n");
-        rows = resourceRows(candidates, [
-          { id: "/SCUS_945.60", size: disc.executable.size, sha256: disc.executable.sha256 },
-          ...reference.files,
-        ]);
+        rows = resourceRows(candidates, resourceReference);
         populate();
         void runChecks();
       } catch (error) {

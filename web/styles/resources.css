@@ -70,15 +70,13 @@
 .resource-row .resource-state {
   color: #aebbc9;
 }
-.resource-row[data-status="original"] .resource-state {
+.resource-row[data-status="compatible"] .resource-state {
   color: #83c9a3;
 }
-.resource-row[data-status="modified"] .resource-state,
-.resource-row[data-status="unknown"] .resource-state {
+.resource-row[data-status="warning"] .resource-state {
   color: #edc878;
 }
-.resource-row[data-status="error"] .resource-state,
-.resource-row[data-status="missing"] .resource-state {
+.resource-row[data-status="uncompatible"] .resource-state {
   color: #f39a9a;
 }
 .resource-row pre {

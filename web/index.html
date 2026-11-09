@@ -205,8 +205,11 @@
           <p id="resource-summary" role="status"></p>
           <progress id="resource-progress" aria-label="Resource checks"></progress>
           <p>
-            Original means an exact SHA-256 match. Modified files may still work; their
-            compatibility is unknown. Missing optional resources do not block startup.
+            Compatible means the resource passes its checks. Warnings do not block startup;
+            uncompatible resources do. TIM artwork and music may change. MR archives are checked for
+            structure and decompression; MAIN.MR also checks resource references. Other formats
+            without a dedicated validator use known supported content; unverified content gets a
+            warning.
           </p>
           <p id="resource-notices"></p>
           <input
@@ -216,7 +219,7 @@
             aria-label="Find a resource"
           />
           <div id="resource-filters">
-            <label><input id="resource-issues" type="checkbox" /> Differences only</label>
+            <label><input id="resource-issues" type="checkbox" /> Warnings / errors only</label>
             <button id="resource-check" type="button" disabled>Pause checks</button>
           </div>
           <div id="resource-list"></div>

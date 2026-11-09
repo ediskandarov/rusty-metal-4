@@ -2,9 +2,9 @@ import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import discReference from "../../config/disc.json";
+import { readTimLayout, sha256 } from "../../web/src/compatibility/index.ts";
 import { discoverResources } from "../../web/src/loader/resources.ts";
 import { checkRange } from "../../web/src/loader/sources.ts";
-import { sha256, verifyExecutable } from "../../web/src/loader/verify.ts";
 
 const directory = process.argv[2];
 if (!directory)
@@ -31,7 +31,8 @@ const signal = new AbortController().signal;
 const { resources } = await discoverResources(sources, signal);
 const exe = resources.find((resource) => resource.id === "/SCUS_945.60");
 if (!exe?.read) throw new Error("Original executable missing");
-await verifyExecutable(await exe.read(signal), discReference.executable.sha256);
+if ((await sha256(await exe.read(signal))) !== discReference.executable.sha256)
+  throw new Error("Original executable checksum mismatch");
 // Bind reference generation to the known full dump, not merely an unchanged EXE.
 for (const expected of discReference.files) {
   const source = sources.get(expected.name.toLowerCase());
@@ -45,10 +46,12 @@ for (const expected of discReference.files) {
 const files = [];
 for (const resource of resources) {
   if (resource.id === "/SCUS_945.60") continue; // Its authoritative hash stays in disc.json.
+  const bytes = await resource.read!(signal);
   files.push({
     id: resource.id,
     size: resource.size,
-    sha256: await sha256(await resource.read!(signal)),
+    sha256: await sha256(bytes),
+    ...(resource.id.endsWith(".TIM") ? { tim: readTimLayout(bytes) } : {}),
   });
 }
 files.sort((a, b) => a.id.localeCompare(b.id));

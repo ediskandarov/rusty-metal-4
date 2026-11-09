@@ -2,11 +2,10 @@ import { expect, test } from "bun:test";
 
 import reference from "../../config/disc.json";
 import resources from "../../config/resources.json";
+import { checkResources, resourceRows, sha256 } from "../../web/src/compatibility/index.ts";
+import type { ResourceCandidate } from "../../web/src/compatibility/index.ts";
 import { discTracks, parseCue } from "../../web/src/loader/cue.ts";
-import { checkResources, resourceRows } from "../../web/src/loader/resources.ts";
-import type { ResourceCandidate } from "../../web/src/loader/resources.ts";
 import { localSources } from "../../web/src/loader/sources.ts";
-import { sha256 } from "../../web/src/loader/verify.ts";
 
 const bytes = new Uint8Array([1, 2, 3]);
 const candidate = (id: string): ResourceCandidate => ({
@@ -15,7 +14,7 @@ const candidate = (id: string): ResourceCandidate => ({
   read: () => Promise.resolve(bytes),
 });
 
-test("resource audit separates identity, modification, absence, unknown and read failure", async () => {
+test("resource audit reports compatibility rather than identity", async () => {
   const hash = await sha256(bytes);
   const found = [
     candidate("original"),
@@ -35,14 +34,16 @@ test("resource audit separates identity, modification, absence, unknown and read
   const rows = resourceRows(found, expected);
   await checkResources(found, rows, new AbortController().signal, () => {});
   expect(Object.fromEntries(rows.map((row) => [row.id, row.status]))).toEqual({
-    original: "original",
-    modified: "modified",
-    missing: "missing",
-    unknown: "unknown",
-    bad: "error",
+    original: "compatible",
+    modified: "warning",
+    missing: "uncompatible",
+    unknown: "warning",
+    bad: "uncompatible",
   });
-  expect(rows.find((row) => row.id === "bad")?.error).toBe("Invalid sector");
-  expect(rows.find((row) => row.id === "unknown")?.hash).toBe(hash);
+  expect(rows.find((row) => row.id === "bad")?.message).toBe("Invalid sector");
+  expect(rows.find((row) => row.id === "unknown")?.message).toContain(
+    "No format-specific validator",
+  );
 });
 
 test("cancelled checks reset the active row and can resume without rereading completed files", async () => {
@@ -62,9 +63,9 @@ test("cancelled checks reset the active row and can resume without rereading com
   ];
   const rows = resourceRows(found, []);
   await expect(checkResources(found, rows, controller.signal, () => {})).rejects.toThrow();
-  expect(rows.map((row) => row.status)).toEqual(["unknown", "pending"]);
+  expect(rows.map((row) => row.status)).toEqual(["warning", "pending"]);
   await checkResources(found, rows, new AbortController().signal, () => {});
-  expect(rows.map((row) => row.status)).toEqual(["unknown", "unknown"]);
+  expect(rows.map((row) => row.status)).toEqual(["warning", "warning"]);
   expect(reads).toBe(2);
 });
 
@@ -86,7 +87,9 @@ test("resource reference contains metadata only and keeps executable hash author
   expect(resources.files.filter((file) => file.id.endsWith(".MR"))).toHaveLength(135);
   expect(resources.files.some((file) => file.id === "/SCUS_945.60")).toBe(false);
   for (const file of resources.files) {
-    expect(Object.keys(file).sort()).toEqual(["id", "sha256", "size"]);
+    expect(Object.keys(file).sort()).toEqual(
+      file.id.endsWith(".TIM") ? ["id", "sha256", "size", "tim"] : ["id", "sha256", "size"],
+    );
     expect(file.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(file.size).toBeGreaterThan(0);
   }

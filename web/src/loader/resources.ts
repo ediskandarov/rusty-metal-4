@@ -1,30 +1,9 @@
 import discReference from "../../../config/disc.json";
+import type { ResourceCandidate } from "../compatibility/index.ts";
 import { discTracks, parseCue, RAW_SECTOR } from "./cue.ts";
 import { Disc } from "./disc.ts";
 import { checkRange, fileKey } from "./sources.ts";
 import type { DiscSource, DiscSources } from "./types.ts";
-import { sha256 } from "./verify.ts";
-
-export type ResourceStatus =
-  "pending" | "checking" | "original" | "modified" | "missing" | "unknown" | "error";
-export interface ResourceReference {
-  id: string;
-  size: number;
-  sha256: string;
-}
-export interface ResourceCandidate {
-  id: string;
-  size: number;
-  read?: (signal: AbortSignal) => Promise<Uint8Array<ArrayBuffer>>;
-}
-export interface ResourceRow {
-  id: string;
-  size?: number;
-  expected?: ResourceReference;
-  status: ResourceStatus;
-  hash?: string;
-  error?: string;
-}
 
 const maxResourceBytes = 128 * 1024 * 1024;
 
@@ -42,7 +21,7 @@ async function readRange(source: DiscSource, offset: number, size: number, signa
   return bytes;
 }
 
-// Discovery is independent of the executable gate: unsupported discs are still inspectable.
+// Disc layout support is independent of resource compatibility.
 export async function discoverResources(sources: DiscSources, signal: AbortSignal) {
   const notices: string[] = [];
   const cues = [...sources.values()].filter((source) => /\.cue$/i.test(source.name));
@@ -108,61 +87,4 @@ export async function discoverResources(sources: DiscSources, signal: AbortSigna
     });
   }
   return { resources, notices };
-}
-
-export function resourceRows(
-  resources: ResourceCandidate[],
-  reference: ResourceReference[],
-): ResourceRow[] {
-  const found = new Map(resources.map((resource) => [resource.id, resource]));
-  const expected = new Map(reference.map((resource) => [resource.id, resource]));
-  return [...new Set([...found.keys(), ...expected.keys()])]
-    .sort((a, b) => (a === "/SCUS_945.60" ? -1 : b === "/SCUS_945.60" ? 1 : a.localeCompare(b)))
-    .map((id) => ({
-      id,
-      size: found.get(id)?.size,
-      expected: expected.get(id),
-      status: found.has(id) ? "pending" : "missing",
-    }));
-}
-
-export async function checkResources(
-  resources: ResourceCandidate[],
-  rows: ResourceRow[],
-  signal: AbortSignal,
-  changed: (row: ResourceRow) => void,
-) {
-  const found = new Map(resources.map((resource) => [resource.id, resource]));
-  const priority = (row: ResourceRow) =>
-    row.id === "/SCUS_945.60" ? 0 : row.id.startsWith("AUDIO/") || row.id.endsWith(".STR") ? 2 : 1;
-  for (const row of [...rows].sort((a, b) => priority(a) - priority(b))) {
-    if (row.status !== "pending") continue;
-    signal.throwIfAborted();
-    row.status = "checking";
-    changed(row);
-    try {
-      const resource = found.get(row.id)!;
-      if (!resource.read) throw new Error("Resource is not readable");
-      const bytes = await resource.read(signal);
-      signal.throwIfAborted();
-      row.hash = await sha256(bytes);
-      signal.throwIfAborted();
-      row.status = !row.expected
-        ? "unknown"
-        : row.hash === row.expected.sha256 && row.size === row.expected.size
-          ? "original"
-          : "modified";
-    } catch (error) {
-      if (signal.aborted) {
-        row.status = "pending";
-        changed(row);
-        throw error;
-      }
-      row.status = "error";
-      row.error = error instanceof Error ? error.message : String(error);
-    }
-    changed(row);
-    // Keep controls responsive, including when inspecting many tiny files.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
 }

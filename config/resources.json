@@ -13,7 +13,17 @@
     {
       "id": "/DATA/AMAZ.TIM",
       "size": 153620,
-      "sha256": "e997fdca5087992bfb8c5d211bf05a8bf1647a00bae2a67dbea248e1dcc30b23"
+      "sha256": "e997fdca5087992bfb8c5d211bf05a8bf1647a00bae2a67dbea248e1dcc30b23",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/AUGER.MR",
@@ -38,7 +48,17 @@
     {
       "id": "/DATA/BED.TIM",
       "size": 153620,
-      "sha256": "b70c8582a803ffcb640a77fe56e2036eeaedab918702ee75d652f83b90c37908"
+      "sha256": "b70c8582a803ffcb640a77fe56e2036eeaedab918702ee75d652f83b90c37908",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/CADA.MR",
@@ -98,7 +118,17 @@
     {
       "id": "/DATA/CARNI.TIM",
       "size": 153620,
-      "sha256": "3a00dfb0705abb3ae397ecb444ae755fc752d400bd3aadbffd5dbb9832981aae"
+      "sha256": "3a00dfb0705abb3ae397ecb444ae755fc752d400bd3aadbffd5dbb9832981aae",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/COMMUTE.IMG",
@@ -113,7 +143,17 @@
     {
       "id": "/DATA/COMMUTE.TIM",
       "size": 153620,
-      "sha256": "9165b07e9abe6459852401cf8bed09dce0073df60081f00256bb8fa0f38b5994"
+      "sha256": "9165b07e9abe6459852401cf8bed09dce0073df60081f00256bb8fa0f38b5994",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/CRUSHER.MR",
@@ -168,7 +208,17 @@
     {
       "id": "/DATA/DMATCH1.TIM",
       "size": 153620,
-      "sha256": "a74360d72412c8f8d461c47f82bf6825f3499e10c9066a5d6abaf14c02028b8b"
+      "sha256": "a74360d72412c8f8d461c47f82bf6825f3499e10c9066a5d6abaf14c02028b8b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH2.IMG",
@@ -183,7 +233,17 @@
     {
       "id": "/DATA/DMATCH2.TIM",
       "size": 153620,
-      "sha256": "a627c3df8adcbaadaf05658cf464d4be360fdb154e977566414e540200f232db"
+      "sha256": "a627c3df8adcbaadaf05658cf464d4be360fdb154e977566414e540200f232db",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH3.IMG",
@@ -198,7 +258,17 @@
     {
       "id": "/DATA/DMATCH3.TIM",
       "size": 153620,
-      "sha256": "07da83ff2d180dfdb22e642888382cc8d5281159b7d6d811a1101793553138b6"
+      "sha256": "07da83ff2d180dfdb22e642888382cc8d5281159b7d6d811a1101793553138b6",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH4.IMG",
@@ -213,7 +283,17 @@
     {
       "id": "/DATA/DMATCH4.TIM",
       "size": 153620,
-      "sha256": "257bdbad6313b2ad0569d17058cdd9cfb8b71f68f10b11ff7812c63069a2e3bc"
+      "sha256": "257bdbad6313b2ad0569d17058cdd9cfb8b71f68f10b11ff7812c63069a2e3bc",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH5.IMG",
@@ -228,7 +308,17 @@
     {
       "id": "/DATA/DMATCH5.TIM",
       "size": 153620,
-      "sha256": "fd84f7d729280fa919f93feeeedc39adfe8afcfc8046bf9ca64f633544040d39"
+      "sha256": "fd84f7d729280fa919f93feeeedc39adfe8afcfc8046bf9ca64f633544040d39",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH6.IMG",
@@ -243,7 +333,17 @@
     {
       "id": "/DATA/DMATCH6.TIM",
       "size": 153620,
-      "sha256": "4a064756ba15ed5932b5e82cdc70350fb7ba254552b69fd8ef3b6cc55f2f3f92"
+      "sha256": "4a064756ba15ed5932b5e82cdc70350fb7ba254552b69fd8ef3b6cc55f2f3f92",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH7.IMG",
@@ -258,7 +358,17 @@
     {
       "id": "/DATA/DMATCH7.TIM",
       "size": 153620,
-      "sha256": "25c581fdfd9f11e107a2d8d5f13bb15fdbb57d01d8b339f2d47a3c2e00141b11"
+      "sha256": "25c581fdfd9f11e107a2d8d5f13bb15fdbb57d01d8b339f2d47a3c2e00141b11",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DMATCH8.IMG",
@@ -273,7 +383,17 @@
     {
       "id": "/DATA/DMATCH8.TIM",
       "size": 153620,
-      "sha256": "082aa38557960b4e864d880a916ea4345e97fde6585c2fd7da3acd9bc4ecb8ff"
+      "sha256": "082aa38557960b4e864d880a916ea4345e97fde6585c2fd7da3acd9bc4ecb8ff",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/DRAG.MR",
@@ -323,7 +443,17 @@
     {
       "id": "/DATA/LEGAL.TIM",
       "size": 153620,
-      "sha256": "0a80b98c3ef23519c4875d6275e93052571d6d2ddd047e7c3eb0d7903222d65b"
+      "sha256": "0a80b98c3ef23519c4875d6275e93052571d6d2ddd047e7c3eb0d7903222d65b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/LRGA.MR",
@@ -388,7 +518,17 @@
     {
       "id": "/DATA/MAZE.TIM",
       "size": 153620,
-      "sha256": "53099df774d1df18d0f744d778baa414e04975d5f02be910e4bb53aaae67bde6"
+      "sha256": "53099df774d1df18d0f744d778baa414e04975d5f02be910e4bb53aaae67bde6",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MEDA.MR",
@@ -433,22 +573,62 @@
     {
       "id": "/DATA/MENU/ADJUSTS.TIM",
       "size": 153620,
-      "sha256": "f802e3fb631cc9523e9c4c1641b138afa13d896e96c085e92f6813e8ca71c191"
+      "sha256": "f802e3fb631cc9523e9c4c1641b138afa13d896e96c085e92f6813e8ca71c191",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/AUDIO.TIM",
       "size": 153620,
-      "sha256": "11441fdb6387a0656ebb755529457c568044f169308b8f378782f54c0ed660bd"
+      "sha256": "11441fdb6387a0656ebb755529457c568044f169308b8f378782f54c0ed660bd",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/AUGER.TIM",
       "size": 153620,
-      "sha256": "2077b8b23509f99bc4038d3202d43ccf58d5e79457dc63b989e650ef8d055bf3"
+      "sha256": "2077b8b23509f99bc4038d3202d43ccf58d5e79457dc63b989e650ef8d055bf3",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/AXEL.TIM",
       "size": 153620,
-      "sha256": "e20dba6231b1fd46dbe4f8cb3c2237d5ba2e51b714e5b5ca2572446a52984a59"
+      "sha256": "e20dba6231b1fd46dbe4f8cb3c2237d5ba2e51b714e5b5ca2572446a52984a59",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CAD.MR",
@@ -458,42 +638,122 @@
     {
       "id": "/DATA/MENU/CALYPSO.TIM",
       "size": 153620,
-      "sha256": "6b50b4ea22acc981c630c360343cf5b9e9bd4d5af10ee6442fcc0af6acc3bbc0"
+      "sha256": "6b50b4ea22acc981c630c360343cf5b9e9bd4d5af10ee6442fcc0af6acc3bbc0",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CARSEL.TIM",
       "size": 153620,
-      "sha256": "662aafbb5d8bc31b0db32cc6c0fae1529b475d7aeed7ebf61296e50c9b834338"
+      "sha256": "662aafbb5d8bc31b0db32cc6c0fae1529b475d7aeed7ebf61296e50c9b834338",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CCBTLCRY.TIM",
       "size": 153620,
-      "sha256": "0961197469b0b1a058341162dce5842a3a9a4f67b51d85f70e38df033df3488a"
+      "sha256": "0961197469b0b1a058341162dce5842a3a9a4f67b51d85f70e38df033df3488a",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CCDESIGN.TIM",
       "size": 153620,
-      "sha256": "9b2abe8f682c3863295dcba119e448210b596a35dd6f29502facc570eb98b290"
+      "sha256": "9b2abe8f682c3863295dcba119e448210b596a35dd6f29502facc570eb98b290",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CCLOAD.TIM",
       "size": 153620,
-      "sha256": "276f7c888039e108146b8dc4eed28e75f8677191d6949d95fed35b2f9aa5bfd6"
+      "sha256": "276f7c888039e108146b8dc4eed28e75f8677191d6949d95fed35b2f9aa5bfd6",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CCSAVE.TIM",
       "size": 153620,
-      "sha256": "de496d1d3899b26bf0a3a902d54e5c424d80ab8040126ffd5e68fbe073e9cfb4"
+      "sha256": "de496d1d3899b26bf0a3a902d54e5c424d80ab8040126ffd5e68fbe073e9cfb4",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CCTYPE.TIM",
       "size": 153620,
-      "sha256": "323128a14f3ef8e2899c2d8126d7c5b7e31c2cc8d8b1b4ab950d9c2908748713"
+      "sha256": "323128a14f3ef8e2899c2d8126d7c5b7e31c2cc8d8b1b4ab950d9c2908748713",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CCWEAPON.TIM",
       "size": 153620,
-      "sha256": "61f1256bfd0e5e572a4c08b36400a2b73efbb066b174af5cab02a69ac7257718"
+      "sha256": "61f1256bfd0e5e572a4c08b36400a2b73efbb066b174af5cab02a69ac7257718",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CHAR.MR",
@@ -503,122 +763,362 @@
     {
       "id": "/DATA/MENU/CONTROLL.TIM",
       "size": 153620,
-      "sha256": "d0d249217608538ce1253867e4dccd785adeae389e8a83622d1e812bc228f1a7"
+      "sha256": "d0d249217608538ce1253867e4dccd785adeae389e8a83622d1e812bc228f1a7",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT1.TIM",
       "size": 153620,
-      "sha256": "7867c03122ffc24a539cd0d25bde56fb9f3d23502ec08451620e6206b14c8aee"
+      "sha256": "7867c03122ffc24a539cd0d25bde56fb9f3d23502ec08451620e6206b14c8aee",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT10.TIM",
       "size": 153620,
-      "sha256": "85abf2f1622963884dbc7d8198c4a7b66297b4aa6879a36bed22ce65f809e5d5"
+      "sha256": "85abf2f1622963884dbc7d8198c4a7b66297b4aa6879a36bed22ce65f809e5d5",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT11.TIM",
       "size": 153620,
-      "sha256": "0678e38cc322291a6e72cb6577c7f7167ccc11b3e8d8ccc78be5fbc04e6e0e0f"
+      "sha256": "0678e38cc322291a6e72cb6577c7f7167ccc11b3e8d8ccc78be5fbc04e6e0e0f",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT12.TIM",
       "size": 153620,
-      "sha256": "bef5fb46f287b2df4a624684528b9d4bed1559f20220b2aa1d8f88e40622cfaa"
+      "sha256": "bef5fb46f287b2df4a624684528b9d4bed1559f20220b2aa1d8f88e40622cfaa",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT13.TIM",
       "size": 153620,
-      "sha256": "2cf1a68bf464221d7e8713cb11be675cd02fe01048fbc711ba3582122597c90b"
+      "sha256": "2cf1a68bf464221d7e8713cb11be675cd02fe01048fbc711ba3582122597c90b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT14.TIM",
       "size": 153620,
-      "sha256": "f4ca18ae81985b927d33560566f1503a0b71c4e323b0336f3cc3ec3fd36ec55e"
+      "sha256": "f4ca18ae81985b927d33560566f1503a0b71c4e323b0336f3cc3ec3fd36ec55e",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT15.TIM",
       "size": 153620,
-      "sha256": "b77a549dae64bd5c01d07d67a57e824b38188b8ddc67fce91aeaa9635eeb84dc"
+      "sha256": "b77a549dae64bd5c01d07d67a57e824b38188b8ddc67fce91aeaa9635eeb84dc",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT16.TIM",
       "size": 153620,
-      "sha256": "95ac0522e44b376a4ba9af283de241928a1409638bb4bfa83cdae5c7f7a08ec1"
+      "sha256": "95ac0522e44b376a4ba9af283de241928a1409638bb4bfa83cdae5c7f7a08ec1",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT17.TIM",
       "size": 153620,
-      "sha256": "cf64de84feda74cb48a7ac6cc2be8d102b9135f4834684487e67f951991063ec"
+      "sha256": "cf64de84feda74cb48a7ac6cc2be8d102b9135f4834684487e67f951991063ec",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT18.TIM",
       "size": 153620,
-      "sha256": "1a6993d9bc117953842847397308c0c7f04fa6c01bcd96f6ef91517c98cd23e8"
+      "sha256": "1a6993d9bc117953842847397308c0c7f04fa6c01bcd96f6ef91517c98cd23e8",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT19.TIM",
       "size": 153620,
-      "sha256": "a172af35d1da8b5feac426776c54f129363fe5b08451d462627010425cce9077"
+      "sha256": "a172af35d1da8b5feac426776c54f129363fe5b08451d462627010425cce9077",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT2.TIM",
       "size": 153620,
-      "sha256": "d050ae54a4baa0ef3f1f047c12e17e5a1b115dc8b8933d940829050adef7adae"
+      "sha256": "d050ae54a4baa0ef3f1f047c12e17e5a1b115dc8b8933d940829050adef7adae",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT20.TIM",
       "size": 153620,
-      "sha256": "fd6c2cae1938fd8174883a8f28dea128449e3c655243c6c8cdf9b8f3d7bbf68f"
+      "sha256": "fd6c2cae1938fd8174883a8f28dea128449e3c655243c6c8cdf9b8f3d7bbf68f",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT21.TIM",
       "size": 153620,
-      "sha256": "63d4e52ebca8abe594938d3bcb73fceca1b1b40093f252352900218d33936aa4"
+      "sha256": "63d4e52ebca8abe594938d3bcb73fceca1b1b40093f252352900218d33936aa4",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT22.TIM",
       "size": 153620,
-      "sha256": "ab04dee2a54005052e20c11dd11a520aef1277b99ea2463bc0e30271e479b4e1"
+      "sha256": "ab04dee2a54005052e20c11dd11a520aef1277b99ea2463bc0e30271e479b4e1",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT3.TIM",
       "size": 153620,
-      "sha256": "0acf226b0a38ee4f540f94b1b493f04eedf525b889b0119bf94b4aae53d23082"
+      "sha256": "0acf226b0a38ee4f540f94b1b493f04eedf525b889b0119bf94b4aae53d23082",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT4.TIM",
       "size": 153620,
-      "sha256": "45bf8210b0b1f85653e5eca2aaab80e190841befd70048fefb7ca387ae4d38ae"
+      "sha256": "45bf8210b0b1f85653e5eca2aaab80e190841befd70048fefb7ca387ae4d38ae",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT5.TIM",
       "size": 153620,
-      "sha256": "8defbaa107f09e6e0807c30f9593bc419c3c2237f89ed115b9c094131abdaeae"
+      "sha256": "8defbaa107f09e6e0807c30f9593bc419c3c2237f89ed115b9c094131abdaeae",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT6.TIM",
       "size": 153620,
-      "sha256": "441cfea72f88302734e7476abf3cfb544d5543b12be4bcf3b7f1284302bddc09"
+      "sha256": "441cfea72f88302734e7476abf3cfb544d5543b12be4bcf3b7f1284302bddc09",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT7.TIM",
       "size": 153620,
-      "sha256": "f737b7080505f030e84f61fe3f17ec8a833a52c55f39dc62471659dd394b5793"
+      "sha256": "f737b7080505f030e84f61fe3f17ec8a833a52c55f39dc62471659dd394b5793",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT8.TIM",
       "size": 153620,
-      "sha256": "ebfa19f5b6e94421a1d610cbb8ee91eeeac3f66e87878dd39d277b32332d8944"
+      "sha256": "ebfa19f5b6e94421a1d610cbb8ee91eeeac3f66e87878dd39d277b32332d8944",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CREDIT9.TIM",
       "size": 153620,
-      "sha256": "93b009617229e2a5b02ef43afc6547f18a56b2131f28c3daa5b4daa7fcb62f04"
+      "sha256": "93b009617229e2a5b02ef43afc6547f18a56b2131f28c3daa5b4daa7fcb62f04",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/CRUSHER.TIM",
       "size": 153620,
-      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b"
+      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/DIAB.MR",
@@ -628,22 +1128,62 @@
     {
       "id": "/DATA/MENU/DMATCH.TIM",
       "size": 153620,
-      "sha256": "ec57a3a18a9fbfddf971cde9b1e9d496df420348099e1864514d4bdc730c60f2"
+      "sha256": "ec57a3a18a9fbfddf971cde9b1e9d496df420348099e1864514d4bdc730c60f2",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/DMCUSTOM.TIM",
       "size": 153620,
-      "sha256": "e17eecdd86ccc05faa9f279bd94ffb476b066439b3f209c6bb6168339d18251b"
+      "sha256": "e17eecdd86ccc05faa9f279bd94ffb476b066439b3f209c6bb6168339d18251b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/DRAG.TIM",
       "size": 153620,
-      "sha256": "d61208b01371b80f66aac92cdb5410d38e3e745168d20c6fcf10a32fb1ba8948"
+      "sha256": "d61208b01371b80f66aac92cdb5410d38e3e745168d20c6fcf10a32fb1ba8948",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/GOGGLE.TIM",
       "size": 153620,
-      "sha256": "5152b6e99055ad25d9d915a01cd8ea9bf7cbfb82c0173e337f9c8e51ac48c924"
+      "sha256": "5152b6e99055ad25d9d915a01cd8ea9bf7cbfb82c0173e337f9c8e51ac48c924",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/LRG.MR",
@@ -653,12 +1193,32 @@
     {
       "id": "/DATA/MENU/MAID.TIM",
       "size": 153620,
-      "sha256": "c7d25340ff099e0d7594cb59d506a689f9dec9be5fd5e491f6f2740caac7f106"
+      "sha256": "c7d25340ff099e0d7594cb59d506a689f9dec9be5fd5e491f6f2740caac7f106",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/MAIN.TIM",
       "size": 153620,
-      "sha256": "1dcdeca0b8eddddaa1c81cae81d803d74dcb11bc5e842b26cf5703e514d65d7d"
+      "sha256": "1dcdeca0b8eddddaa1c81cae81d803d74dcb11bc5e842b26cf5703e514d65d7d",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/MED.MR",
@@ -678,62 +1238,182 @@
     {
       "id": "/DATA/MENU/MINION.TIM",
       "size": 153620,
-      "sha256": "7676f72b5fe7bc8dff0d3dfbe9d771eceb7c3bef02a2579eee146acae97d05b1"
+      "sha256": "7676f72b5fe7bc8dff0d3dfbe9d771eceb7c3bef02a2579eee146acae97d05b1",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/MOON.TIM",
       "size": 153620,
-      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b"
+      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/NEWGAME.TIM",
       "size": 153620,
-      "sha256": "2b13459c8c8bbeeb802627775e1d68cf4fc6a5dd58a1a5273bbcbb82f709ab51"
+      "sha256": "2b13459c8c8bbeeb802627775e1d68cf4fc6a5dd58a1a5273bbcbb82f709ab51",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/OPTIONS.TIM",
       "size": 153620,
-      "sha256": "5075ab4d8a9107ef6d9dfa465a2e19e79ff291ec1ff98b36c60b4b984d02a07f"
+      "sha256": "5075ab4d8a9107ef6d9dfa465a2e19e79ff291ec1ff98b36c60b4b984d02a07f",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/ORBITAL.TIM",
       "size": 153620,
-      "sha256": "bd7754a9eea334ee9d0251031823ea2fc58344cb00152bd689af016c1cab478f"
+      "sha256": "bd7754a9eea334ee9d0251031823ea2fc58344cb00152bd689af016c1cab478f",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/PASSWORD.TIM",
       "size": 153620,
-      "sha256": "1ebe83940f7e6f9775dae701f88c79a61849c4dd24a1743e7b3cf647f5d935c4"
+      "sha256": "1ebe83940f7e6f9775dae701f88c79a61849c4dd24a1743e7b3cf647f5d935c4",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 0,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/PIRATE.TIM",
       "size": 153620,
-      "sha256": "a9f001aaefa6854784c54f4cc96856aef3b577cb873d1989cb981e851b70e3c3"
+      "sha256": "a9f001aaefa6854784c54f4cc96856aef3b577cb873d1989cb981e851b70e3c3",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/PIZZA.TIM",
       "size": 153620,
-      "sha256": "16bab660e9b2d51a7998b585adbf025dd34976b7d1b3348c4c7d50cab11cd6b9"
+      "sha256": "16bab660e9b2d51a7998b585adbf025dd34976b7d1b3348c4c7d50cab11cd6b9",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/PSETTING.TIM",
       "size": 153620,
-      "sha256": "ec3f81d2b0a62b3aa8131af0adeb000aa20661ae404e62555a166b43304785d3"
+      "sha256": "ec3f81d2b0a62b3aa8131af0adeb000aa20661ae404e62555a166b43304785d3",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/QUATRO.TIM",
       "size": 153620,
-      "sha256": "6482757044cebcdd89fd10fef1ea4d5d8a02a74959519e71ca0afbd219702d23"
+      "sha256": "6482757044cebcdd89fd10fef1ea4d5d8a02a74959519e71ca0afbd219702d23",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/RCCAR.TIM",
       "size": 153620,
-      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b"
+      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/SLAM.TIM",
       "size": 153620,
-      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b"
+      "sha256": "333108f83cbfdb86982b709f9bec922e9a7622c7c5c617cc04168f1e21a72c9b",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/SM.MR",
@@ -743,7 +1423,17 @@
     {
       "id": "/DATA/MENU/STOOTH.TIM",
       "size": 153620,
-      "sha256": "51407db55c82fb7f159960ca6839a024c318231fc3caef1e95baf032b82b9831"
+      "sha256": "51407db55c82fb7f159960ca6839a024c318231fc3caef1e95baf032b82b9831",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/SUV.MR",
@@ -753,37 +1443,107 @@
     {
       "id": "/DATA/MENU/TANK.TIM",
       "size": 153620,
-      "sha256": "a7368b5a40f4445abab6c3b715110202068af264118ab01e835313ead8968dec"
+      "sha256": "a7368b5a40f4445abab6c3b715110202068af264118ab01e835313ead8968dec",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/THUMP.TIM",
       "size": 153620,
-      "sha256": "72fcf3222f2fda021b2209dae96769a05803fa9d72adae8338480f400f64c1d4"
+      "sha256": "72fcf3222f2fda021b2209dae96769a05803fa9d72adae8338480f400f64c1d4",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/TLOAD.TIM",
       "size": 153620,
-      "sha256": "c377904ab01fd54ac1051c60932f99b8217ba079b59d99aee5bda2632ebaa04d"
+      "sha256": "c377904ab01fd54ac1051c60932f99b8217ba079b59d99aee5bda2632ebaa04d",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/TOPTIONS.TIM",
       "size": 153620,
-      "sha256": "6c61bba7f2fa0683ee7829779a790cb83b9521bf53508d10bf1ee1ec85a55a44"
+      "sha256": "6c61bba7f2fa0683ee7829779a790cb83b9521bf53508d10bf1ee1ec85a55a44",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/TOY.TIM",
       "size": 153620,
-      "sha256": "6739738981cf75f64386ffe72642fe825f63c079deb2531cc60f0db830a5cc04"
+      "sha256": "6739738981cf75f64386ffe72642fe825f63c079deb2531cc60f0db830a5cc04",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/TRASH.TIM",
       "size": 153620,
-      "sha256": "2edbabdf84f53567a591ca9808b2bab452ca929ab864d935a22c7b5c586947be"
+      "sha256": "2edbabdf84f53567a591ca9808b2bab452ca929ab864d935a22c7b5c586947be",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/TSAVE.TIM",
       "size": 153620,
-      "sha256": "f7fafd7ad7ffb2b86c25699de2da0919eba05ad6cb604eaf073a53ad09ae5404"
+      "sha256": "f7fafd7ad7ffb2b86c25699de2da0919eba05ad6cb604eaf073a53ad09ae5404",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/VAN.MR",
@@ -798,17 +1558,47 @@
     {
       "id": "/DATA/MENU/VIDEO.TIM",
       "size": 153620,
-      "sha256": "a4a14b60c4c1f957a0377cd440a95c7d4b7a8b92a9888c743b1659f3ec4410dc"
+      "sha256": "a4a14b60c4c1f957a0377cd440a95c7d4b7a8b92a9888c743b1659f3ec4410dc",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/WAGON.TIM",
       "size": 153620,
-      "sha256": "ec93c238c86d980dd8019ba90b12bf20ea9b767f3767dd59125c8295fa50d5a5"
+      "sha256": "ec93c238c86d980dd8019ba90b12bf20ea9b767f3767dd59125c8295fa50d5a5",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MENU/ZOMBIE.TIM",
       "size": 153620,
-      "sha256": "b0cf31a810566063f466837ba61145281dc6e992c3a502ac49249f7caf43b73a"
+      "sha256": "b0cf31a810566063f466837ba61145281dc6e992c3a502ac49249f7caf43b73a",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/MINIA.MR",
@@ -878,7 +1668,17 @@
     {
       "id": "/DATA/NEON.TIM",
       "size": 153620,
-      "sha256": "54a9b2d5a1598cd77adad935275e519dfc65ad48161cd700d0608cbf3342e681"
+      "sha256": "54a9b2d5a1598cd77adad935275e519dfc65ad48161cd700d0608cbf3342e681",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/OIL.IMG",
@@ -893,7 +1693,17 @@
     {
       "id": "/DATA/OIL.TIM",
       "size": 153620,
-      "sha256": "2c1490bb22daf03290a4aa512bedc5dfb941776fef2a6b0d017acb8b64eb14e5"
+      "sha256": "2c1490bb22daf03290a4aa512bedc5dfb941776fef2a6b0d017acb8b64eb14e5",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/ORBITAL.MR",
@@ -1113,7 +1923,17 @@
     {
       "id": "/DATA/TITLE.TIM",
       "size": 153620,
-      "sha256": "1409e7588520bea86303565647a6b620d8ee91ba3061f8fba2b65d00580d23bf"
+      "sha256": "1409e7588520bea86303565647a6b620d8ee91ba3061f8fba2b65d00580d23bf",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/TOY.MR",
@@ -1248,7 +2068,17 @@
     {
       "id": "/DATA/YARD.TIM",
       "size": 153620,
-      "sha256": "51c60a940cf8b653e1031c8c9391f40beebc560592f1dbc6b0c1bcc904c8b3ee"
+      "sha256": "51c60a940cf8b653e1031c8c9391f40beebc560592f1dbc6b0c1bcc904c8b3ee",
+      "tim": {
+        "bitDepth": 16,
+        "image": {
+          "x": 320,
+          "y": 0,
+          "widthWords": 320,
+          "height": 240
+        },
+        "clut": null
+      }
     },
     {
       "id": "/DATA/ZOMBIE.MR",

@@ -5,7 +5,6 @@ import { byteRange, serveFile } from "../../tools/server/files.js";
 import { discTracks, parseCue } from "../../web/src/loader/cue.ts";
 import { Disc } from "../../web/src/loader/disc.ts";
 import { checkRange, directorySources, localSources } from "../../web/src/loader/sources.ts";
-import { sha256, verifyExecutable } from "../../web/src/loader/verify.ts";
 
 const cue =
   'FILE "data.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\nFILE "audio.bin" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:02:00\n';
@@ -54,15 +53,6 @@ test("folder selection ignores unrelated files and rejects ambiguous filenames",
   await expect(
     discTracks(directorySources([cueFile, new File([cue], "second.cue")]), reference, () => {}),
   ).rejects.toThrow("only one disc CUE");
-});
-
-test("EXE checksum mismatch fails independently of resources", async () => {
-  const bytes = new TextEncoder().encode("test executable");
-  const hash = await sha256(bytes);
-  expect(await verifyExecutable(bytes, hash)).toBe(hash);
-  await expect(verifyExecutable(bytes, reference.executable.sha256)).rejects.toThrow(
-    "Unsupported SCUS",
-  );
 });
 
 test("MODE2 extraction checks sync, subheader and form", async () => {

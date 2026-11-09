@@ -1,8 +1,8 @@
 import reference from "../../../config/disc.json";
+import { checkResource, requireResources, resourceReference } from "../compatibility/index.ts";
 import { discTracks } from "./cue.ts";
 import { Disc } from "./disc.ts";
 import type { DiscAssets, DiscSources, LoaderProgress } from "./types.ts";
-import { verifyExecutable } from "./verify.ts";
 export async function loadDisc(
   sources: DiscSources,
   { progress = () => {}, warn = () => {} }: LoaderProgress = {},
@@ -13,21 +13,38 @@ export async function loadDisc(
   if (!first?.source) throw new Error("Required data track missing");
   const disc = new Disc(first.source, first.index);
   const entries = await disc.entries();
-  const exe = entries.find((e) => e.path.toUpperCase() === "/SCUS_945.60");
-  if (!exe || exe.size > 4 * 1024 * 1024)
-    throw new Error("Required SCUS_945.60 is missing or invalid");
-  progress("Verifying SCUS_945.60…");
-  await verifyExecutable(await disc.read(exe.lba, exe.size), reference.executable.sha256);
-  const data = entries.filter((e) => /^\/DATA\/.+\.(MR|IMG|TIM|VAB)$/i.test(e.path));
+  const candidates = entries
+    .filter(
+      (entry) =>
+        entry.path.toUpperCase() === "/SCUS_945.60" || /\.(MR|IMG|TIM|VAB|STR)$/i.test(entry.path),
+    )
+    .map((entry) => ({ id: entry.path.toUpperCase(), size: entry.size }));
+  requireResources(candidates, resourceReference);
+  const available = new Set(candidates.map((entry) => entry.id));
+  const expected = new Map(resourceReference.map((entry) => [entry.id, entry]));
+  const data = entries.filter(
+    (e) =>
+      e.path.toUpperCase() === "/SCUS_945.60" || /^\/DATA\/.+\.(MR|IMG|TIM|VAB)$/i.test(e.path),
+  );
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   const manifest = [];
   for (const [i, entry] of data.entries()) {
     progress(`Reading ${entry.path} (${i + 1}/${data.length})…`);
-    files.set(entry.path, await disc.read(entry.lba, entry.size));
+    if (entry.path.toUpperCase() === "/SCUS_945.60" && entry.size > 4 * 1024 * 1024)
+      throw new Error("Main EXE is too large");
+    const bytes = await disc.read(entry.lba, entry.size);
+    const result = await checkResource({
+      id: entry.path.toUpperCase(),
+      bytes,
+      available,
+      reference: expected.get(entry.path.toUpperCase()),
+    });
+    if (result.status === "uncompatible") throw new Error(`${entry.path}: ${result.message}`);
+    if (result.status === "warning") warn(`${entry.path}: ${result.message}`);
+    if (entry.path.toUpperCase() === "/SCUS_945.60") continue;
+    files.set(entry.path.toUpperCase(), bytes);
     manifest.push(`${entry.lba}\t${entry.size}\t${entry.path}`);
   }
-  if (!files.has("/DATA/MAIN.MR") || !files.has("/DATA/MENU.MR"))
-    throw new Error("Required MAIN.MR or MENU.MR is missing");
   files.set("/DATA/files.tsv", new TextEncoder().encode(manifest.join("\n") + "\n"));
   const movies = new Map(
     entries

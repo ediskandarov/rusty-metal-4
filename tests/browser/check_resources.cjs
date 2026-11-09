@@ -31,10 +31,27 @@ const { chromium } = require("playwright");
       assert(await page.locator("#disc-files").isEnabled());
       const summary = await page.locator("#resource-summary").textContent();
       console.log("Variant:", summary);
-      assert(await page.locator('.resource-row[data-status="modified"]').count());
-      assert(await page.locator('.resource-row[data-status="error"]').count());
+      await page.locator("#resource-search").fill("SCUS_945.60");
+      assert.equal(
+        await page.locator('.resource-row[data-status="compatible"]:visible').count(),
+        1,
+      );
+      await page.locator("#resource-search").fill("");
+      assert(await page.locator('.resource-row[data-status="warning"]').count());
+      assert(await page.locator('.resource-row[data-status="uncompatible"]').count());
       await page.locator("#resource-issues").check();
-      assert.equal(await page.locator('.resource-row[data-status="original"]:visible').count(), 0);
+      assert.equal(
+        await page.locator('.resource-row[data-status="compatible"]:visible').count(),
+        0,
+      );
+      assert.equal(
+        await page.locator('.resource-row[data-status="compatible"]:visible').count(),
+        0,
+      );
+      assert(await page.locator('.resource-row[data-status="warning"]:visible').count());
+      assert(await page.locator('.resource-row[data-status="uncompatible"]:visible').count());
+      await page.locator("#resource-search").fill("PASSWORD.TIM");
+      assert.equal(await page.locator('.resource-row[data-status="warning"]:visible').count(), 1);
       await page.locator("#resource-search").fill("CADCOP");
       assert.equal(await page.locator(".resource-row:visible").count(), 1);
       await page.locator(".resource-row:visible > summary").click();
@@ -64,12 +81,14 @@ const { chromium } = require("playwright");
     await page.locator("#resource-check").click();
     await page.waitForFunction(
       () =>
-        document.getElementById("resource-summary").textContent.startsWith("275 original") &&
+        document
+          .getElementById("resource-summary")
+          .textContent.startsWith("Compatible\n275 compatible") &&
         document.getElementById("resource-check").disabled,
       null,
       { timeout: 90000 },
     );
-    assert.equal(await page.locator('.resource-row[data-status="original"]').count(), 275);
+    assert.equal(await page.locator('.resource-row[data-status="compatible"]').count(), 275);
     await page.locator("#resource-search").fill("neon");
     assert(await page.locator(".resource-row:visible").count());
     await page.locator("#resource-search").fill("");
@@ -88,7 +107,7 @@ const { chromium } = require("playwright");
     assert(bounds.x >= 0 && bounds.x + bounds.width <= 390);
     assert.deepEqual(errors, []);
     console.log(
-      "PASS resource inventory, SHA-256 identity, pause/resume, filters, retry, viewport and normal game startup",
+      "PASS resource inventory, per-format compatibility, pause/resume, filters, retry, viewport and normal game startup",
     );
   } finally {
     await browser.close();
