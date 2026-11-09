@@ -17,8 +17,10 @@ export function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): Promis
           const module = globalThis.Module;
           requireRuntime(module);
           module.FS.mkdirTree("/DATA");
-          for (const [path, bytes] of assets.files)
+          for (const [path, bytes] of assets.files) {
+            module.FS.mkdirTree(path.slice(0, path.lastIndexOf("/")));
             module.FS.writeFile(path, bytes, { canOwn: true });
+          }
           assets.files.clear();
           for (const track of assets.tracks) {
             module._WebMusicConfigureTrack(track.number, track.start, track.end, track.toc);

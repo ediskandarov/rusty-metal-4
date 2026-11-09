@@ -8,7 +8,7 @@ module.exports = async function checkMenuHighlight(page, prefix) {
     await page.keyboard.press(key, { delay: 150 });
     await page.waitForTimeout(300);
   };
-  async function greenOnNewGame(label) {
+  async function measureNewGame(label) {
     const png = await page.locator("canvas").screenshot({ path: `${prefix}-${label}.png` });
     return page.evaluate(async (base64) => {
       const image = new Image();
@@ -26,20 +26,27 @@ module.exports = async function checkMenuHighlight(page, prefix) {
         Math.floor(image.height * 0.25),
       ).data;
       let green = 0;
-      for (let i = 0; i < pixels.length; i += 4)
+      let visible = 0;
+      for (let i = 0; i < pixels.length; i += 4) {
         green += pixels[i + 1] - (pixels[i] + pixels[i + 2]) / 2;
-      return green / (pixels.length / 4);
+        if (Math.max(pixels[i], pixels[i + 1], pixels[i + 2]) > 24) visible++;
+      }
+      return { green: green / (pixels.length / 4), visible: visible / (pixels.length / 4) };
     }, png.toString("base64"));
   }
   assert.equal(await page.evaluate(() => tm4Port.screen), "main");
   assert.equal(await page.evaluate(() => tm4Port.selected), 0);
-  const selected = await greenOnNewGame("selected");
+  const selected = await measureNewGame("selected");
   await press("ArrowUp");
   assert.equal(await page.evaluate(() => tm4Port.selected), 2);
-  const unselected = await greenOnNewGame("unselected");
+  const unselected = await measureNewGame("unselected");
   assert(
-    selected - unselected > 2,
-    `New Game must visibly glow green when selected (${selected} vs ${unselected})`,
+    unselected.visible > 0.5,
+    `Unselected New Game must retain its background texture (${unselected.visible})`,
+  );
+  assert(
+    selected.green - unselected.green > 2,
+    `New Game must visibly glow green when selected (${selected.green} vs ${unselected.green})`,
   );
   await press("ArrowDown");
   assert.equal(await page.evaluate(() => tm4Port.selected), 0);

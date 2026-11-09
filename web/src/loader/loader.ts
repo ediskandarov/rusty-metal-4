@@ -18,7 +18,7 @@ export async function loadDisc(
     throw new Error("Required SCUS_945.60 is missing or invalid");
   progress("Verifying SCUS_945.60…");
   await verifyExecutable(await disc.read(exe.lba, exe.size), reference.executable.sha256);
-  const data = entries.filter((e) => /^\/DATA\/[^/]+\.(MR|IMG|TIM|VAB)$/i.test(e.path));
+  const data = entries.filter((e) => /^\/DATA\/.+\.(MR|IMG|TIM|VAB)$/i.test(e.path));
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   const manifest = [];
   for (const [i, entry] of data.entries()) {
