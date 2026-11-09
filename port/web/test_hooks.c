@@ -1,4 +1,6 @@
 /* Diagnostic entry points only; not linked into the normal browser target. */
+#include "test_hooks.h"
+#include "src/modules/menu/private.h"
 #include "src/main/object/private.h"
 #include "src/modules/car/private.h"
 #include "src/modules/cars/c_crush/private.h"
@@ -1218,4 +1220,28 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadCoop(void)
             car != NULL, GameInfo.players[i].lives, GameInfo.players[i].eliminated, camera != NULL,
             car && camera && camera->object == car);
     }
+}
+
+static int test_preview_angle = -1;
+
+EMSCRIPTEN_KEEPALIVE void WebTestSetPreviewAngle(int angle)
+{
+    test_preview_angle = angle;
+}
+
+void WebTestDrawMenu(MenuGraphics* graphics)
+{
+    s32 original_angle = MenuPreviewRotationAngle;
+    int preview_angle = test_preview_angle;
+    if (preview_angle >= 0)
+        MenuPreviewRotationAngle = preview_angle;
+    MenuDrawScreen(graphics);
+    if (preview_angle >= 0)
+        MenuPreviewRotationAngle = original_angle;
+    EM_ASM(
+        {
+            tm4Port.testPreviewAngle = $0;
+            tm4Port.previewRotationAngle = $1;
+        },
+        preview_angle, MenuPreviewRotationAngle);
 }

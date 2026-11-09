@@ -52,6 +52,7 @@ const assert = require("node:assert/strict");
     await screen("newgame");
     await press("x");
     await screen("carsel");
+    await require("./check_preview_rotation.cjs")(page);
     const initial = await page.evaluate(() => tm4Port.selectedCar);
     for (let cycle = 0; cycle < 3; ++cycle) {
       const seen = new Set();

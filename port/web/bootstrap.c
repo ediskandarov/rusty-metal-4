@@ -7,6 +7,9 @@
 #include "overlays.h"
 #include "render_sync.h"
 #include "subpixel.h"
+#ifdef TM4_WEB_TEST_HOOKS
+#include "test_hooks.h"
+#endif
 #include "tm4/main/redbook.h"
 #include <libetc.h>
 #include <libgpu.h>
@@ -263,15 +266,6 @@ void WebLeaveMenu(void)
     set_menu_mask(0);
 }
 
-#ifdef TM4_WEB_TEST_HOOKS
-static int test_preview_angle = -1;
-
-EMSCRIPTEN_KEEPALIVE void WebTestSetPreviewAngle(int angle)
-{
-    test_preview_angle = angle;
-}
-#endif
-
 static void draw_menu(void)
 {
     MenuGraphicsBuffer = MenuGraphicsBuffer->next;
@@ -285,14 +279,9 @@ static void draw_menu(void)
     WebSubpixelBegin(WEB_SUBPIXEL_MENU);
     WebSubpixelSelect(WEB_SUBPIXEL_MENU);
 #ifdef TM4_WEB_TEST_HOOKS
-    s32 original_angle = MenuPreviewRotationAngle;
-    int preview_angle = test_preview_angle;
-    if (preview_angle >= 0)
-        MenuPreviewRotationAngle = preview_angle;
-#endif
+    WebTestDrawMenu(graphics);
+#else
     MenuDrawScreen(graphics);
-#ifdef TM4_WEB_TEST_HOOKS
-    MenuPreviewRotationAngle = original_angle;
 #endif
     WebSubpixelSelect(WEB_SUBPIXEL_NONE);
     addPrim(&graphics->ordering_table[2], &graphics->draw);
@@ -300,9 +289,6 @@ static void draw_menu(void)
     VSync(0);
     PutDispEnv(&graphics->display);
     WebSubpixelDraw(WEB_SUBPIXEL_MENU, &graphics->ordering_table[2]);
-#ifdef TM4_WEB_TEST_HOOKS
-    EM_ASM({ tm4Port.testPreviewAngle = $0; }, preview_angle);
-#endif
     MenuProcessScreenInput();
     WebCardFlush();
     ++MenuTicks;

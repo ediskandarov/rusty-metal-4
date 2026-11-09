@@ -5,7 +5,9 @@
   "scripts": {
     "build": "bun tools/build.js",
     "build:dev": "bun tools/build.js --dev",
+    "build:diagnostic": "bun tools/build.js --diagnostic",
     "dev": "bun tools/serve.js",
+    "dev:diagnostic": "bun tools/serve.js --site build/diagnostic/site",
     "test": "bun test tests/unit",
     "fmt": "bun fmt --no-script tools web tests package.json config tsconfig.json bunfig.toml",
     "fmt:check": "bun fmt --no-script --check tools web tests package.json config tsconfig.json bunfig.toml",

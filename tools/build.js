@@ -1,10 +1,18 @@
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
 import { root, run } from "./common.js";
-const { values } = parseArgs({ options: { dev: { type: "boolean", default: false } } });
-const mode = values.dev ? "dev" : "release";
+const { values } = parseArgs({
+  options: {
+    dev: { type: "boolean", default: false },
+    diagnostic: { type: "boolean", default: false },
+  },
+});
+if (values.dev && values.diagnostic) throw new Error("Choose either --dev or --diagnostic");
+const mode = values.diagnostic ? "diagnostic" : values.dev ? "dev" : "release";
+const diagnostics = values.diagnostic;
+const localDisc = values.dev || diagnostics;
 const directory = join(root, "build", mode);
 const site = join(directory, "site");
 await mkdir(site, { recursive: true });
@@ -16,8 +24,8 @@ await run([
   root,
   "-B",
   directory,
-  `-DCMAKE_BUILD_TYPE=${values.dev ? "Debug" : "Release"}`,
-  `-DTM4_WEB_TEST_HOOKS=${values.dev ? "ON" : "OFF"}`,
+  `-DCMAKE_BUILD_TYPE=${diagnostics ? "Debug" : "Release"}`,
+  `-DTM4_WEB_TEST_HOOKS=${diagnostics ? "ON" : "OFF"}`,
 ]);
 await run([
   "cmake",
@@ -31,11 +39,12 @@ const result = await Bun.build({
   outdir: site,
   naming: "web.js",
   target: "browser",
-  minify: !values.dev,
-  sourcemap: values.dev ? "linked" : "none",
-  define: { TM4_DEV: JSON.stringify(values.dev) },
+  minify: !diagnostics,
+  sourcemap: diagnostics ? "linked" : "none",
+  define: { TM4_DEV: JSON.stringify(localDisc) },
 });
 if (!result.success) throw new AggregateError(result.logs, "Browser bundle failed");
+if (!diagnostics) await rm(join(site, "web.js.map"), { force: true });
 await cp(join(root, "web/index.html"), join(site, "index.html"));
 await cp(join(root, "web/styles"), join(site, "styles"), { recursive: true });
 console.log(`Built ${mode}: ${site}`);
