@@ -1,6 +1,7 @@
 import { loadDisc } from "./loader/loader.ts";
 import { directorySources, localSources, remoteSources } from "./loader/sources.ts";
 import type { DiscSources } from "./loader/types.ts";
+import { prepareIsolation } from "./runtime/isolation.ts";
 import { startGame } from "./runtime/start.ts";
 import { element } from "./ui/dom.ts";
 
@@ -64,7 +65,21 @@ folderPicker.addEventListener("change", () => {
 });
 canvas.addEventListener("pointerdown", () => canvas.focus());
 
-if (TM4_DEV) {
+picker.disabled = folderPicker.disabled = !crossOriginIsolated;
+if (!crossOriginIsolated) {
+  progress.textContent =
+    isSecureContext && "serviceWorker" in navigator
+      ? "Preparing browser support… The page will reload automatically. If it does not, allow service workers for this site and reload."
+      : "This game needs HTTPS and a browser with service worker support.";
+}
+
+try {
+  await prepareIsolation();
+} catch (error) {
+  progress.textContent = error instanceof Error ? error.message : String(error);
+}
+
+if (TM4_DEV && crossOriginIsolated) {
   progress.textContent = "Connecting to local disc server…";
   try {
     const { sources, warnings: messages } = await remoteSources("/__dev/disc.json");

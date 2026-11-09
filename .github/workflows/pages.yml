@@ -1,0 +1,104 @@
+name: CI and Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - run: bun run fmt:check
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+
+  build:
+    needs: checks
+    # Forks can run checks, but must not receive access to the private game repository.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Read pinned game revision
+        id: game
+        run: echo "revision=$(git ls-tree HEAD game | awk '{print $3}')" >> "$GITHUB_OUTPUT"
+      - name: Check out private game sources
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: ediskandarov/tm4_archaeology
+          ref: ${{ steps.game.outputs.revision }}
+          path: game
+          ssh-key: ${{ secrets.GAME_DEPLOY_KEY }}
+          persist-credentials: false
+      - name: Check out pinned PsyZ and SDL
+        run: |
+          git submodule update --init --depth 1 external/psyz
+          git -C external/psyz submodule update --init --depth 1 external/SDL
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - run: bun install --frozen-lockfile
+      - name: Check out Emscripten SDK
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: emscripten-core/emsdk
+          ref: 35659964bc2762fffec0d257997fb61475f765b7 # 6.0.13
+          path: .emsdk
+          persist-credentials: false
+      - name: Install Emscripten
+        run: |
+          .emsdk/emsdk install 6.0.13
+          .emsdk/emsdk activate 6.0.13
+      - name: Build release
+        run: |
+          source .emsdk/emsdk_env.sh
+          bun run build
+      - name: Install browser
+        run: bun x playwright install --with-deps chromium
+      - name: Check static hosting without disc files
+        run: bun run test:pages
+      - name: Configure Pages
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Upload release site
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: build/release/site
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

@@ -45,6 +45,14 @@ const result = await Bun.build({
 });
 if (!result.success) throw new AggregateError(result.logs, "Browser bundle failed");
 if (!diagnostics) await rm(join(site, "web.js.map"), { force: true });
+await cp(
+  join(root, "node_modules/coi-serviceworker/coi-serviceworker.min.js"),
+  join(site, "coi-serviceworker.js"),
+);
+await cp(
+  join(root, "node_modules/coi-serviceworker/LICENSE"),
+  join(site, "coi-serviceworker.LICENSE.txt"),
+);
 await cp(join(root, "web/index.html"), join(site, "index.html"));
 await cp(join(root, "web/styles"), join(site, "styles"), { recursive: true });
 console.log(`Built ${mode}: ${site}`);
