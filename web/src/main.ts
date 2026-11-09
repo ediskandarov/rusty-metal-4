@@ -2,6 +2,8 @@ import { loadDisc } from "./loader/loader.ts";
 import { directorySources, remoteSources } from "./loader/sources.ts";
 import type { DiscSources } from "./loader/types.ts";
 import { installCarMods } from "./mods/install.ts";
+import { joinMatch } from "./network/match.ts";
+import { hasNetworkEngine } from "./network/protocol.ts";
 import { prepareIsolation } from "./runtime/isolation.ts";
 import { startGame } from "./runtime/start.ts";
 import { element } from "./ui/dom.ts";
@@ -50,7 +52,17 @@ async function launch(resolveSources: () => DiscSources) {
     // Hide before starting SDL so its initial viewport uses the final page layout.
     startup.hidden = true;
     await startGame(assets, canvas);
-    element("status", HTMLElement).textContent = "";
+    const status = element("status", HTMLElement);
+    status.textContent = "";
+    const endpoint = new URLSearchParams(location.search).get("match");
+    if (endpoint) {
+      const runtime = globalThis.Module;
+      if (!hasNetworkEngine(runtime))
+        throw new Error("This build does not include the network runtime");
+      void joinMatch(runtime, endpoint, status).catch((error: unknown) => {
+        status.textContent = error instanceof Error ? error.message : String(error);
+      });
+    }
     if (!new URLSearchParams(location.search).has("preview")) canvas.focus();
   } catch (error) {
     startup.hidden = false;

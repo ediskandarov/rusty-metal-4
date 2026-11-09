@@ -4,6 +4,7 @@
 #include "interpolation.h"
 #include "loading.h"
 #include "movie.h"
+#include "net_match.h"
 #include "render_sync.h"
 #include "tm4/main/carresources.h"
 #include "tm4/main/cd.h"
@@ -87,6 +88,7 @@ void WebLevelStart(void)
         TournamentReset(&GameInfo, 1);
     }
 #endif
+    WebNetMatchSeed();
     RegistryDirectory* metadata = GameGetWorldNameDirectoryPtr(GameInfo.world_name);
     const char* filename = RegGetFileDataPS(metadata, "filename");
     if (!filename) {
@@ -111,10 +113,11 @@ void WebLevelStart(void)
     SoundSetSoundMasterVolume(GameInfo.sound_volume);
     WebCarEnable();
     ObjectConstructor();
+    s32 camera_count = GameInfo.player_count + (WebNetMatchActive() ? GameInfo.extra_player_count : 0);
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i) {
         GameInfo.players[i].camera
-            = i < GameInfo.player_count ? ObjectCreate("camera", 0, NULL) : NULL;
-        assert(i >= GameInfo.player_count || GameInfo.players[i].camera);
+            = i < camera_count ? ObjectCreate("camera", 0, NULL) : NULL;
+        assert(i >= camera_count || GameInfo.players[i].camera);
     }
     EM_ASM({ tm4Port.cameraSlots = []; });
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i)
@@ -278,8 +281,52 @@ static void demo_frame(void)
         finish_session();
 }
 
+static void draw_network_view(s32 slot)
+{
+    Tm4GamePlayer* view = &GameInfo.players[0];
+    const Tm4GamePlayer* player = &GameInfo.players[slot];
+    Camera* saved_camera = view->camera;
+    struct Car* saved_car = view->car;
+    Camera* saved_active_view = GameInfo.active_view;
+
+    view->camera = player->camera;
+    view->car = player->car;
+    RenderBeginFrame();
+    RenderBuildFrame();
+    view->camera = saved_camera;
+    view->car = saved_car;
+    GameInfo.active_view = saved_active_view;
+    WebRenderPresentLevelFrame(1);
+    ++frames;
+    EM_ASM(
+        { Object.assign(tm4Port, { levelFrames: $0, netViewSlot: $1, netCameraAttached: !!$2 }); },
+        frames, slot, player->camera->object != NULL);
+}
+
 void WebLevelFrame(void)
 {
+    if (WebNetMatchActive()) {
+        if (WebNetMatchCancelled()) {
+            GameInfo.next_mode = GAME_MODE_MENU;
+            WebNetMatchEnd();
+            finish_session();
+            return;
+        }
+        WebNetMatchPollInput();
+        if (WebNetMatchTakeInput()) {
+            process_level_step();
+            GameProcessMode();
+            ++MainFrameCount;
+            WebNetMatchPublishTick();
+            if (GameInfo.next_mode) {
+                WebNetMatchEnd();
+                finish_session();
+            } else if (WebNetMatchViewSlot() >= 0) {
+                draw_network_view(WebNetMatchViewSlot());
+            }
+        }
+        return;
+    }
     if (GameInfo.mode == GAME_MODE_DEMO) {
         demo_frame();
         return;

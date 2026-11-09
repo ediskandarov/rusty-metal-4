@@ -9,6 +9,7 @@
     "build:diagnostic": "bun tools/build.js --diagnostic",
     "dev": "bun tools/serve.js",
     "dev:diagnostic": "bun tools/serve.js --site build/diagnostic/site",
+    "match": "bun tools/network/run.ts",
     "test": "bun test tests/unit",
     "fmt": "bun fmt --no-script tools web tests package.json config tsconfig.json bunfig.toml",
     "fmt:check": "bun fmt --no-script --check tools web tests package.json config tsconfig.json bunfig.toml",
