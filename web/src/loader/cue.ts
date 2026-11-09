@@ -1,5 +1,5 @@
-import { fileKey } from "./sources.ts";
-import type { CueTrack, DiscReference, DiscSources, DiscTrack } from "./types.ts";
+import { fileKey, trackSource } from "./sources.ts";
+import type { CueTrack, DiscReference, DiscSources, DiscTrack, ReadOptions } from "./types.ts";
 export const RAW_SECTOR = 2352;
 export function parseCue(text: string): CueTrack[] {
   const tracks: CueTrack[] = [];
@@ -39,7 +39,9 @@ export function parseCue(text: string): CueTrack[] {
       track.audio !== i > 0 ||
       !Number.isSafeInteger(track.index) ||
       track.index < 0 ||
-      (track.index0 !== undefined && track.index0 > track.index)
+      (track.index0 !== undefined &&
+        (!Number.isSafeInteger(track.index0) || track.index0 < 0 || track.index0 > track.index)) ||
+      (track.pregap !== undefined && (!Number.isSafeInteger(track.pregap) || track.pregap < 0))
     )
       throw new Error("Expected one data track, then consecutive audio tracks with INDEX 01");
   });
@@ -49,21 +51,14 @@ export async function discTracks(
   sources: DiscSources,
   reference: DiscReference,
   warn: (message: string) => void,
+  options: ReadOptions = {},
 ) {
   const cues = [...sources.values()].filter((f) => /\.cue$/i.test(f.name));
   if (cues.length > 1) throw new Error("Select only one disc CUE");
   let tracks: CueTrack[];
   if (cues.length) {
     if (cues[0]!.size > 65536) throw new Error("CUE file is too large");
-    tracks = parseCue(new TextDecoder().decode(await cues[0]!.read(0, cues[0]!.size)));
-    if (tracks.some((track) => track.pregap))
-      throw new Error(
-        "Playback does not support synthetic CUE pregaps; resources can still be inspected.",
-      );
-    if (new Set(tracks.map((t) => fileKey(t.file))).size !== tracks.length)
-      throw new Error(
-        "Playback needs one BIN per track; this single-BIN disc can still be inspected in Resources.",
-      );
+    tracks = parseCue(new TextDecoder().decode(await cues[0]!.read(0, cues[0]!.size, options)));
   } else {
     const bins = [...sources.values()].filter((f) => /\.bin$/i.test(f.name));
     if (bins.length !== 1)
@@ -73,27 +68,58 @@ export async function discTracks(
   }
   let start = 0;
   const resolved: DiscTrack[] = [];
-  for (const track of tracks) {
-    const source = sources.get(fileKey(track.file));
+  const visitedFiles = new Set<string>();
+  for (const [i, track] of tracks.entries()) {
+    const key = fileKey(track.file);
+    const previous = tracks[i - 1];
+    const next = tracks[i + 1];
+    const sharesPrevious = previous !== undefined && fileKey(previous.file) === key;
+    const sharesNext = next !== undefined && fileKey(next.file) === key;
+    if (!sharesPrevious && visitedFiles.has(key))
+      throw new Error(`CUE reopens a BIN out of order: ${track.file}`);
+    visitedFiles.add(key);
+    const source = sources.get(key);
     if (!source && !track.audio) throw new Error(`Required data track missing: ${track.file}`);
     const canonical = reference.tracks.find((t) => t.number === track.number);
-    const size = source?.size ?? canonical?.size;
+    const begin = sharesPrevious ? (track.index0 ?? track.index) : 0;
+    const fallbackEnd =
+      canonical === undefined
+        ? undefined
+        : sharesPrevious
+          ? track.index + canonical.size / RAW_SECTOR - canonical.index
+          : canonical.size / RAW_SECTOR;
+    const end = sharesNext
+      ? (next.index0 ?? next.index)
+      : source
+        ? source.size / RAW_SECTOR
+        : fallbackEnd;
     if (
-      size === undefined ||
-      !Number.isSafeInteger(size) ||
-      size % RAW_SECTOR ||
-      track.index >= size / RAW_SECTOR
+      (source && (!Number.isSafeInteger(source.size) || source.size % RAW_SECTOR !== 0)) ||
+      end === undefined ||
+      !Number.isSafeInteger(end) ||
+      end <= begin ||
+      track.index < begin ||
+      track.index >= end ||
+      (source && end > source.size / RAW_SECTOR)
     )
-      throw new Error(`Invalid or unknown track length: ${track.file}`);
+      throw new Error(`Invalid or unknown track boundaries: ${track.file}, track ${track.number}`);
+    const pregap = track.pregap ?? 0;
+    const index = pregap + track.index - begin;
+    const sectors = pregap + end - begin;
+    if (!Number.isSafeInteger(start + sectors)) throw new Error("Disc is too large");
     if (!source) warn(`Optional audio missing: ${track.file}`);
     resolved.push({
       ...track,
-      source,
+      index,
+      ...(track.index0 === undefined ? {} : { index0: pregap + track.index0 - begin }),
+      source: source
+        ? trackSource(source, begin * RAW_SECTOR, (end - begin) * RAW_SECTOR, pregap * RAW_SECTOR)
+        : undefined,
       start,
-      end: start + size / RAW_SECTOR,
-      toc: Math.floor((start + track.index + 150) / 75) * 75 - 150,
+      end: start + sectors,
+      toc: Math.floor((start + index + 150) / 75) * 75 - 150,
     });
-    start += size / RAW_SECTOR;
+    start += sectors;
   }
   return { tracks: resolved, leadout: Math.floor((start + 150) / 75) * 75 - 150 };
 }

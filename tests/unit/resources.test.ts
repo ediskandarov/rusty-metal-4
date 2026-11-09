@@ -69,7 +69,7 @@ test("cancelled checks reset the active row and can resume without rereading com
   expect(reads).toBe(2);
 });
 
-test("shared-BIN CUE can be inspected without silently enabling unsupported playback", async () => {
+test("shared-BIN CUE resolves stored and synthetic pregaps for playback", async () => {
   const cue =
     'FILE "disc.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\n TRACK 02 AUDIO\n PREGAP 00:02:00\n INDEX 01 00:10:00\n TRACK 03 AUDIO\n ISRC 123456789012\n INDEX 00 00:20:00\n INDEX 01 00:22:00\n';
   const tracks = parseCue(cue);
@@ -77,9 +77,19 @@ test("shared-BIN CUE can be inspected without silently enabling unsupported play
   expect(tracks[2]?.index0).toBe(1500);
   expect(tracks[2]?.index).toBe(1650);
   expect(() => parseCue(cue.replace("PREGAP 00:02:00", "PREGAP 00:02:75"))).toThrow();
-  await expect(
-    discTracks(localSources([new File([cue], "disc.cue")]), reference, () => {}),
-  ).rejects.toThrow("can still be inspected");
+  const { tracks: resolved } = await discTracks(
+    localSources([
+      new File([cue], "disc.cue"),
+      new File([new Uint8Array(1800 * 2352)], "disc.bin"),
+    ]),
+    reference,
+    () => {},
+  );
+  expect(resolved.map(({ start, end, index }) => [start, end, index])).toEqual([
+    [0, 750, 0],
+    [750, 1650, 150],
+    [1650, 1950, 150],
+  ]);
 });
 
 test("resource reference contains metadata only and keeps executable hash authoritative in disc.json", () => {

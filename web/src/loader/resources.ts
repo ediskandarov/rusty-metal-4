@@ -1,8 +1,8 @@
 import discReference from "../../../config/disc.json";
 import type { ResourceCandidate } from "../compatibility/index.ts";
-import { discTracks, parseCue, RAW_SECTOR } from "./cue.ts";
+import { discTracks, RAW_SECTOR } from "./cue.ts";
 import { Disc } from "./disc.ts";
-import { checkRange, fileKey } from "./sources.ts";
+import { checkRange } from "./sources.ts";
 import type { DiscSource, DiscSources } from "./types.ts";
 
 const maxResourceBytes = 128 * 1024 * 1024;
@@ -24,25 +24,12 @@ async function readRange(source: DiscSource, offset: number, size: number, signa
 // Disc layout support is independent of resource compatibility.
 export async function discoverResources(sources: DiscSources, signal: AbortSignal) {
   const notices: string[] = [];
-  const cues = [...sources.values()].filter((source) => /\.cue$/i.test(source.name));
-  if (cues.length > 1) throw new Error("Select only one disc CUE");
-  let tracks;
-  if (cues.length) {
-    const cue = cues[0]!;
-    if (cue.size > 65536) throw new Error("CUE file is too large");
-    tracks = parseCue(new TextDecoder().decode(await cue.read(0, cue.size, { signal })));
-    if (new Set(tracks.map((track) => fileKey(track.file))).size !== tracks.length)
-      notices.push(
-        "Single-BIN disc: resource inspection is available; playback still requires one BIN per track.",
-      );
-  } else {
-    tracks = (await discTracks(sources, discReference, () => {})).tracks;
-    notices.push("No CUE: audio track positions use the original disc layout.");
-  }
+  const { tracks } = await discTracks(sources, discReference, (notice) => notices.push(notice), {
+    signal,
+  });
   signal.throwIfAborted();
   const first = tracks[0]!;
-  const source = sources.get(fileKey(first.file));
-  if (!source) throw new Error(`Required data track missing: ${first.file}`);
+  const source = first.source!;
   const disc = new Disc(source, first.index);
   const entries = await disc.entries();
   signal.throwIfAborted();
@@ -70,15 +57,11 @@ export async function discoverResources(sources: DiscSources, signal: AbortSigna
         },
       };
     });
-  for (const [index, track] of tracks.entries()) {
+  for (const track of tracks) {
     if (!track.audio) continue;
-    const audio = sources.get(fileKey(track.file));
-    if (!audio) continue; // Reference entries below distinguish absent tracks from unverified ones.
-    const next = tracks[index + 1];
-    const end =
-      next && fileKey(next.file) === fileKey(track.file)
-        ? (next.index0 ?? next.index) * RAW_SECTOR
-        : audio.size;
+    const audio = track.source;
+    if (!audio) continue;
+    const end = audio.size;
     const offset = track.index * RAW_SECTOR;
     resources.push({
       id: `AUDIO/${String(track.number).padStart(2, "0")}`,

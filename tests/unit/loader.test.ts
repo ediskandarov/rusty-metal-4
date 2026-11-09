@@ -82,3 +82,88 @@ test("HTTP ranges support bounded reads and HEAD; invalid ranges fail", async ()
   const head = serveFile(new Request(request, { method: "HEAD" }), file);
   expect((await head.arrayBuffer()).byteLength).toBe(0);
 });
+
+function sectors(...values: number[]) {
+  const bytes = new Uint8Array(values.length * 2352);
+  values.forEach((value, i) => bytes.fill(value, i * 2352, (i + 1) * 2352));
+  return bytes;
+}
+
+test("merged BIN and split BINs expose identical track bytes and TOC", async () => {
+  const merged = localSources([
+    new File([sectors(1, 2, 0, 3, 4, 0, 5)], "disc.bin"),
+    new File(
+      [
+        'FILE "disc.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nINDEX 00 00:00:02\nINDEX 01 00:00:03\nTRACK 03 AUDIO\nINDEX 00 00:00:05\nINDEX 01 00:00:06',
+      ],
+      "disc.cue",
+    ),
+  ]);
+  const split = localSources([
+    new File([sectors(1, 2)], "data.bin"),
+    new File([sectors(0, 3, 4)], "a.bin"),
+    new File([sectors(0, 5)], "b.bin"),
+    new File(
+      [
+        'FILE "data.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\nFILE "a.bin" BINARY\nTRACK 02 AUDIO\nINDEX 00 00:00:00\nINDEX 01 00:00:01\nFILE "b.bin" BINARY\nTRACK 03 AUDIO\nINDEX 00 00:00:00\nINDEX 01 00:00:01',
+      ],
+      "disc.cue",
+    ),
+  ]);
+  const a = await discTracks(merged, reference, () => {});
+  const b = await discTracks(split, reference, () => {});
+  expect(a.leadout).toBe(b.leadout);
+  for (let i = 0; i < a.tracks.length; i++) {
+    const { start, end, index, toc, source } = a.tracks[i]!;
+    const other = b.tracks[i]!;
+    expect({ start, end, index, toc }).toEqual({
+      start: other.start,
+      end: other.end,
+      index: other.index,
+      toc: other.toc,
+    });
+    expect(await source!.read(0, source!.size)).toEqual(
+      await other.source!.read(0, other.source!.size),
+    );
+    await expect(source!.read(source!.size - 1, 2)).rejects.toThrow("outside disc file");
+  }
+});
+
+test("synthetic pregap inserts silence without consuming shared BIN sectors", async () => {
+  const sources = localSources([
+    new File([sectors(1, 2, 3, 4)], "disc.bin"),
+    new File(
+      [
+        'FILE "disc.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\nTRACK 02 AUDIO\nPREGAP 00:00:01\nINDEX 01 00:00:02',
+      ],
+      "disc.cue",
+    ),
+  ]);
+  const { tracks } = await discTracks(sources, reference, () => {});
+  const audio = tracks[1]!;
+  expect([audio.start, audio.end, audio.index]).toEqual([2, 5, 1]);
+  expect(await audio.source!.read(2350, 4)).toEqual(new Uint8Array([0, 0, 3, 3]));
+  expect(await audio.source!.read(2 * 2352, 2)).toEqual(new Uint8Array([4, 4]));
+  expect(await audio.source!.read(audio.source!.size, 0)).toHaveLength(0);
+  const controller = new AbortController();
+  controller.abort();
+  await expect(audio.source!.read(0, 1, { signal: controller.signal })).rejects.toThrow();
+});
+
+test("shared BIN rejects reversed, out-of-range and reopened track boundaries", async () => {
+  for (const tail of [
+    "TRACK 02 AUDIO\nINDEX 01 00:00:04",
+    "TRACK 02 AUDIO\nINDEX 01 00:00:02\nTRACK 03 AUDIO\nINDEX 01 00:00:01",
+    'FILE "other.bin" BINARY\nTRACK 02 AUDIO\nINDEX 01 00:00:00\nFILE "disc.bin" BINARY\nTRACK 03 AUDIO\nINDEX 01 00:00:02',
+  ]) {
+    const sources = localSources([
+      new File([sectors(1, 2, 3, 4)], "disc.bin"),
+      new File([sectors(0, 5)], "other.bin"),
+      new File(
+        ['FILE "disc.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\n' + tail],
+        "disc.cue",
+      ),
+    ]);
+    await expect(discTracks(sources, reference, () => {})).rejects.toThrow();
+  }
+});
