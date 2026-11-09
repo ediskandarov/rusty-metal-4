@@ -1,0 +1,166 @@
+diff --git a/src/modules/power/display.c b/src/modules/power/display.c
+--- a/src/modules/power/display.c
++++ b/src/modules/power/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4/gpu_packet.h"
+ #include "tm4_scalar.h"
+@@ -111,7 +114,14 @@
+     SVECTOR* position;
+     if (power->position.fields.active != POWERUP_AVAILABLE)
+         return;
++#ifdef __psyz
++    SVECTOR render_position;
++    s32 render_angle;
++    WebInterpolationPickup(power, &render_position, &render_angle);
++    position = &render_position;
++#else
+     position = &power->position.vector;
++#endif
+     /* The second GTE word also reads the adjacent flags; VZ uses its low half. */
+     gte_ldv0(position);
+     gte_rtv0tr();
+@@ -122,7 +132,11 @@
+     ordering_depth >>= 2;
+     ClampOTDepth(ordering_depth);
+     ordering += ordering_depth;
++#ifdef __psyz
++    RotationMatrixY(render_angle, &rotation);
++#else
+     RotationMatrixY(power->angle, &rotation);
++#endif
+     translation = (Tm4VectorXYZ*)rotation.t;
+     CopyVectorXYZ(translation, position);
+     CompMatrix(camera, &rotation, &combined);
+diff --git a/src/modules/weap/display.c b/src/modules/weap/display.c
+--- a/src/modules/weap/display.c
++++ b/src/modules/weap/display.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+@@ -68,30 +71,38 @@
+     }
+ }
+ 
++#ifdef __psyz
++static void ProjectileDrawSampledShadow(WeaponProjectile* projectile, Tm4OrderingTag* ordering,
++    u8** cursor, u8* limit, MATRIX* world_to_camera, const MATRIX* model, const SVECTOR* position)
++#else
+ void ProjectileDrawShadow(WeaponProjectile* projectile, Tm4OrderingTag* ordering, u8** cursor,
+     u8* limit, MATRIX* world_to_camera)
++#endif
+ {
+     SVECTOR shadow_vertices[4];
+     MATRIX shadow_to_world, shadow_to_camera;
+     s32 ground_height;
+     s32 length;
+     Tm4CardTexture* texture;
++#ifndef __psyz
++    const MATRIX* model = &projectile->model_to_world;
++    const SVECTOR* position = &projectile->bullet.current_world;
++#endif
+     PushMatrix();
+-    ground_height = GetHeight3d(projectile->bullet.current_world.vx,
+-        projectile->bullet.current_world.vy, projectile->bullet.current_world.vz);
++    ground_height = GetHeight3d(position->vx, position->vy, position->vz);
+     PopMatrix();
+-    shadow_to_world.t[0] = projectile->bullet.current_world.vx;
++    shadow_to_world.t[0] = position->vx;
+     shadow_to_world.t[1] = ground_height;
+-    shadow_to_world.t[2] = projectile->bullet.current_world.vz;
+-    shadow_to_world.m[0][0] = projectile->model_to_world.m[0][0];
++    shadow_to_world.t[2] = position->vz;
++    shadow_to_world.m[0][0] = model->m[0][0];
+     shadow_to_world.m[1][0] = 0;
+-    shadow_to_world.m[2][0] = projectile->model_to_world.m[2][0];
++    shadow_to_world.m[2][0] = model->m[2][0];
+     shadow_to_world.m[0][1] = 0;
+     shadow_to_world.m[1][1] = ONE;
+     shadow_to_world.m[2][1] = 0;
+-    shadow_to_world.m[0][2] = projectile->model_to_world.m[0][2];
++    shadow_to_world.m[0][2] = model->m[0][2];
+     shadow_to_world.m[1][2] = 0;
+-    shadow_to_world.m[2][2] = projectile->model_to_world.m[2][2];
++    shadow_to_world.m[2][2] = model->m[2][2];
+     CompMatrix(world_to_camera, &shadow_to_world, &shadow_to_camera);
+     SetRotMatrix(&shadow_to_camera);
+     SetTransMatrix(&shadow_to_camera);
+@@ -115,10 +126,21 @@
+         ProjectileDrawTrail(projectile, ordering, cursor, limit);
+     if (!projectile->expiry_frames_left) {
+         PushMatrix();
++#ifdef __psyz
++        MATRIX render_model;
++        SVECTOR render_shadow;
++        WebInterpolationProjectile(projectile, &render_model, &render_shadow, 0, NULL);
++        if (projectile->shadow_length && projectile->shadow_width)
++            ProjectileDrawSampledShadow(
++                projectile, ordering, cursor, limit, world_to_camera, &render_model, &render_shadow);
++        MATRIX* model = &render_model;
++#else
+         if (projectile->shadow_length && projectile->shadow_width)
+             ProjectileDrawShadow(projectile, ordering, cursor, limit, world_to_camera);
++        MATRIX* model = &projectile->model_to_world;
++#endif
+         if (projectile->type->geometry) {
+-            CompMatrix(world_to_camera, &projectile->model_to_world, &model_to_camera);
++            CompMatrix(world_to_camera, model, &model_to_camera);
+             SetRotMatrix(&model_to_camera);
+             SetTransMatrix(&model_to_camera);
+             WeaponDisplay(projectile->type->geometry, ordering, cursor, limit, world_to_camera);
+@@ -364,10 +386,20 @@
+         ProjectileDrawTrail(projectile, ordering, cursor, limit);
+     if (!projectile->expiry_frames_left) {
+         PushMatrix();
++#ifdef __psyz
++        SVECTOR render_shadow;
++        s32 spin;
++        WebInterpolationProjectile(projectile, &rotated_to_world, &render_shadow, angle_step, &spin);
++        if (projectile->shadow_length && projectile->shadow_width)
++            ProjectileDrawSampledShadow(projectile, ordering, cursor, limit, world_to_camera,
++                &rotated_to_world, &render_shadow);
++        RotMatrixY(spin, &rotated_to_world);
++#else
+         if (projectile->shadow_length && projectile->shadow_width)
+             ProjectileDrawShadow(projectile, ordering, cursor, limit, world_to_camera);
+         rotated_to_world = projectile->model_to_world;
+         RotMatrixY(projectile->age_frames * angle_step, &rotated_to_world);
++#endif
+         CompMatrix(world_to_camera, &rotated_to_world, &model_to_camera);
+         SetRotMatrix(&model_to_camera);
+         SetTransMatrix(&model_to_camera);
+diff --git a/src/modules/weap/fireball.c b/src/modules/weap/fireball.c
+--- a/src/modules/weap/fireball.c
++++ b/src/modules/weap/fireball.c
+@@ -1,5 +1,8 @@
+ 
+ #include "private.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+@@ -104,7 +107,11 @@
+     MATRIX billboard;
+     Tm4GteFlag flags;
+     PushMatrix();
++#ifdef __psyz
++    WebInterpolationFireball(fireball, &position);
++#else
+     ObjectCopyPosition(&position, fireball);
++#endif
+     RotTrans(&position, (VECTOR*)billboard.t, &flags);
+     {
+         MATRIX* matrix = &billboard;

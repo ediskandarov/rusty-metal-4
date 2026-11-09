@@ -1,5 +1,6 @@
 #include <LIBGTE.H>
 #include "interpolation.h"
+#include "src/modules/weap/private.h"
 #include "tm4/fixed.h"
 #include "tm4/main/game.h"
 #include "tm4/main/math3d.h"
@@ -9,7 +10,10 @@
 #include "tm4/modules/car.h"
 #include <emscripten.h>
 #include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 typedef struct {
     u32 serial;
@@ -26,6 +30,25 @@ typedef struct {
     MATRIX transform;
 } CameraPose;
 
+typedef struct {
+    uintptr_t address;
+    s32 serial;
+    union {
+        struct {
+            SVECTOR position;
+            s16 angle;
+        } pickup;
+        struct {
+            MATRIX transform;
+            SVECTOR shadow;
+            u32 age;
+        } projectile;
+        SVECTOR fireball;
+    };
+} ObjectPose;
+
+static ObjectPose* objects;
+static size_t object_count, object_capacity;
 static CarPose cars[ArrayCount(GameInfo.cars)];
 static CameraPose cameras[ArrayCount(GameInfo.players)];
 static int enabled, completed, drawing, advance_display;
@@ -56,14 +79,99 @@ void WebInterpolationReset(void)
 {
     have_effect_seed = 0;
     completed = 0;
+    object_count = 0;
     memset(cars, 0, sizeof(cars));
     memset(cameras, 0, sizeof(cameras));
+}
+
+static SVECTOR fireball_position(const WeaponFireball* fireball)
+{
+    const SVECTOR* previous = &fireball->previous;
+    const Tm4ShortVectorXYZ* current = &fireball->position.fields.xyz;
+    /* This is the collision grid's display midpoint, also valid before the first tick. */
+    return (SVECTOR){ (previous->vx + current->vx) / 2, (previous->vy + current->vy) / 2,
+        (previous->vz + current->vz) / 2 };
+}
+
+static int projectile_in_flight(const WeaponProjectile* projectile)
+{
+    return !projectile->expiry_frames_left && !projectile->bullet.hit_object
+        && !projectile->bullet.motion.fields.world_impact;
+}
+
+static ObjectPose* append_object(const Tm4ObjectHeader* header)
+{
+    if (object_count == object_capacity) {
+        size_t capacity = object_capacity ? object_capacity * 2 : 64;
+        ObjectPose* poses = realloc(objects, capacity * sizeof(*objects));
+        if (!poses)
+            return NULL;
+        objects = poses;
+        object_capacity = capacity;
+    }
+    ObjectPose* pose = &objects[object_count++];
+    pose->address = (uintptr_t)header;
+    pose->serial = header->serial;
+    return pose;
+}
+
+static void capture_objects(void)
+{
+    object_count = 0;
+    for (const Tm4ObjectHeader* header = ObjectLists[OBJECT_LIST_DEFAULT].first; header;
+         header = header->next) {
+        if (!header->display || (header->flags & OBJECT_CUSTOM_CLASS))
+            continue;
+        const void* object = ObjectGetPayload(header);
+        if (!strcasecmp(header->name, "powerup")) {
+            const PowerupState* power = object;
+            if (power->position.fields.active != POWERUP_AVAILABLE)
+                continue;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->pickup.position = power->position.vector;
+                pose->pickup.angle = power->angle;
+            }
+        } else if (!strcasecmp(header->name, "weaponProjectile")) {
+            const WeaponProjectile* projectile = object;
+            if (!projectile_in_flight(projectile))
+                continue;
+            ObjectPose* pose = append_object(header);
+            if (pose) {
+                pose->projectile.transform = projectile->model_to_world;
+                pose->projectile.shadow = projectile->bullet.current_world;
+                pose->projectile.age = projectile->age_frames;
+            }
+        } else if (!strcasecmp(header->name, "weaponFireball")) {
+            SVECTOR position = fireball_position(object);
+            /* The constructor has yet to set the grid position on a newly launched fireball. */
+            if (position.vx != header->position.vx || position.vy != header->position.vy
+                || position.vz != header->position.vz)
+                continue;
+            ObjectPose* pose = append_object(header);
+            if (pose)
+                pose->fireball = position;
+        }
+    }
+}
+
+static const ObjectPose* previous_object(const void* object)
+{
+    if (!drawing || !completed || fraction >= 1)
+        return NULL;
+    const Tm4ObjectHeader* header = ObjectGetHeader(object);
+    for (size_t i = 0; i < object_count; ++i) {
+        if (objects[i].address == (uintptr_t)header && objects[i].serial == header->serial)
+            return &objects[i];
+    }
+    return NULL;
 }
 
 void WebInterpolationBeginStep(void)
 {
     /* Live simulation state is the newer endpoint after this tick completes. */
     completed = 0;
+    capture_objects();
     memset(cars, 0, sizeof(cars));
     memset(cameras, 0, sizeof(cameras));
     for (s32 i = 0; i < GameInfo.car_count; ++i) {
@@ -159,12 +267,13 @@ static int normalize(double v[3])
     return 1;
 }
 
-static int interpolate_matrix(const MATRIX* before, const MATRIX* after, MATRIX* result)
+static int interpolate_matrix(
+    const MATRIX* before, const MATRIX* after, MATRIX* result, s32 maximum_delta)
 {
     double right[3], up[3];
     for (int i = 0; i < 3; ++i) {
-        /* Guard discontinuities that bypass the explicit car and camera cut hooks. */
-        if (fabs((double)after->t[i] - before->t[i]) > 1024)
+        /* Discontinuities bypass interpolation when no explicit cut hook ran. */
+        if (fabs((double)after->t[i] - before->t[i]) > maximum_delta)
             return 0;
         right[i] = lerp(before->m[i][0], after->m[i][0]);
         up[i] = lerp(before->m[i][1], after->m[i][1]);
@@ -198,7 +307,7 @@ Camera* WebInterpolationCamera(Camera* camera, Camera* pose)
             continue;
         *pose = *camera;
         if (!interpolate_matrix(
-                &previous->transform, &camera->camera_to_world, &pose->camera_to_world))
+                &previous->transform, &camera->camera_to_world, &pose->camera_to_world, 1024))
             break;
         InverseMatrix(&pose->camera_to_world, &pose->world_to_camera);
         return pose;
@@ -216,7 +325,7 @@ Car* WebInterpolationCar(Car* car, Car* pose)
         if (previous->serial != id)
             continue;
         *pose = *car;
-        if (!interpolate_matrix(&previous->transform, &car->transform, &pose->transform))
+        if (!interpolate_matrix(&previous->transform, &car->transform, &pose->transform, 1024))
             break;
         for (s32 wheel = 0; wheel < ArrayCount(car->wheels); ++wheel) {
             pose->wheels[wheel].rotation
@@ -232,6 +341,112 @@ Car* WebInterpolationCar(Car* car, Car* pose)
         return pose;
     }
     return car;
+}
+
+static int interpolate_position(const SVECTOR* before, const SVECTOR* after, SVECTOR* result,
+    s32 maximum_delta)
+{
+    if (abs(after->vx - before->vx) > maximum_delta || abs(after->vy - before->vy) > maximum_delta
+        || abs(after->vz - before->vz) > maximum_delta)
+        return 0;
+    result->vx = lerp(before->vx, after->vx);
+    result->vy = lerp(before->vy, after->vy);
+    result->vz = lerp(before->vz, after->vz);
+    return 1;
+}
+
+#ifdef TM4_WEB_TEST_HOOKS
+static int test_capture_motion;
+
+EMSCRIPTEN_KEEPALIVE void WebTestCaptureMotion(int capture)
+{
+    test_capture_motion = capture;
+}
+
+static void trace_motion(const void* object, const char* name, s32 x, s32 y, s32 z, s32 angle,
+    s32 render_x, s32 render_y, s32 render_z, s32 render_angle, int flags)
+{
+    if (!test_capture_motion)
+        return;
+    EM_ASM(
+        {
+            tm4Port.motionSamples.push({
+                frame : tm4Port.levelFrames,
+                tick : tm4Port.simulationTicks,
+                id : $0,
+                name : UTF8ToString($1),
+                live : [ $2, $3, $4, $5 ],
+                render : [ $6, $7, $8, $9 ],
+                history : !!($10 & 1),
+                impact : !!($10 & 2),
+                pickup : !!($10 & 4),
+                address : $11
+            });
+        },
+        ObjectGetHeader(object)->serial, name, x, y, z, angle, render_x, render_y, render_z,
+        render_angle, flags, object);
+}
+#endif
+
+void WebInterpolationPickup(const PowerupState* power, SVECTOR* position, s32* angle)
+{
+    *position = power->position.vector;
+    *angle = power->angle;
+    const ObjectPose* previous = previous_object(power);
+    /* Only bob height changes continuously. Repositioned or regenerated pickups cut. */
+    int sampled = previous && previous->pickup.position.vx == position->vx
+        && previous->pickup.position.vz == position->vz
+        && interpolate_position(&previous->pickup.position, position, position, 40);
+    if (sampled)
+        *angle = lerp_angle(previous->pickup.angle, *angle);
+#ifdef TM4_WEB_TEST_HOOKS
+    trace_motion(power, power->name, power->position.vector.vx, power->position.vector.vy,
+        power->position.vector.vz, power->angle, position->vx, position->vy, position->vz,
+        *angle, sampled | 4);
+#endif
+}
+
+void WebInterpolationProjectile(const WeaponProjectile* projectile, MATRIX* model, SVECTOR* shadow,
+    s32 spin_step, s32* angle)
+{
+    *model = projectile->model_to_world;
+    *shadow = projectile->bullet.current_world;
+    s32 live_angle = (projectile->age_frames * spin_step) & (ANGLE_FULL_TURN - 1);
+    s32 render_angle = live_angle;
+    int in_flight = projectile_in_flight(projectile);
+    const ObjectPose* previous = previous_object(projectile);
+    /* A signed 16-bit flight velocity can travel more than 1024 units in one tick.
+     * Impact/expiry state owns visibility and uses the live impact pose. */
+    int sampled = previous && in_flight
+        && interpolate_matrix(&previous->projectile.transform, &projectile->model_to_world,
+            model, 2048);
+    if (sampled) {
+        interpolate_position(&previous->projectile.shadow, shadow, shadow, 2048);
+        s32 previous_angle = (previous->projectile.age * spin_step) & (ANGLE_FULL_TURN - 1);
+        render_angle = lerp_angle(previous_angle, live_angle);
+    }
+    if (angle)
+        *angle = render_angle;
+#ifdef TM4_WEB_TEST_HOOKS
+    const MATRIX* live = &projectile->model_to_world;
+    trace_motion(projectile, projectile->type->name, live->t[0], live->t[1], live->t[2],
+        live_angle, model->t[0], model->t[1], model->t[2], render_angle,
+        sampled | (!in_flight << 1));
+#endif
+}
+
+void WebInterpolationFireball(const WeaponFireball* fireball, SVECTOR* position)
+{
+    *position = (SVECTOR){ 0 };
+    ObjectCopyPosition(position, fireball);
+    const ObjectPose* previous = previous_object(fireball);
+    int sampled = previous && interpolate_position(&previous->fireball, position, position, 2048);
+#ifdef TM4_WEB_TEST_HOOKS
+    const Tm4ShortVectorXYZ* live = &ObjectGetHeader(fireball)->position;
+    trace_motion(fireball, "weaponFireball", live->vx, live->vy, live->vz, 0, position->vx,
+        position->vy, position->vz, 0, sampled);
+#endif
+    (void)sampled;
 }
 
 void WebInterpolationEndCarDraw(void)

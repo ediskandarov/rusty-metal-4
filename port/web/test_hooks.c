@@ -270,6 +270,39 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceEnergyTarget(s32 rear)
     return health;
 }
 
+/* The random spawn can start with only one pickup type inside the camera view. */
+EMSCRIPTEN_KEEPALIVE int WebTestPlaceMotionPickups(void)
+{
+    const Camera* camera = GameInfo.players[0].camera;
+    if (!camera)
+        return 0;
+    const MATRIX* view = &camera->camera_to_world;
+    int count = 0;
+    for (s32 side = -1; side <= 1; side += 2) {
+        s32 position[3];
+        for (s32 i = 0; i < 3; ++i)
+            position[i] = view->t[i] + (view->m[i][2] * 750 + view->m[i][0] * side * 175) / ONE;
+        if (ObjectCreate("powerup", 0, side < 0 ? "health" : "homing", -1, -1, position[0],
+                position[1], position[2]))
+            ++count;
+    }
+    return count;
+}
+
+/* Launch in the active view so the motion check is independent of Rain's landing site. */
+EMSCRIPTEN_KEEPALIVE u32 WebTestSpawnMotionFireball(void)
+{
+    const Car* car = GameInfo.players[0].car;
+    if (!car)
+        return 0;
+    const MATRIX* transform = &car->transform;
+    s32 forward_x = transform->m[0][2], forward_z = transform->m[2][2];
+    SVECTOR position = { transform->t[0] + forward_x / 16, transform->t[1] - 160,
+        transform->t[2] + forward_z / 16, 0 };
+    SVECTOR velocity = { forward_x / 2, -1024, forward_z / 2, 0 };
+    return (u32)ObjectCreate("weaponFireball", 0, &position, &velocity);
+}
+
 EMSCRIPTEN_KEEPALIVE s32 WebTestWeaponTargetHealth(void)
 {
     return test_weapon_target ? test_weapon_target->health : -1;
