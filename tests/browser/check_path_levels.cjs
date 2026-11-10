@@ -89,15 +89,25 @@ const assert = require("node:assert/strict");
           { timeout: 30000 },
         );
         const beforeDamage = await state();
-        assert.equal(await page.evaluate(() => Module._WebTestDamageHelicopter()), 1);
+        assert.equal(await page.evaluate(() => Module._WebTestLaunchAtHelicopter()), 1);
         await page.waitForFunction(
-          (n) => tm4Port.pickupInstances === n + 5,
-          beforeDamage.pickupInstances,
+          (before) =>
+            tm4Port.helicopterRemoved === (before.helicopterRemoved || 0) + 1 &&
+            tm4Port.pickupInstances === before.pickupInstances + 5 &&
+            tm4Port.levelFrames > before.levelFrames + 30,
+          beforeDamage,
           { timeout: 10000 },
         );
-        assert.equal((await state()).helicopterInstances, beforeDamage.helicopterInstances);
-        assert((await state()).helicopterRemoved > (beforeDamage.helicopterRemoved || 0));
-        console.log("PASS helicopter route, blades, pickup, lap and five weapon drops");
+        const destroyed = await state();
+        assert.equal(
+          destroyed.playerProjectileSpawns.Power,
+          (beforeDamage.playerProjectileSpawns?.Power || 0) + 1,
+        );
+        assert.equal(destroyed.helicopterInstances, beforeDamage.helicopterInstances);
+        assert(destroyed.fragmentSpawns > (beforeDamage.fragmentSpawns || 0));
+        console.log(
+          "PASS helicopter route, blades, pickup, lap, Power impact and five weapon drops",
+        );
       }
       await page.screenshot({ path: `build/checks/level-${map}.png` });
       await press("Enter");

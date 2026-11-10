@@ -13,7 +13,6 @@ void WeaponBombDestructor(WeaponBomb* bomb);
 void WeaponBombProcess(WeaponBomb* bomb);
 void WeaponBombDisplay(
     WeaponBomb* object, Tm4OrderingTag* ordering, u8** cursor, u8* limit, MATRIX* view);
-s32 WeaponBombApplyDamage(void* payload, s32 damage, SVECTOR* position);
 void BladeProjectileDisplay(WeaponProjectile* projectile, Tm4OrderingTag* ordering, u8** cursor,
     u8* limit, MATRIX* world_to_camera);
 void SkullProjectileDisplay(WeaponProjectile* projectile, Tm4OrderingTag* ordering, u8** cursor,

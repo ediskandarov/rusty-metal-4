@@ -229,7 +229,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestProjectileCheckpointCallbacks(void)
 
 static void test_approach_scenery(void);
 static void test_coop_actions(void);
-static void test_damage_helicopter(void);
+static void test_launch_at_helicopter(void);
 
 static PowerupState* test_pickup;
 static s32 test_weapon_index;
@@ -933,7 +933,7 @@ void WebTestApplyPendingActions(void)
     test_rollback_audio();
     test_approach_scenery();
     test_coop_actions();
-    test_damage_helicopter();
+    test_launch_at_helicopter();
     if (deathmatch_rules_pending) {
         deathmatch_rules_pending = 0;
         GameInfo.deathmatch_limit_is_wins = deathmatch_test_wins;
@@ -1099,7 +1099,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachPathObject(s32 helicopter_kind)
     return 0;
 }
 
-static int helicopter_damage_pending;
+static int helicopter_projectile_pending;
 
 static Helicopter* test_find_helicopter(void)
 {
@@ -1110,23 +1110,33 @@ static Helicopter* test_find_helicopter(void)
     return NULL;
 }
 
-EMSCRIPTEN_KEEPALIVE s32 WebTestDamageHelicopter(void)
+EMSCRIPTEN_KEEPALIVE s32 WebTestLaunchAtHelicopter(void)
 {
-    helicopter_damage_pending = test_find_helicopter() != NULL;
-    return helicopter_damage_pending;
+    helicopter_projectile_pending = test_find_helicopter() != NULL;
+    return helicopter_projectile_pending;
 }
 
-static void test_damage_helicopter(void)
+static void test_launch_at_helicopter(void)
 {
-    if (!helicopter_damage_pending)
+    if (!helicopter_projectile_pending)
         return;
-    helicopter_damage_pending = 0;
+    helicopter_projectile_pending = 0;
     Helicopter* helicopter = test_find_helicopter();
-    if (helicopter) {
-        SVECTOR origin;
-        ObjectCopyPosition(&origin, helicopter);
-        HelicopterApplyDamage(helicopter, 0x7fffffff, &origin);
-    }
+    Car* car = GameInfo.players[0].car;
+    if (!helicopter || !car)
+        return;
+    /* Start behind the bounding box so normal projectile physics delivers the hit. */
+    SVECTOR start = helicopter->box.center;
+    start.vz = helicopter->box.minimum.vz - 200;
+    SVECTOR world_start;
+    MATRIX launch = helicopter->path.local_to_world;
+    ApplyMatrixWithTranslationSV(&launch, &start, &world_start);
+    launch.t[0] = world_start.vx;
+    launch.t[1] = world_start.vy;
+    launch.t[2] = world_start.vz;
+    SVECTOR velocity = { 0 };
+    ObjectCreate(CarTextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER, car, CarTextPower, NULL,
+        &launch, &velocity);
 }
 
 EMSCRIPTEN_KEEPALIVE void WebTestReadCarModel(void)

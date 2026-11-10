@@ -1,0 +1,169 @@
+diff --git a/include/tm4/modules/bullet.h b/include/tm4/modules/bullet.h
+index 9af72ce4..a813888d 100644
+--- a/include/tm4/modules/bullet.h
++++ b/include/tm4/modules/bullet.h
+@@ -32,6 +32,8 @@ typedef struct Bullet {
+     BulletImpact impact;
+ } Bullet;
+ 
++typedef s32 BulletDamageFunction(void* object, s32 damage, SVECTOR* position);
++
+ typedef s32 BulletProjectileConstructorFunction(Bullet* bullet, void* payload, ...);
+ BulletProjectileConstructorFunction BulletProjectileConstructor;
+ typedef s32 BulletProjectileProcessFunction(Bullet* bullet, void* payload, s32 damage);
+diff --git a/include/tm4/modules/weap.h b/include/tm4/modules/weap.h
+index bd6f7590..809a8891 100644
+--- a/include/tm4/modules/weap.h
++++ b/include/tm4/modules/weap.h
+@@ -8,6 +8,8 @@
+ #include "tm4/modules/afc.h"
+ #include "tm4/modules/bullet.h"
+ 
++BulletDamageFunction WeaponBombApplyDamage;
++
+ typedef struct WeaponProjectile WeaponProjectile;
+ typedef void (*WeaponProjectilePhysics)(WeaponProjectile*);
+ typedef void (*WeaponProjectileRender)(WeaponProjectile*, Tm4OrderingTag*, u8**, u8*, MATRIX*);
+diff --git a/src/modules/bullet/bullet.c b/src/modules/bullet/bullet.c
+index 43f4618e..0dff61df 100644
+--- a/src/modules/bullet/bullet.c
++++ b/src/modules/bullet/bullet.c
+@@ -22,8 +22,6 @@
+ #include <STDIO.H>
+ #include <STRINGS.H>
+ 
+-typedef s32 (*BulletDamageHandler)(void* object, s32 damage, SVECTOR* position);
+-
+ typedef char BulletObjectHeaderSizeCheck[sizeof(Tm4ObjectHeader) == 60 ? 1 : -1];
+ 
+ void BulletClassConstructor(RegistryDirectory* registry)
+@@ -182,13 +180,12 @@ s32 BulletProjectileProcess(Bullet* object, void* payload, s32 damage)
+             char* suffix = BulletApplyDamageFormat;
+             s32 n = strlen(ObjectGetHeader(object->hit_object)->name) + strlen(suffix) + 1;
+             char name[n];
+-            BulletDamageHandler apply;
++            BulletDamageFunction* apply;
+             sprintf(name, suffix, ObjectGetHeader(object->hit_object)->name);
+             name[0] = toupper(name[0]);
+-            apply = (BulletDamageHandler)OSSymbolGetAddress(name);
++            apply = (BulletDamageFunction*)OSSymbolGetAddress(name);
+             if (!apply)
+                 return 0;
+-            /* This legacy dispatch discards the result. Helicopter has a void return. */
+             apply(object->hit_object, damage, &object->impact.vector);
+         }
+         return 0;
+diff --git a/src/modules/levels/w_carni/coaster.c b/src/modules/levels/w_carni/coaster.c
+index 1e710941..7542ebd0 100644
+--- a/src/modules/levels/w_carni/coaster.c
++++ b/src/modules/levels/w_carni/coaster.c
+@@ -15,8 +15,9 @@ void CoasterClassConstructor(RegistryDirectory* directory)
+     CoasterWorldInfo = info;
+ }
+ 
+-s32 CoasterApplyDamage(Coaster* object, s32 damage, SVECTOR* origin)
++s32 CoasterApplyDamage(void* payload, s32 damage, SVECTOR* origin)
+ {
++    Coaster* object = payload;
+     return Import_BoxObjectApplyDamage(object, &object->health, damage, origin,
+         &object->path.local_to_world, &object->path.previous_local_to_world, CoasterWorldInfo,
+         CoasterRollKey, NULL, -1);
+diff --git a/src/modules/levels/w_carni/private.h b/src/modules/levels/w_carni/private.h
+index ca48ffa3..a37db0e3 100644
+--- a/src/modules/levels/w_carni/private.h
++++ b/src/modules/levels/w_carni/private.h
+@@ -27,7 +27,7 @@ typedef char CoasterSizeCheck[sizeof(Coaster) == 0x2dc ? 1 : -1];
+ extern Tm4WorldInfoBundle* CoasterWorldInfo;
+ extern char CoasterRollKey[];
+ void CoasterProcess(Coaster*);
+-s32 CoasterApplyDamage(Coaster*, s32, SVECTOR*);
++BulletDamageFunction CoasterApplyDamage;
+ 
+ extern char CoasterPathingSpeedKey[];
+ extern char CoasterDamageKey[];
+diff --git a/src/modules/levels/w_neon/private.h b/src/modules/levels/w_neon/private.h
+index 47d75f5d..0a4b3904 100644
+--- a/src/modules/levels/w_neon/private.h
++++ b/src/modules/levels/w_neon/private.h
+@@ -30,7 +30,7 @@ extern Tm4WorldInfoBundle* TrainWorldInfo;
+ extern char TrainRollKey[];
+ extern char TrainAiKey[];
+ void TrainProcess(Train*);
+-s32 TrainApplyDamage(Train*, s32, SVECTOR*);
++BulletDamageFunction TrainApplyDamage;
+ 
+ extern char TrainPathingSpeedKey[];
+ extern char TrainDamageKey[];
+@@ -53,6 +53,7 @@ typedef struct Ufo {
+     s32 drop_radius;
+     SoundEmitter* beam_sound;
+ } Ufo;
++BulletDamageFunction UfoApplyDamage;
+ typedef char UfoSizeCheck[sizeof(Ufo) == 0x2f4 ? 1 : -1];
+ extern Tm4WorldInfoBundle* UfoWorldInfo;
+ extern Tm4CardTexture* UfoBeamTexture;
+diff --git a/src/modules/levels/w_neon/train.c b/src/modules/levels/w_neon/train.c
+index f649fbfb..55e9e7b3 100644
+--- a/src/modules/levels/w_neon/train.c
++++ b/src/modules/levels/w_neon/train.c
+@@ -15,8 +15,9 @@ void TrainClassConstructor(RegistryDirectory* directory)
+     TrainWorldInfo = info;
+ }
+ 
+-s32 TrainApplyDamage(Train* object, s32 damage, SVECTOR* origin)
++s32 TrainApplyDamage(void* payload, s32 damage, SVECTOR* origin)
+ {
++    Train* object = payload;
+     return Import_BoxObjectApplyDamage(object, &object->health, damage, origin,
+         &object->path.local_to_world, &object->path.previous_local_to_world, TrainWorldInfo,
+         TrainRollKey, TrainAiKey, 1);
+diff --git a/src/modules/levels/w_neon/ufo.c b/src/modules/levels/w_neon/ufo.c
+index 2bb21c47..f7e8fd65 100644
+--- a/src/modules/levels/w_neon/ufo.c
++++ b/src/modules/levels/w_neon/ufo.c
+@@ -238,8 +238,9 @@ void InteractUfoWithWeaponProjectile(Ufo* object, WeaponProjectile* projectile)
+         object, &object->box, &object->path.local_to_world, projectile);
+ }
+ 
+-s32 UfoApplyDamage(Ufo* object, s32 damage, SVECTOR* origin)
++s32 UfoApplyDamage(void* payload, s32 damage, SVECTOR* origin)
+ {
++    Ufo* object = payload;
+     return Import_BoxObjectApplyDamage(object, &object->health, damage, origin,
+         &object->path.local_to_world, &object->path.previous_local_to_world, UfoWorldInfo,
+         TrainRollKey, NULL, -1);
+diff --git a/src/modules/levels/w_oil/helicopter.c b/src/modules/levels/w_oil/helicopter.c
+index 84cdd184..32f4d787 100644
+--- a/src/modules/levels/w_oil/helicopter.c
++++ b/src/modules/levels/w_oil/helicopter.c
+@@ -171,13 +171,15 @@ s32 HelicopterSpawnInstances(char* name, RegistryDirectory* directory)
+     return 1;
+ }
+ 
+-void HelicopterApplyDamage(Helicopter* object, s32 damage, SVECTOR* origin)
++s32 HelicopterApplyDamage(void* payload, s32 damage, SVECTOR* origin)
+ {
++    Helicopter* object = payload;
+     s32 result = Import_BoxObjectApplyDamage(object, &object->health, damage, origin,
+         &object->path.local_to_world, &object->path.previous_local_to_world, HelicopterWorldInfo,
+         HelicopterRollKey, NULL, -1);
+     if (result != 1)
+-        ObjectDirectoryRecurse(HelicopterSpawnInstances);
++        return ObjectDirectoryRecurse(HelicopterSpawnInstances);
++    return result;
+ }
+ 
+ s32 OilAiInstanceConstructor(void* payload, RegistryDirectory* directory)
+diff --git a/src/modules/levels/w_oil/private.h b/src/modules/levels/w_oil/private.h
+index 6f6c74ba..849a0ee0 100644
+--- a/src/modules/levels/w_oil/private.h
++++ b/src/modules/levels/w_oil/private.h
+@@ -32,7 +32,7 @@ typedef char HelicopterSizeCheck[sizeof(Helicopter) == 0x328 ? 1 : -1];
+ extern Tm4WorldInfoBundle* HelicopterWorldInfo;
+ extern char HelicopterRollKey[];
+ void HelicopterProcess(Helicopter*);
+-void HelicopterApplyDamage(Helicopter*, s32, SVECTOR*);
++BulletDamageFunction HelicopterApplyDamage;
+ 
+ extern Tm4WorldInfoBundle* HelicopterBladeTopInfo;
+ extern Tm4WorldInfoBundle* HelicopterBladeBackInfo;
