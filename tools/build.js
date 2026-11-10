@@ -56,3 +56,15 @@ await cp(
 await cp(join(root, "web/index.html"), join(site, "index.html"));
 await cp(join(root, "web/styles"), join(site, "styles"), { recursive: true });
 console.log(`Built ${mode}: ${site}`);
+
+await run(["bun", "tools/network/build.ts", "--mode", mode]);
+const wasm = await Bun.file(join(site, "tm4_web.wasm")).arrayBuffer();
+await Bun.write(
+  join(site, "simulation-build.json"),
+  JSON.stringify({
+    sha256: new Bun.CryptoHasher("sha256")
+      .update(wasm)
+      .update(await Bun.file(join(site, "network/tm4_network_bg.wasm")).arrayBuffer())
+      .digest("hex"),
+  }),
+);

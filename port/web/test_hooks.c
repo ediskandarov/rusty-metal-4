@@ -2,6 +2,7 @@
 #include "test_hooks.h"
 #include "src/modules/menu/private.h"
 #include "src/main/object/private.h"
+#include "src/modules/menu/private.h"
 #include "src/modules/car/private.h"
 #include "src/modules/cars/c_crush/private.h"
 #include "src/modules/cars/shovel.h"

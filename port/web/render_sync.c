@@ -1,5 +1,6 @@
 #include "render_sync.h"
 #include "interpolation.h"
+#include "net_match.h"
 #include "tm4/main/game.h"
 #include "tm4/main/render.h"
 #include "tm4/main/sync.h"
@@ -79,7 +80,7 @@ unsigned int WebRenderWaitForFrame(void)
 {
     unsigned int target = effective_render_limit() == 30 ? 2 : 1;
 #ifdef TM4_WEB_TEST_HOOKS
-    if (test_delay_ms && !GameInfo.pause_player)
+    if (test_delay_ms && !GameInfo.pause_player && !WebNetMatchActive())
         emscripten_sleep(test_delay_ms);
 #endif
     DrawSync(0);

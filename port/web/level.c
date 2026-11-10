@@ -88,7 +88,6 @@ void WebLevelStart(void)
         TournamentReset(&GameInfo, 1);
     }
 #endif
-    WebNetMatchSeed();
     RegistryDirectory* metadata = GameGetWorldNameDirectoryPtr(GameInfo.world_name);
     const char* filename = RegGetFileDataPS(metadata, "filename");
     if (!filename) {
@@ -99,7 +98,8 @@ void WebLevelStart(void)
     char background[32];
     int background_length = snprintf(background, sizeof(background), "%s.TIM", filename);
     assert(background_length > 0 && background_length < sizeof(background));
-    WebLoadingBackground(background);
+    if (!WebNetMatchActive())
+        WebLoadingBackground(background);
     GameInfo.mode = GameInfo.next_mode;
     GameInfo.next_mode = 0;
     LoadGameFiles();
@@ -113,10 +113,10 @@ void WebLevelStart(void)
     SoundSetSoundMasterVolume(GameInfo.sound_volume);
     WebCarEnable();
     ObjectConstructor();
-    s32 camera_count = GameInfo.player_count + (WebNetMatchActive() ? GameInfo.extra_player_count : 0);
+    s32 camera_count
+        = GameInfo.player_count + (WebNetMatchActive() ? GameInfo.extra_player_count : 0);
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i) {
-        GameInfo.players[i].camera
-            = i < camera_count ? ObjectCreate("camera", 0, NULL) : NULL;
+        GameInfo.players[i].camera = i < camera_count ? ObjectCreate("camera", 0, NULL) : NULL;
         assert(i >= camera_count || GameInfo.players[i].camera);
     }
     EM_ASM({ tm4Port.cameraSlots = []; });
@@ -124,14 +124,17 @@ void WebLevelStart(void)
         EM_ASM({ tm4Port.cameraSlots.push(!!$0); }, GameInfo.players[i].camera);
     ObjectStartupInstance();
     SoundSetMusicVolume(GameInfo.music_volume);
-    RedbookMusic(1, restore_music_volume, *(s32*)RegGetFileDataPS(metadata, "musicTrackNum"));
+    if (!WebAuthorityStartup())
+        RedbookMusic(1, restore_music_volume, *(s32*)RegGetFileDataPS(metadata, "musicTrackNum"));
     SoundStopSounds();
     RenderConstructor();
     ScreenInitialize();
     WebCarStart();
-    PadGetPad(8);
-    PadGetPad(8);
-    PadGetPad(8);
+    if (!WebNetMatchActive()) {
+        PadGetPad(8);
+        PadGetPad(8);
+        PadGetPad(8);
+    }
     for (s32 i = 0; i < GameInfo.player_count; ++i)
         MainControllerTypes[i] = PadJpad[i].port_id;
     MainFrameCount = 0;
@@ -176,7 +179,7 @@ int WebLevelActive(void)
     return active;
 }
 
-static void finish_session(void)
+void WebLevelStop(void)
 {
     WebInterpolationReset();
     PadStopPad();
@@ -192,6 +195,13 @@ static void finish_session(void)
     SoundDestructor();
     CarResourcesExtractAll();
     active = 0;
+}
+
+static void finish_session(void)
+{
+    WebLevelStop();
+    if (WebDirectStartup())
+        return;
     if (GameInfo.save_menu || GameInfo.next_mode == GAME_MODE_MENU)
         WebReturnToMenu();
     else
@@ -283,48 +293,36 @@ static void demo_frame(void)
 
 static void draw_network_view(s32 slot)
 {
-    Tm4GamePlayer* view = &GameInfo.players[0];
     const Tm4GamePlayer* player = &GameInfo.players[slot];
-    Camera* saved_camera = view->camera;
-    struct Car* saved_car = view->car;
-    Camera* saved_active_view = GameInfo.active_view;
-
-    view->camera = player->camera;
-    view->car = player->car;
     RenderBeginFrame();
     RenderBuildFrame();
-    view->camera = saved_camera;
-    view->car = saved_car;
-    GameInfo.active_view = saved_active_view;
-    WebRenderPresentLevelFrame(1);
+    WebRenderPresentLevelFrame();
     ++frames;
     EM_ASM(
-        { Object.assign(tm4Port, { levelFrames: $0, netViewSlot: $1, netCameraAttached: !!$2 }); },
+        {
+            Object.assign(
+                tm4Port, { levelFrames : $0, netViewSlot : $1, netCameraAttached : !!$2 });
+        },
         frames, slot, player->camera->object != NULL);
+}
+
+void WebLevelNetworkStep(void)
+{
+    if (!active || !WebNetMatchTakeInput())
+        return;
+    process_level_step();
+    GameProcessMode();
+    ++MainFrameCount;
+    EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
+    WebNetMatchPublishTick();
 }
 
 void WebLevelFrame(void)
 {
     if (WebNetMatchActive()) {
-        if (WebNetMatchCancelled()) {
-            GameInfo.next_mode = GAME_MODE_MENU;
-            WebNetMatchEnd();
-            finish_session();
-            return;
-        }
         WebNetMatchPollInput();
-        if (WebNetMatchTakeInput()) {
-            process_level_step();
-            GameProcessMode();
-            ++MainFrameCount;
-            WebNetMatchPublishTick();
-            if (GameInfo.next_mode) {
-                WebNetMatchEnd();
-                finish_session();
-            } else if (WebNetMatchViewSlot() >= 0) {
-                draw_network_view(WebNetMatchViewSlot());
-            }
-        }
+        if (WebNetMatchViewSlot() >= 0 && WebRenderBeginLevelFrame())
+            draw_network_view(WebNetMatchViewSlot());
         return;
     }
     if (GameInfo.mode == GAME_MODE_DEMO) {

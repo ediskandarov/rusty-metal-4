@@ -6,5 +6,7 @@ void WebReturnToMenu(void);
 void WebLeaveMenu(void);
 void WebLevelStart(void);
 void WebLevelFrame(void);
+void WebLevelNetworkStep(void);
+void WebLevelStop(void);
 int WebLevelActive(void);
 #endif

@@ -32,15 +32,12 @@ const { chromium } = require("playwright");
           if (/initialized:|Match cars|FIXTURE/.test(m.text()))
             console.log("PAGE", index, m.text());
         });
-        await page.goto(index ? site + "?match=" + encodeURIComponent(endpoint) : site);
-        await page.waitForFunction(() => globalThis.tm4Port?.movie, null, { timeout: 30000 });
-        const start = page.locator("#tm4-movie-start");
-        if (await start.count()) await start.click();
-        else await page.locator("canvas").click();
-        await page.waitForFunction(() => tm4Port.movie.name === "INTRO");
-        await page.keyboard.down("Enter");
-        await page.waitForTimeout(120);
-        await page.keyboard.up("Enter");
+        await page.goto(
+          index ? site + "?match=" + encodeURIComponent(endpoint) : site + "?authority=1",
+        );
+        await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
+          timeout: 60000,
+        });
         await page.evaluate(() => {
           const queue = Module._WebNetQueueTick;
           Module._WebNetQueueTick = (tick) => {
@@ -55,7 +52,7 @@ const { chromium } = require("playwright");
           };
         });
         if (index === 0) {
-          await page.waitForFunction(() => tm4Port.screen === "main" && tm4Port.menuReady);
+          await page.waitForFunction(() => tm4Port.platformReady);
           finished = connectAuthority(page, endpoint, token).catch((error) => {
             authorityError = error;
           });
@@ -116,7 +113,20 @@ const { chromium } = require("playwright");
     await shooter.keyboard.up("x");
     await finished;
     assert.ifError(authorityError);
-    console.log("PASS car contact, weapon input, lethal hit, result and return to menu");
+    for (const page of pages) await page.waitForFunction(() => !tm4Port.netMatch);
+    // A completed session releases C state and can initialize again in this page.
+    for (const page of pages) {
+      assert.equal(
+        await page.evaluate(() => {
+          const started = Module._WebNetRequestMatch(2, 0, 54321, -1);
+          const tick = tm4Port.netMatch?.tick;
+          Module._WebNetCancelMatch();
+          return started === 1 && tick === 0;
+        }),
+        true,
+      );
+    }
+    console.log("PASS car contact, weapon input, lethal hit, result and round completion");
   } catch (error) {
     for (const page of browser.contexts().flatMap((context) => context.pages())) {
       console.error(

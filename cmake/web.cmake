@@ -218,7 +218,7 @@ if(TM4_WEB_TEST_HOOKS)
 endif()
 target_link_libraries(tm4_web PRIVATE tm4_core psyz)
 target_link_options(tm4_web PRIVATE -sUSE_ZLIB=1 -sASSERTIONS=1 -Wl,--error-limit=0
-    -sPTHREAD_POOL_SIZE=2 -sINITIAL_MEMORY=67108864 "-sEXPORTED_FUNCTIONS=_main,_malloc" "-sEXPORTED_RUNTIME_METHODS=FS,callMain")
+    -sPTHREAD_POOL_SIZE=2 -sINITIAL_MEMORY=67108864 "-sEXPORTED_FUNCTIONS=_main,_malloc" "-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall")
 tm4_web_configure_target(tm4_web OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/site")
 target_compile_definitions(tm4_web PRIVATE TM4_WEB_CONTROLS=1)
 psyz_title(tm4_web "TM4 Rewired")

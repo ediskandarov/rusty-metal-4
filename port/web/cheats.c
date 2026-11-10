@@ -1,4 +1,5 @@
 #include "cheats.h"
+#include "net_match.h"
 #include "tm4/main/easteregg.h"
 #include <emscripten.h>
 
@@ -11,6 +12,8 @@ static u32 pending_enabled;
 
 EMSCRIPTEN_KEEPALIVE int WebSetCheat(s32 index, int enabled)
 {
+    if (WebNetMatchActive())
+        return 0;
     for (unsigned int i = 0; i < sizeof(cheat_indices) / sizeof(*cheat_indices); ++i) {
         if (cheat_indices[i] != index)
             continue;
@@ -39,7 +42,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebGetCheats(void)
 /* Apply between frames, never in a suspended constructor or input callback. */
 void WebApplyCheats(void)
 {
-    if (!pending_changes)
+    if (WebNetMatchActive() || !pending_changes)
         return;
     for (unsigned int i = 0; i < sizeof(cheat_indices) / sizeof(*cheat_indices); ++i) {
         s32 index = cheat_indices[i];
@@ -52,4 +55,11 @@ void WebApplyCheats(void)
             EasterEggMakeInaccessible(index);
     }
     pending_changes = 0;
+}
+
+void WebResetNetworkCheats(void)
+{
+    pending_changes = pending_enabled = 0;
+    for (unsigned i = 0; i < sizeof(cheat_indices) / sizeof(*cheat_indices); ++i)
+        EasterEggMakeInaccessible(cheat_indices[i]);
 }

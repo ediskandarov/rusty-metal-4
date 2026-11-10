@@ -1,4 +1,4 @@
-/* global Module */
+/* global Module, tm4Network */
 const assert = require("node:assert/strict");
 const { lstatSync, readdirSync } = require("node:fs");
 const { resolve, join } = require("node:path");
@@ -13,6 +13,11 @@ const { chromium } = require("playwright");
     "tm4_web.wasm",
     "coi-serviceworker.js",
     "coi-serviceworker.LICENSE.txt",
+    "simulation-build.json",
+    "network/tm4_network.js",
+    "network/tm4_network_bg.wasm",
+    "network/tm4_network.d.ts",
+    "network/tm4_network_bg.wasm.d.ts",
   ]);
   for (const path of readdirSync(site, { recursive: true })) {
     const stat = lstatSync(join(site, path));
@@ -24,7 +29,7 @@ const { chromium } = require("playwright");
     );
   }
 
-  let server, browser;
+  let server, browser, probe;
   try {
     let url = process.env.TM4_PAGES_URL;
     if (!url) {
@@ -101,17 +106,67 @@ const { chromium } = require("playwright");
     await page.waitForFunction(() =>
       performance.getEntriesByType("resource").some((entry) => entry.name.endsWith("tm4_web.wasm")),
     );
+    const fingerprint = await (await fetch(new URL("simulation-build.json", url))).json();
+    assert.deepEqual(Object.keys(fingerprint), ["sha256"]);
+    assert.match(fingerprint.sha256, /^[0-9a-f]{64}$/);
+    // Loading through the real bridge must resolve both generated modules beneath
+    // the application path. No game files are needed to initialize networking.
+    let probeOpened = false;
+    probe = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch(request, server) {
+        if (server.upgrade(request)) return;
+        return new Response(null, { status: 404 });
+      },
+      websocket: {
+        open() {
+          probeOpened = true;
+        },
+        message() {},
+      },
+    });
+    const endpoint = new URL(probe.url);
+    endpoint.protocol = "ws:";
+    await page.evaluate(async (endpoint) => {
+      const connection = await tm4Network.connect(endpoint);
+      globalThis.pagesNetworkProbe = connection;
+      await new Promise((resolve, reject) => {
+        connection.onopen = resolve;
+        connection.onerror = reject;
+      });
+    }, endpoint.href);
+    const deadline = Date.now() + 5000;
+    while (!probeOpened && Date.now() < deadline) await Bun.sleep(10);
+    assert(probeOpened, "Networking probe did not open its WebSocket");
+    await page.evaluate(() => globalThis.pagesNetworkProbe.close());
+    const base = new URL(".", url).pathname;
+    for (const file of ["tm4_network.js", "tm4_network_bg.wasm"]) {
+      assert(
+        requests.includes(base + "network/" + file),
+        `Networking loaded outside application subpath: ${file}`,
+      );
+      assert(
+        !requests.includes("/network/" + file),
+        `Networking escaped application subpath: ${file}`,
+      );
+    }
+    for (const path of ["__dev/disc.json", "__dev/files/0"])
+      assert.equal((await fetch(new URL(path, url))).status, 404);
     assert(
-      !requests.some((path) => /\/__dev\/|\.(bin|cue|MR|STR|data)$/i.test(path)),
+      !requests.some((path) =>
+        /\/__dev\/|\/SCUS_945\.60$|\.(bin|cue|ccd|img|mr|str|vab|tim|sub|data|exe)$/i.test(path),
+      ),
       "Public site must not request disc resources",
     );
     assert.deepEqual(errors, []);
     console.log(
-      "PASS Pages subpath, first-visit isolation, shared-memory WASM and asset-free release",
+      "PASS Pages subpath, first-visit isolation, C and Rust/Wasm runtimes and asset-free release",
     );
   } finally {
     await browser?.close();
     server?.stop(true);
+    probe?.stop(true);
   }
 })().catch((error) => {
   console.error(error);

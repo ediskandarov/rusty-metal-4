@@ -5,11 +5,33 @@ edition = "2024"
 rust-version = "1.95"
 publish = false
 
+[lib]
+name = "tm4_network"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["server"]
+server = ["lightyear/server"]
+client = ["lightyear/client"]
+
+[[bin]]
+name = "tm4-deathmatch-server"
+path = "src/main.rs"
+required-features = ["server"]
+
 [dependencies]
 aeronet_io = "0.21"
 bevy_app = "0.19"
 bevy_ecs = "0.19"
-lightyear_link = "=0.30.1"
-lightyear_websocket = { version = "=0.30.1", default-features = false, features = ["server"] }
+lightyear = { version = "=0.30.1", default-features = false, features = ["std", "websocket", "raw_connection", "input_native", "replication", "prediction", "interpolation"] }
+bevy_reflect = "0.19"
+bevy_time = "0.19"
+bevy_tasks = "0.19"
+bevy_state = "0.19"
+bevy_log = "0.19"
+wasm-bindgen = "=0.2.114"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+console_error_panic_hook = "0.1"

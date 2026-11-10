@@ -1,220 +1,160 @@
 # Network implementation audit
 
-Reviewed 2026-11-09: the uncommitted networking prototype on top of `8d19d7b`.
-This audit covers the Rust server, browser client, trusted simulator, and C game adapter.
-P1 means a prerequisite for reliable, responsive online play; P2 means a lifecycle or
-integration issue to resolve before expanding the supported scenarios. Some findings
-are deliberate prototype limitations rather than regressions.
+Updated 2026-11-10 for the experimental networking implementation.
+The [v0.1 requirements](network-requirements-v0.1.md) remain the acceptance contract;
+this page records actual coverage and limitations, not revised requirements.
 
-## Assessment
+## Current boundary
 
-The implementation is a useful foundation for other existing game modes. It feeds
-network input into ordinary player slots and reuses the game's physics, weapons,
-collisions, and scoring. Those boundaries should remain.
+C owns gameplay, including physics, weapons and scoring. A server-owned Chromium
+instance runs that C/Wasm simulation. The native Rust server selects accepted inputs
+and advances it on a 30 Hz schedule, with one outstanding step. A delay over 250 ms
+fails the session explicitly instead of silently slowing the schedule. Clients do
+not gate the authority's simulation after initial readiness.
 
-It is not yet a general multiplayer layer: input history, state recovery, latency
-handling, and session transitions need work before adding modes. Eight connected
-players demonstrate slot capacity, not robustness under real network conditions.
+Both browser and server run Lightyear 0.30.1 / Bevy 0.19. The browser Rust/Wasm module
+is separate from Emscripten. wasm-bindgen copies owned strings at the JS boundary;
+Emscripten receives scalar controls and temporary `ccall` strings that C resolves to
+its own registry names. No pointer or linear memory is shared between Wasm modules.
+The wire uses typed binary Lightyear messages, not JSON WebSocket payloads.
 
-## Current architecture
+Controller ownership is replicated through Lightyear entities. Its native input
+plugin buffers tick-indexed records and validates controlled targets. The server
+reads every newly received buffer record before fixed-step trimming, then applies
+an explicit game-tick acceptance policy. Connection synchronization, typed channels,
+replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
+live. **C-world state replication, rollback, prediction and presentation interpolation
+are not implemented.** Installing their plugins does not satisfy R5, R6 or the full
+R8 integration proof.
 
-1. Each browser sends changes to its controller state.
-2. The Rust server assigns slots and selects the latest input for each simulation tick.
-3. A server-owned headless Chromium instance runs the existing C/Wasm game and reports
-   the result. An authority token distinguishes it from player connections.
-4. The server broadcasts accepted inputs, a result summary, and a state digest.
-5. Clients replay the inputs through their own simulation and compare the summary.
+Sources: [Rust protocol](../network/src/protocol.rs),
+[browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
+[authority adapter](../tools/network/authority.ts).
 
-The server targets 30 Hz and permits one outstanding simulator step. It waits for the
-simulator, but does not wait for every client to execute each tick. Simulator stalls
-can therefore slow the match; clients can independently fall behind.
+## Implemented changes and verification
 
-The authoritative game runs in [authority.ts](../tools/network/authority.ts), not in
-Rust. This preserves the original rules without implementing a second physics engine.
-Headless Chromium is a practical experimental host; a browser-independent simulation
-interface would make its lifecycle easier to control later.
+- Direct initialization accepts stable world/car names, validates required file
+  presence, resets session configuration and seeds both gameplay RNG entry points
+  before `GamePrepareSession` resets the mode. It requires no menu, movies,
+  synthetic controller activity, user gesture, animation callback or presented frame.
+  Missing-file rejection is retryable; deeper corrupt-resource/constructor failure
+  recovery has not been implemented.
+- Authority has no viewport or audio device. A client maps its one camera, HUD,
+  local-message queue and listener to its gameplay slot. No slot-zero car/camera
+  substitution remains. Existing gameplay slots and rules remain intact.
+- Compatibility includes protocol version, both Wasm build hashes, and hashes of
+  locally supplied gameplay archives/images/sound banks. Optional music/movies and
+  menu files are excluded. Fingerprints are compatibility checks only. Roster and
+  map selection use names supplied by the authority; local exposed cheats are blocked.
+- Render/device samples with unchanged buttons coalesce at the native input boundary;
+  newer held state stays separate from an older button edge. Superseded unsent
+  sequences leave JS acknowledgement history immediately. Input transitions retain
+  sequence and intended tick. Multiple transitions aimed
+  at one tick occupy successive ticks, preserving normal press/release semantics.
+  History is bounded to 60 records, future acceptance to 60 ticks, and held input
+  reuse to nine ticks. Frames acknowledge processed sequences; late/future/full
+  requests are explicitly rejected. Lightyear retransmissions are deduplicated.
+- A departed client loses queued controls immediately; its car remains in combat
+  under original game rules. Survivors continue. A client whose summaries diverge
+  stops locally; it still cannot recover. Finished/error paths release C resources,
+  input queues and callbacks, permitting another direct initialization in the page.
+- Diagnostic limits include loopback-only listening, 16 KiB WebSocket messages,
+  bounded write buffering, 128 unacknowledged session messages, 13 links, 120 session messages/second/link, 128 received
+  bridge messages, 90 ticks without client progress, ten seconds for unidentified
+  connections, 45 seconds for loading and five minutes for a lobby. These are local
+  experiment safeguards, not proof against hostile public traffic; native-input
+  amplification and all library-internal queue limits still need adversarial review.
 
-Only `lightyear_link` and `lightyear_websocket` are connected in
-[Cargo.toml](../network/Cargo.toml). Input scheduling, the protocol, and result checking
-are custom. Lightyear's higher-level prediction, replication, and interpolation are
-not connected to the C world. They require an explicit integration; installing the
-transport does not enable them. See the [Lightyear project](https://github.com/cBournhonesque/lightyear#features).
+[Direct-startup checks](../tests/browser/check_network_startup.cjs) cover zero presented
+frames, 60 accepted steps repeated after stop/start, all eight control slots, a missing
+resource followed by retry, stale/incomplete tick rejection and blocked local cheats.
+Equality here covers the published summary/car diagnostics, not the complete world.
 
-## Findings
+[Network timing checks](../tests/browser/check_network_timing.cjs) verify 30 Hz simulation
+and performance counters while clients alternate between 30 FPS and display-rate rendering.
+The authority runs without animation callbacks or presented frames.
 
-### N1 — P1: button transitions can disappear
+[High-rate input checks](../tests/browser/check_network_analog.cjs) feed changing analog
+samples through the production browser callback at 120 Hz for 30 seconds, alongside
+batched press/release events. They check bounded JS/native history and actual C inputs.
 
-**Evidence:** `Match::request` overwrites `player.input` for each newer sequence number.
-The next tick samples only that final value. A press followed by a release before
-sampling becomes indistinguishable from no press. Sequence numbers order messages;
-they do not assign commands to simulation ticks.
+[Fault checks](../tests/browser/check_network_faults.cjs) run the real browser/Rust/C
+path with two and eight clients. They cover a batched press/release plus duplicate,
+late/future rejection, nine-tick stale expiry, Lightyear receive-side delay of
+100±30 ms, a 1.2-second frozen client, bounded catch-up and disconnect survival.
+The conditioner acts on received Lightyear packets; it does not emulate TCP loss
+or WebSocket head-of-line retransmission. These short runs are not sustained-match,
+250 ms RTT, prediction-response or snapshot-recovery acceptance.
+`TM4_TEST_MISMATCH=1` verifies that incompatible content is rejected before C initialization.
 
-A loopback probe against the existing server reproduced this: the press and release
-were accepted, but both adjacent tick inputs contained an unpressed button.
+[Rendered gameplay checks](../tests/browser/check_network.cjs) exercise nonzero-slot
+control, car contact, weapon damage, a lethal hit, scoring, round completion and
+same-page C reinitialization.
+The diagnostic fixture places cars and adjusts target health identically in each
+instance. It is controlled gameplay evidence, not arbitrary-world determinism.
 
-**Impact:** network delays or batched delivery can lose firing, weapon selection, and
-confirmation actions even when the transport delivers every message.
+## Remaining blockers
 
-**Required direction:** retain tick-indexed input history and define how discrete
-button transitions are preserved and acknowledged. A newer held-button state must
-not silently erase an unconsumed action.
+### Complete C state and recovery — R4/R5
 
-Source: [server input handling](../network/src/main.rs#L179),
-[client input sender](../web/src/network/match.ts#L65).
+The digest still samples RNG/positions/health and the mode result. It is not a
+canonical full-state checksum. No authoritative checkpoint, capture/restore API,
+subsystem divergence diagnosis, correction or reconnect snapshot exists.
 
-### N2 — P1: state divergence is only partially detected and cannot be repaired
+A safe state codec cannot copy `Car` or the process heap. `Car` mixes physics and
+ammunition with resource pointers, collision-history allocations, weapon arrays,
+special-attack callback contexts and callbacks. Object headers carry ownership,
+creation serials, process/destruction ordering and spatial interaction links.
+World mechanisms and special attacks also keep overlay globals. `SoundProcess`
+reads SPU key/envelope status to reallocate voices and destroy emitter objects, while
+local listener choice changes voice assignment. A silent authority and an audible
+client therefore need an explicit deterministic sound-object lifetime policy; matching
+car summaries do not establish audio-independent complete state. Restoring only
+Bevy components, or only car transforms, leaves these causal dependencies unchanged.
+An unfiltered memory dump would additionally expose locally supplied resource bytes.
 
-**Evidence:** `match_digest` hashes one RNG state, car presence, positions, and health.
-It omits velocity, orientation, ammunition, projectiles, timers, world state, and the
-other RNG state. Equal digests do not establish equal simulations. `Frame` contains
-inputs and a summary, not a restorable world snapshot.
+Relevant definitions: [Car](../game/include/tm4/modules/car.h),
+[object headers/lists](../game/include/tm4/main/object.h),
+[object lifetime state](../game/src/main/object/private.h).
 
-When a checked value differs, the client cancels its game and closes the connection.
-The server then terminates the match for the other participants.
+### Latency and presentation — R6/R8
 
-**Impact:** some discrepancies remain undetected until they affect a checked value;
-any detected discrepancy ends play instead of correcting the affected client.
+Clients currently execute authoritative inputs after receipt. There is no immediate
+local prediction, C rollback/replay, correction smoothing, remote interpolation or
+stable replay-event identity. Slow clients exceeding retained history stop; they
+cannot resynchronize. The existing offline render interpolation is not wired to the
+network path. WebTransport has not been evaluated; WebSocket remains susceptible to
+head-of-line blocking. The required discrepancy → C restore/replay → smooth display
+integration proof therefore remains outstanding.
 
-**Required direction:** define the complete gameplay state needed for a reproducible
-step, add useful divergence diagnostics, and support authoritative capture/restore.
-Prediction and reconnect should use this same state contract. A checksum is a
-consistency check, not a replacement for state transfer.
+### Session identity and modes — R1/R2/R7
 
-Source: [digest](../port/web/net_match.c#L206),
-[wire state](../web/src/network/protocol.ts#L5),
-[client divergence handling](../web/src/network/match.ts#L73).
+The experiment remains a single fixed Deathmatch, epoch 1, a fixed seed and no bots.
+There is no replaceable authenticated participant identity, reconnect credential,
+grace-period resume, map/round transition protocol or generalized mode adapter.
+Any nonzero `next_mode` is still treated as session completion. A second direct C
+initialization works, but this does not establish a second server-managed match.
+Tournament's seed order has been fixed at the common initialization point; its
+configuration, capacity and gameplay have not been verified in this path. HUD/audio
+ownership is patched, but per-slot audible/message presentation still needs explicit
+visual/audio acceptance, beyond controls and camera attachment.
 
-### N3 — P1: participants do not agree on all initial conditions
+Public authenticated admission, TLS and resource-server deployment separation remain
+unimplemented. The development file server binds loopback and the match server has
+no resource routes. Generated sites contain port code/Wasm/CSS only; local game files
+remain separately supplied. No network snapshot format or resource-byte transfer has
+been introduced.
 
-**Evidence:** `Start` specifies player count, world index, and seed. Each game instance
-chooses its own roster by enumerating local resources. There is no handshake for the
-simulation build or gameplay content. The loader validates the original executable,
-but that does not identify the compiled port or guarantee identical gameplay assets.
+## Running focused checks
 
-`WebApplyCheats` also continues to apply local browser-menu changes during a match.
-For example, local ammunition or physics cheats can change one simulation without
-changing the authority's simulation.
+Build `bun run build:diagnostic`, then serve `bun run dev:diagnostic --port 18180`
+with separately configured local files. Start a fresh match server for each test
+using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
+count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
+`TM4_WEB_URL=http://127.0.0.1:18180/` when running the browser checks with Bun;
+`TM4_TEST_PLAYERS=8` selects the eight-client fault test. Chrome is required.
 
-**Impact:** ordinary configuration or resource differences can cause divergence even
-with identical network inputs.
-
-**Required direction:** the authority defines mode, map, roster, rules, seed, and
-allowed gameplay modifiers. Validate simulation/content compatibility before play;
-cosmetic assets need not be identical. Keep presentation preferences local and route
-any permitted gameplay changes through the authoritative tick stream.
-
-Source: [start message](../network/src/main.rs#L257),
-[local setup](../port/web/net_match.c#L35),
-[per-frame cheats](../port/web/bootstrap.c#L364),
-[loader verification](../web/src/loader/loader.ts#L16).
-
-### N4 — P1: latency and packet arrival timing directly affect play
-
-**Evidence:** a client changes its simulated world only after receiving a completed
-server frame. There is no local input prediction. The network branch draws after a
-simulation tick and bypasses the ordinary interpolation path. It processes one tick
-per browser-frame invocation; the client rejects a backlog of 120 pending frames.
-
-**Impact:** control response includes the round trip, server scheduling, and simulator
-execution. Jitter becomes uneven movement. Slow or suspended browsers accumulate old
-frames, with no snapshot-based recovery. The local render interpolation setting does
-not smooth this branch.
-
-**Required direction:** separate simulation, network, and presentation timelines;
-add predicted local input with authoritative correction and buffered presentation.
-Bound catch-up work and define recovery when a client falls too far behind.
-
-Source: [network frame loop](../port/web/level.c#L282),
-[frame queue](../web/src/network/match.ts#L131).
-
-### N5 — P2: participant liveness and reconnection are incomplete
-
-**Evidence:** one player disconnect sets `ended` for the whole match. This was
-reproduced with test peers. Server-side readiness has no deadline. An open connection
-with no new input retains its last buttons; a probe confirmed reuse across subsequent
-ticks, and there is no application-level freshness limit. Since unchanged input is
-not sent, silence cannot distinguish a held button from an inactive application.
-
-**Impact:** an interrupted tab can abort everyone or leave stale controls active.
-A connected peer that never becomes ready can block startup indefinitely.
-
-**Required direction:** define readiness deadlines, application heartbeats, stale-input
-handling, and a disconnect policy. Reconnection needs stable participant identity and
-a current authoritative state, rather than a new simulation starting at tick zero.
-
-Source: [disconnect handling](../network/src/main.rs#L219),
-[readiness gate](../network/src/main.rs#L268),
-[input suppression](../web/src/network/match.ts#L65).
-
-### N6 — P2: local presentation still assumes player slot zero
-
-**Evidence:** `draw_network_view` temporarily replaces slot zero's car and camera for
-rendering. `SoundProcess` runs before that substitution and selects listeners from
-`GameInfo.player_count`, which is one. Thus positional sound uses the first player's
-camera on every client. `ScreenLocalMessageRegisterV` rejects messages addressed to
-other slots for the same reason.
-
-**Impact:** a client can see its own car while hearing from another player's position
-and missing its own gameplay messages. These are incomplete slot adaptation, separate
-from transport correctness.
-
-**Required direction:** explicitly distinguish a gameplay participant from a local
-viewport/listener. Apply that mapping to sound, HUD messages, camera preferences, and
-other presentation consumers without replacing simulation ownership.
-
-Source: [view substitution](../port/web/level.c#L260),
-[sound listener](../game/src/main/sound.c#L804),
-[message filtering](../game/src/main/screen.c#L382).
-
-## Extending existing modes
-
-The input-to-slot adapter and trusted game simulation are reusable. The current
-Deathmatch setup and lifecycle are not yet generic:
-
-- `WebNetMatchStartPending` fixes Deathmatch, one round, and no bots.
-- The protocol's result fields describe Deathmatch wins, losses, and a single winner.
-- Any nonzero `next_mode` ends the network session, including a request to play another
-  round. The C adapter also disables networking before following that transition.
-- The network seed is applied **after** `GamePrepareSession`. That function calls the
-  mode reset, and `TournamentReset` already makes random opponent selections. The
-  current fixed Deathmatch avoids this selection path; simply switching its mode
-  would seed those earlier operations too late.
-- Tournament shares a finite car capacity among humans, allies, opponents, and bosses.
-  Eight human slots in Deathmatch do not establish support for an unchanged
-  eight-human tournament.
-
-Sources: [fixed setup](../port/web/net_match.c#L66),
-[server completion](../network/src/main.rs#L187),
-[load and seed order](../port/web/level.c#L68),
-[mode preparation](../game/src/main/game.c#L643),
-[tournament setup](../game/src/main/tournament.c#L117).
-
-Introduce a common session configuration and lifecycle: loading, running, round
-transition, map transition, and finished. Keep mode rules in the existing game code;
-provide mode-specific setup and outcome adapters. A transport or reconnect operation
-should not need to interpret Deathmatch fields.
-
-## Verification boundary and next work
-
-The audit's executable probes used the already-built Rust server with test peers and
-a simulated authority. They confirmed lost button transitions, retained input during
-silence, and whole-match termination on one disconnect. They did not exercise physics.
-
-The existing [browser integration test](../tests/browser/check_network.cjs) covers
-real car contact, weapon damage, scoring, and return to the menu. It positions cars
-and adjusts target health identically in each instance. That is a useful controlled
-scenario, not proof of arbitrary gameplay determinism or internet-quality behavior.
-
-Priorities:
-
-1. Preserve inputs and agree on authoritative initial conditions.
-2. Establish complete simulation state capture/restore and divergence diagnostics.
-3. Add latency handling, prediction/correction, and independent presentation.
-4. Handle loading failures, disconnects, reconnects, and round/map transitions.
-5. Extend modes through their existing rules after those contracts are stable.
-
-Validation should include variable latency, delivery stalls, short button presses,
-background tabs, slow clients, incompatible gameplay data, reconnects, and long
-matches. Rendering settings must not affect gameplay state. For public deployment,
-also review authenticated admission, encrypted transport, message/connection limits,
-and backpressure; the current local prototype does not establish those properties.
+Ordinary `build:dev` uses release optimization and excludes test hooks, retaining
+only local-disc autoload. `build:diagnostic` owns fixtures and Debug output in
+`build/diagnostic/site`. Public `build` also excludes hooks and local autoload.
+Generated logs stay under the checkout's ignored `build/` directory.

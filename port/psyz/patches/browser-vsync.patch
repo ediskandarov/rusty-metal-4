@@ -1,15 +1,16 @@
 --- a/platform/sdl3_common.h
 +++ b/platform/sdl3_common.h
-@@ -38,7 +38,7 @@
+@@ -38,7 +38,8 @@
  static void QuitPlatform(void);
  bool InitPlatform(void);
  #ifdef PLATFORM_WEB
 -void Psyz_WebWaitForNextFrame(void);
++#include <emscripten.h>
 +void Psyz_WebWaitForNextFrame(double delay_ms);
  #endif
  
  #ifndef PSYZ_TITLE
-@@ -635,10 +635,14 @@
+@@ -635,10 +636,15 @@
      double target_us = target_frame_time_us * frames;
  
  #ifdef PLATFORM_WEB
@@ -24,7 +25,8 @@
 +            last_frame_time, SDL_GetPerformanceCounter());
 +        delay_ms = MAX(0.0, target_us - elapsed_us) / 1000.0;
 +    }
-+    Psyz_WebWaitForNextFrame(delay_ms);
++    if (!EM_ASM_INT({ return !!globalThis.tm4Port?.networkSynchronous; }))
++        Psyz_WebWaitForNextFrame(delay_ms);
  #else
      if (use_driver_vsync) {
          for (int i = 1; i < frames; i++) {

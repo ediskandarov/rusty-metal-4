@@ -45,6 +45,18 @@ static unsigned int directory_count;
 static unsigned int resource_count;
 static unsigned int frame_count;
 static int menu_directory_saved;
+static int menu_initialized;
+static int direct_startup;
+static int authority_startup;
+int WebAuthorityStartup(void)
+{
+    return authority_startup;
+}
+
+int WebDirectStartup(void)
+{
+    return direct_startup;
+}
 static struct {
     unsigned int scale;
     PsyzDitherMode dithering;
@@ -230,6 +242,7 @@ static void initialize_menu(void)
     WebMenuBindImports();
     menu_directory_saved = CDPushDirectory();
     MenuInitialize(1);
+    menu_initialized = 1;
     set_menu_mask(1);
     MenuTicks = 0;
     SetDispMask(1);
@@ -249,6 +262,7 @@ void WebReturnToMenu(void)
     GameInfo.save_menu = 0;
     menu_directory_saved = CDPushDirectory();
     MenuInitialize(0);
+    menu_initialized = 1;
     set_menu_mask(1);
     MenuTicks = 0;
     SetDispMask(1);
@@ -258,7 +272,10 @@ void WebReturnToMenu(void)
 void WebLeaveMenu(void)
 {
     EM_ASM({ tm4Port.menuReady = false; });
+    if (!menu_initialized)
+        return;
     MenuShutdown();
+    menu_initialized = 0;
     if (menu_directory_saved)
         CDPopDirectory();
     menu_directory_saved = 0;
@@ -326,31 +343,28 @@ static void startup_intro(void)
     WebMovieStart("INTRO", 1, initialize_menu);
 }
 
+static void initialize_platform(void)
+{
+    ResetGraph(0);
+    Psyz_OverlayFrameCB(count_presented_frame);
+    PadInitPad();
+    if (!authority_startup && Psyz_AudioInit() != 0) {
+        fprintf(stderr, "Cannot initialize browser audio\n");
+        exit(1);
+    }
+    WebMusicInitialize();
+    RedbookInitialize();
+    SetVideoMode(MODE_NTSC);
+    GameInitialize();
+    SoundInitializeSpu();
+    /* Keep SDL on RAF scheduling before installing the browser main loop. */
+    Psyz_VideoSetVsyncMode(PSYZ_VSYNC_ON);
+    if (!direct_startup)
+        WebMovieStart("N89STUDI", 0, startup_intro);
+}
+
 static void browser_frame(void)
 {
-    static int initialized;
-    if (!initialized) {
-        ResetGraph(0);
-        Psyz_OverlayFrameCB(count_presented_frame);
-        PadInitPad();
-        if (Psyz_AudioInit() != 0) {
-            fprintf(stderr, "Cannot initialize browser audio\n");
-            exit(1);
-        }
-        WebMusicInitialize();
-        RedbookInitialize();
-        SetVideoMode(MODE_NTSC);
-        GameInitialize();
-        SoundInitializeSpu();
-        WebMovieStart("N89STUDI", 0, startup_intro);
-        initialized = 1;
-        /* SDL swap interval zero switches the entire main loop to timers. */
-        Psyz_VideoSetVsyncMode(PSYZ_VSYNC_ON);
-        emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
-        emscripten_pause_main_loop();
-        emscripten_resume_main_loop();
-        return;
-    }
     apply_render_settings();
     WebApplyCheats();
 #ifdef TM4_WEB_TEST_HOOKS
@@ -360,7 +374,7 @@ static void browser_frame(void)
         WebMovieFrame();
     else if (WebLevelActive())
         WebLevelFrame();
-    else if (!WebNetMatchStartPending()) {
+    else if (!direct_startup) {
         static double next_frame;
         double now = emscripten_get_now();
         if (now >= next_frame) {
@@ -372,9 +386,14 @@ static void browser_frame(void)
     }
 }
 
-int main(void)
+int main(int argc, char** argv)
 {
+    direct_startup = argc > 1 && !strcmp(argv[1], "--session");
+    authority_startup = argc > 2 && !strcmp(argv[2], "--authority");
     load_registry();
+    initialize_platform();
+    WebNetPublishCatalog();
+    EM_ASM({ tm4Port.platformReady = true; });
     emscripten_set_main_loop(browser_frame, 0, 1);
     return 0;
 }

@@ -1,0 +1,205 @@
+diff --git a/src/main/game.c b/src/main/game.c
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -7,6 +7,7 @@
+ 
+ /* Shared game/session services; mode-specific rules remain separate. */
+ #include "tm4/main/game.h"
++#include "port/web/net_match.h"
+ #include "tm4/modules/car.h"
+ 
+ #include "tm4/main/deathmatch.h"
+@@ -652,6 +653,7 @@
+     s32 e = VSync(-1);
+     GameInfo.random_seed = a * b * c * d * e;
+     srand(GameInfo.random_seed);
++    WebNetMatchSeed(); /* Before mode reset, roster selection, or constructors. */
+     if (selection == GAME_MODE_DEMO) {
+         const s32 entrant_capacity = ArrayCount(GameInfo.character_names);
+         GameInfo.player_count = selection;
+diff --git a/src/main/loading.c b/src/main/loading.c
+--- a/src/main/loading.c
++++ b/src/main/loading.c
+@@ -1,4 +1,5 @@
+ #include "tm4/main/loading.h"
++#include "port/web/net_match.h"
+ 
+ #include "tm4_scalar.h"
+ #include <emscripten.h>
+@@ -31,6 +32,8 @@
+ #if !defined(TM4_LOADING_FUNCTION) || TM4_LOADING_FUNCTION == 0x80031FBC
+ void LoadingInitializeDisplay(void)
+ {
++    if (WebNetMatchActive())
++        return;
+     DRAWENV draw;
+     DISPENV display;
+ 
+@@ -48,6 +51,8 @@
+ #if !defined(TM4_LOADING_FUNCTION) || TM4_LOADING_FUNCTION == 0x80032064
+ void LoadingDisplay(s32 progress)
+ {
++    if (WebNetMatchActive())
++        return;
+     TILE tile;
+     DR_TPAGE mode;
+ 
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -11,6 +11,7 @@
+ 
+ /* Candidate MAIN rendering and presentation services. */
+ #include "tm4/main/render.h"
++#include "port/web/net_match.h"
+ 
+ #include "tm4/main/font.h"
+ #include "tm4/main/memory.h"
+@@ -1075,7 +1076,7 @@
+ 
+         ordering += otSize;
+         primitives += RenderPrimitiveCount;
+-        view_state = (Tm4GameInfo*)((u8*)&GameInfo + view * sizeof(Tm4GamePlayer));
++        view_state = (Tm4GameInfo*)((u8*)&GameInfo + WebNetGameplaySlot(view) * sizeof(Tm4GamePlayer));
+         camera = view_state->players[0].camera;
+ #ifdef __psyz
+         Camera pose;
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -11,6 +11,7 @@
+ /* MAIN screen messages, HUD resources, and per-player drawing. */
+ #include "tm4/main/render.h"
+ #include "tm4/main/screen.h"
++#include "port/web/net_match.h"
+ 
+ #include "tm4_scalar.h"
+ 
+@@ -385,7 +386,8 @@
+     ScreenMessageQueue* base;
+     ScreenMessageQueue* queue;
+     const s32 queue_count = ArrayCount(ScreenLocalMessages);
+-    if (player >= queue_count || player >= GameInfo.player_count)
++    player = WebNetLocalView(player);
++    if (player < 0 || player >= queue_count || player >= GameInfo.player_count)
+         return;
+     base = ScreenLocalMessages;
+     queue = &base[player];
+@@ -723,7 +725,7 @@
+     s32 green;
+     s32 blue;
+ 
+-    car = GameInfo.players[player].car;
++    car = GameInfo.players[WebNetGameplaySlot(player)].car;
+     if (!car)
+         return;
+     primitives = &buffer->players[player];
+@@ -743,7 +745,7 @@
+     FontPrint(text, ScreenMessageFontName, 28, RenderViewHeight - 24, statusFont, orderingTable,
+         FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, red, green, blue, 1, 1);
+     if (GameInfo.game_type == GAME_TYPE_TOURNAMENT) {
+-        sprintf(text, HudDecimalFormat, GameInfo.players[player].lives);
++        sprintf(text, HudDecimalFormat, GameInfo.players[WebNetGameplaySlot(player)].lives);
+         FontPrint(text, ScreenMessageFontName, 28, RenderViewHeight - 48, statusFont, orderingTable,
+             FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, ScreenAbbrPlayerLivesColor->r,
+             ScreenAbbrPlayerLivesColor->g, ScreenAbbrPlayerLivesColor->b, 1, 1);
+@@ -842,12 +844,12 @@
+     const s32 lives_count = ArrayCount(primitives->lives);
+ 
+     if (GameInfo.mode == GAME_MODE_PLAY
+-        && (GameInfo.players[player].abbreviated_hud || GameInfo.player_count >= 3)) {
++        && (GameInfo.players[WebNetGameplaySlot(player)].abbreviated_hud || GameInfo.player_count >= 3)) {
+         ScreenDisplayAbbreviatedHud(buffer, orderingTable, player);
+         return;
+     }
+     ScreenDisplayLocalMessages(player, buffer, orderingTable);
+-    car = GameInfo.players[player].car;
++    car = GameInfo.players[WebNetGameplaySlot(player)].car;
+     if (!car)
+         return;
+     primitives = &buffer->players[player];
+@@ -967,7 +969,7 @@
+             RenderViewHeight + (u16)-16);
+     }
+     addPrim(orderingTable, &primitives->health_bar);
+-    for (index = 0; index < Int32Min(GameInfo.players[player].lives, lives_count); index++) {
++    for (index = 0; index < Int32Min(GameInfo.players[WebNetGameplaySlot(player)].lives, lives_count); index++) {
+         setSemiTrans(&primitives->lives[index], 0);
+         setRGB0(&primitives->lives[index], ScreenPlayerLivesColor->r, ScreenPlayerLivesColor->g,
+             ScreenPlayerLivesColor->b);
+diff --git a/src/main/sound.c b/src/main/sound.c
+--- a/src/main/sound.c
++++ b/src/main/sound.c
+@@ -1,4 +1,5 @@
+ #include "tm4/main/sound.h"
++#include "port/web/net_match.h"
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/integer.h"
+@@ -801,13 +802,13 @@
+             if (emitter->flags & SOUND_EMITTER_POSITIONAL) {
+                 s32 i;
+                 distance = 0x7FFFFFFF;
+-                for (i = 0; i < GameInfo.player_count; i++) {
++                for (i = 0; i < WebNetLocalViewCount(); i++) {
+                     s32 value;
+                     {
+                         VECTOR* output = &offset_world;
+                         SVECTOR* position = &emitter->position;
+                         const Tm4VectorComponent* listener_position_world
+-                            = GameInfo.players[i].camera->camera_to_world.t;
++                            = GameInfo.players[WebNetGameplaySlot(i)].camera->camera_to_world.t;
+                         s32 x = position->vx, y = position->vy, z = position->vz;
+                         x -= listener_position_world[0];
+                         y -= listener_position_world[1];
+@@ -816,7 +817,7 @@
+                     }
+                     value = DistanceApprox3d(offset_world.vx, offset_world.vy, offset_world.vz);
+                     if (value < distance) {
+-                        listener = GameInfo.players[i].camera;
++                        listener = GameInfo.players[WebNetGameplaySlot(i)].camera;
+                         distance = value;
+                         {
+                             VECTOR* input = &offset_world;
+diff --git a/src/main/sound.c b/src/main/sound.c
+--- a/src/main/sound.c
++++ b/src/main/sound.c
+@@ -168,3 +168,4 @@
+     do {
+-        VSync(0);
++        if (!WebNetMatchActive())
++            VSync(0);
+         attempts++;
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -974,7 +974,8 @@
+     s32 index;
+     const s32 buffer_count = ArrayCount(RenderBuffers.buffers);
+ 
+-    RenderPresent(0);
++    if (!WebNetMatchActive())
++        RenderPresent(0);
+     for (index = 0; index < buffer_count; index++) {
+         if (handles[index] == NULL)
+             continue;
+--- a/src/main/redbook.c
++++ b/src/main/redbook.c
+@@ -2,6 +2,7 @@
+  * The remaining names describe observed behavior; historical OBJ ownership is unknown. */
+ 
+ #include "tm4/main/redbook.h"
++#include "port/web/net_match.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/os.h"
+@@ -154,7 +155,8 @@
+     RedbookCurrentSector = start;
+     mode = CdlModeRept | CdlModeDA;
+     CdMute();
+-    VSync(4);
++    if (!WebNetMatchActive())
++        VSync(4);
+     while (!CdControlB(CdlSetmode, &mode, NULL)) {
+         CdInit();
+         CdSync(0, NULL);

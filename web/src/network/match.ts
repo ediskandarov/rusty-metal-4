@@ -1,8 +1,13 @@
 import type { Frame, Input, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
-import { enqueueStep } from "./protocol.ts";
+import { configureMatch, enqueueStep } from "./protocol.ts";
+import { connectNetwork } from "./transport.ts";
 
 type Message =
-  Start | Frame | { type: "welcome"; slot: number } | { type: "error"; message: string };
+  | Start
+  | Frame
+  | { type: "input_ack"; sequence: number; tick: number | null; rejected: string | null }
+  | { type: "welcome"; slot: number }
+  | { type: "error"; message: string };
 
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
   return (
@@ -22,12 +27,9 @@ function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
 
 export async function joinMatch(engine: NetworkEngine, endpoint: string, status: HTMLElement) {
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
-  status.textContent = "Open the main menu to join the match";
-  while (port.screen !== "main" || !port.menuReady) await new Promise(requestAnimationFrame);
+  status.textContent = "Preparing network session…";
 
-  const socket = new WebSocket(endpoint);
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
+  const socket = await connectNetwork(endpoint);
   const pending: Frame[] = [];
   let running: Frame | undefined;
   let slot = -1;
@@ -36,15 +38,27 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   let nextFrame = 0;
   let closed = false;
   let lastInput: Input | undefined;
-  socket.binaryType = "arraybuffer";
+  let lastSent = 0;
+  let epoch = 0;
+  const history = new Map<number, Input>();
+  const diagnostics = (port.netDiagnostics = {
+    pendingInputs: 0,
+    rejectedInputs: 0,
+    processedSequence: 0,
+    receivedFrames: 0,
+    transport: socket.diagnostics(),
+  });
 
-  const send = (message: object) => socket.send(encoder.encode(JSON.stringify(message)));
+  const send = (message: object) => socket.send(message);
   const cleanup = (message: string, cancel: boolean) => {
     if (closed) return;
     closed = true;
     delete port.netMatchTick;
     delete port.netMatchInput;
-    if (cancel) engine._WebNetCancelMatch();
+    pending.length = 0;
+    history.clear();
+    diagnostics.pendingInputs = 0;
+    if (cancel) queueMicrotask(() => engine._WebNetCancelMatch());
     status.textContent = message;
     socket.close();
   };
@@ -59,15 +73,42 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   };
 
   status.textContent = "Connecting to Deathmatch…";
-  socket.onopen = () => send({ type: "join" });
-  socket.onerror = () => fail("Could not connect to the Deathmatch server");
-  socket.onclose = () => fail("Disconnected from the Deathmatch server");
+  socket.onopen = () => send({ type: "join", compatibility: port.compatibility });
+  socket.onerror = (error) => fail(error);
+
   port.netMatchInput = (buttons, axes, analog) => {
     if (closed || socket.readyState !== WebSocket.OPEN) return;
-    if (lastInput?.buttons === buttons && lastInput.axes === axes && lastInput.analog === analog)
+    if (
+      lastInput?.buttons === buttons &&
+      lastInput.axes === axes &&
+      lastInput.analog === analog &&
+      performance.now() - lastSent < 100
+    )
       return;
     const input = { buttons, axes, analog };
-    send({ type: "input", sequence: ++sequence, input });
+    if (!epoch) return;
+    try {
+      // Rust returns the unsent sample it coalesced. Only retained/transmitted
+      // commands belong in acknowledgement history, not every render sample.
+      const superseded = send({
+        type: "input",
+        epoch,
+        sequence: ++sequence,
+        tick: nextFrame + 6,
+        input,
+      });
+      if (superseded !== undefined) history.delete(superseded);
+      history.set(sequence, input);
+      diagnostics.pendingInputs = history.size;
+      if (history.size > 60) {
+        fail("Input acknowledgement stalled; controls stopped");
+        return;
+      }
+    } catch (error) {
+      fail(error);
+      return;
+    }
+    lastSent = performance.now();
     lastInput = input;
   };
   port.netMatchTick = () => {
@@ -87,7 +128,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     }
     if (state.nextMode) {
       const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      cleanup("Match finished · " + result, false);
+      cleanup("Match finished · " + result, true);
       return;
     }
     queueMicrotask(() => {
@@ -99,9 +140,9 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     });
   };
 
-  socket.onmessage = async ({ data }: MessageEvent<ArrayBuffer>) => {
+  socket.onmessage = (data: unknown) => {
     try {
-      const message = JSON.parse(decoder.decode(data)) as Message;
+      const message = data as Message;
       switch (message.type) {
         case "welcome":
           if (!Number.isInteger(message.slot) || message.slot < 0 || message.slot >= 8)
@@ -110,31 +151,42 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           status.textContent = "Player " + (slot + 1) + " · Waiting for the other players";
           break;
         case "start": {
-          if (
-            players ||
-            slot < 0 ||
-            !engine._WebNetRequestMatch(message.players, message.world, message.seed, slot)
-          )
-            throw new Error("The game refused the match setup");
+          if (players || slot < 0 || !configureMatch(engine, message, slot))
+            throw new Error(port.netSession?.message ?? "The game refused the match setup");
           players = message.players;
+          epoch = message.epoch;
           status.textContent = "Loading Deathmatch…";
-          const deadline = performance.now() + 30_000;
-          while (!port.netMatch && !closed) {
-            if (performance.now() >= deadline) throw new Error("Match loading timed out");
-            await new Promise(requestAnimationFrame);
-          }
+          if (!port.netMatch) throw new Error("The game did not become ready at tick zero");
           if (closed) return;
-          send({ type: "ready" });
+          send({ type: "ready", epoch, digest: port.netMatch?.digest });
           status.textContent = "Player " + (slot + 1) + " of " + players;
           break;
         }
-        case "frame":
+        case "input_ack":
+          if (message.rejected) {
+            history.delete(message.sequence);
+            diagnostics.rejectedInputs++;
+            diagnostics.pendingInputs = history.size;
+          }
+          break;
+        case "frame": {
+          diagnostics.receivedFrames++;
+          if (message.tick % 15 === 0) send({ type: "progress", tick: message.tick });
+          diagnostics.transport = socket.diagnostics();
+          const acknowledged = message.acknowledged[slot];
+          if (acknowledged !== null && acknowledged !== undefined) {
+            diagnostics.processedSequence = acknowledged;
+            for (const sequence of history.keys())
+              if (sequence <= acknowledged) history.delete(sequence);
+            diagnostics.pendingInputs = history.size;
+          }
           if (message.tick !== nextFrame++ || message.inputs.length !== players)
             throw new Error("Received an out-of-order match frame");
           if (pending.length >= 120) throw new Error("Could not keep up with the server");
           pending.push(message);
           runNext();
           break;
+        }
         case "error":
           throw new Error(message.message);
       }

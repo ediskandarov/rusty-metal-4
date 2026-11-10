@@ -1,4 +1,5 @@
 #include "net_match.h"
+#include "cheats.h"
 #include "level.h"
 #include "tm4/main/game.h"
 #include "tm4/main/pad.h"
@@ -6,10 +7,14 @@
 #include "tm4/main/system.h"
 #include "tm4/modules/car.h"
 
+#include "tm4/main/loadfiles.h"
+#include <ctype.h>
 #include <emscripten.h>
 #include <libetc.h>
 #include <psyz/input.h>
+#include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef struct NetPadInput {
     u32 axes;
@@ -26,20 +31,61 @@ static struct {
     u32 input_mask;
     s32 players;
     s32 view_slot;
-    int cancelled;
     PadCache physical_pad;
-    int start_pending;
     int tick_pending;
 } match;
+
+static char* configured_cars[8];
+static void start_session(void);
+
+EMSCRIPTEN_KEEPALIVE int WebNetSelectCar(s32 slot, const char* name)
+{
+    if (match.players || slot < 0 || slot >= 8 || !name)
+        return 0;
+    const s32 count = RegGetNumberOfDirectoriesS("/objects/car/characters");
+    for (s32 i = 0; i < count; ++i) {
+        char* candidate = RegGetDirectoryNameSN("/objects/car/characters", i);
+        if (candidate && !strcmp(candidate, name) && !GameIsBossCar(candidate)) {
+            configured_cars[slot] = candidate;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetWorldIndex(const char* name)
+{
+    for (s32 i = 0; i < GameGetNumberOfWorlds(); ++i)
+        if (!strcmp(name, GameGetWorldName(i)))
+            return i;
+    return -1;
+}
+
+void WebNetPublishCatalog(void)
+{
+    EM_ASM({ tm4Port.catalog = ({ worlds : [], cars : [] }); });
+    for (s32 i = 0; i < GameGetNumberOfWorlds(); ++i)
+        EM_ASM({ tm4Port.catalog.worlds.push(UTF8ToString($0)); }, GameGetWorldName(i));
+    const s32 count = RegGetNumberOfDirectoriesS("/objects/car/characters");
+    for (s32 i = 0; i < count; ++i) {
+        char* name = RegGetDirectoryNameSN("/objects/car/characters", i);
+        if (name && !GameIsBossCar(name))
+            EM_ASM({ tm4Port.catalog.cars.push(UTF8ToString($0)); }, name);
+    }
+}
+
+static int reject_start(const char* message)
+{
+    EM_ASM({ tm4Port.netSession = ({ status : "error", message : UTF8ToString($0) }); }, message);
+    return 0;
+}
 
 EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s32 view_slot)
 {
     static char characters[] = "/objects/car/characters";
-    if (match.players || WebLevelActive() || GameInfo.mode != GAME_MODE_MENU
-        || players < 2 || players > ArrayCount(match.cars)
-        || view_slot < -1 || view_slot >= players
-        || world < 0 || world >= GameGetNumberOfWorlds())
-        return 0;
+    if (match.players || WebLevelActive() || players < 2 || players > ArrayCount(match.cars)
+        || view_slot < -1 || view_slot >= players || world < 0 || world >= GameGetNumberOfWorlds())
+        return reject_start("Invalid match configuration or session already running");
 
     s32 count = RegGetNumberOfDirectoriesS(characters);
     s32 slot = 0;
@@ -50,26 +96,57 @@ EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s3
     }
     if (slot != players)
         return 0;
+    for (s32 i = 0; i < players; ++i)
+        if (configured_cars[i])
+            match.cars[i] = configured_cars[i];
 
     match.world = GameGetWorldName(world);
     if (!match.world)
         return 0;
+    /* Validate file presence before mutating session state; a rejected start is retryable. */
+    const char* common[] = { "/DATA/GAME.MR", "/DATA/GAME.IMG", "/DATA/GAME.VAB" };
+    for (unsigned i = 0; i < ArrayCount(common); ++i)
+        if (access(common[i], R_OK))
+            return reject_start(common[i]);
+    for (s32 i = -1; i < players; ++i) {
+        RegistryDirectory* directory = i < 0 ? GameGetWorldNameDirectoryPtr(match.world)
+                                             : GetMatchingCarDirectory(match.cars[i], NULL);
+        const char* name = directory ? RegGetFileDataPS(directory, "filename") : NULL;
+        char path[128];
+        if (!name || snprintf(path, sizeof(path), "/DATA/%s.MR", name) >= sizeof(path))
+            return 0;
+        for (char* ch = path; *ch; ++ch)
+            *ch = toupper((unsigned char)*ch);
+        if (access(path, R_OK)) {
+            fprintf(stderr, "Missing session resource: %s\n", path);
+            return reject_start(path);
+        }
+        if (i < 0) {
+            snprintf(path, sizeof(path), "/DATA/%s.IMG", name);
+            for (char* ch = path; *ch; ++ch)
+                *ch = toupper((unsigned char)*ch);
+            if (access(path, R_OK))
+                return reject_start(path);
+        }
+    }
     match.seed = seed;
     match.tick = 0;
     match.players = players;
     match.view_slot = view_slot;
-    match.cancelled = 0;
-    match.start_pending = 1;
+    EM_ASM({
+        tm4Port.networkSynchronous = true;
+        tm4Port.netSession = ({ status : "loading" });
+    });
+    start_session();
     return 1;
 }
 
-int WebNetMatchStartPending(void)
+static void start_session(void)
 {
-    if (!match.start_pending)
-        return 0;
-
-    match.start_pending = 0;
     WebLeaveMenu();
+    memset(&GameInfo, 0, sizeof(GameInfo));
+    GameInitialize();
+    WebResetNetworkCheats();
     GameInfo.player_count = 1;
     GameInfo.extra_player_count = match.players - 1;
     GameInfo.computer_count = 0;
@@ -90,30 +167,43 @@ int WebNetMatchStartPending(void)
     }
     GameInfo.next_mode = GAME_MODE_PLAY;
     WebLevelStart();
-    match.physical_pad = PadJpad[0];
+    match.physical_pad = (PadCache) { 0 };
     memset(PadJpad, 0, sizeof(PadJpad));
-    EM_ASM({ tm4Port.netMatch = ({ players: $0, tick: 0 }); }, match.players);
-    return 1;
+    EM_ASM(
+        {
+            tm4Port.netSession = ({ status : "ready" });
+            tm4Port.netMatch = ({ players : $0, tick : 0, status : "ready" });
+        },
+        match.players);
+    WebNetMatchPublishTick();
 }
 
 int WebNetMatchActive(void)
 {
-    return match.players && !match.start_pending;
+    return match.players != 0;
 }
 
 EMSCRIPTEN_KEEPALIVE void WebNetCancelMatch(void)
 {
-    if (match.start_pending) {
-        match.start_pending = 0;
+    if (match.players) {
+        WebLevelStop();
         WebNetMatchEnd();
-    } else if (match.players) {
-        match.cancelled = 1;
     }
 }
 
-int WebNetMatchCancelled(void)
+int WebNetLocalViewCount(void)
 {
-    return match.cancelled;
+    return WebNetMatchActive() ? (match.view_slot >= 0) : GameInfo.player_count;
+}
+
+int WebNetGameplaySlot(int view)
+{
+    return WebNetMatchActive() ? match.view_slot : view;
+}
+
+int WebNetLocalView(int slot)
+{
+    return WebNetMatchActive() ? (slot == match.view_slot ? 0 : -1) : slot;
 }
 
 int WebNetMatchViewSlot(void)
@@ -137,8 +227,8 @@ void WebNetMatchPollInput(void)
     for (s32 axis = 0; axis < ArrayCount(match.physical_pad.axes); ++axis)
         axes |= (u32)match.physical_pad.axes[axis] << (8 * axis);
     EM_ASM(
-        { tm4Port.netMatchInput?.($0, $1 >>> 0, !!$2); },
-        match.physical_pad.buttons & ~PADstart, axes, match.physical_pad.has_analog);
+        { tm4Port.netMatchInput ?.($0, $1 >>> 0, !!$2); }, match.physical_pad.buttons & ~PADstart,
+        axes, match.physical_pad.has_analog);
 }
 
 void WebNetMatchSeed(void)
@@ -172,6 +262,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetQueueTick(u32 tick)
         return 0;
 
     match.tick_pending = 1;
+    WebLevelNetworkStep();
     return 1;
 }
 
@@ -223,14 +314,14 @@ void WebNetMatchPublishTick(void)
     EM_ASM(
         {
             Object.assign(tm4Port.netMatch, {
-                tick: $0,
-                remaining: $1,
-                winner: $2,
-                roundFinished: !!$3,
-                acceptsContinue: !!$4,
-                nextMode: $5,
-                scores: [],
-                digest: $6 >>> 0
+                tick : $0,
+                remaining : $1,
+                winner : $2,
+                roundFinished : !!$3,
+                acceptsContinue : !!$4,
+                nextMode : $5,
+                scores : [],
+                digest : $6 >>> 0
             });
         },
         match.tick, GameInfo.active_player_count, GameInfo.deathmatch_winner,
@@ -239,15 +330,19 @@ void WebNetMatchPublishTick(void)
     for (s32 slot = 0; slot < match.players; ++slot) {
         const Tm4GamePlayer* player = &GameInfo.players[slot];
         EM_ASM(
-            { tm4Port.netMatch.scores.push({ wins: $0, losses: $1 }); },
-            player->wins, player->losses);
+            { tm4Port.netMatch.scores.push({ wins : $0, losses : $1 }); }, player->wins,
+            player->losses);
     }
-    EM_ASM({ tm4Port.netMatchTick?.(); });
+    if (match.tick)
+        EM_ASM({ tm4Port.netMatchTick ?.(); });
 }
 
 void WebNetMatchEnd(void)
 {
-    match.players = 0;
-    match.input_mask = 0;
-    match.tick_pending = 0;
+    memset(&match, 0, sizeof(match));
+    memset(configured_cars, 0, sizeof(configured_cars));
+    EM_ASM({
+        delete tm4Port.netMatch;
+        tm4Port.networkSynchronous = false;
+    });
 }

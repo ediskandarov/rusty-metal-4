@@ -2,7 +2,19 @@ import type { DiscAssets } from "../loader/types.ts";
 import { initializeSettings } from "../ui/settings.ts";
 import { requireRuntime } from "./module.ts";
 
-export function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): Promise<void> {
+export async function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): Promise<void> {
+  const digest = async (bytes: Uint8Array<ArrayBuffer>) =>
+    Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (value) =>
+      value.toString(16).padStart(2, "0"),
+    ).join("");
+  const fingerprints: string[] = [];
+  for (const [path, bytes] of [...assets.files.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    if (/\.(MR|IMG|VAB)$/i.test(path) && !/\/MENU\./i.test(path))
+      fingerprints.push(path + ":" + (await digest(bytes)));
+  }
+  const content = await digest(new TextEncoder().encode(fingerprints.join("\n")));
+  const build = (await (await fetch("simulation-build.json")).json()) as { sha256: string };
+
   return new Promise((resolve, reject) => {
     globalThis.tm4Assets = assets;
     globalThis.Module = {
@@ -27,7 +39,17 @@ export function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): Promis
           }
           module._WebMusicConfigureDisc(assets.tracks.length, assets.leadout);
           initializeSettings(module, canvas);
-          module.callMain([]);
+          const parameters = new URLSearchParams(location.search);
+          module.callMain(
+            parameters.has("match") || parameters.has("authority") || parameters.has("session")
+              ? ["--session", ...(parameters.has("authority") ? ["--authority"] : [])]
+              : [],
+          );
+          (
+            globalThis as typeof globalThis & {
+              tm4Port: import("../network/protocol.ts").NetworkPort;
+            }
+          ).tm4Port.compatibility = { protocol: 1, build: build.sha256, content };
           resolve();
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));

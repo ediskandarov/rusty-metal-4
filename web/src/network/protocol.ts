@@ -1,5 +1,14 @@
 export type Input = { buttons: number; axes: number; analog: boolean };
-export type Start = { type: "start"; players: number; world: number; seed: number };
+export type Compatibility = { protocol: number; build: string; content: string };
+export type Start = {
+  type: "start";
+  players: number;
+  world: string;
+  cars: string[];
+  seed: number;
+  epoch: number;
+  compatibility: Compatibility;
+};
 export type Step = { type: "step"; tick: number; inputs: Input[] };
 export type Score = { wins: number; losses: number };
 export type RoundState = {
@@ -11,9 +20,14 @@ export type RoundState = {
   digest: number;
   scores: Score[];
 };
-export type Frame = Omit<Step, "type"> & { type: "frame"; state: RoundState };
+export type Frame = Omit<Step, "type"> & {
+  type: "frame";
+  state: RoundState;
+  acknowledged: (number | null)[];
+};
 
 export interface NetworkEngine {
+  ccall(name: string, result: string, types: string[], values: (string | number)[]): number;
   _WebNetRequestMatch(players: number, world: number, seed: number, viewSlot: number): number;
   _WebNetSetInput(
     tick: number,
@@ -37,11 +51,22 @@ export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is Ne
 
 export interface NetworkPort {
   screen?: string;
+  platformReady?: boolean;
+  compatibility?: Compatibility;
+  catalog?: { worlds: string[]; cars: string[] };
   menuReady?: boolean;
+  netSession?: { status: "loading" | "ready" | "error"; message?: string };
   netMatch?: { tick: number } & Partial<RoundState>;
   netMatchTick?: () => void;
   netMatchInput?: (buttons: number, axes: number, analog: boolean) => void;
   netMatchServerState?: RoundState;
+  netDiagnostics?: {
+    pendingInputs: number;
+    rejectedInputs: number;
+    processedSequence: number;
+    receivedFrames: number;
+    transport: { rttMs: number; jitterMs: number; queuedPackets: number; pendingInputs: number };
+  };
 }
 
 export function enqueueStep(engine: NetworkEngine, step: Step | Frame) {
@@ -51,4 +76,15 @@ export function enqueueStep(engine: NetworkEngine, step: Step | Frame) {
   }
   if (!engine._WebNetQueueTick(step.tick))
     throw new Error("The game refused to run tick " + step.tick);
+}
+
+export function configureMatch(engine: NetworkEngine, start: Start, view: number) {
+  const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
+  if (world < 0 || start.cars.length !== start.players)
+    throw new Error("Session resources are missing locally");
+  for (const [slot, car] of start.cars.entries()) {
+    if (!engine.ccall("WebNetSelectCar", "number", ["number", "string"], [slot, car]))
+      throw new Error("Missing local car: " + car);
+  }
+  return engine._WebNetRequestMatch(start.players, world, start.seed, view);
 }

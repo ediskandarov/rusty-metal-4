@@ -40,7 +40,7 @@ const authority = Bun.spawn([process.execPath, join(root, "tools/network/authori
 const joinUrl = new URL(site);
 joinUrl.searchParams.set("match", endpoint);
 console.log("Join the match from " + joinUrl.href);
-console.log("After the intro, the match starts when every player is ready.");
+console.log("The match loads directly and starts when every player is ready.");
 
 const stop = () => {
   authority.kill();

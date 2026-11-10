@@ -1,9 +1,13 @@
 #ifndef TM4_WEB_NET_MATCH_H
 #define TM4_WEB_NET_MATCH_H
 
-int WebNetMatchStartPending(void);
+int WebNetLocalViewCount(void);
+int WebNetGameplaySlot(int view);
+int WebNetLocalView(int slot);
+int WebDirectStartup(void);
+int WebAuthorityStartup(void);
+void WebNetPublishCatalog(void);
 int WebNetMatchActive(void);
-int WebNetMatchCancelled(void);
 int WebNetMatchViewSlot(void);
 void WebNetMatchPollInput(void);
 void WebNetMatchSeed(void);

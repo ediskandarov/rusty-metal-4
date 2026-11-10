@@ -1,9 +1,14 @@
-import { createRequire } from "node:module";
-
 import type { Page } from "playwright";
 import { chromium } from "playwright";
 
-import type { NetworkEngine, NetworkPort, Start, Step } from "../../web/src/network/protocol.ts";
+import type {
+  configureMatch,
+  NetworkEngine,
+  NetworkPort,
+  Start,
+  Step,
+} from "../../web/src/network/protocol.ts";
+import type { connectNetwork } from "../../web/src/network/transport.ts";
 
 type ServerMessage =
   | Start
@@ -12,42 +17,54 @@ type ServerMessage =
   | { type: "finished" }
   | { type: "error"; message: string };
 
-type AuthorityPage = typeof globalThis & { Module: NetworkEngine; tm4Port: NetworkPort };
+type AuthorityPage = typeof globalThis & {
+  Module: NetworkEngine;
+  tm4Port: NetworkPort;
+  tm4Network: { connect: typeof connectNetwork; configure: typeof configureMatch };
+};
 
 export async function connectAuthority(page: Page, endpoint: string, token: string) {
   await page.evaluate(
-    ({ endpoint, token }) =>
-      new Promise<void>((resolve, reject) => {
+    async ({ endpoint, token }) => {
+      const socket = await (globalThis as AuthorityPage).tm4Network.connect(endpoint);
+      return new Promise<void>((resolve, reject) => {
         const { Module: engine, tm4Port: port } = globalThis as AuthorityPage;
-        const socket = new WebSocket(endpoint);
-        socket.binaryType = "arraybuffer";
-        const encoder = new TextEncoder();
-        const decoder = new TextDecoder();
-        const send = (message: object) => socket.send(encoder.encode(JSON.stringify(message)));
-        socket.onopen = () => send({ type: "authority", token });
-        socket.onerror = () => reject(new Error("The authority could not connect to Lightyear"));
-        socket.onclose = () => reject(new Error("Lightyear closed the authority connection"));
+        const send = (message: object) => socket.send(message);
+        socket.onopen = () =>
+          send({
+            type: "authority",
+            token,
+            compatibility: port.compatibility,
+            catalog: port.catalog,
+          });
+        const cleanup = () => {
+          delete port.netMatchTick;
+          socket.close();
+          queueMicrotask(() => engine._WebNetCancelMatch());
+        };
+        socket.onerror = (error) => {
+          cleanup();
+          reject(error instanceof Error ? error : new Error(String(error)));
+        };
+
         port.netMatchTick = () => {
           const state = port.netMatch;
           if (!state) return;
           send({ type: "completed", tick: state.tick - 1, state });
         };
-        socket.onmessage = async ({ data }: MessageEvent<ArrayBuffer>) => {
+        socket.onmessage = (data: unknown) => {
           try {
-            const message = JSON.parse(decoder.decode(data)) as ServerMessage;
+            const message = data as ServerMessage;
             switch (message.type) {
               case "welcome":
                 console.log("Server simulator connected");
                 break;
               case "start": {
-                if (!engine._WebNetRequestMatch(message.players, message.world, message.seed, -1))
+                if (!(globalThis as AuthorityPage).tm4Network.configure(engine, message, -1))
                   throw new Error("The game refused the match setup");
-                const deadline = performance.now() + 30_000;
-                while (!port.netMatch) {
-                  if (performance.now() >= deadline) throw new Error("Match loading timed out");
-                  await new Promise(requestAnimationFrame);
-                }
-                send({ type: "ready" });
+                if (!port.netMatch)
+                  throw new Error("The simulator did not become ready at tick zero");
+                send({ type: "ready", epoch: message.epoch, digest: port.netMatch?.digest });
                 break;
               }
               case "step":
@@ -67,16 +84,19 @@ export async function connectAuthority(page: Page, endpoint: string, token: stri
                   throw new Error("The game refused to run tick " + message.tick);
                 break;
               case "finished":
+                cleanup();
                 resolve();
                 break;
               case "error":
                 throw new Error(message.message);
             }
           } catch (error) {
+            cleanup();
             reject(error instanceof Error ? error : new Error(String(error)));
           }
         };
-      }),
+      });
+    },
     { endpoint, token },
   );
 }
@@ -86,9 +106,6 @@ if (import.meta.main) {
   if (!token) throw new Error("Set TM4_AUTHORITY_TOKEN to the server's authority token");
   const endpoint = process.env.TM4_MATCH_ENDPOINT ?? "ws://127.0.0.1:8122";
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:8120";
-  const startup = createRequire(import.meta.url)("../../tests/browser/browser_startup.cjs") as (
-    page: import("playwright").Page,
-  ) => Promise<void>;
 
   const browser = await chromium.launch({
     executablePath: process.env.TM4_CHROME,
@@ -106,8 +123,10 @@ if (import.meta.main) {
       if (message.type() === "error" || /Match cars|initialized/.test(message.text()))
         console.error(message.text());
     });
-    await page.goto(site);
-    await startup(page);
+    const url = new URL(site);
+    url.searchParams.set("authority", "1");
+    await page.goto(url.href);
+    await page.waitForFunction(() => (globalThis as AuthorityPage).tm4Port?.compatibility);
 
     await connectAuthority(page, endpoint, token);
   } finally {
