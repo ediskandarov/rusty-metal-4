@@ -397,7 +397,8 @@ int WebNetReplaying(void)
     return match.replaying || match.local_replaying;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebNetBeginReplay(void)
+#ifdef TM4_WEB_TEST_HOOKS
+EMSCRIPTEN_KEEPALIVE int WebTestRestartNetworkReplay(void)
 {
     if (!WebNetMatchActive() || !WebLevelActive() || WebNetReplaying() || match.stepping
         || match.tick_pending || match.input_mask || checkpoint_resource_blocker())
@@ -415,6 +416,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetBeginReplay(void)
     start_session();
     return 1;
 }
+#endif
 
 EMSCRIPTEN_KEEPALIVE void WebNetEndReplay(void)
 {

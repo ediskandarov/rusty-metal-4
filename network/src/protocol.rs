@@ -1,4 +1,4 @@
-use crate::input::{ControllerCommand, Input, Rejection};
+use crate::input::{ControllerCommand, Input};
 use bevy_app::App;
 use bevy_ecs::prelude::*;
 use lightyear::prelude::*;
@@ -10,7 +10,6 @@ pub type AcceptedInputs = lightyear::input::input_message::InputMessage<
 >;
 pub const PREDICTION_DEPTH: u16 = 12;
 
-pub const REPLAY_SCHEMA: u16 = 2;
 pub const SNAPSHOT_CHUNK_BYTES: usize = 8192;
 pub const SNAPSHOT_MAX_BYTES: usize = 256 * 1024;
 pub const SNAPSHOT_MAX_CATCHUP: u32 = 240;
@@ -18,7 +17,6 @@ pub const JOURNAL_DISK_BYTES: usize = 1024 * 1024 * 1024;
 pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
-pub const REPLAY_WINDOW_CHUNKS: usize = 4;
 pub const MAX_PLAYERS: usize = 8;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 29;
@@ -159,18 +157,13 @@ pub enum Request {
     Ready {
         epoch: u32,
         digest: u32,
-        #[serde(default)]
-        recoverable: bool,
+        unsupported: Option<String>,
     },
     Progress {
         tick: u32,
     },
-    Recover {
-        epoch: u32,
-        tick: u32,
-    },
-    ReplayApplied {
-        epoch: u32,
+    CatchupApplied {
+        attempt: u32,
         tick: u32,
     },
     Completed {
@@ -211,7 +204,7 @@ pub enum Message {
         offset: u32,
         data: Vec<u8>,
     },
-    ResumeJournal {
+    ResumeCatchup {
         attempt: u32,
         start: u32,
         head: u32,
@@ -239,27 +232,13 @@ pub enum Message {
         tick: u32,
         inputs: Vec<Input>,
         state: RoundState,
-        fallback_processed: Vec<Option<u32>>,
     },
-    RecoveryBegin {
-        schema: u16,
-        epoch: u32,
-        head: u32,
-        initial_digest: u32,
-    },
-    RecoveryFrames {
+    CatchupFrames {
+        attempt: u32,
         start: u32,
         head: u32,
         data: Vec<u8>,
         checksum: u32,
-    },
-    RecoveryEnd {
-        tick: u32,
-        state: RoundState,
-    },
-    InputRejected {
-        sequence: u32,
-        reason: Rejection,
     },
     Finished,
     Error {

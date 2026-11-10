@@ -1,32 +1,27 @@
 import { attachLivePrediction } from "./livePrediction.ts";
-import type { Frame, Input, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
-import { configureMatch, enqueueStep, stateSections } from "./protocol.ts";
-import type { ReplayBegin, ReplayChunk } from "./replay.ts";
-import { checksum, ReplayJournal, replaySchema } from "./replay.ts";
+import type { Frame, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
+import { configureMatch } from "./protocol.ts";
+import type { CatchupChunk } from "./replay.ts";
+import { checksum, maxResumeTicks, SnapshotReplay } from "./replay.ts";
 import { connectNetwork } from "./transport.ts";
 
 type Message =
-  | Start
   | (Omit<Start, "type"> & { type: "prediction_prepare" | "resume_prepare" })
   | { type: "resume_credential"; token: string }
   | SnapshotBegin
   | { type: "snapshot_chunk"; attempt: number; offset: number; data: number[] }
-  | { type: "resume_journal"; attempt: number; start: number; head: number; digest: number }
+  | { type: "resume_catchup"; attempt: number; start: number; head: number; digest: number }
   | { type: "resume_live"; attempt: number; anchor: number; head: number; sequence: number }
   | { type: "resume_active"; head: number }
   | { type: "prediction_offer" | "prediction_begin"; anchor: number }
   | Frame
-  | ReplayBegin
-  | ReplayChunk
-  | { type: "recovery_end"; tick: number; state: RoundState }
-  | { type: "input_rejected"; sequence: number; reason: string }
+  | CatchupChunk
   | { type: "welcome"; slot: number }
   | { type: "error"; message: string };
 
-const journalIdleMs = 7_000;
+const resumeIdleMs = 7_000;
 const maxSnapshotBytes = 256 * 1024;
 const snapshotChunkBytes = 8192;
-const maxResumeTicks = 240;
 
 type SnapshotBegin = {
   type: "snapshot_begin";
@@ -48,7 +43,7 @@ type SnapshotDownload = {
 type Recovery = {
   abort: AbortController;
   requestedAt: number;
-  journal?: ReplayJournal;
+  replay?: SnapshotReplay;
 };
 
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
@@ -86,22 +81,12 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   show("lobby", "Connecting to Deathmatch…");
 
   const socket = await connectNetwork(endpoint);
-  const pending: Frame[] = [];
-  let running: Frame | undefined;
   let slot = -1;
   let players = 0;
-  let sequence = 0;
-  let nextFallbackFrame = 0;
   let closed = false;
-  let lastInput: Input | undefined;
-  let lastSent = 0;
   let epoch = 0;
-  const history = new Set<number>();
-  let initialDigest = 0;
-  let initialRecoverable = false;
   let recovery: Recovery | undefined;
   let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
-  let recoveryUsed = false;
   let prediction: ReturnType<typeof attachLivePrediction> | undefined;
   let predictionStarted = false;
   let offeredAnchor: number | undefined;
@@ -115,9 +100,6 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     // Playing without session storage is still supported.
   }
   const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
-    pendingInputs: 0,
-    rejectedInputs: 0,
-    processedSequence: 0,
     receivedFrames: 0,
     transport: socket.diagnostics(),
   });
@@ -129,12 +111,9 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     delete port.netMatchTick;
     delete port.netMatchInput;
     prediction?.close();
-    pending.length = 0;
-    history.clear();
     clearTimeout(recoveryDeadline);
     recovery?.abort.abort();
     recovery = undefined;
-    diagnostics.pendingInputs = 0;
     queueMicrotask(() => engine._WebNetCancelMatch());
     show(state, message);
     socket.close();
@@ -143,15 +122,9 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     const message = error instanceof Error ? error.message : String(error);
     cleanup(message, "error");
   };
-  const runNext = () => {
-    if (closed || running || recovery) return;
-    running = pending.shift();
-    if (running) enqueueStep(engine, running);
-  };
-
-  const armJournalTimeout = () => {
+  const armResumeTimeout = () => {
     clearTimeout(recoveryDeadline);
-    recoveryDeadline = setTimeout(() => fail("Match journal progress timed out"), journalIdleMs);
+    recoveryDeadline = setTimeout(() => fail("Reconnect progress timed out"), resumeIdleMs);
   };
 
   const displayOutcome = (state: RoundState) => {
@@ -178,92 +151,18 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     } catch {
       // The last verified frame still has transport diagnostics after a runtime trap.
     } finally {
-      fail(error);
+      const unsupported = port.netMatch?.unsupported;
+      fail(unsupported ? "Live rollback cannot restore this state: " + unsupported : error);
     }
   };
 
   port.netMatchInput = (buttons, axes, analog) => {
     if (closed || recovery || socket.readyState !== WebSocket.OPEN) return;
-    if (prediction) {
-      try {
-        socket.predictionInput(buttons, axes, analog);
-      } catch (error) {
-        fail(error);
-      }
-      return;
-    }
-    if (
-      lastInput?.buttons === buttons &&
-      lastInput.axes === axes &&
-      lastInput.analog === analog &&
-      performance.now() - lastSent < 100
-    )
-      return;
-    const input = { buttons, axes, analog };
-    if (!epoch) return;
     try {
-      // Rust returns the unsent sample it coalesced. Only retained/transmitted
-      // commands belong in acknowledgement history, not every render sample.
-      const superseded = send({
-        type: "input",
-        epoch,
-        sequence: ++sequence,
-        tick: nextFallbackFrame + 6,
-        input,
-      });
-      if (superseded !== undefined) history.delete(superseded);
-      history.add(sequence);
-      diagnostics.pendingInputs = history.size;
-      if (history.size > 60) {
-        fail("Input acknowledgement stalled; controls stopped");
-        return;
-      }
+      if (prediction) socket.predictionInput(buttons, axes, analog);
     } catch (error) {
       fail(error);
-      return;
     }
-    lastSent = performance.now();
-    lastInput = input;
-  };
-  port.netMatchTick = () => {
-    const local = port.netMatch;
-    const frame = running;
-    if (!local || !frame || local.tick !== frame.tick + 1) return;
-    running = undefined;
-    const { state } = frame;
-    port.netMatchServerState = state;
-    if (!sameOutcome(local, state)) {
-      diagnostics.divergence = stateSections.filter(
-        (_, i) => local.sections?.[i] !== state.sections[i],
-      );
-      if (!initialRecoverable || recoveryUsed || state.unsupported || state.nextMode) {
-        fail("Simulation diverged from the server at tick " + frame.tick);
-        return;
-      }
-      recoveryUsed = true;
-      recovery = { abort: new AbortController(), requestedAt: performance.now() };
-      pending.length = 0;
-      history.clear();
-      diagnostics.pendingInputs = 0;
-      show("lobby", "Restoring the match…");
-      armJournalTimeout();
-      send({ type: "recover", epoch, tick: frame.tick });
-      return;
-    }
-    try {
-      if (frame.tick % 15 === 0) send({ type: "progress", tick: frame.tick });
-    } catch (error) {
-      fail(error);
-      return;
-    }
-    displayOutcome(state);
-    queueMicrotask(() => {
-      try {
-        runNext();
-      } catch (error) {
-        fail(error);
-      }
-    });
   };
 
   const targetResumeClock = async (download: SnapshotDownload, active: Recovery) => {
@@ -277,7 +176,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
       throw new Error("The snapshot fell outside the reconnect window");
     download.target = target;
     send({ type: "resume_clock", attempt, target });
-    armJournalTimeout();
+    armResumeTimeout();
   };
 
   socket.onmessage = (data: unknown) => {
@@ -305,25 +204,24 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           }
           break;
         case "resume_prepare":
-        case "prediction_prepare":
-        case "start": {
+        case "prediction_prepare": {
           show("lobby", "Loading Deathmatch…");
-          if (message.type === "prediction_prepare" || message.type === "resume_prepare") {
-            if (prediction || players || message.world !== "Construction Yard")
-              throw new Error("Live rollback requires a stock Construction Yard match");
-            prediction = attachLivePrediction(engine, port);
-            delete port.netMatchTick;
-            socket.preparePrediction(message.players);
-          }
-          if (players || slot < 0 || !configureMatch(engine, { ...message, type: "start" }, slot))
+          if (
+            prediction ||
+            slot < 0 ||
+            slot >= message.players ||
+            message.world !== "Construction Yard"
+          )
+            throw new Error("Live rollback requires a stock Construction Yard match");
+          prediction = attachLivePrediction(engine, port);
+          socket.preparePrediction(message.players);
+          if (!configureMatch(engine, { ...message, type: "start" }, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");
           players = message.players;
           epoch = message.epoch;
-          if (!port.netMatch) throw new Error("The game did not become ready at tick zero");
-          if (closed) return;
-          initialDigest = port.netMatch.digest ?? 0;
-          initialRecoverable = port.netMatch.unsupported === null;
-          if (prediction && !initialRecoverable)
+          if (!port.netMatch || port.netMatch.digest === undefined)
+            throw new Error("The game did not become ready at tick zero");
+          if (port.netMatch.unsupported !== null)
             throw new Error(
               "Live rollback cannot restore this roster: " + port.netMatch.unsupported,
             );
@@ -332,9 +230,9 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             resumePending = true;
             recovery = { abort: new AbortController(), requestedAt: performance.now() };
             show("lobby", "Downloading the current match state…");
-            armJournalTimeout();
+            armResumeTimeout();
           } else {
-            send({ type: "ready", epoch, digest: initialDigest });
+            send({ type: "ready", epoch, digest: port.netMatch.digest });
             show("lobby", "Waiting for all players to finish loading…");
           }
           break;
@@ -375,7 +273,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           resume = { header: message, bytes: new Uint8Array(message.total), received: 0 };
           diagnostics.snapshotTick = message.tick;
           diagnostics.snapshotBytes = message.total;
-          armJournalTimeout();
+          armResumeTimeout();
           break;
         case "snapshot_chunk": {
           const active = recovery;
@@ -395,7 +293,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           download.bytes.set(message.data, download.received);
           download.received += message.data.length;
           send({ type: "snapshot_received", attempt: message.attempt, offset: download.received });
-          armJournalTimeout();
+          armResumeTimeout();
           if (download.received !== download.bytes.length) break;
           if (checksum(download.bytes) !== download.header.checksum)
             throw new Error("Corrupt reconnect snapshot");
@@ -420,10 +318,10 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           });
           break;
         }
-        case "resume_journal":
+        case "resume_catchup":
           if (
             !recovery ||
-            recovery.journal ||
+            recovery.replay ||
             !resume ||
             message.attempt !== resume.header.attempt ||
             message.start !== resume.header.tick ||
@@ -431,29 +329,22 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             message.digest !== resume.header.state.digest
           )
             throw new Error("Invalid reconnect catch-up boundary");
-          recovery.journal = new ReplayJournal(
-            {
-              type: "recovery_begin",
-              schema: replaySchema,
-              epoch,
-              head: message.head,
-              initial_digest: message.digest,
-            },
-            epoch,
-            players,
+          recovery.replay = new SnapshotReplay(
+            message.start,
+            message.head,
             message.digest,
+            players,
             engine,
             port,
             recovery.abort.signal,
-            message.start,
           );
-          armJournalTimeout();
+          armResumeTimeout();
           break;
         case "resume_live":
           if (
             !prediction ||
             predictionStarted ||
-            !recovery?.journal ||
+            !recovery?.replay ||
             !resume ||
             message.attempt !== resume.header.attempt ||
             message.anchor !== resume.header.anchor ||
@@ -461,7 +352,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             message.head !== port.netMatch?.tick
           )
             throw new Error("Invalid reconnect prediction boundary");
-          recovery.journal.finish(message.head);
+          recovery.replay.finish(message.head);
           socket.beginResumedPrediction(
             message.anchor,
             epoch,
@@ -476,7 +367,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           diagnostics.recoveredTick = message.head;
           diagnostics.replayMs = performance.now() - recovery.requestedAt;
           send({ type: "resume_live_ack", attempt: message.attempt, head: message.head });
-          armJournalTimeout();
+          armResumeTimeout();
           break;
         case "resume_active":
           if (!resumePending || !predictionStarted || !resume || message.head !== resume.target)
@@ -487,82 +378,35 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           clearTimeout(recoveryDeadline);
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
-        case "recovery_begin":
-          if (!recovery || recovery.journal || message.head !== nextFallbackFrame)
-            throw new Error("Unexpected match journal");
-          recovery.journal = new ReplayJournal(
-            message,
-            epoch,
-            players,
-            initialDigest,
-            engine,
-            port,
-            recovery.abort.signal,
-          );
-          armJournalTimeout();
-          break;
-        case "recovery_frames": {
+        case "catchup_frames": {
           const active = recovery;
-          if (!active?.journal) throw new Error("Unexpected match journal block");
-          const applied = active.journal.accept(message);
+          if (!active?.replay || !resume || message.attempt !== resume.header.attempt)
+            throw new Error("Unexpected reconnect replay block");
+          const applied = active.replay.accept(message);
           diagnostics.replayBytes = (diagnostics.replayBytes ?? 0) + message.data.length;
           diagnostics.replayChunks = (diagnostics.replayChunks ?? 0) + 1;
           void applied
             .then((tick) => {
               if (active.abort.signal.aborted) return;
-              send({ type: "replay_applied", epoch, tick });
-              armJournalTimeout();
+              send({ type: "catchup_applied", attempt: message.attempt, tick });
+              armResumeTimeout();
             })
             .catch((error) => {
               if (!active.abort.signal.aborted) fail(error);
             });
           break;
         }
-        case "recovery_end":
-          if (!recovery?.journal || !port.netMatch || !sameOutcome(port.netMatch, message.state))
-            throw new Error("Match journal did not reach the authority");
-          recovery.journal.finish(message.tick);
-          diagnostics.replayMs = performance.now() - recovery.requestedAt;
-          diagnostics.recoveredTick = message.tick;
-          recovery = undefined;
-          clearTimeout(recoveryDeadline);
-          nextFallbackFrame = message.tick;
-          port.netMatchServerState = message.state;
-          show("playing", "Player " + (slot + 1) + " of " + players);
-          displayOutcome(message.state);
-          break;
-        case "input_rejected":
-          history.delete(message.sequence);
-          diagnostics.rejectedInputs++;
-          diagnostics.pendingInputs = history.size;
-          break;
-        case "frame": {
+        case "frame":
+          if (!prediction || !predictionStarted || resumePending)
+            throw new Error("Unexpected live confirmation before prediction starts");
           diagnostics.receivedFrames++;
           diagnostics.transport = socket.diagnostics();
-          if (predictionStarted) {
-            if (message.tick % 15 === 0) send({ type: "progress", tick: message.tick });
-            prediction?.confirm(message.tick + 1);
-            port.netConfirmedTick = message.tick + 1;
-            port.netMatchServerState = message.state;
-            displayOutcome(message.state);
-            break;
-          }
-          if (message.tick !== nextFallbackFrame++ || message.inputs.length !== players)
-            throw new Error("Received an out-of-order match frame");
-          const processed = message.fallback_processed[slot];
-          if (processed !== null && processed !== undefined) {
-            diagnostics.processedSequence = processed;
-            for (const sequence of history.keys())
-              if (sequence <= processed) history.delete(sequence);
-            diagnostics.pendingInputs = history.size;
-          }
-          if (recovery) break;
-          if (message.tick === 0) show("playing", "Player " + (slot + 1) + " of " + players);
-          if (pending.length >= 120) throw new Error("Could not keep up with the server");
-          pending.push(message);
-          runNext();
+          if (message.tick % 15 === 0) send({ type: "progress", tick: message.tick });
+          prediction.confirm(message.tick + 1);
+          port.netConfirmedTick = message.tick + 1;
+          port.netMatchServerState = message.state;
+          displayOutcome(message.state);
           break;
-        }
         case "error":
           throw new Error(message.message);
       }

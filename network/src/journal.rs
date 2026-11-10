@@ -25,7 +25,6 @@ const END: u8 = 2;
 pub struct Header {
     pub start: SessionStart,
     pub initial_digest: u32,
-    pub recoverable: bool,
 }
 
 impl Header {
@@ -346,7 +345,6 @@ mod tests {
                 portable: false,
             },
             initial_digest: 42,
-            recoverable: true,
         }
     }
 

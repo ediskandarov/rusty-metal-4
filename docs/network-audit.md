@@ -9,9 +9,9 @@ this page records actual coverage and limitations, not revised requirements.
 C owns gameplay, including physics, weapons and scoring. A server-owned Chromium
 instance runs that C/Wasm simulation. The native Rust server selects accepted inputs
 and advances it on Lightyear's 30 Hz timeline, with one outstanding step.
-Prediction uses a negotiated start tick. The non-predicting path aligns to the
-same native clock when it enters realtime play. A delay over 250 ms fails the
-session explicitly. After initial readiness, clients cannot gate the authority.
+Clients agree on a start tick before prediction begins. A delay over 250 ms
+fails the session explicitly. After initial readiness, clients cannot gate the
+authority.
 
 Both browser and server run Lightyear 0.30.1 / Bevy 0.19. The browser Rust/Wasm module
 is separate from Emscripten. wasm-bindgen copies owned strings at the JS boundary;
@@ -24,10 +24,9 @@ plugin buffers tick-indexed records and validates controlled targets. The server
 reads every newly received buffer record before fixed-step trimming, then applies
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
-live. The match journal can rebuild the C world from startup. Live matches can
-opt into native Lightyear prediction for stock Construction Yard Deathmatch.
-An additional opt-in enables portable checkpoints for reconnecting players.
-The diagnostic build also includes a smaller native rollback probe.
+live. Network play uses native prediction and rollback for supported stock
+Construction Yard Deathmatch rosters. The Orbital and Pizza Boy pair also supports
+portable reconnect. The diagnostic build includes a smaller native rollback probe.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -52,8 +51,7 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   The server retains a bounded acceptance queue for each slot, preserves button
   edges, and expires held input after nine ticks. Future acceptance and the queue
   are bounded to 60 ticks and 60 records. Prediction verifies C results against
-  accepted inputs at the same native tick. The non-predicting client still uses
-  the processed-sequence frontier and rejection feedback to bound pending controls.
+  accepted inputs at the same native tick.
 - A departed client loses queued controls immediately; its car remains in combat
   under original game rules. Survivors continue. Finished/error paths release C resources,
   input queues and callbacks, permitting another direct initialization in the page.
@@ -62,10 +60,6 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   scheduled gameplay commands in the current mode. The first 8 MiB of packed
   rows are cached in memory. Additional rows are read from disk during replay.
   A 1 GiB worst-case per-match disk budget ends the match explicitly if reached.
-- Non-predicting Construction Yard clients still have one recovery attempt from
-  the journal, with at most four in-flight blocks of 64 ticks. This path serves
-  configurations outside portable checkpoint coverage. Predicting clients use
-  native rollback and, where enabled, snapshot reconnect with a short suffix.
 - Network sound emitters expire and fade on simulation ticks. SPU completion, voice
   assignment and listener choice govern playback only. Replay suppresses mixing and
   marks already replayed one-shots as finished for presentation. Offline sound keeps
@@ -83,22 +77,8 @@ frames, 60 accepted steps repeated after stop/start, all eight control slots, a 
 resource followed by retry, stale/incomplete tick rejection and blocked local cheats.
 Equality here covers the published gameplay checksums.
 
-[Network timing checks](../tests/browser/check_network_timing.cjs) verify 30 Hz simulation
-and performance counters while clients alternate between 30 FPS and display-rate rendering.
-The authority runs without animation callbacks or presented frames.
-
-[High-rate input checks](../tests/browser/check_network_analog.cjs) feed changing analog
-samples through the production browser callback at 120 Hz for 30 seconds, alongside
-batched press/release events. They check bounded JS/native history and actual C inputs.
-
-[Fault checks](../tests/browser/check_network_faults.cjs) run the real browser/Rust/C
-path with two and eight clients. They cover a batched press/release plus duplicate,
-late/future rejection, nine-tick stale expiry, Lightyear receive-side delay of
-100±30 ms, a 1.2-second frozen client, bounded catch-up and disconnect survival.
-The conditioner acts on received Lightyear packets; it does not emulate TCP loss
-or WebSocket head-of-line retransmission. These short runs are not sustained-match,
-250 ms RTT or prediction-response acceptance.
-`TM4_TEST_MISMATCH=1` verifies that incompatible content is rejected before C initialization.
+[Admission checks](../tests/browser/check_network_admission.cjs) cover explicit
+rejection of an unsupported map and roster before the first predicted tick.
 
 [Rendered gameplay checks](../tests/browser/check_network.cjs) exercise nonzero-slot
 control, car contact, weapon damage, a lethal hit, scoring, round completion and
@@ -122,16 +102,8 @@ stay out of the record.
 [The replay browser check](../tests/browser/check_network_replay.cjs) compares those
 checksums per tick and encoded bytes at selected ticks across reset and a separate
 instance. Its scripted contact, target and crane setup runs identically on each direct
-simulation. The wire test perturbs only one client's energy and uses ordinary
-accepted controls for recovery. The sustained and stalled wire cases exercise
-full-history catch-up and progress-based cancellation. The sustained two-client
-check accelerates 15 minutes of combat, then measures recovery with the authority
-back at live 30 Hz. The disk tests exercise an eight-slot history of the same
-length, forced cache spill, corrupt records and incomplete files.
-
-The non-predicting recovery path rebuilds the match from its startup and journal
-using local files. Unknown object classes, unknown timer callbacks, opaque car
-callbacks, independent Wasm modules and other maps cannot use journal recovery.
+simulation. The disk tests exercise an eight-slot 15-minute recording, forced
+cache spill, corrupt records and incomplete files.
 
 ### Same-instance C checkpoint
 
@@ -140,7 +112,6 @@ Capture requires a completed simulation tick with no staged input. Restore rewin
 the same running instance, then the ordinary C step accepts recorded controls.
 During replay the headless instance suppresses external tick publication, audio
 playback, rumble and presentation. Finishing replay re-enables tick publication.
-The non-predicting network fallback uses journal recovery.
 
 The checkpoint preserves the fixed-address simulation allocation arena, including
 allocator headers, live objects, weapons, contact histories and gameplay sound emitters.
@@ -257,7 +228,6 @@ boundary it pauses the fixed clock and resumes when two ticks of headroom
 return. This covers temporary gaps and startup clock lead. A whole-tick clock
 resync, excess confirmation backlog, or unsupported gameplay state closes that
 client session. The authority and other clients keep running.
-The server journal still supports ordinary non-predicting match recovery.
 Rendered play was verified with Orbital and Pizza Boy. An eight-slot attempt
 reached all slot assignments, but the default larger roster used car callbacks
 outside checkpoint coverage. Two-player Chromium checks passed at 72±12 and
@@ -269,7 +239,7 @@ network presentation is deferred. Covering more maps and rosters remains open.
 ### Session identity and modes — R1/R2/R7
 
 The experiment remains a single fixed Deathmatch, epoch 1, a fixed seed and no bots.
-In the portable reconnect experiment the server assigns each participant a random
+For a supported portable roster, the server assigns each participant a random
 bearer credential. The match page retains it for the tab session. Reloading the
 tab can reclaim only the corresponding disconnected slot while the match is
 active and the local build and content match. Live connections retain control
@@ -295,14 +265,14 @@ against that site to test same-instance rollback without a match server. For the
 native probe, run `cargo run --manifest-path network/Cargo.toml --features rollback_probe
 --example rollback_peer -- 19326` and then `bun tests/browser/check_lightyear_rollback.cjs`.
 Set `TM4_ROLLBACK_ENDPOINT` if using a different loopback port.
-To play the experimental rendered match, start the site with your local disc
-and run `TM4_NATIVE_PREDICTION=1 TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2`.
+To play a rendered match, start the site with your local disc and run
+`TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2`.
 Open the printed match link in two browser windows. An empty lobby waits for
 the first player. After someone joins, the other players have five minutes to
 arrive. Start a new match server after the match has been played. The test
-`bun tests/browser/check_live_rollback.cjs` uses a fresh prediction-enabled
-match server and launches its own Chromium authority. Supply the endpoint and
-authority token as for the journal tests. It conditions client receive traffic
+`bun tests/browser/check_live_rollback.cjs` uses a fresh
+match server and launches its own Chromium authority. Supply its endpoint and
+authority token. It conditions client receive traffic
 at 72±12 ms by default and uses real keyboard input in both rendered clients.
 Run `bun tests/browser/check_prediction_start.cjs` with a fresh server to
 exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.cjs`
@@ -316,22 +286,18 @@ sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` a
 
 Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
 site. Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
-`TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry. For live reconnect, start a fresh two-player server with `TM4_NATIVE_PREDICTION=1` and
-`TM4_SNAPSHOT_RECONNECT=1`, then run
-`bun tests/browser/check_snapshot_reconnect.cjs` with its endpoint and authority
-token. Set `TM4_RESUME_TEST_TICKS=3600` for a two-minute live prelude.
+`TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry.
+Run `bun tests/browser/check_snapshot_reconnect.cjs` with a fresh two-player
+server's endpoint and authority token. Set `TM4_RESUME_TEST_TICKS=3600` for a two-minute live prelude.
 
-Start a fresh match server for each network test using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
-count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
-`TM4_WEB_URL=http://127.0.0.1:18180/` when running the browser checks with Bun;
-`TM4_TEST_PLAYERS=8` selects the eight-client fault test. Run
-`bun tests/browser/check_network_replay.cjs` for direct and wire replay verification.
-It runs only the direct portion when no match endpoint and token are supplied.
-Use a fresh server for each `TM4_REPLAY_SCENARIO` value. Set
-`TM4_REPLAY_NETWORK_ONLY=1` for the `stalled` or `long` case and set
-`TM4_REPLAY_PLAYERS` to the server's player count. A debug server launched with
-`TM4_TEST_FAST_UNTIL=27000` advances the first 15 simulated minutes without
-wall-clock pacing, then resumes 30 Hz before recovery. Chrome is required.
+Start a fresh match server for each network test using
+`TM4_MATCH_LISTEN=127.0.0.1:18182` and a diagnostic `TM4_AUTHORITY_TOKEN`.
+Supply the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
+`TM4_WEB_URL=http://127.0.0.1:18180/` to the fixtures. Run
+`bun tests/browser/check_network_admission.cjs` for the map refusal, or set
+`TM4_ADMISSION_SCENARIO=roster` on a fresh server for the car callback refusal.
+`bun tests/browser/check_network_replay.cjs` runs direct replay diagnostics without
+a match server.
 
 The server writes to `build/network-journals` by default. Set `TM4_JOURNAL_DIR`
 to choose a separate directory. The server binary accepts

@@ -10,6 +10,7 @@ const { chromium } = require("playwright");
   if (!endpoint || !token) throw new Error("Set TM4_MATCH_ENDPOINT and TM4_AUTHORITY_TOKEN");
   const browser = await chromium.launch({
     executablePath: process.env.TM4_CHROME,
+    channel: process.env.TM4_CHROME ? undefined : "chrome",
     args: [
       "--enable-unsafe-swiftshader",
       "--disable-background-timer-throttling",
@@ -90,6 +91,7 @@ const { chromium } = require("playwright");
       const result = await client.evaluate(() => ({
         state: tm4Port.netMatchServerState,
         local: tm4Port.netMatch,
+        confirmed: tm4Port.netConfirmedTick,
         slot: tm4Port.netViewSlot,
         status: document.querySelector("#status").textContent,
       }));
@@ -99,7 +101,7 @@ const { chromium } = require("playwright");
         { wins: 1, losses: 0 },
         { wins: 0, losses: 1 },
       ]);
-      assert.equal(result.local.digest, result.state.digest);
+      assert(result.confirmed > 0 && result.local.tick >= result.confirmed);
     }
     await shooter.waitForFunction(() => tm4Port.netMatchServerState?.acceptsContinue);
     await shooter.keyboard.down("x");

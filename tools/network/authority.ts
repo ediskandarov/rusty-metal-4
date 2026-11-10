@@ -96,7 +96,7 @@ export async function connectAuthority(
                   type: "ready",
                   epoch: message.epoch,
                   digest: port.netMatch.digest,
-                  recoverable: port.netMatch.unsupported === null,
+                  unsupported: port.netMatch.unsupported,
                 });
                 break;
               }

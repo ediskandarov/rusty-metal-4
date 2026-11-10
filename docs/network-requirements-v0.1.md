@@ -172,12 +172,11 @@ represented at its simulation tick. Record canonical state checksums and subsyst
 checksums to verify replay and locate the first disagreement. Use stable resource
 and object identities where needed.
 
-Journal replay can rebuild the simulation from tick zero with local resources
-and verify its progression while the authority advances. Deliver the journal in
-bounded chunks and limit unconfirmed work, memory, storage and stalled connections
-explicitly. Match duration and the recovery history are independent of the
-15-minute validation benchmark. Reconnect uses a portable checkpoint with a
-bounded suffix of the accepted-input journal.
+Recorded inputs can rebuild the simulation from tick zero for diagnostics.
+Reconnect uses a portable checkpoint and a bounded suffix of the accepted-input
+journal while the authority advances. Limit unconfirmed work, memory, storage and
+stalled connections explicitly. Match duration is independent of the 15-minute
+validation benchmark.
 
 **Acceptance:** replay a sustained combat history including firing, impacts,
 collisions and world mechanisms. Verify state equality and measure storage,

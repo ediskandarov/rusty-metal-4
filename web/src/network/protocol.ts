@@ -27,7 +27,6 @@ export type RoundState = {
 export type Frame = Omit<Step, "type"> & {
   type: "frame";
   state: RoundState;
-  fallback_processed: (number | null)[];
 };
 
 export interface NetworkEngine {
@@ -42,7 +41,6 @@ export interface NetworkEngine {
   ): number;
   _WebNetQueueTick(tick: number): number;
   _WebNetCancelMatch(): void;
-  _WebNetBeginReplay(): number;
   _WebNetEndReplay(): void;
   _WebNetEnablePortableCheckpoint?(): number;
   _WebNetCapturePortableCheckpoint?(): number;
@@ -55,7 +53,6 @@ export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is Ne
     typeof runtime._WebNetSetInput === "function" &&
     typeof runtime._WebNetQueueTick === "function" &&
     typeof runtime._WebNetCancelMatch === "function" &&
-    typeof runtime._WebNetBeginReplay === "function" &&
     typeof runtime._WebNetEndReplay === "function"
   );
 }
@@ -86,9 +83,6 @@ export interface NetworkPort {
     maxRollbackMs: number;
   };
   netDiagnostics?: {
-    pendingInputs: number;
-    rejectedInputs: number;
-    processedSequence: number;
     receivedFrames: number;
     clockOffers?: number;
     recoveredTick?: number;
@@ -97,12 +91,10 @@ export interface NetworkPort {
     replayBytes?: number;
     replayChunks?: number;
     replayMs?: number;
-    divergence?: string[];
     transport: {
       rttMs: number;
       jitterMs: number;
       queuedPackets: number;
-      pendingInputs: number;
       nativeTick: number;
       pump: {
         pollGapMs: number;
@@ -125,15 +117,6 @@ export interface NetworkPort {
       };
     };
   };
-}
-
-export function enqueueStep(engine: NetworkEngine, step: Step | Frame) {
-  for (const [slot, input] of step.inputs.entries()) {
-    if (!engine._WebNetSetInput(step.tick, slot, input.buttons, input.axes, +input.analog))
-      throw new Error("The game refused input for tick " + step.tick);
-  }
-  if (!engine._WebNetQueueTick(step.tick))
-    throw new Error("The game refused to run tick " + step.tick);
 }
 
 export function configureMatch(engine: NetworkEngine, start: Start, view: number) {

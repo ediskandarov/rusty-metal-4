@@ -5,7 +5,7 @@ import { configureMatch } from "./protocol.ts";
  */
 interface RustClient {
   connected(): boolean;
-  send(json: string): number | undefined;
+  send(json: string): void;
   update(): string;
   diagnostics(): string;
   prepare_prediction(players: number): void;
@@ -65,7 +65,6 @@ export async function connectNetwork(endpoint: string) {
         rttMs: number;
         jitterMs: number;
         queuedPackets: number;
-        pendingInputs: number;
         nativeTick: number;
         prediction: {
           head: number;

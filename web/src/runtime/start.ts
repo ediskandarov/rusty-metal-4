@@ -25,7 +25,6 @@ export async function startGame(
     globalThis.Module = {
       canvas,
       tm4ResourceMods: resourceMods,
-      tm4LocalCheckpoint: parameters.get("checkpoint") === "1",
       noInitialRun: true,
       print: (text) => console.log(text),
       printErr: (text) => console.error(text),
@@ -46,8 +45,12 @@ export async function startGame(
           }
           module._WebMusicConfigureDisc(assets.tracks.length, assets.leadout);
           initializeSettings(module, canvas);
+          const diagnostic = "_WebTestRestartNetworkReplay" in module;
+          module.tm4LocalCheckpoint = diagnostic && parameters.get("checkpoint") === "1";
           module.callMain(
-            parameters.has("match") || parameters.has("authority") || parameters.has("session")
+            parameters.has("match") ||
+              parameters.has("authority") ||
+              (diagnostic && parameters.has("session"))
               ? ["--session", ...(parameters.has("authority") ? ["--authority"] : [])]
               : [],
           );
@@ -55,7 +58,7 @@ export async function startGame(
             globalThis as typeof globalThis & {
               tm4Port: import("../network/protocol.ts").NetworkPort;
             }
-          ).tm4Port.compatibility = { protocol: 5, build: build.sha256, content };
+          ).tm4Port.compatibility = { protocol: 6, build: build.sha256, content };
           resolve();
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));

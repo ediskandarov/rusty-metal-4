@@ -1,25 +1,16 @@
 import type { NetworkEngine, NetworkPort } from "./protocol.ts";
 import { stateSections } from "./protocol.ts";
 
-export const replaySchema = 2;
+export const maxResumeTicks = 240;
 const maxChunkTicks = 64;
-const maxQueuedChunks = 4;
 const framePrefix = 29;
 const inputBytes = 7;
-const maxReplayTicks = Math.floor((1024 * 1024 * 1024 - 8192) / (framePrefix + 8 * inputBytes + 5));
 const maxBatchTicks = 24;
 const batchBudgetMs = 8;
 
-export type ReplayBegin = {
-  type: "recovery_begin";
-  schema: number;
-  epoch: number;
-  head: number;
-  initial_digest: number;
-};
-
-export type ReplayChunk = {
-  type: "recovery_frames";
+export type CatchupChunk = {
+  type: "catchup_frames";
+  attempt: number;
   start: number;
   head: number;
   data: number[];
@@ -36,67 +27,58 @@ export function checksum(data: Uint8Array): number {
   return hash >>> 0;
 }
 
-export class ReplayJournal {
+export class SnapshotReplay {
   readonly #engine: NetworkEngine;
   readonly #port: NetworkPort;
   readonly #signal: AbortSignal;
-  readonly #initialDigest: number;
   readonly #players: number;
   readonly #width: number;
-  #received = 0;
-  #applied = 0;
-  #head: number;
-  #began = false;
-  #queued = 0;
-  #tail = Promise.resolve(0);
+  readonly #head: number;
+  #applied: number;
+  #ended = false;
+  #applying = false;
 
   constructor(
-    header: ReplayBegin,
-    epoch: number,
+    start: number,
+    head: number,
+    digest: number,
     players: number,
-    initialDigest: number,
     engine: NetworkEngine,
     port: NetworkPort,
     signal: AbortSignal,
-    snapshotTick?: number,
   ) {
     if (
-      header.schema !== replaySchema ||
-      header.epoch !== epoch ||
       !integer(players, 8) ||
       players < 2 ||
-      !integer(header.head, maxReplayTicks) ||
-      header.head === 0 ||
-      (snapshotTick !== undefined && (!integer(snapshotTick, header.head) || snapshotTick === 0)) ||
-      !integer(header.initial_digest, 0xffffffff) ||
-      header.initial_digest !== initialDigest
+      !integer(head, 0xffffffff) ||
+      !integer(start, head) ||
+      start === 0 ||
+      head - start > maxResumeTicks ||
+      !integer(digest, 0xffffffff)
     )
-      throw new Error("Incompatible match journal");
+      throw new Error("Invalid reconnect replay boundary");
+    signal.throwIfAborted();
     this.#engine = engine;
     this.#port = port;
     this.#signal = signal;
-    this.#initialDigest = initialDigest;
     this.#players = players;
     this.#width = framePrefix + inputBytes * players;
-    this.#head = header.head;
-    if (snapshotTick !== undefined) {
-      this.#received = this.#applied = snapshotTick;
-      this.#verify(snapshotTick, initialDigest);
-      this.#began = true;
-      signal.addEventListener("abort", this.#end, { once: true });
-    }
+    this.#head = head;
+    this.#applied = start;
+    this.#verify(start, digest);
+    signal.addEventListener("abort", this.#end, { once: true });
   }
 
-  accept(chunk: ReplayChunk): Promise<number> {
+  accept(chunk: CatchupChunk): Promise<number> {
     const count = Array.isArray(chunk.data) ? chunk.data.length / this.#width : NaN;
     if (
-      chunk.start !== this.#received ||
+      this.#ended ||
+      this.#applying ||
+      chunk.start !== this.#applied ||
       !integer(count, maxChunkTicks) ||
       count === 0 ||
-      !integer(chunk.head, maxReplayTicks) ||
-      chunk.head < this.#head ||
+      chunk.head !== this.#head ||
       chunk.start + count > chunk.head ||
-      this.#queued >= maxQueuedChunks ||
       !chunk.data.every((byte) => integer(byte, 255))
     )
       throw new Error("Invalid match journal block");
@@ -107,29 +89,22 @@ export class ReplayJournal {
       for (let input = row + framePrefix; input < row + this.#width; input += inputBytes)
         if (data[input + 6]! > 1) throw new Error("Invalid match journal controller flags");
     }
-    this.#head = chunk.head;
-    this.#received += count;
-    this.#queued++;
-    this.#tail = this.#tail.then(() => this.#apply(data)).finally(() => this.#queued--);
-    return this.#tail;
+    this.#applying = true;
+    return this.#apply(data).finally(() => {
+      this.#applying = false;
+    });
   }
 
   finish(tick: number) {
-    if (
-      !this.#began ||
-      tick !== this.#head ||
-      tick !== this.#applied ||
-      tick !== this.#received ||
-      this.#queued
-    )
-      throw new Error("Incomplete match journal stream");
+    if (this.#ended || this.#applying || tick !== this.#head || tick !== this.#applied)
+      throw new Error("Incomplete reconnect replay");
     this.#signal.removeEventListener("abort", this.#end);
     this.#end();
   }
 
   #end = () => {
-    if (!this.#began) return;
-    this.#began = false;
+    if (this.#ended) return;
+    this.#ended = true;
     this.#engine._WebNetEndReplay();
   };
 
@@ -158,13 +133,6 @@ export class ReplayJournal {
     const engine = this.#engine;
     const signal = this.#signal;
     signal.throwIfAborted();
-    if (!this.#began) {
-      if (!engine._WebNetBeginReplay())
-        throw new Error(this.#port.netSession?.message ?? "The game refused replay initialization");
-      this.#began = true;
-      signal.addEventListener("abort", this.#end, { once: true });
-      this.#verify(0, this.#initialDigest);
-    }
     const frame = new DataView(data.buffer);
     let row = 0;
     while (row < data.length) {

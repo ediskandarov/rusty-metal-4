@@ -1,8 +1,8 @@
 //! This module owns a separate Wasm memory from Emscripten. wasm-bindgen copies
 //! strings across JS/Rust; controller values are scalars. No C pointer crosses it.
-use crate::input::{ControllerCommand, Input, PendingInputs};
+use crate::input::{ControllerCommand, Input};
 use crate::live_prediction::{self, LivePrediction};
-use bevy_app::{App, FixedPreUpdate, Update};
+use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
 use lightyear::prelude::client::*;
 use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
@@ -31,9 +31,6 @@ fn receive(mut inbox: ResMut<Inbox>, mut receivers: Query<&mut MessageReceiver<M
     }
 }
 
-#[derive(Resource, Default)]
-struct PendingInput(PendingInputs);
-
 fn attach_controls(
     mut commands: Commands,
     slots: Query<Entity, (With<ControllerIdentity>, Without<ActionState<Input>>)>,
@@ -58,17 +55,6 @@ fn attach_controls(
         ));
     }
 }
-fn write_input(
-    mut pending: ResMut<PendingInput>,
-    mut query: Query<&mut ActionState<ControllerCommand>, With<InputMarker<ControllerCommand>>>,
-) {
-    for mut action in &mut query {
-        if let Some(command) = pending.0.pop() {
-            action.0 = command;
-        }
-    }
-}
-
 #[wasm_bindgen]
 pub struct NetworkClient {
     app: App,
@@ -95,14 +81,9 @@ impl NetworkClient {
         });
         protocol(&mut app);
         live_prediction::install(&mut app);
-        app.init_resource::<PendingInput>();
         app.init_resource::<Inbox>();
         app.add_systems(Update, receive);
         app.add_systems(Update, attach_controls);
-        app.add_systems(
-            FixedPreUpdate,
-            write_input.in_set(lightyear::input::client::InputSystems::WriteClientInputs),
-        );
         let connection = app
             .world_mut()
             .spawn((
@@ -129,7 +110,7 @@ impl NetworkClient {
         self.app.world().get::<Connected>(self.connection).is_some()
     }
 
-    pub fn send(&mut self, json: &str) -> Result<Option<u32>, JsValue> {
+    pub fn send(&mut self, json: &str) -> Result<(), JsValue> {
         if json.len() > 36 * 1024 {
             return Err(JsValue::from_str("Message exceeds bridge limit"));
         }
@@ -142,17 +123,6 @@ impl NetworkClient {
             .ok_or_else(|| JsValue::from_str("Missing bridge request type"))?;
         if json.len() > 8192 && kind != "snapshot_upload" {
             return Err(JsValue::from_str("Message exceeds bridge limit"));
-        }
-        if kind == "input" {
-            let command = serde_json::from_value::<ControllerCommand>(value)
-                .map_err(|e| JsValue::from_str(&e.to_string()))?;
-            return self
-                .app
-                .world_mut()
-                .resource_mut::<PendingInput>()
-                .0
-                .enqueue(command)
-                .map_err(|_| JsValue::from_str("Controller button-edge history is full"));
         }
         let request: Request = serde_json::from_value(serde_json::json!({kind: value}))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -170,14 +140,14 @@ impl NetworkClient {
                 .is_some()
         {
             self.prediction_ready = Some(request);
-            return Ok(None);
+            return Ok(());
         }
         self.app
             .world_mut()
             .get_mut::<MessageSender<Request>>(self.connection)
             .ok_or_else(|| JsValue::from_str("Connection closed"))?
             .send::<SessionChannel>(request);
-        Ok(None)
+        Ok(())
     }
 
     pub fn prepare_prediction(&mut self, slots: u8) {
@@ -283,7 +253,6 @@ impl NetworkClient {
             "rttMs": link.map(|l| l.stats.rtt.as_secs_f64() * 1000.0),
             "jitterMs": link.map(|l| l.stats.jitter.as_secs_f64() * 1000.0),
             "queuedPackets": link.map(|l| l.recv.len() + l.send.len()),
-            "pendingInputs": self.app.world().resource::<PendingInput>().0.len(),
             "nativeTick": self.app.world().resource::<LocalTimeline>().tick().0,
             "prediction": self.app.world().resource::<LivePrediction>()
                 .diagnostics(self.app.world().resource::<PredictionWindowWait>()),
