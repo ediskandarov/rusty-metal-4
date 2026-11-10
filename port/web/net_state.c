@@ -19,7 +19,7 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(2); /* State record schema. */
+    VALUE(4); /* State record schema. */
     const Tm4GameInfo* game = &GameInfo;
     VALUE(randseed());
     VALUE(WebRenderEffectRandomState());

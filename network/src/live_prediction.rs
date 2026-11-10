@@ -58,6 +58,8 @@ struct Session {
 pub struct LivePrediction {
     pub expected_slots: Option<u8>,
     session: Option<Session>,
+    resume_warmup: bool,
+    pending_resume_rollback: Option<Tick>,
     held: Input,
     edges: VecDeque<Input>,
     checksums: VecDeque<VerifiedRow>,
@@ -204,6 +206,10 @@ pub fn install(app: &mut App) {
     app.add_systems(
         PreUpdate,
         (
+            request_resume_rollback
+                .after(ReplicationSystems::Receive)
+                .after(InputSystems::ReceiveInputMessages)
+                .before(RollbackSystems::Check),
             observe_mismatch
                 .after(InputSystems::ReceiveInputMessages)
                 .before(RollbackSystems::Check),
@@ -264,41 +270,110 @@ pub fn begin(
     local_slot: u8,
     checkpoint_depth: u16,
 ) -> Result<(), &'static str> {
+    if world.resource::<LocalTimeline>().tick() >= Tick(anchor) {
+        return Err("Prediction start arrived after the native clock anchor");
+    }
+    start_at(
+        world,
+        Session {
+            epoch,
+            slots,
+            local_slot,
+            anchor: Tick(anchor),
+        },
+        checkpoint_depth,
+        0,
+        0,
+    )
+}
+
+pub fn resume_target(world: &World, anchor: u32, head: u32) -> Result<u32, &'static str> {
+    let clock = world.resource::<LocalTimeline>().tick();
+    let target = (clock + 2 - Tick(anchor)).max(head as i32);
+    if world.resource::<LivePrediction>().session.is_some() || target <= 0 {
+        return Err("Invalid resume clock");
+    }
+    Ok(target as u32)
+}
+
+pub fn begin_resume(
+    world: &mut World,
+    anchor: u32,
+    epoch: u32,
+    slots: u8,
+    local_slot: u8,
+    checkpoint_depth: u16,
+    head: u32,
+    sequence: u32,
+) -> Result<(), &'static str> {
+    let anchor = Tick(anchor);
+    let boundary = anchor + head as i32;
+    let clock = world.resource::<LocalTimeline>().tick();
+    let depth = clock - boundary;
+    if depth < 0 || depth > i32::from(PREDICTION_DEPTH) {
+        return Err("The native reconnect clock fell outside the handoff window");
+    }
+    start_at(
+        world,
+        Session {
+            epoch,
+            slots,
+            local_slot,
+            anchor,
+        },
+        checkpoint_depth,
+        head,
+        sequence,
+    )?;
+    if depth != 0 {
+        let mut state = world.resource_mut::<LivePrediction>();
+        state.resume_warmup = true;
+        state.pending_resume_rollback = Some(boundary);
+    }
+    Ok(())
+}
+
+fn start_at(
+    world: &mut World,
+    session: Session,
+    checkpoint_depth: u16,
+    head: u32,
+    sequence: u32,
+) -> Result<(), &'static str> {
     if !ready(world)
         || world.resource::<LivePrediction>().session.is_some()
-        || world.resource::<LivePrediction>().expected_slots != Some(slots)
-        || !(2..=8).contains(&slots)
-        || local_slot >= slots
+        || world.resource::<LivePrediction>().expected_slots != Some(session.slots)
+        || !(2..=8).contains(&session.slots)
+        || session.local_slot >= session.slots
         || checkpoint_depth != PREDICTION_DEPTH
     {
         return Err("Invalid prediction start");
     }
-    let anchor = Tick(anchor);
-    if world.resource::<LocalTimeline>().tick() >= anchor {
-        return Err("Prediction start arrived after the native clock anchor");
-    }
+    let boundary = session.anchor + head as i32;
     let mut present = [false; MAX_SLOTS];
     for (identity, mut buffer) in world
         .query::<(&ControllerIdentity, &mut NativeBuffer<Input>)>()
         .iter_mut(world)
     {
         let slot = usize::from(identity.slot);
-        if slot >= usize::from(slots) || present[slot] {
+        if slot >= usize::from(session.slots) || present[slot] {
             return Err("Invalid native controller assignment");
         }
         present[slot] = true;
-        buffer.set(anchor, ActionState(Input::default()));
-        buffer.last_remote_tick = Some(anchor);
+        if buffer.last_remote_tick.is_none_or(|tick| tick < boundary) {
+            buffer.set(boundary, ActionState(Input::default()));
+            buffer.last_remote_tick = Some(boundary);
+        }
     }
-    if present[..usize::from(slots)].contains(&false) {
+    if present[..usize::from(session.slots)].contains(&false) {
         return Err("A native controller slot was not replicated before play");
     }
-    let bytes = retain_live_tick(0);
+    let bytes = retain_live_tick(head);
     if bytes == 0 {
         return Err("The game could not checkpoint the rendered match");
     }
     let mut manager = PredictionManager::default();
-    manager.input_rollback_floor = Some(anchor);
+    manager.input_rollback_floor = Some(boundary);
     manager.rollback_policy = RollbackPolicy {
         state: RollbackMode::Disabled,
         input: RollbackMode::Check,
@@ -306,22 +381,25 @@ pub fn begin(
     };
     world.insert_resource(manager);
     let mut history = PredictionHistory::default();
-    history.add_predicted(anchor, Some(CheckpointTick(0)));
+    history.add_predicted(boundary, Some(CheckpointTick(head)));
     world.spawn((
-        DeterministicPredicted::default(),
-        CheckpointTick(0),
+        DeterministicPredicted {
+            // The imported world existed at the checkpoint's tick even when
+            // this ECS entity was created later on the synchronized timeline.
+            skip_despawn: head != 0,
+            ..Default::default()
+        },
+        CheckpointTick(head),
         history,
     ));
     let mut state = world.resource_mut::<LivePrediction>();
-    state.session = Some(Session {
-        epoch,
-        slots,
-        local_slot,
-        anchor,
-    });
+    state.session = Some(session);
+    state.sequence = sequence;
+    state.head = head;
+    state.confirmed = head;
     state
         .checksums
-        .push_back((0, hashes(), [Input::default(); MAX_SLOTS]));
+        .push_back((head, hashes(), [Input::default(); MAX_SLOTS]));
     state.bytes = bytes;
     state.peak_bytes = bytes;
     Ok(())
@@ -410,7 +488,7 @@ fn step_world(
                 return;
             };
             input.0
-        } else if slot != session.local_slot {
+        } else if slot != session.local_slot || state.resume_warmup {
             accepted.0
         } else {
             if local.0.tick != tick || local.0.epoch != session.epoch {
@@ -467,10 +545,10 @@ fn update_prediction_wait(
     slots: Query<(&ControllerIdentity, &NativeBuffer<Input>)>,
     mut wait: ResMut<PredictionWindowWait>,
 ) {
+    let tick = timeline.tick();
     let Some(session) = state.session else {
         return;
     };
-    let tick = timeline.tick();
     if tick <= session.anchor || state.restoring || state.error.is_some() {
         return;
     }
@@ -506,6 +584,15 @@ fn discard_waiting_overstep(
     }
 }
 
+fn request_resume_rollback(
+    mut state: ResMut<LivePrediction>,
+    mut metadata: ResMut<StateRollbackMetadata>,
+) {
+    if let Some(tick) = state.pending_resume_rollback.take() {
+        metadata.request_forced_rollback(tick);
+    }
+}
+
 fn observe_mismatch(mut state: ResMut<LivePrediction>, manager: Option<Res<PredictionManager>>) {
     state.received_mismatch = state.session.is_some()
         && manager.is_some_and(|manager| manager.earliest_mismatch_input.has_mismatches());
@@ -520,6 +607,7 @@ fn reject_unhandled(mut state: ResMut<LivePrediction>, manager: Option<Res<Predi
 
 fn restore_world(
     mut state: ResMut<LivePrediction>,
+    timeline: Res<LocalTimeline>,
     manager: Option<Res<PredictionManager>>,
     checkpoint: Single<&CheckpointTick>,
 ) {
@@ -538,12 +626,13 @@ fn restore_world(
         return;
     }
     state.rollbacks += 1;
-    state.depth = state.depth.max(state.head - checkpoint.0);
+    state.depth = state.depth.max((timeline.tick() - tick).max(0) as u32);
     state.restoring = true;
     state.checksums.retain(|(tick, _, _)| *tick <= checkpoint.0);
 }
 
 fn end_replay(mut state: ResMut<LivePrediction>) {
+    state.resume_warmup = false;
     if std::mem::take(&mut state.restoring) && !finish_live_replay() && state.error.is_none() {
         state.error = Some("The game refused to end Lightyear rollback".into());
     }

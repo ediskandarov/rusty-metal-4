@@ -1,0 +1,20 @@
+diff --git a/src/main/object/classes.c b/src/main/object/classes.c
+--- a/src/main/object/classes.c
++++ b/src/main/object/classes.c
+@@ -2,3 +2,6 @@
+ #include "private.h"
+ #include "tm4/compiler.h"
++#ifdef __EMSCRIPTEN__
++#include "port/web/snapshot_types.h"
++#endif
+ #include "tm4_scalar.h"
+@@ -117,6 +120,9 @@
+     ObjectClasses[index].destructor = destructor;
+     ObjectInteractionPairs = pairs;
+     ObjectClassCount++;
++#ifdef __EMSCRIPTEN__
++    WebSnapshotRegisterClass(index, name, size);
++#endif
+     last = index;
+     i = 0;
+     if (last >= 0) {

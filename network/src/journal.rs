@@ -343,6 +343,7 @@ mod tests {
                 },
                 seed: 12345,
                 epoch: 1,
+                portable: false,
             },
             initial_digest: 42,
             recoverable: true,

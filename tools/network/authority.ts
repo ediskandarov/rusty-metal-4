@@ -13,6 +13,7 @@ import type { connectNetwork } from "../../web/src/network/transport.ts";
 type ServerMessage =
   | Start
   | Step
+  | { type: "snapshot_request"; attempt: number; tick: number }
   | { type: "welcome"; slot: null }
   | { type: "finished" }
   | { type: "error"; message: string };
@@ -36,6 +37,26 @@ export async function connectAuthority(
         const { Module: engine, tm4Port: port } = globalThis as AuthorityPage;
         const send = (message: object) => socket.send(message);
         let worstStep = 0;
+        const uploads = new Map<
+          number,
+          { tick: number; bytes: Uint8Array; checksum: number; offset: number }
+        >();
+        const sendChunk = (attempt: number) => {
+          const upload = uploads.get(attempt);
+          if (!upload) return;
+          const { bytes, offset, tick, checksum } = upload;
+          upload.offset = Math.min(offset + 8192, bytes.length);
+          send({
+            type: "snapshot_upload",
+            attempt,
+            tick,
+            total: bytes.length,
+            offset,
+            checksum,
+            data: [...bytes.subarray(offset, upload.offset)],
+          });
+          if (upload.offset === bytes.length) uploads.delete(attempt);
+        };
         socket.onopen = () =>
           send({
             type: "authority",
@@ -57,6 +78,7 @@ export async function connectAuthority(
           const state = port.netMatch;
           if (!state) return;
           send({ type: "completed", tick: state.tick - 1, state });
+          for (const attempt of uploads.keys()) sendChunk(attempt);
         };
         socket.onmessage = (data: unknown) => {
           try {
@@ -76,6 +98,28 @@ export async function connectAuthority(
                   digest: port.netMatch.digest,
                   recoverable: port.netMatch.unsupported === null,
                 });
+                break;
+              }
+              case "snapshot_request": {
+                const { attempt, tick } = message;
+                if (
+                  uploads.size >= 2 ||
+                  port.netMatch?.tick !== tick ||
+                  !engine._WebNetCapturePortableCheckpoint?.()
+                ) {
+                  send({ type: "snapshot_unavailable", attempt });
+                  break;
+                }
+                const bytes = port.portableCheckpoint;
+                delete port.portableCheckpoint;
+                if (!bytes || bytes.length > 256 * 1024) {
+                  send({ type: "snapshot_unavailable", attempt });
+                  break;
+                }
+                let hash = 2166136261;
+                for (const byte of bytes) hash = Math.imul(hash ^ byte, 16777619);
+                uploads.set(attempt, { tick, bytes, checksum: hash >>> 0, offset: 0 });
+                sendChunk(attempt);
                 break;
               }
               case "step": {

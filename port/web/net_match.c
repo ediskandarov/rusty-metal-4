@@ -1,6 +1,10 @@
 #include "net_match.h"
 #include "net_state.h"
 #include "checkpoint.h"
+#include "snapshot.h"
+#include "snapshot_world.h"
+#include "tm4/main/main.h"
+#include <stdlib.h>
 #include "cheats.h"
 #include "level.h"
 #include "tm4/main/game.h"
@@ -44,6 +48,7 @@ static struct {
 
 static char* configured_cars[8];
 static int rendered_prediction;
+static int portable_checkpoint;
 static void start_session(void);
 
 EMSCRIPTEN_KEEPALIVE int WebNetSelectCar(s32 slot, const char* name)
@@ -221,11 +226,26 @@ int WebNetRenderedPrediction(void)
     return rendered_prediction && match.players && match.view_slot >= 0;
 }
 
+EMSCRIPTEN_KEEPALIVE int WebNetEnablePortableCheckpoint(void)
+{
+    if (match.players || WebLevelActive()
+        || EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
+        return 0;
+    portable_checkpoint = 1;
+    return 1;
+}
+
+int WebNetPortableCheckpointEnabled(void)
+{
+    return portable_checkpoint;
+}
+
 int WebNetLocalCheckpointSupported(void)
 {
     return match.players && !checkpoint_resource_blocker()
         && (WebNetRenderedPrediction() || (match.view_slot < 0 && WebAuthorityStartup()
-            && EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; })));
+            && (portable_checkpoint
+                || EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; }))));
 }
 
 static int local_checkpoint_boundary(void)
@@ -325,6 +345,51 @@ EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
         },
         buffer, length);
     return length;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebNetCapturePortableCheckpoint(void)
+{
+    if (!portable_checkpoint || !local_checkpoint_boundary() || match.local_replaying)
+        return 0;
+    u8* bytes = malloc(WebSnapshotMaxBytes);
+    if (!bytes)
+        return 0;
+    const char* blocker = NULL;
+    const u32 length = WebSnapshotCapture(bytes, WebSnapshotMaxBytes, &blocker);
+    EM_ASM({
+        tm4Port.portableCheckpointError = $2 ? UTF8ToString($2) : null;
+        if ($1)
+            tm4Port.portableCheckpoint = HEAPU8.slice($0, $0 + $1);
+        else
+            delete tm4Port.portableCheckpoint;
+    }, bytes, length, blocker);
+    free(bytes);
+    return length;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetBeginPortableReplay(void)
+{
+    if (!portable_checkpoint || !local_checkpoint_boundary() || match.tick || match.local_replaying)
+        return 0;
+    const u32 length = EM_ASM_INT({
+        return (tm4Port.portableCheckpoint && tm4Port.portableCheckpoint.length) || 0;
+    });
+    if (!length || length > WebSnapshotMaxBytes)
+        return 0;
+    u8* bytes = malloc(length);
+    if (!bytes)
+        return 0;
+    EM_ASM({ HEAPU8.set(tm4Port.portableCheckpoint, $0); }, bytes);
+    const char* blocker = NULL;
+    const int restored = WebSnapshotRestore(bytes, length, &blocker);
+    free(bytes);
+    EM_ASM({ tm4Port.portableCheckpointError = $0 ? UTF8ToString($0) : null; }, blocker);
+    if (restored) {
+        match.tick = MainFrameCount;
+        match.replaying = 1;
+        WebNetMatchPublishTick();
+    }
+    return restored;
 }
 
 int WebNetReplaying(void)
@@ -524,6 +589,7 @@ void WebNetMatchPublishTick(void)
 void WebNetMatchEnd(void)
 {
     rendered_prediction = 0;
+    portable_checkpoint = 0;
     memset(&match, 0, sizeof(match));
     memset(configured_cars, 0, sizeof(configured_cars));
     EM_ASM({

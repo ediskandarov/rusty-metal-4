@@ -1,7 +1,12 @@
 /* Diagnostic entry points only; not linked into the normal browser target. */
 #include "test_hooks.h"
 #include "checkpoint.h"
+#include "checkpoint_memory.h"
+#include "snapshot_types.h"
+#include "snapshot_session.h"
+#include "rollback_audio.h"
 #include "net_state.h"
+#include "net_match.h"
 #include "src/modules/menu/private.h"
 #include "src/main/object/private.h"
 #include "src/modules/menu/private.h"
@@ -14,6 +19,7 @@
 #include "src/modules/levels/w_yard/private.h"
 #include "overlays.h"
 #include "tm4/main/game.h"
+#include "tm4/main/main.h"
 #include "tm4/main/screen.h"
 #include "tm4/main/sound.h"
 #include "tm4/main/pad.h"
@@ -31,6 +37,7 @@
 #include "tm4/vector.h"
 #include <emscripten.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -225,6 +232,316 @@ EMSCRIPTEN_KEEPALIVE int WebTestProjectileCheckpointCallbacks(void)
             && !strcmp(altered_destructor.unsupported, "weaponProjectile");
     }
     return 0;
+}
+
+void ObjectInteractionSeenInsert(Tm4ObjectHeader* object, Tm4ExtenderSeen** head);
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableExtenderFixture(void)
+{
+    Car* first = GameInfo.players[0].car;
+    Car* second = GameInfo.players[1].car;
+    if (!first || !second)
+        return 0;
+    WebCheckpointArenaSelect(1);
+    ObjectSetInteractionRadius(first, WORLD_CELL_SIZE);
+    ObjectSetInteractionRadius(second, WORLD_CELL_SIZE);
+    Tm4InteractionExtender* root = ObjectGetHeader(first)->interaction_extenders;
+    Tm4InteractionExtender* other = ObjectGetHeader(second)->interaction_extenders;
+    if (root)
+        ObjectInteractionSeenInsert(ObjectGetHeader(second), &root->seen);
+    WebCheckpointArenaSelect(0);
+    if (!root || !root->seen || !other)
+        return 0;
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_INTERACTION_EXTENDERS].first;
+         object; object = object->next) {
+        if (object->owner == first && ObjectGetPayload(object) != root) {
+            EM_ASM({ tm4Port.testPortableExtenders = ([ $0, $1 ]); },
+                object->serial + 1, ObjectGetHeader(other)->serial + 1);
+            WebNetMatchPublishTick();
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static WeaponProjectile* test_portable_projectile(void)
+{
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_DEFAULT].first; object; object = object->next)
+        if (!strcmp(object->name, "weaponProjectile"))
+            return ObjectGetPayload(object);
+    return NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestPortableProjectileCapture(void)
+{
+    WeaponProjectile* projectile = test_portable_projectile();
+    if (!projectile)
+        return 0;
+    u8 bytes[1024], header[256];
+    const SnapshotType* type = WebSnapshotObjectType(ObjectGetHeader(projectile));
+    const u32 length
+        = type ? WebSnapshotFieldsCapture(type, projectile, bytes, sizeof(bytes)) : 0;
+    const u32 header_length = WebSnapshotObjectCapture(ObjectGetHeader(projectile), header, sizeof(header));
+    if (length && header_length) {
+        EM_ASM({
+            tm4Port.testPortableProjectile = ({
+                bytes : HEAPU8.slice($0, $0 + $1),
+                header : HEAPU8.slice($2, $2 + $3),
+                projectile : $4,
+                owner : $5,
+                target : $6
+            });
+        }, bytes, length, header, header_length, projectile, projectile->owner, projectile->target);
+        return length;
+    }
+    return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableProjectilePerturb(void)
+{
+    WeaponProjectile* projectile = test_portable_projectile();
+    if (!projectile)
+        return 0;
+    projectile->bullet.current_world.vx += 240;
+    projectile->age_frames++;
+    projectile->owner = NULL;
+    return 1;
+}
+
+static void test_replace_projectile_header(Tm4ObjectHeader* old, Tm4ObjectHeader* replacement,
+    s32 square_count)
+{
+    for (unsigned i = 0; i < OBJECT_LIST_COUNT; ++i) {
+        for (Tm4ObjectHeader* object = ObjectLists[i].first; object; object = object->next) {
+            if (object == old)
+                continue;
+            if (object->previous == old)
+                object->previous = replacement;
+            if (object->owner == ObjectGetPayload(old))
+                object->owner = ObjectGetPayload(replacement);
+            if (object->next_display == old)
+                object->next_display = replacement;
+            if (object->next_interaction == old)
+                object->next_interaction = replacement;
+            if (object->next == old)
+                object->next = replacement;
+        }
+        if (ObjectLists[i].first == old)
+            ObjectLists[i].first = replacement;
+    }
+    for (s32 i = 0; i < square_count; ++i) {
+        if (WorldSquares[i].display_objects == old)
+            WorldSquares[i].display_objects = replacement;
+        if (WorldSquares[i].interaction_objects == old)
+            WorldSquares[i].interaction_objects = replacement;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableProjectileRestore(void)
+{
+    WeaponProjectile* projectile = test_portable_projectile();
+    const s32* square_count = RegGetFileDataS("/world/squares/numSquares");
+    u8 bytes[1024], header[256];
+    const u32 length = EM_ASM_INT({
+        return (tm4Port.testPortableProjectile && tm4Port.testPortableProjectile.bytes.length) || 0;
+    });
+    const u32 header_length = EM_ASM_INT({
+        return (tm4Port.testPortableProjectile && tm4Port.testPortableProjectile.header.length) || 0;
+    });
+    if (!projectile || !square_count || !length || length > sizeof(bytes)
+        || !header_length || header_length > sizeof(header))
+        return 0;
+    EM_ASM({
+        HEAPU8.set(tm4Port.testPortableProjectile.bytes, $0);
+        HEAPU8.set(tm4Port.testPortableProjectile.header, $1);
+    }, bytes, header);
+    WebCheckpointArenaSelect(1);
+    Tm4ObjectHeader* object = WebSnapshotObjectAllocate(header, header_length);
+    Tm4ObjectHeader* old = ObjectGetHeader(projectile);
+    const SnapshotType* type = object ? WebSnapshotObjectType(object) : NULL;
+    int result = type && object->serial == old->serial && object->class_index == old->class_index
+        && WebSnapshotObjectBind(object, header, header_length, WebSnapshotFindLiveObject)
+        && WebSnapshotFieldsRestore(
+            type, ObjectGetPayload(object), bytes, length, WebSnapshotFindLiveObject);
+    if (result) {
+        test_replace_projectile_header(old, object, *square_count);
+        WebSnapshotFieldsRelease(type, projectile);
+        MemFree(old);
+    } else if (object) {
+        if (type)
+            WebSnapshotFieldsRelease(type, ObjectGetPayload(object));
+        if (object->class_index == -1)
+            MemFree(object->name);
+        MemFree(object);
+    }
+    WebCheckpointArenaSelect(0);
+    return result;
+}
+
+static SoundEmitter* test_portable_emitter(int loop)
+{
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object; object = object->next) {
+        SoundEmitter* emitter = ObjectGetPayload(object);
+        if (emitter->voice_count > 0 && (emitter->voices[0].duration_frames < 0) == loop)
+            return emitter;
+    }
+    return NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestPortableSoundCapture(int loop)
+{
+    SoundEmitter* emitter = test_portable_emitter(loop);
+    u8 bytes[2048];
+    const SnapshotType* type = emitter ? WebSnapshotObjectType(ObjectGetHeader(emitter)) : NULL;
+    const u32 length = type ? WebSnapshotFieldsCapture(type, emitter, bytes, sizeof(bytes)) : 0;
+    if (length) {
+        EM_ASM({
+            tm4Port.testPortableSound = ({
+                bytes : HEAPU8.slice($0, $0 + $1),
+                allocation : $2
+            });
+        }, bytes, length, emitter->voices);
+    }
+    return length;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableSoundPerturb(int loop)
+{
+    SoundEmitter* emitter = test_portable_emitter(loop);
+    if (!emitter)
+        return 0;
+    emitter->age_frames++;
+    emitter->voices[0].volume ^= 1;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableSoundRestore(int loop)
+{
+    SoundEmitter* emitter = test_portable_emitter(loop);
+    u8 bytes[2048];
+    const u32 length = EM_ASM_INT({
+        return (tm4Port.testPortableSound && tm4Port.testPortableSound.bytes.length) || 0;
+    });
+    if (!emitter || !length || length > sizeof(bytes))
+        return 0;
+    EM_ASM({ HEAPU8.set(tm4Port.testPortableSound.bytes, $0); }, bytes);
+    SoundEmitter restored = { 0 };
+    WebCheckpointArenaSelect(1);
+    const SnapshotType* type = WebSnapshotObjectType(ObjectGetHeader(emitter));
+    int result = type && WebSnapshotFieldsRestore(type, &restored, bytes, length, NULL);
+    if (result) {
+        for (s32 i = 0; i < restored.voice_count; ++i) {
+            const SoundEmitterVoice* voice = &restored.voices[i];
+            const s32 expected = voice->duration_frames < 0 ? SOUND_VOICE_UNASSIGNED
+                                                           : WebAudioPlaybackFinished;
+            if (voice->voice_id != expected)
+                result = 0;
+        }
+    }
+    if (result) {
+        WebSnapshotFieldsRelease(type, emitter);
+        *emitter = restored;
+    } else if (type) {
+        WebSnapshotFieldsRelease(type, &restored);
+    }
+    WebCheckpointArenaSelect(0);
+    return result;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestPortableCarCapture(s32 slot)
+{
+    if (slot < 0 || slot >= ArrayCount(GameInfo.players))
+        return 0;
+    Car* car = GameInfo.players[slot].car;
+    u8 bytes[4096];
+    const SnapshotType* type = car ? WebSnapshotObjectType(ObjectGetHeader(car)) : NULL;
+    const u32 length = type ? WebSnapshotFieldsCapture(type, car, bytes, sizeof(bytes)) : 0;
+    if (length)
+        EM_ASM({ tm4Port.testPortableCar = HEAPU8.slice($0, $0 + $1); }, bytes, length);
+    return length;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableCarPerturb(s32 slot)
+{
+    if (slot < 0 || slot >= ArrayCount(GameInfo.players) || !GameInfo.players[slot].car)
+        return 0;
+    Car* car = GameInfo.players[slot].car;
+    car->transform.t[0] -= 140;
+    car->turbo_fuel -= 70;
+    car->controls.steering_input ^= 32;
+    car->wheels[0].angular_velocity += 91;
+    car->particles[0].velocity_q12.vz += 53;
+    car->engine_sound = NULL;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableCarRestore(s32 slot)
+{
+    if (slot < 0 || slot >= ArrayCount(GameInfo.players))
+        return 0;
+    Car* car = GameInfo.players[slot].car;
+    u8 bytes[4096];
+    const u32 length = EM_ASM_INT({
+        return (tm4Port.testPortableCar && tm4Port.testPortableCar.length) || 0;
+    });
+    if (!car || !length || length > sizeof(bytes))
+        return 0;
+    EM_ASM({ HEAPU8.set(tm4Port.testPortableCar, $0); }, bytes);
+    if (!WebCheckpointCapture(MainFrameCount, 0))
+        return 0;
+    WebCheckpointArenaSelect(1);
+    const SnapshotType* type = WebSnapshotObjectType(ObjectGetHeader(car));
+    int result = type && WebSnapshotFieldsRestore(
+        type, car, bytes, length, WebSnapshotFindLiveObject);
+    WebCheckpointArenaSelect(0);
+    if (!result)
+        WebCheckpointRestore(MainFrameCount);
+    WebCheckpointDiscard();
+    return result;
+}
+
+enum { TestSessionCapacity = 64 * 1024 };
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestPortableSessionCapture(void)
+{
+    u8* bytes = malloc(TestSessionCapacity);
+    if (!bytes)
+        return 0;
+    const u32 length = WebSnapshotSessionCapture(bytes, TestSessionCapacity);
+    if (length)
+        EM_ASM({ tm4Port.testPortableSession = HEAPU8.slice($0, $0 + $1); }, bytes, length);
+    free(bytes);
+    return length;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableSessionPerturb(void)
+{
+    if (!ObjectActiveInteractionCells)
+        return 0;
+    ObjectActiveInteractionCells = NULL;
+    PadJpad[0].buttons ^= 0x40;
+    ++ObjectNextSerial;
+    rand();
+    randrand();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPortableSessionRestore(void)
+{
+    const u32 length = EM_ASM_INT({
+        return (tm4Port.testPortableSession && tm4Port.testPortableSession.length) || 0;
+    });
+    if (!length || length > TestSessionCapacity)
+        return 0;
+    u8* bytes = malloc(length);
+    if (!bytes)
+        return 0;
+    EM_ASM({ HEAPU8.set(tm4Port.testPortableSession, $0); }, bytes);
+    WebCheckpointArenaSelect(1);
+    int result = WebSnapshotSessionRestore(bytes, length, WebSnapshotFindLiveObject);
+    WebCheckpointArenaSelect(0);
+    free(bytes);
+    return result;
 }
 
 static void test_approach_scenery(void);

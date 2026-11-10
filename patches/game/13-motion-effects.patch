@@ -14,7 +14,7 @@ diff --git a/src/modules/afc/afc.c b/src/modules/afc/afc.c
  }
  
 +#ifdef __psyz
-+static void advance_flare_rotation(void* payload)
++void WebAfcAdvanceFlareRotation(void* payload)
 +{
 +    Afc* flare = payload;
 +    flare->rotation_angle = (flare->rotation_angle + flare->rotation_step) % ANGLE_FULL_TURN;
@@ -31,7 +31,7 @@ diff --git a/src/modules/afc/afc.c b/src/modules/afc/afc.c
 +#ifdef __psyz
 +    /* The display cadence and number of views do not advance the flare animation. */
 +    if (rotation)
-+        ObjectGetHeader(object)->process = advance_flare_rotation;
++        ObjectGetHeader(object)->process = WebAfcAdvanceFlareRotation;
 +#endif
      ObjectSetInteractionRadius(object, -1);
      if (light)

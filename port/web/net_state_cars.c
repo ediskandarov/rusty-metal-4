@@ -58,6 +58,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(car->contact_count);
     VALUE(car->contact_countdown);
     VALUE(car->control_kind);
+    VALUE(handle(car->ai.target));
     VALUE(handle(car->fire_effect));
     VALUE(handle(car->turbo_sound));
     VALUE(handle(car->invisibility_sound));
@@ -85,7 +86,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
         VALUE(p->slip_speed_q12);
         VALUE(p->gravity);
     }
-    for (const CarWheel* w = car->wheels; w < car->wheel_end; ++w) {
+    for (const CarWheel* w = car->wheels; w <= car->wheel_end; ++w) {
         VALUE(w->response_particle ? w->response_particle - car->particles + 1 : 0);
         XYZ(w->direction.vector);
         VALUE(w->direction.fields.displacement);

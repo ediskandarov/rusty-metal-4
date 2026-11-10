@@ -8,6 +8,7 @@ export type Start = {
   seed: number;
   epoch: number;
   compatibility: Compatibility;
+  portable?: boolean;
 };
 export type Step = { type: "step"; tick: number; inputs: Input[] };
 export const stateSections = ["session", "cars", "objects", "world", "sound"] as const;
@@ -43,6 +44,9 @@ export interface NetworkEngine {
   _WebNetCancelMatch(): void;
   _WebNetBeginReplay(): number;
   _WebNetEndReplay(): void;
+  _WebNetEnablePortableCheckpoint?(): number;
+  _WebNetCapturePortableCheckpoint?(): number;
+  _WebNetBeginPortableReplay?(): number;
 }
 
 export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is NetworkEngine {
@@ -64,6 +68,8 @@ export interface NetworkPort {
   menuReady?: boolean;
   netSession?: { status: "loading" | "ready" | "error"; message?: string };
   netMatch?: { tick: number } & Partial<RoundState>;
+  portableCheckpoint?: Uint8Array<ArrayBuffer>;
+  portableCheckpointError?: string | null;
   netMatchTick?: () => void;
   netMatchInput?: (buttons: number, axes: number, analog: boolean) => void;
   netMatchServerState?: RoundState;
@@ -86,6 +92,8 @@ export interface NetworkPort {
     receivedFrames: number;
     clockOffers?: number;
     recoveredTick?: number;
+    snapshotTick?: number;
+    snapshotBytes?: number;
     replayBytes?: number;
     replayChunks?: number;
     replayMs?: number;
@@ -136,5 +144,7 @@ export function configureMatch(engine: NetworkEngine, start: Start, view: number
     if (!engine.ccall("WebNetSelectCar", "number", ["number", "string"], [slot, car]))
       throw new Error("Missing local car: " + car);
   }
+  if (start.portable && !engine._WebNetEnablePortableCheckpoint?.())
+    throw new Error("Portable checkpoints are unavailable for this match");
   return engine._WebNetRequestMatch(start.players, world, start.seed, view);
 }

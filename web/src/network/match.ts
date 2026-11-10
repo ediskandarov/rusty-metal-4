@@ -2,12 +2,18 @@ import { attachLivePrediction } from "./livePrediction.ts";
 import type { Frame, Input, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
 import { configureMatch, enqueueStep, stateSections } from "./protocol.ts";
 import type { ReplayBegin, ReplayChunk } from "./replay.ts";
-import { ReplayJournal } from "./replay.ts";
+import { checksum, ReplayJournal, replaySchema } from "./replay.ts";
 import { connectNetwork } from "./transport.ts";
 
 type Message =
   | Start
-  | (Omit<Start, "type"> & { type: "prediction_prepare" })
+  | (Omit<Start, "type"> & { type: "prediction_prepare" | "resume_prepare" })
+  | { type: "resume_credential"; token: string }
+  | SnapshotBegin
+  | { type: "snapshot_chunk"; attempt: number; offset: number; data: number[] }
+  | { type: "resume_journal"; attempt: number; start: number; head: number; digest: number }
+  | { type: "resume_live"; attempt: number; anchor: number; head: number; sequence: number }
+  | { type: "resume_active"; head: number }
   | { type: "prediction_offer" | "prediction_begin"; anchor: number }
   | Frame
   | ReplayBegin
@@ -18,6 +24,26 @@ type Message =
   | { type: "error"; message: string };
 
 const journalIdleMs = 7_000;
+const maxSnapshotBytes = 256 * 1024;
+const snapshotChunkBytes = 8192;
+const maxResumeTicks = 240;
+
+type SnapshotBegin = {
+  type: "snapshot_begin";
+  attempt: number;
+  tick: number;
+  anchor: number;
+  total: number;
+  checksum: number;
+  state: RoundState;
+};
+
+type SnapshotDownload = {
+  header: SnapshotBegin;
+  bytes: Uint8Array<ArrayBuffer>;
+  received: number;
+  target?: number;
+};
 
 type Recovery = {
   abort: AbortController;
@@ -79,6 +105,15 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   let prediction: ReturnType<typeof attachLivePrediction> | undefined;
   let predictionStarted = false;
   let offeredAnchor: number | undefined;
+  let resume: SnapshotDownload | undefined;
+  let resumePending = false;
+  const credentialKey = "tm4.resume." + endpoint;
+  let credential: string | null = null;
+  try {
+    credential = sessionStorage.getItem(credentialKey);
+  } catch {
+    // Playing without session storage is still supported.
+  }
   const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
     pendingInputs: 0,
     rejectedInputs: 0,
@@ -130,7 +165,12 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     }
   };
 
-  socket.onopen = () => send({ type: "join", compatibility: port.compatibility });
+  socket.onopen = () =>
+    send(
+      credential
+        ? { type: "resume", token: credential, compatibility: port.compatibility }
+        : { type: "join", compatibility: port.compatibility },
+    );
   socket.onerror = (error) => {
     try {
       diagnostics.transport = socket.diagnostics();
@@ -220,6 +260,20 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     });
   };
 
+  const targetResumeClock = async (download: SnapshotDownload, active: Recovery) => {
+    while (!socket.predictionIsReady()) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      active.abort.signal.throwIfAborted();
+    }
+    const { anchor, attempt, tick } = download.header;
+    const target = socket.resumeTarget(anchor, tick);
+    if (!Number.isInteger(target) || target < tick || target - tick > maxResumeTicks)
+      throw new Error("The snapshot fell outside the reconnect window");
+    download.target = target;
+    send({ type: "resume_clock", attempt, target });
+    armJournalTimeout();
+  };
+
   socket.onmessage = (data: unknown) => {
     if (closed) return;
     try {
@@ -236,10 +290,19 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
               " · Waiting for the other players\nFor local play, open this match link in another window.",
           );
           break;
+        case "resume_credential":
+          if (!/^[0-9a-f]{64}$/.test(message.token)) throw new Error("Invalid match credential");
+          try {
+            sessionStorage.setItem(credentialKey, message.token);
+          } catch {
+            // Playing without session storage is still supported.
+          }
+          break;
+        case "resume_prepare":
         case "prediction_prepare":
         case "start": {
           show("lobby", "Loading Deathmatch…");
-          if (message.type === "prediction_prepare") {
+          if (message.type === "prediction_prepare" || message.type === "resume_prepare") {
             if (prediction || players || message.world !== "Construction Yard")
               throw new Error("Live rollback requires a stock Construction Yard match");
             prediction = attachLivePrediction(engine, port);
@@ -258,8 +321,16 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             throw new Error(
               "Live rollback cannot restore this roster: " + port.netMatch.unsupported,
             );
-          send({ type: "ready", epoch, digest: initialDigest });
-          show("lobby", "Waiting for all players to finish loading…");
+          if (message.type === "resume_prepare") {
+            if (!message.portable || !credential) throw new Error("This match cannot resume");
+            resumePending = true;
+            recovery = { abort: new AbortController(), requestedAt: performance.now() };
+            show("lobby", "Downloading the current match state…");
+            armJournalTimeout();
+          } else {
+            send({ type: "ready", epoch, digest: initialDigest });
+            show("lobby", "Waiting for all players to finish loading…");
+          }
           break;
         }
         case "prediction_offer":
@@ -280,6 +351,135 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             throw new Error("Unexpected live prediction clock anchor");
           socket.beginPrediction(message.anchor, epoch, players, slot, prediction.depth);
           predictionStarted = true;
+          show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
+          break;
+        case "snapshot_begin":
+          if (
+            !resumePending ||
+            !recovery ||
+            resume ||
+            !Number.isInteger(message.total) ||
+            message.total <= 0 ||
+            message.total > maxSnapshotBytes ||
+            !Number.isInteger(message.tick) ||
+            message.tick <= 0 ||
+            message.state.unsupported
+          )
+            throw new Error("Invalid reconnect snapshot header");
+          resume = { header: message, bytes: new Uint8Array(message.total), received: 0 };
+          diagnostics.snapshotTick = message.tick;
+          diagnostics.snapshotBytes = message.total;
+          armJournalTimeout();
+          break;
+        case "snapshot_chunk": {
+          const active = recovery;
+          const download = resume;
+          if (
+            !active ||
+            !download ||
+            download.header.attempt !== message.attempt ||
+            message.offset !== download.received ||
+            !Array.isArray(message.data) ||
+            message.data.length <= 0 ||
+            message.data.length > snapshotChunkBytes ||
+            download.received + message.data.length > download.bytes.length ||
+            !message.data.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+          )
+            throw new Error("Invalid reconnect snapshot block");
+          download.bytes.set(message.data, download.received);
+          download.received += message.data.length;
+          send({ type: "snapshot_received", attempt: message.attempt, offset: download.received });
+          armJournalTimeout();
+          if (download.received !== download.bytes.length) break;
+          if (checksum(download.bytes) !== download.header.checksum)
+            throw new Error("Corrupt reconnect snapshot");
+          port.portableCheckpoint = download.bytes;
+          try {
+            if (
+              !engine._WebNetBeginPortableReplay?.() ||
+              !port.netMatch ||
+              port.netMatch.tick !== download.header.tick ||
+              !sameOutcome(port.netMatch, download.header.state)
+            )
+              throw new Error(
+                "The game could not restore the snapshot" +
+                  (port.portableCheckpointError ? " (" + port.portableCheckpointError + ")" : ""),
+              );
+          } finally {
+            delete port.portableCheckpoint;
+          }
+          show("lobby", "Catching up with the current match…");
+          void targetResumeClock(download, active).catch((error) => {
+            if (!active.abort.signal.aborted) fail(error);
+          });
+          break;
+        }
+        case "resume_journal":
+          if (
+            !recovery ||
+            recovery.journal ||
+            !resume ||
+            message.attempt !== resume.header.attempt ||
+            message.start !== resume.header.tick ||
+            message.head !== resume.target ||
+            message.digest !== resume.header.state.digest
+          )
+            throw new Error("Invalid reconnect catch-up boundary");
+          recovery.journal = new ReplayJournal(
+            {
+              type: "recovery_begin",
+              schema: replaySchema,
+              epoch,
+              head: message.head,
+              initial_digest: message.digest,
+            },
+            epoch,
+            players,
+            message.digest,
+            engine,
+            port,
+            recovery.abort.signal,
+            message.start,
+          );
+          armJournalTimeout();
+          break;
+        case "resume_live":
+          if (
+            !prediction ||
+            predictionStarted ||
+            !recovery?.journal ||
+            !resume ||
+            message.attempt !== resume.header.attempt ||
+            message.anchor !== resume.header.anchor ||
+            message.head !== resume.target ||
+            message.head !== port.netMatch?.tick
+          )
+            throw new Error("Invalid reconnect prediction boundary");
+          recovery.journal.finish(message.head);
+          socket.beginResumedPrediction(
+            message.anchor,
+            epoch,
+            players,
+            slot,
+            prediction.depth,
+            message.head,
+            message.sequence,
+          );
+          predictionStarted = true;
+          nextFrame = message.head;
+          port.netConfirmedTick = message.head;
+          diagnostics.recoveredTick = message.head;
+          diagnostics.replayMs = performance.now() - recovery.requestedAt;
+          send({ type: "resume_live_ack", attempt: message.attempt, head: message.head });
+          armJournalTimeout();
+          break;
+        case "resume_active":
+          if (!resumePending || !predictionStarted || !resume || message.head !== nextFrame)
+            throw new Error("Unexpected reconnect acknowledgement");
+          resumePending = false;
+          resume = undefined;
+          recovery = undefined;
+          clearTimeout(recoveryDeadline);
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "recovery_begin":

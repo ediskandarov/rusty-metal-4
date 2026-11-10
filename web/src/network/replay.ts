@@ -30,7 +30,7 @@ function integer(value: number, max: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= max;
 }
 
-function checksum(data: Uint8Array): number {
+export function checksum(data: Uint8Array): number {
   let hash = 2166136261;
   for (const byte of data) hash = Math.imul(hash ^ byte, 16777619);
   return hash >>> 0;
@@ -58,6 +58,7 @@ export class ReplayJournal {
     engine: NetworkEngine,
     port: NetworkPort,
     signal: AbortSignal,
+    snapshotTick?: number,
   ) {
     if (
       header.schema !== replaySchema ||
@@ -66,6 +67,7 @@ export class ReplayJournal {
       players < 2 ||
       !integer(header.head, maxReplayTicks) ||
       header.head === 0 ||
+      (snapshotTick !== undefined && (!integer(snapshotTick, header.head) || snapshotTick === 0)) ||
       !integer(header.initial_digest, 0xffffffff) ||
       header.initial_digest !== initialDigest
     )
@@ -77,6 +79,12 @@ export class ReplayJournal {
     this.#players = players;
     this.#width = framePrefix + inputBytes * players;
     this.#head = header.head;
+    if (snapshotTick !== undefined) {
+      this.#received = this.#applied = snapshotTick;
+      this.#verify(snapshotTick, initialDigest);
+      this.#began = true;
+      signal.addEventListener("abort", this.#end, { once: true });
+    }
   }
 
   accept(chunk: ReplayChunk): Promise<number> {

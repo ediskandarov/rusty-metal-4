@@ -172,11 +172,12 @@ represented at its simulation tick. Record canonical state checksums and subsyst
 checksums to verify replay and locate the first disagreement. Use stable resource
 and object identities where needed.
 
-A client rebuilds from tick zero with its local resources, verifies the journal as
-it replays, and catches up to the advancing authority. Deliver the journal in
+Journal replay can rebuild the simulation from tick zero with local resources
+and verify its progression while the authority advances. Deliver the journal in
 bounded chunks and limit unconfirmed work, memory, storage and stalled connections
 explicitly. Match duration and the recovery history are independent of the
-15-minute validation benchmark. Direct state snapshots are deferred.
+15-minute validation benchmark. Reconnect uses a portable checkpoint with a
+bounded suffix of the accepted-input journal.
 
 **Acceptance:** replay a sustained combat history including firing, impacts,
 collisions and world mechanisms. Verify state equality and measure storage,
@@ -213,9 +214,10 @@ deadline and an understandable failure message.
 
 A temporary disconnect retains participant identity for a bounded grace period and
 applies the agreed missing-input policy. Authenticate reclaiming that participant;
-a second connection cannot seize the slot. Rebuild from the current epoch's
-journal before restoring control at the authority's current tick. Reject messages
-from previous connections or epochs.
+a second connection cannot seize the slot. Restore a current-epoch authority
+checkpoint and replay the bounded accepted inputs that follow it before handing
+control back. Keep the journal available for match verification and replay.
+Reject messages from previous connections or epochs.
 
 A permanent departure is handled through a declared policy compatible with the mode's
 existing rules. Do not add an implicit new bot, invulnerability, or respawn rule.

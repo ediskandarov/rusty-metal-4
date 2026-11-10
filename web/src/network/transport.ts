@@ -17,6 +17,17 @@ interface RustClient {
     slot: number,
     depth: number,
   ): void;
+  prediction_is_ready(): boolean;
+  resume_target(anchor: number, head: number): number;
+  begin_resumed_prediction(
+    anchor: number,
+    epoch: number,
+    players: number,
+    slot: number,
+    depth: number,
+    head: number,
+    sequence: number,
+  ): void;
   prediction_input(buttons: number, axes: number, analog: boolean): void;
   condition(latency: number, jitter: number): void;
   free(): void;
@@ -82,6 +93,21 @@ export async function connectNetwork(endpoint: string) {
       depth: number,
     ) => {
       client.begin_prediction(anchor, epoch, players, slot, depth);
+      lastPoll = performance.now();
+      maxPollGapMs = maxUpdateMs = 0;
+    },
+    predictionIsReady: () => client.prediction_is_ready(),
+    resumeTarget: (anchor: number, head: number) => client.resume_target(anchor, head),
+    beginResumedPrediction: (
+      anchor: number,
+      epoch: number,
+      players: number,
+      slot: number,
+      depth: number,
+      head: number,
+      sequence: number,
+    ) => {
+      client.begin_resumed_prediction(anchor, epoch, players, slot, depth, head, sequence);
       lastPoll = performance.now();
       maxPollGapMs = maxUpdateMs = 0;
     },

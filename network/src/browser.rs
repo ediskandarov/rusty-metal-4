@@ -130,7 +130,7 @@ impl NetworkClient {
     }
 
     pub fn send(&mut self, json: &str) -> Result<Option<u32>, JsValue> {
-        if json.len() > 8192 {
+        if json.len() > 36 * 1024 {
             return Err(JsValue::from_str("Message exceeds bridge limit"));
         }
         let mut value: serde_json::Value =
@@ -140,8 +140,16 @@ impl NetworkClient {
             .and_then(|v| v.remove("type"))
             .and_then(|v| v.as_str().map(str::to_owned))
             .ok_or_else(|| JsValue::from_str("Missing bridge request type"))?;
+        if json.len() > 8192 && kind != "snapshot_upload" {
+            return Err(JsValue::from_str("Message exceeds bridge limit"));
+        }
         let request: Request = serde_json::from_value(serde_json::json!({kind: value}))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        if let Request::SnapshotUpload { data, .. } = &request
+            && data.len() > crate::protocol::SNAPSHOT_CHUNK_BYTES
+        {
+            return Err(JsValue::from_str("Snapshot block exceeds bridge limit"));
+        }
         if let Request::Input {
             epoch,
             sequence,
@@ -202,6 +210,37 @@ impl NetworkClient {
             players,
             slot,
             checkpoint_depth,
+        )
+        .map_err(JsValue::from_str)
+    }
+
+    pub fn prediction_is_ready(&mut self) -> bool {
+        live_prediction::ready(self.app.world_mut())
+    }
+
+    pub fn resume_target(&self, anchor: u32, head: u32) -> Result<u32, JsValue> {
+        live_prediction::resume_target(self.app.world(), anchor, head).map_err(JsValue::from_str)
+    }
+
+    pub fn begin_resumed_prediction(
+        &mut self,
+        anchor: u32,
+        epoch: u32,
+        players: u8,
+        slot: u8,
+        checkpoint_depth: u16,
+        head: u32,
+        sequence: u32,
+    ) -> Result<(), JsValue> {
+        live_prediction::begin_resume(
+            self.app.world_mut(),
+            anchor,
+            epoch,
+            players,
+            slot,
+            checkpoint_depth,
+            head,
+            sequence,
         )
         .map_err(JsValue::from_str)
     }

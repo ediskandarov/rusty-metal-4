@@ -1,4 +1,5 @@
 mod journal;
+mod resume;
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -42,6 +43,15 @@ struct Player {
     received_sequence: u32,
     progress_tick: u32,
     replay: Replay,
+    credential: Option<String>,
+    resume: Option<resume::Attempt>,
+    reassign_controller: bool,
+}
+
+impl Player {
+    fn receives_live(&self) -> bool {
+        self.resume.is_none() && self.replay.receives_live()
+    }
 }
 
 #[derive(Default)]
@@ -211,6 +221,8 @@ struct Match {
     replay_available: bool,
     fast_until: u32,
     prediction: Option<AcceptedTimeline>,
+    snapshot_reconnect: bool,
+    next_resume: u32,
 }
 
 fn send(
@@ -231,6 +243,149 @@ impl Match {
     ) {
         for entity in self.players.iter().filter_map(|player| player.entity) {
             send(links, entity, message);
+        }
+    }
+
+    fn pump_resume(
+        &mut self,
+        links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+    ) {
+        if self.ended {
+            return;
+        }
+        let Some(anchor) = self
+            .prediction
+            .as_ref()
+            .and_then(|timeline| timeline.anchor)
+        else {
+            return;
+        };
+        let Some(authority) = self.authority else {
+            return;
+        };
+        for player in &mut self.players {
+            let (Some(entity), Some(attempt)) = (player.entity, player.resume.as_mut()) else {
+                continue;
+            };
+            if attempt.failed {
+                continue;
+            }
+            if attempt.requested.is_none()
+                && self.in_flight.is_none()
+                && self.tick >= attempt.retry_at
+            {
+                if let Some(state) = self.last_state.clone() {
+                    attempt.requested = Some(resume::Snapshot {
+                        tick: self.tick,
+                        state,
+                        checksum: 0,
+                        total: 0,
+                        data: Vec::new(),
+                        sent: 0,
+                        acknowledged: 0,
+                    });
+                    send(
+                        links,
+                        authority,
+                        &Message::SnapshotRequest {
+                            attempt: attempt.id,
+                            tick: self.tick,
+                        },
+                    );
+                }
+            }
+            let Some(snapshot) = attempt
+                .requested
+                .as_mut()
+                .filter(|snapshot| snapshot.ready())
+            else {
+                continue;
+            };
+            if !attempt.announced {
+                send(
+                    links,
+                    entity,
+                    &Message::SnapshotBegin {
+                        attempt: attempt.id,
+                        tick: snapshot.tick,
+                        anchor: anchor.0,
+                        total: snapshot.total as u32,
+                        checksum: snapshot.checksum,
+                        state: snapshot.state.clone(),
+                    },
+                );
+                attempt.announced = true;
+            }
+            if snapshot.sent == snapshot.acknowledged && snapshot.sent < snapshot.total {
+                let offset = snapshot.sent;
+                snapshot.sent = (offset + game_protocol::SNAPSHOT_CHUNK_BYTES).min(snapshot.total);
+                send(
+                    links,
+                    entity,
+                    &Message::SnapshotChunk {
+                        attempt: attempt.id,
+                        offset: offset as u32,
+                        data: snapshot.data[offset..snapshot.sent].to_vec(),
+                    },
+                );
+            }
+            let Some(target) = attempt.target else {
+                continue;
+            };
+            if attempt.pending_frame.is_some() || attempt.offered {
+                continue;
+            }
+            if attempt.sent_frames == target {
+                if self.tick.saturating_sub(target) > u32::from(game_protocol::PREDICTION_DEPTH) {
+                    attempt.failed = true;
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: "The reconnect handoff expired. Retry this match.".into(),
+                        },
+                    );
+                    continue;
+                }
+                send(
+                    links,
+                    entity,
+                    &Message::ResumeLive {
+                        attempt: attempt.id,
+                        anchor: anchor.0,
+                        head: target,
+                        sequence: player.received_sequence,
+                    },
+                );
+                attempt.offered = true;
+                continue;
+            }
+            let end = (attempt.sent_frames + REPLAY_CHUNK_TICKS)
+                .min(target)
+                .min(self.tick);
+            if end <= attempt.sent_frames {
+                continue;
+            }
+            let Some(data) = self
+                .journal
+                .as_mut()
+                .and_then(|journal| journal.range(attempt.sent_frames, end).ok())
+            else {
+                attempt.failed = true;
+                continue;
+            };
+            send(
+                links,
+                entity,
+                &Message::RecoveryFrames {
+                    start: attempt.sent_frames,
+                    head: target,
+                    checksum: checksum(CHECKSUM_SEED, &data),
+                    data,
+                },
+            );
+            attempt.sent_frames = end;
+            attempt.pending_frame = Some(end);
         }
     }
 
@@ -370,6 +525,12 @@ impl Match {
                     self.players[slot].entity = Some(entity);
                     self.players[slot].compatibility = Some(compatibility);
                     send(links, entity, &Message::Welcome { slot: Some(slot) });
+                    if self.snapshot_reconnect {
+                        self.players[slot].credential = resume::credential();
+                        if let Some(token) = self.players[slot].credential.clone() {
+                            send(links, entity, &Message::ResumeCredential { token });
+                        }
+                    }
                 } else {
                     send(
                         links,
@@ -392,6 +553,157 @@ impl Match {
                     .into(),
                 },
             ),
+            Request::Resume { compatibility, .. } if !self.started && !self.ended => {
+                self.request(links, entity, Request::Join { compatibility });
+            }
+            Request::Resume {
+                token,
+                compatibility,
+            } if !is_authority && slot.is_none() => {
+                let requested = self.players.iter().position(|player| {
+                    player
+                        .credential
+                        .as_deref()
+                        .is_some_and(|expected| resume::matches_credential(expected, &token))
+                });
+                let session = self.session.as_ref().filter(|session| {
+                    session.portable
+                        && session.compatibility == compatibility
+                        && self.started
+                        && !self.ended
+                        && self.tick > 0
+                });
+                if let (Some(slot), Some(session)) = (requested, session)
+                    && self.players[slot].entity.is_none()
+                {
+                    self.next_resume = self.next_resume.wrapping_add(1);
+                    let player = &mut self.players[slot];
+                    player.entity = Some(entity);
+                    player.history.disconnect();
+                    player.resume = Some(resume::Attempt::new(self.next_resume));
+                    player.reassign_controller = true;
+                    send(links, entity, &Message::Welcome { slot: Some(slot) });
+                    send(links, entity, &Message::ResumePrepare(session.clone()));
+                } else {
+                    send(links, entity, &Message::Error {
+                        message: "This participant cannot resume this match. If its previous connection is still closing, retry in a moment.".into(),
+                    });
+                }
+            }
+            Request::SnapshotUpload {
+                attempt: id,
+                tick,
+                total,
+                offset,
+                checksum,
+                data,
+            } if is_authority => {
+                if let Some(attempt) = self
+                    .players
+                    .iter_mut()
+                    .filter_map(|player| player.resume.as_mut())
+                    .find(|attempt| attempt.id == id && !attempt.failed)
+                    && let Some(snapshot) = attempt.requested.as_mut()
+                {
+                    if snapshot.tick != tick
+                        || snapshot.ready()
+                        || !snapshot.upload(total as usize, offset as usize, checksum, data)
+                    {
+                        attempt.failed = true;
+                    } else {
+                        attempt.progress = Instant::now();
+                    }
+                }
+            }
+            Request::SnapshotUnavailable { attempt: id } if is_authority => {
+                if let Some(attempt) = self
+                    .players
+                    .iter_mut()
+                    .filter_map(|player| player.resume.as_mut())
+                    .find(|attempt| attempt.id == id && !attempt.failed && !attempt.announced)
+                {
+                    attempt.retries += 1;
+                    if attempt.retries >= 4 {
+                        attempt.failed = true;
+                    } else {
+                        attempt.requested = None;
+                        attempt.retry_at = self.tick + 12;
+                        attempt.progress = Instant::now();
+                    }
+                }
+            }
+            Request::SnapshotReceived {
+                attempt: id,
+                offset,
+            } if slot.is_some() => {
+                if let Some(attempt) = self.players[slot.unwrap()].resume.as_mut()
+                    && attempt.id == id
+                    && attempt.announced
+                    && !attempt.failed
+                    && let Some(snapshot) = attempt.requested.as_mut()
+                {
+                    if offset as usize != snapshot.sent || snapshot.sent == snapshot.acknowledged {
+                        attempt.failed = true;
+                    } else {
+                        snapshot.acknowledged = snapshot.sent;
+                        attempt.progress = Instant::now();
+                    }
+                }
+            }
+            Request::ResumeClock {
+                attempt: id,
+                target,
+            } if slot.is_some() => {
+                if let Some(attempt) = self.players[slot.unwrap()].resume.as_mut()
+                    && attempt.id == id
+                    && !attempt.failed
+                    && attempt.target.is_none()
+                    && let Some(snapshot) = attempt
+                        .requested
+                        .as_ref()
+                        .filter(|snapshot| snapshot.ready())
+                {
+                    if snapshot.acknowledged != snapshot.total
+                        || target < snapshot.tick
+                        || target - snapshot.tick > game_protocol::SNAPSHOT_MAX_CATCHUP
+                        || target > self.tick + 60
+                        || self.tick.saturating_sub(target) > 12
+                    {
+                        attempt.failed = true;
+                    } else {
+                        attempt.target = Some(target);
+                        attempt.sent_frames = snapshot.tick;
+                        attempt.progress = Instant::now();
+                        send(
+                            links,
+                            entity,
+                            &Message::ResumeJournal {
+                                attempt: id,
+                                start: snapshot.tick,
+                                head: target,
+                                digest: snapshot.state.digest,
+                            },
+                        );
+                    }
+                }
+            }
+            Request::ResumeLiveAck { attempt: id, head } if slot.is_some() => {
+                let player = &mut self.players[slot.unwrap()];
+                if let Some(attempt) = &player.resume
+                    && attempt.id == id
+                    && attempt.offered
+                    && attempt.target == Some(head)
+                    && !attempt.failed
+                {
+                    let attempt = player.resume.take().unwrap();
+                    player.progress_tick = head;
+                    player.replay = Replay::Spent;
+                    send(links, entity, &Message::ResumeActive { head });
+                    for frame in attempt.frames {
+                        send(links, entity, &frame);
+                    }
+                }
+            }
             Request::Authority {
                 token,
                 compatibility,
@@ -452,7 +764,7 @@ impl Match {
                     .is_none_or(|timeline| timeline.anchor.is_some()) =>
             {
                 if let Some(player) = slot.map(|slot| &mut self.players[slot])
-                    && player.replay.receives_live()
+                    && player.receives_live()
                 {
                     let earliest = self.tick + u32::from(self.in_flight.is_some());
                     let result = player.history.enqueue(earliest, sequence, tick, input);
@@ -469,7 +781,7 @@ impl Match {
             }
             Request::Progress { tick } if tick <= self.tick => {
                 if let Some(player) = slot.map(|slot| &mut self.players[slot])
-                    && player.replay.receives_live()
+                    && player.receives_live()
                 {
                     player.progress_tick = player.progress_tick.max(tick);
                 }
@@ -521,6 +833,15 @@ impl Match {
             }
             Request::ReplayApplied { epoch: 1, tick } if slot.is_some() => {
                 let player = &mut self.players[slot.unwrap()];
+                if let Some(attempt) = &mut player.resume {
+                    if attempt.pending_frame == Some(tick) && !attempt.failed {
+                        attempt.pending_frame = None;
+                        attempt.progress = Instant::now();
+                    } else {
+                        attempt.failed = true;
+                    }
+                    return;
+                }
                 if let Replay::Streaming {
                     unconfirmed,
                     progressed,
@@ -577,8 +898,18 @@ impl Match {
                             .map(|player| player.history.processed_sequence)
                             .collect(),
                     };
-                    for player in &self.players {
-                        if player.replay.receives_live()
+                    for player in &mut self.players {
+                        if let Some(attempt) = player.resume.as_mut() {
+                            if attempt.target.is_some_and(|target| tick >= target) {
+                                if attempt.frames.len()
+                                    == usize::from(game_protocol::PREDICTION_DEPTH)
+                                {
+                                    attempt.failed = true;
+                                } else {
+                                    attempt.frames.push_back(message.clone());
+                                }
+                            }
+                        } else if player.receives_live()
                             && let Some(entity) = player.entity
                         {
                             send(links, entity, &message);
@@ -616,6 +947,7 @@ fn update(
             player.entity = None;
             player.history.disconnect();
             player.replay = Replay::Failed;
+            player.resume = None;
             if !started {
                 if let Some(controller) = player.controller {
                     commands.entity(controller).despawn();
@@ -644,17 +976,24 @@ fn update(
             .players
             .iter()
             .find(|p| p.entity == Some(entity))
-            .and_then(|p| match p.replay {
-                Replay::Streaming { progressed, .. }
-                    if now.duration_since(progressed) > REPLAY_IDLE =>
-                {
-                    Some("Client journal progress timed out.")
+            .and_then(|p| {
+                if let Some(attempt) = &p.resume {
+                    return attempt
+                        .timeout(now)
+                        .then_some("Snapshot reconnect stopped or expired. Retry this match.");
                 }
-                Replay::Failed => Some("Client journal recovery failed."),
-                _ if p.replay.receives_live() && game.tick.saturating_sub(p.progress_tick) > 90 => {
-                    Some("Client session progress timed out.")
+                match p.replay {
+                    Replay::Streaming { progressed, .. }
+                        if now.duration_since(progressed) > REPLAY_IDLE =>
+                    {
+                        Some("Client journal progress timed out.")
+                    }
+                    Replay::Failed => Some("Client journal recovery failed."),
+                    _ if p.receives_live() && game.tick.saturating_sub(p.progress_tick) > 90 => {
+                        Some("Client session progress timed out.")
+                    }
+                    _ => None,
                 }
-                _ => None,
             });
         let unidentified = !known && now.duration_since(admission.opened) > Duration::from_secs(10);
         if let Some(reason) =
@@ -688,7 +1027,16 @@ fn update(
         }
     }
     game.pump_replay(&mut links);
+    game.pump_resume(&mut links);
     for (slot, player) in game.players.iter_mut().enumerate() {
+        if std::mem::take(&mut player.reassign_controller)
+            && let (Some(controller), Some(owner)) = (player.controller, player.entity)
+        {
+            commands.entity(controller).insert(ControlledBy {
+                owner,
+                lifetime: Lifetime::Persistent,
+            });
+        }
         if let Some(owner) = player.entity
             && player.controller.is_none()
         {
@@ -742,6 +1090,10 @@ fn update(
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,
+            portable: game.snapshot_reconnect
+                && game.prediction.is_some()
+                && game.catalog.as_ref().unwrap().cars[..game.players.len()]
+                    == ["Orbital", "Pizza Boy"],
         };
         if game.prediction.is_some() && start.world != "Construction Yard" {
             game.fail(
@@ -991,7 +1343,7 @@ fn accept_native_inputs(
             if let Some(action) = buffer.get(tick) {
                 let command = action.0;
                 let player = &mut game.players[identity.slot as usize];
-                if command.sequence > player.received_sequence {
+                if player.resume.is_none() && command.sequence > player.received_sequence {
                     player.received_sequence = command.sequence;
                     if let Some(owner) = player.entity {
                         game.request(
@@ -1140,6 +1492,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         fast_until,
         prediction: (env::var("TM4_NATIVE_PREDICTION").as_deref() == Ok("1"))
             .then(AcceptedTimeline::default),
+        snapshot_reconnect: count == 2 && env::var("TM4_SNAPSHOT_RECONNECT").as_deref() == Ok("1"),
+        next_resume: 0,
     });
     app.add_systems(Update, update);
     app.add_systems(

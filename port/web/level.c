@@ -9,6 +9,7 @@
 #include "net_match.h"
 #include "render_sync.h"
 #include "rollback_audio.h"
+#include "snapshot_world.h"
 #include "tm4/main/carresources.h"
 #include "tm4/main/cd.h"
 #include "tm4/main/game.h"
@@ -164,6 +165,8 @@ void WebLevelStart(void)
     demo_draw_enabled = 1;
     last_step = emscripten_get_now();
     WebRenderResetTiming();
+    if (WebNetPortableCheckpointEnabled() && checkpoint_arena)
+        WebSnapshotWorldOpen();
     EM_ASM({ tm4Port.renderPhaseCounts = ([ 0, 0, 0 ]); });
     active = 1;
     printf("%s initialized: %d cells, %d vertices, %d faces, %d collision faces; spawn %d,%d,%d\n",
@@ -202,6 +205,7 @@ int WebLevelCheckpointActive(void)
 void WebLevelStop(void)
 {
     WebCheckpointDiscard();
+    WebSnapshotWorldClose();
     WebInterpolationReset();
     PadStopPad();
     RedbookPause();

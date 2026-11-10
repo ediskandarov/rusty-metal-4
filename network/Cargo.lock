@@ -6427,6 +6427,7 @@ dependencies = [
  "bevy_tasks",
  "bevy_time",
  "console_error_panic_hook",
+ "getrandom 0.4.3",
  "lightyear",
  "serde",
  "serde_json",

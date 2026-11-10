@@ -23,10 +23,10 @@ plugin buffers tick-indexed records and validates controlled targets. The server
 reads every newly received buffer record before fixed-step trimming, then applies
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
-live. Recovery streams the authoritative match journal to rebuild the C world.
-Live matches can opt into native Lightyear prediction for the stock Construction
-Yard Deathmatch. The diagnostic build also includes a smaller native rollback probe.
-Portable C state replication remains open.
+live. The match journal can rebuild the C world from startup. Live matches can
+opt into native Lightyear prediction for stock Construction Yard Deathmatch.
+An additional opt-in enables portable checkpoints for reconnecting players.
+The diagnostic build also includes a smaller native rollback probe.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -133,8 +133,7 @@ length, forced cache spill, corrupt records and incomplete files.
 
 Recovery uses the current match's startup and journal. Constructors run again
 using local files. Unknown object classes, unknown timer callbacks, opaque car
-callbacks, independent Wasm modules and other maps cannot use recovery. Portable
-state snapshots and reconnect admission remain open.
+callbacks, independent Wasm modules and other maps cannot use journal recovery.
 
 ### Same-instance C checkpoint
 
@@ -165,6 +164,36 @@ replayed ticks, three times. Combat exercises steering, contact, weapon damage a
 projectile creation, impact and removal. A second case destroys and restores scenery,
 including its display and collision state, and checks another 180 ticks. The test
 also perturbs car, world and RNG state and hides a startup archive while restoring.
+
+### Portable reconnect checkpoint — R4/R7
+
+Portable checkpoints restore into a separately initialized C instance at tick
+zero. The existing object class registry binds per-type field descriptions.
+A shared walker allocates shells, then resolves object serials and local resource
+keys, restores owned arrays and lists, and rebinds exceptional callbacks. Session
+roots, clocks, RNGs, grid order and world-resource edits are saved separately.
+Assets, device voices and heap addresses stay local. Restore validates structure and gameplay digests
+and resets the destination on failure. Interaction extenders must share their
+owner's root. Only that root may own the collision `seen` list.
+
+This path is scoped to an active human Orbital/Pizza Boy Deathmatch in
+Construction Yard without mods or eliminated players. Cars and player camera
+objects must retain their startup identities. Unrecognized types and unbound
+state fail capture. Temporary debris such as live scenery fragments can
+delay capture. After bounded retries, the player can reconnect again. The
+[independent browser check](../tests/browser/check_portable_checkpoint.cjs)
+relocates both resource and simulation allocations, then compares canonical bytes
+and all five checksums on each subsequent tick. It exercises a live projectile
+and a separate post-destruction checkpoint.
+
+The authority captures one completed tick and continues stepping while the server
+forwards the checkpoint in acknowledged 8 KiB chunks. An attempt allows up to
+256 KiB of snapshot data, 240 accepted catch-up ticks and 12 seconds. At handoff
+Lightyear's `StateRollbackMetadata` requests a bounded rewind of its synchronized
+timeline to the imported checkpoint. Its fixed schedule brings the C world to
+the predicted head, then input mismatches use ordinary Lightyear rollback.
+Each catch-up and confirmed tick is checked against the authoritative digests.
+The journal remains available for diagnostics and for the ordinary recovery path.
 
 ### Native Lightyear rollback probe
 
@@ -242,9 +271,12 @@ network presentation is deferred. Covering more maps and rosters remains open.
 ### Session identity and modes — R1/R2/R7
 
 The experiment remains a single fixed Deathmatch, epoch 1, a fixed seed and no bots.
-There is no replaceable authenticated participant identity, reconnect credential,
-grace-period resume, map/round transition protocol or generalized mode adapter.
-Any nonzero `next_mode` is still treated as session completion. A second direct C
+In the portable reconnect experiment the server assigns each participant a random
+bearer credential. The match page retains it for the tab session. Reloading the
+tab can reclaim only the corresponding disconnected slot while the match is
+active and the local build and content match. Live connections retain control
+and departed cars follow the existing missing-input policy.
+Any nonzero `next_mode` is treated as session completion. A second direct C
 initialization works, but this does not establish a second server-managed match.
 Tournament's seed order has been fixed at the common initialization point; its
 configuration, capacity and gameplay have not been verified in this path. HUD/audio
@@ -283,6 +315,13 @@ suspend the receiving tab during the first offer. The standalone rendered browse
 `bun tests/browser/check_rollback_audio.cjs` uses the real mixer to check finite
 sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` and `TM4_LIVE_JITTER_MS` to try other profiles. Set
 `TM4_LIVE_SCREENSHOT_DIR` to save compositor screenshots.
+
+Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
+site. Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
+`TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry. For live reconnect, start a fresh two-player server with `TM4_NATIVE_PREDICTION=1` and
+`TM4_SNAPSHOT_RECONNECT=1`, then run
+`bun tests/browser/check_snapshot_reconnect.cjs` with its endpoint and authority
+token. Set `TM4_RESUME_TEST_TICKS=3600` for a two-minute live prelude.
 
 Start a fresh match server for each network test using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
 count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and

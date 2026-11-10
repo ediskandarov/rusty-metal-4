@@ -208,7 +208,12 @@ static s32 load_texture(char* path, s32 type, s32 size, void* data, char* regist
 
 static void load_registry(void)
 {
-    MemInitHeap((u8*)heap, sizeof(heap));
+    u32 heap_offset = 0;
+#ifdef TM4_WEB_TEST_HOOKS
+    if (EM_ASM_INT({ return !!globalThis.tm4TestShiftResourceHeap; }))
+        heap_offset = 65536;
+#endif
+    MemInitHeap((u8*)heap + heap_offset, sizeof(heap) - heap_offset);
     RegistryInitialize();
     WebNativeModulesInitialize();
     RegistrySetTypeHandler(REG_FILE_TYPE_TEXTURE, load_texture);

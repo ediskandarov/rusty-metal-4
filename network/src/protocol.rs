@@ -11,6 +11,9 @@ pub type AcceptedInputs = lightyear::input::input_message::InputMessage<
 pub const PREDICTION_DEPTH: u16 = 12;
 
 pub const REPLAY_SCHEMA: u16 = 2;
+pub const SNAPSHOT_CHUNK_BYTES: usize = 8192;
+pub const SNAPSHOT_MAX_BYTES: usize = 256 * 1024;
+pub const SNAPSHOT_MAX_CATCHUP: u32 = 240;
 pub const JOURNAL_DISK_BYTES: usize = 1024 * 1024 * 1024;
 pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
@@ -111,6 +114,8 @@ pub struct SessionStart {
     pub compatibility: Compatibility,
     pub seed: u32,
     pub epoch: u32,
+    #[serde(default)]
+    pub portable: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -118,6 +123,33 @@ pub struct SessionStart {
 pub enum Request {
     Join {
         compatibility: Compatibility,
+    },
+    Resume {
+        token: String,
+        compatibility: Compatibility,
+    },
+    SnapshotUpload {
+        attempt: u32,
+        tick: u32,
+        total: u32,
+        offset: u32,
+        checksum: u32,
+        data: Vec<u8>,
+    },
+    SnapshotUnavailable {
+        attempt: u32,
+    },
+    SnapshotReceived {
+        attempt: u32,
+        offset: u32,
+    },
+    ResumeClock {
+        attempt: u32,
+        target: u32,
+    },
+    ResumeLiveAck {
+        attempt: u32,
+        head: u32,
     },
     Authority {
         token: String,
@@ -164,10 +196,46 @@ pub enum Message {
     Welcome {
         slot: Option<usize>,
     },
+    ResumeCredential {
+        token: String,
+    },
+    ResumePrepare(SessionStart),
+    SnapshotRequest {
+        attempt: u32,
+        tick: u32,
+    },
+    SnapshotBegin {
+        attempt: u32,
+        tick: u32,
+        anchor: u32,
+        total: u32,
+        checksum: u32,
+        state: RoundState,
+    },
+    SnapshotChunk {
+        attempt: u32,
+        offset: u32,
+        data: Vec<u8>,
+    },
+    ResumeJournal {
+        attempt: u32,
+        start: u32,
+        head: u32,
+        digest: u32,
+    },
+    ResumeLive {
+        attempt: u32,
+        anchor: u32,
+        head: u32,
+        sequence: u32,
+    },
     Start(SessionStart),
     PredictionPrepare(SessionStart),
     PredictionBegin {
         anchor: u32,
+    },
+    ResumeActive {
+        head: u32,
     },
     Step {
         tick: u32,
