@@ -1,0 +1,103 @@
+diff --git a/src/main/object/object.c b/src/main/object/object.c
+--- a/src/main/object/object.c
++++ b/src/main/object/object.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/web/net_match.h"
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -235,6 +236,8 @@
+         goto failed;
+     }
+     serial = ObjectNextSerial;
++    if (WebNetMatchActive())
++        ++ObjectNextSerial; /* Reserve before a constructor can create children. */
+     header->name = name;
+     header->class_index = class_index;
+     header->process = process;
+@@ -327,7 +330,8 @@
+         result = NULL;
+     } else {
+         result = ObjectGetPayload(header);
+-        ObjectNextSerial++;
++        if (!WebNetMatchActive())
++            ObjectNextSerial++;
+     }
+     routing_scratch = ObjectCreateStackRouteState;
+     if ((s32)routing_scratch == -1)
+diff --git a/src/main/world.c b/src/main/world.c
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -252,6 +252,11 @@
+ Tm4WorldSettings* WorldSettings = NULL;
+ Tm4CollisionPolygon* WorldCollisionPolygons = NULL;
+ static s32 WorldCollisionPolygonCount = 0;
++
++s32 WebNetWorldPolygonCount(void)
++{
++    return WorldCollisionPolygonCount;
++}
+ s16* WorldCollisionIndices = NULL;
+ static s32 WorldCollisionIndexCount = 0;
+ Tm4CardTexture WorldReflectionTextureSpecular = {
+diff --git a/src/main/object/private.h b/src/main/object/private.h
+--- a/src/main/object/private.h
++++ b/src/main/object/private.h
+@@ -37,6 +37,16 @@
+     Tm4ObjectInteractionCallback callback;
+     s32 reversed;
+ } Tm4ObjectPair;
++
++typedef struct Tm4ExtenderSeen {
++    struct Tm4ExtenderSeen* next;
++    Tm4ObjectHeader* object;
++} Tm4ExtenderSeen;
++typedef struct Tm4InteractionExtender {
++    Tm4ExtenderSeen* seen;
++    struct Tm4InteractionExtender* next;
++    s16 dx, dz;
++} Tm4InteractionExtender;
+ 
+ extern Tm4WorldSquare* ObjectActiveInteractionCells;
+ extern u32 ObjectNextSerial;
+diff --git a/src/main/object/interaction.c b/src/main/object/interaction.c
+--- a/src/main/object/interaction.c
++++ b/src/main/object/interaction.c
+@@ -9,16 +9,6 @@
+ #include <INLINE_C.H>
+ #include <LIBGPU.H>
+ #include <STRINGS.H>
+-
+-typedef struct Tm4ExtenderSeen {
+-    struct Tm4ExtenderSeen* next;
+-    Tm4ObjectHeader* object;
+-} Tm4ExtenderSeen;
+-typedef struct Tm4InteractionExtender {
+-    Tm4ExtenderSeen* seen;
+-    struct Tm4InteractionExtender* next;
+-    s16 dx, dz;
+-} Tm4InteractionExtender;
+ 
+ s32 ObjectInteractionExtenderConstructor(Tm4InteractionExtender* object, va_list input_args);
+ void ObjectInteractionExtenderClearSeen(Tm4InteractionExtender* object);
+diff --git a/src/modules/power/resources.c b/src/modules/power/resources.c
+--- a/src/modules/power/resources.c
++++ b/src/modules/power/resources.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/web/net_match.h"
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -132,6 +133,8 @@
+             regeneration_seconds = *value;
+     }
+     power->position.fields.regeneration_seconds = regeneration_seconds;
++    if (WebNetMatchActive())
++        power->respawn_delay_ticks = 0;
+     position = &power->position.vector;
+     ObjectSetPosition(power, (position->vx = x, position->vy = y, position->vz = z, x), y, z);
+     ObjectSetInteractionRadius(power, PowerCollisionRadius);

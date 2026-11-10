@@ -1,0 +1,88 @@
+diff --git a/src/main/sound.c b/src/main/sound.c
+--- a/src/main/sound.c
++++ b/src/main/sound.c
+@@ -743,9 +743,25 @@
+ }
+ #endif
+ 
++enum { PlaybackFinished = -2 };
++
++void WebNetSuppressReplayedSounds(void)
++{
++    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
++         object = object->next) {
++        SoundEmitter* emitter = ObjectGetPayload(object);
++        for (s32 i = 0; i < emitter->voice_count; ++i)
++            if (emitter->voices[i].duration_frames >= 0)
++                emitter->voices[i].voice_id = PlaybackFinished;
++    }
++}
++
+ #if !defined(TM4_SOUND_FUNCTION) || TM4_SOUND_FUNCTION == 0x800237C0
+ void SoundProcess(void)
+ {
++    const int network = WebNetMatchActive();
++    if (network && (WebNetLocalViewCount() == 0 || WebNetReplaying()))
++        return;
+     s32 voice;
+     SoundEmitter* emitter;
+     s32 index;
+@@ -774,7 +790,11 @@
+                         SoundVoiceOwners[voice].emitter_voice_index = index;
+                     } else {
+                         SpuSetKey(SPU_OFF, SPU_KEYCH(voice));
+-                        if (SoundSamples[SoundPrograms[emitter->program_id]
++                        if (network) {
++                            emitter->voices[index].voice_id =
++                                emitter->voices[index].duration_frames < 0
++                                ? SOUND_VOICE_UNASSIGNED : PlaybackFinished;
++                        } else if (SoundSamples[SoundPrograms[emitter->program_id]
+                                              .attributes[emitter->voices[index].attribute_index]
+                                              .sample]
+                                 .loop) {
+@@ -831,6 +851,8 @@
+             } else
+                 distance = 0;
+             for (index = 0; index < emitter->voice_count; index++) {
++                if (network && emitter->voices[index].voice_id == PlaybackFinished)
++                    continue;
+                 if (count < SOUND_HARDWARE_VOICES)
+                     candidate = count++;
+                 else {
+@@ -899,7 +921,7 @@
+         emitter = SoundCandidates[candidate].emitter;
+         for (index = 0; index < emitter->voice_count; index++) {
+             voice = emitter->voices[index].voice_id;
+-            if (voice >= 0)
++            if (voice != SOUND_VOICE_UNASSIGNED)
+                 continue;
+             voice = 0;
+             while (active & SPU_VOICECH(voice))
+diff --git a/src/modules/sound/sound.c b/src/modules/sound/sound.c
+--- a/src/modules/sound/sound.c
++++ b/src/modules/sound/sound.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/web/net_match.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/fixed.h"
+@@ -235,6 +236,8 @@
+ 
+ void SoundEmitterRemoveVoice(SoundEmitter* emitter, s32 voice_index)
+ {
++    if (WebNetMatchActive() && emitter->voices[voice_index].voice_id >= 0)
++        SoundStopSound(emitter->voices[voice_index].voice_id);
+     for (; voice_index < emitter->voice_count - 1; voice_index++)
+         emitter->voices[voice_index] = emitter->voices[voice_index + 1];
+     emitter->voices
+@@ -247,7 +250,7 @@
+     s32 voice_index;
+     emitter->age_frames++;
+     for (voice_index = 0; voice_index < emitter->voice_count; voice_index++) {
+-        if (emitter->voices[voice_index].duration_frames > 0
++        if (emitter->voices[voice_index].duration_frames >= (WebNetMatchActive() ? 0 : 1)
+             && emitter->voices[voice_index].duration_frames < emitter->age_frames) {
+             SoundEmitterRemoveVoice(emitter, voice_index);
+             voice_index--;

@@ -10,6 +10,7 @@ export type Start = {
   compatibility: Compatibility;
 };
 export type Step = { type: "step"; tick: number; inputs: Input[] };
+export const stateSections = ["session", "cars", "objects", "world", "sound"] as const;
 export type Score = { wins: number; losses: number };
 export type RoundState = {
   remaining: number;
@@ -18,6 +19,8 @@ export type RoundState = {
   acceptsContinue: boolean;
   nextMode: number;
   digest: number;
+  sections: [number, number, number, number, number];
+  unsupported: string | null;
   scores: Score[];
 };
 export type Frame = Omit<Step, "type"> & {
@@ -38,6 +41,8 @@ export interface NetworkEngine {
   ): number;
   _WebNetQueueTick(tick: number): number;
   _WebNetCancelMatch(): void;
+  _WebNetBeginReplay(): number;
+  _WebNetEndReplay(): void;
 }
 
 export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is NetworkEngine {
@@ -45,7 +50,9 @@ export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is Ne
     typeof runtime._WebNetRequestMatch === "function" &&
     typeof runtime._WebNetSetInput === "function" &&
     typeof runtime._WebNetQueueTick === "function" &&
-    typeof runtime._WebNetCancelMatch === "function"
+    typeof runtime._WebNetCancelMatch === "function" &&
+    typeof runtime._WebNetBeginReplay === "function" &&
+    typeof runtime._WebNetEndReplay === "function"
   );
 }
 
@@ -65,6 +72,8 @@ export interface NetworkPort {
     rejectedInputs: number;
     processedSequence: number;
     receivedFrames: number;
+    recoveredTick?: number;
+    divergence?: string[];
     transport: { rttMs: number; jitterMs: number; queuedPackets: number; pendingInputs: number };
   };
 }

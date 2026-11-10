@@ -1,4 +1,5 @@
 #include "net_match.h"
+#include "net_state.h"
 #include "cheats.h"
 #include "level.h"
 #include "tm4/main/game.h"
@@ -33,6 +34,7 @@ static struct {
     s32 view_slot;
     PadCache physical_pad;
     int tick_pending;
+    int replaying;
 } match;
 
 static char* configured_cars[8];
@@ -80,29 +82,8 @@ static int reject_start(const char* message)
     return 0;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s32 view_slot)
+static int session_resources_present(s32 players)
 {
-    static char characters[] = "/objects/car/characters";
-    if (match.players || WebLevelActive() || players < 2 || players > ArrayCount(match.cars)
-        || view_slot < -1 || view_slot >= players || world < 0 || world >= GameGetNumberOfWorlds())
-        return reject_start("Invalid match configuration or session already running");
-
-    s32 count = RegGetNumberOfDirectoriesS(characters);
-    s32 slot = 0;
-    for (s32 index = 0; index < count && slot < players; ++index) {
-        char* name = RegGetDirectoryNameSN(characters, index);
-        if (name && !GameIsBossCar(name))
-            match.cars[slot++] = name;
-    }
-    if (slot != players)
-        return 0;
-    for (s32 i = 0; i < players; ++i)
-        if (configured_cars[i])
-            match.cars[i] = configured_cars[i];
-
-    match.world = GameGetWorldName(world);
-    if (!match.world)
-        return 0;
     /* Validate file presence before mutating session state; a rejected start is retryable. */
     const char* common[] = { "/DATA/GAME.MR", "/DATA/GAME.IMG", "/DATA/GAME.VAB" };
     for (unsigned i = 0; i < ArrayCount(common); ++i)
@@ -129,6 +110,34 @@ EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s3
                 return reject_start(path);
         }
     }
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s32 view_slot)
+{
+    static char characters[] = "/objects/car/characters";
+    if (match.players || WebLevelActive() || players < 2 || players > ArrayCount(match.cars)
+        || view_slot < -1 || view_slot >= players || world < 0 || world >= GameGetNumberOfWorlds())
+        return reject_start("Invalid match configuration or session already running");
+
+    s32 count = RegGetNumberOfDirectoriesS(characters);
+    s32 slot = 0;
+    for (s32 index = 0; index < count && slot < players; ++index) {
+        char* name = RegGetDirectoryNameSN(characters, index);
+        if (name && !GameIsBossCar(name))
+            match.cars[slot++] = name;
+    }
+    if (slot != players)
+        return 0;
+    for (s32 i = 0; i < players; ++i)
+        if (configured_cars[i])
+            match.cars[i] = configured_cars[i];
+
+    match.world = GameGetWorldName(world);
+    if (!match.world)
+        return 0;
+    if (!session_resources_present(players))
+        return 0;
     match.seed = seed;
     match.tick = 0;
     match.players = players;
@@ -176,6 +185,66 @@ static void start_session(void)
         },
         match.players);
     WebNetMatchPublishTick();
+}
+
+static const char* checkpoint_resource_blocker(void)
+{
+    if (EM_ASM_INT({ return !!Module.tm4CodeMods?.size; }))
+        return "independent module state";
+    if (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count != 0)
+        return "game mode state";
+    if (strcmp(match.world, "Construction Yard"))
+        return "map state";
+    return NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
+{
+    static u8 buffer[256 * 1024];
+    u32 length = 0;
+    if (WebNetMatchActive() && WebLevelActive() && !match.tick_pending && !match.input_mask
+        && !checkpoint_resource_blocker())
+        length = WebNetCaptureBytes(buffer, sizeof(buffer));
+    EM_ASM(
+        {
+            if ($1)
+                tm4Port.netCapturedState = HEAPU8.slice($0, $0 + $1);
+            else
+                delete tm4Port.netCapturedState;
+        },
+        buffer, length);
+    return length;
+}
+
+int WebNetReplaying(void)
+{
+    return match.replaying;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetBeginReplay(void)
+{
+    if (!WebNetMatchActive() || !WebLevelActive() || match.replaying || match.tick_pending
+        || match.input_mask || checkpoint_resource_blocker())
+        return 0;
+
+    RegistryDirectory* directory = RegGetCurrentDirectoryPtr();
+    int resources_present = session_resources_present(match.players);
+    RegChangeCurrentDirectoryP(directory);
+    if (!resources_present)
+        return 0;
+
+    match.replaying = 1;
+    WebLevelStop();
+    match.tick = 0;
+    start_session();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE void WebNetEndReplay(void)
+{
+    if (match.replaying)
+        WebNetSuppressReplayedSounds();
+    match.replaying = 0;
 }
 
 int WebNetMatchActive(void)
@@ -294,23 +363,17 @@ int WebNetMatchTakeInput(void)
     return 1;
 }
 
-static u32 match_digest(void)
-{
-    u32 digest = randseed();
-    for (s32 slot = 0; slot < match.players; ++slot) {
-        const Car* car = GameInfo.players[slot].car;
-        digest = digest * 16777619u ^ (car != NULL);
-        if (car) {
-            for (s32 axis = 0; axis < 3; ++axis)
-                digest = digest * 16777619u ^ (u32)car->transform.t[axis];
-            digest = digest * 16777619u ^ (u32)car->health;
-        }
-    }
-    return digest;
-}
-
 void WebNetMatchPublishTick(void)
 {
+    const char* unsupported = checkpoint_resource_blocker();
+    const WebNetStateDigest state = WebNetCaptureDigest(!unsupported);
+    u32 digest = state.session;
+    digest = (digest ^ state.cars) * 16777619u;
+    digest = (digest ^ state.objects) * 16777619u;
+    digest = (digest ^ state.world) * 16777619u;
+    digest = (digest ^ state.sound) * 16777619u;
+    if (!unsupported)
+        unsupported = state.unsupported;
     EM_ASM(
         {
             Object.assign(tm4Port.netMatch, {
@@ -321,19 +384,21 @@ void WebNetMatchPublishTick(void)
                 acceptsContinue : !!$4,
                 nextMode : $5,
                 scores : [],
-                digest : $6 >>> 0
+                digest : $6 >>> 0,
+                sections : [ $7 >>> 0, $8 >>> 0, $9 >>> 0, $10 >>> 0, $11 >>> 0 ],
+                unsupported : $12 ? UTF8ToString($12) : null
             });
         },
         match.tick, GameInfo.active_player_count, GameInfo.deathmatch_winner,
         GameInfo.deathmatch_finished, GameInfo.deathmatch_accept_input, GameInfo.next_mode,
-        match_digest());
+        digest, state.session, state.cars, state.objects, state.world, state.sound, unsupported);
     for (s32 slot = 0; slot < match.players; ++slot) {
         const Tm4GamePlayer* player = &GameInfo.players[slot];
         EM_ASM(
             { tm4Port.netMatch.scores.push({ wins : $0, losses : $1 }); }, player->wins,
             player->losses);
     }
-    if (match.tick)
+    if (match.tick && !match.replaying)
         EM_ASM({ tm4Port.netMatchTick ?.(); });
 }
 
@@ -343,6 +408,7 @@ void WebNetMatchEnd(void)
     memset(configured_cars, 0, sizeof(configured_cars));
     EM_ASM({
         delete tm4Port.netMatch;
+        delete tm4Port.netCapturedState;
         tm4Port.networkSynchronous = false;
     });
 }

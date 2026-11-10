@@ -8,6 +8,8 @@ int WebDirectStartup(void);
 int WebAuthorityStartup(void);
 void WebNetPublishCatalog(void);
 int WebNetMatchActive(void);
+int WebNetReplaying(void);
+void WebNetSuppressReplayedSounds(void);
 int WebNetMatchViewSlot(void);
 void WebNetMatchPollInput(void);
 void WebNetMatchSeed(void);

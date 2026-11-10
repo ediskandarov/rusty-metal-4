@@ -23,9 +23,8 @@ plugin buffers tick-indexed records and validates controlled targets. The server
 reads every newly received buffer record before fixed-step trimming, then applies
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
-live. **C-world state replication, rollback, prediction and presentation interpolation
-are not implemented.** Installing their plugins does not satisfy R5, R6 or the full
-R8 integration proof.
+live. Recovery uses a bounded authoritative input checkpoint to rebuild the C world.
+Local prediction, C state replication and network presentation interpolation remain open.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -55,9 +54,20 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   reuse to nine ticks. Frames acknowledge processed sequences; late/future/full
   requests are explicitly rejected. Lightyear retransmissions are deduplicated.
 - A departed client loses queued controls immediately; its car remains in combat
-  under original game rules. Survivors continue. A client whose summaries diverge
-  stops locally; it still cannot recover. Finished/error paths release C resources,
+  under original game rules. Survivors continue. Finished/error paths release C resources,
   input queues and callbacks, permitting another direct initialization in the page.
+- Construction Yard recovery retains up to 900 completed ticks from match startup.
+  The server keeps the full prefix for 30 more ticks so a request for an eligible
+  divergence can arrive in flight. A client can request one checkpoint. It validates
+  the version, epoch, initial digest, block order, size, controls and integrity checksum
+  before resetting C. Replay yields between bounded batches so transport progress can
+  continue. It verifies each replayed tick and catches up with accepted live inputs.
+  Delivery and replay have separate deadlines. Expired or unsupported checkpoints
+  are refused, and loss of progress disconnects only that client.
+- Network sound emitters expire and fade on simulation ticks. SPU completion, voice
+  assignment and listener choice govern playback only. Replay suppresses mixing and
+  marks already replayed one-shots as finished for presentation. Offline sound keeps
+  its existing expiry policy.
 - Diagnostic limits include loopback-only listening, 16 KiB WebSocket messages,
   bounded write buffering, 128 unacknowledged session messages, 13 links, 120 session messages/second/link, 128 received
   bridge messages, 90 ticks without client progress, ten seconds for unidentified
@@ -68,7 +78,7 @@ Sources: [Rust protocol](../network/src/protocol.rs),
 [Direct-startup checks](../tests/browser/check_network_startup.cjs) cover zero presented
 frames, 60 accepted steps repeated after stop/start, all eight control slots, a missing
 resource followed by retry, stale/incomplete tick rejection and blocked local cheats.
-Equality here covers the published summary/car diagnostics, not the complete world.
+Equality here covers the published gameplay checksums.
 
 [Network timing checks](../tests/browser/check_network_timing.cjs) verify 30 Hz simulation
 and performance counters while clients alternate between 30 FPS and display-rate rendering.
@@ -84,7 +94,7 @@ late/future rejection, nine-tick stale expiry, Lightyear receive-side delay of
 100±30 ms, a 1.2-second frozen client, bounded catch-up and disconnect survival.
 The conditioner acts on received Lightyear packets; it does not emulate TCP loss
 or WebSocket head-of-line retransmission. These short runs are not sustained-match,
-250 ms RTT, prediction-response or snapshot-recovery acceptance.
+250 ms RTT or prediction-response acceptance.
 `TM4_TEST_MISMATCH=1` verifies that incompatible content is rejected before C initialization.
 
 [Rendered gameplay checks](../tests/browser/check_network.cjs) exercise nonzero-slot
@@ -95,37 +105,39 @@ instance. It is controlled gameplay evidence, not arbitrary-world determinism.
 
 ## Remaining blockers
 
-### Complete C state and recovery — R4/R5
+### Canonical state coverage — R4/R5
 
-The digest still samples RNG/positions/health and the mode result. It is not a
-canonical full-state checksum. No authoritative checkpoint, capture/restore API,
-subsystem divergence diagnosis, correction or reconnect snapshot exists.
+[The C field writer](../port/web/net_state.c) emits a bounded diagnostic record and
+checksums for the session, cars, objects, world and sound. It covers both RNGs, pad
+edges, car physics and weapon inventory, object order/ownership, projectiles,
+known timers, collision histories and Construction Yard object state. Network object
+serials are reserved before constructors so nested objects receive unique handles.
+Detonation devices use a car handle and weapon slot. Stock projectile callbacks
+must agree with the loaded resource type. Keys and numeric IDs replace process pointers. Presentation voice IDs and GPU state
+stay out of the record.
 
-A safe state codec cannot copy `Car` or the process heap. `Car` mixes physics and
-ammunition with resource pointers, collision-history allocations, weapon arrays,
-special-attack callback contexts and callbacks. Object headers carry ownership,
-creation serials, process/destruction ordering and spatial interaction links.
-World mechanisms and special attacks also keep overlay globals. `SoundProcess`
-reads SPU key/envelope status to reallocate voices and destroy emitter objects, while
-local listener choice changes voice assignment. A silent authority and an audible
-client therefore need an explicit deterministic sound-object lifetime policy; matching
-car summaries do not establish audio-independent complete state. Restoring only
-Bevy components, or only car transforms, leaves these causal dependencies unchanged.
-An unfiltered memory dump would additionally expose locally supplied resource bytes.
+[The replay browser check](../tests/browser/check_network_replay.cjs) compares those
+checksums per tick and encoded bytes at selected ticks across reset and a separate
+instance. Its scripted contact, target and crane setup runs identically on each direct
+simulation. The wire test perturbs only one client's energy and uses ordinary
+accepted controls for recovery. Separate wire cases cover a delayed eligible request,
+expiry of its grace period, and progress loss during replay.
 
-Relevant definitions: [Car](../game/include/tm4/modules/car.h),
-[object headers/lists](../game/include/tm4/main/object.h),
-[object lifetime state](../game/src/main/object/private.h).
+The recovery checkpoint contains the authoritative command prefix and per-tick
+digests. Restore runs constructors again from tick zero using local files. Loading
+the captured C record directly, recovery beyond the retained prefix, and reconnect
+snapshots remain open. Unknown object classes, unknown timer callbacks, opaque
+car callbacks, independent Wasm modules and other maps cannot use recovery. The
+covered classes and fields are a Construction Yard audit, with broader overlay
+globals and per-module state contracts still required for complete snapshots.
 
 ### Latency and presentation — R6/R8
 
-Clients currently execute authoritative inputs after receipt. There is no immediate
-local prediction, C rollback/replay, correction smoothing, remote interpolation or
-stable replay-event identity. Slow clients exceeding retained history stop; they
-cannot resynchronize. The existing offline render interpolation is not wired to the
-network path. WebTransport has not been evaluated; WebSocket remains susceptible to
-head-of-line blocking. The required discrepancy → C restore/replay → smooth display
-integration proof therefore remains outstanding.
+Clients execute authoritative inputs after receipt. Local prediction, correction
+smoothing, remote interpolation and stable replay-event identities remain open.
+The offline renderer retains its own interpolation path. WebSocket
+head-of-line blocking still applies. R8 integration requires smoothing a
+restored client during live play.
 
 ### Session identity and modes — R1/R2/R7
 
@@ -142,8 +154,8 @@ visual/audio acceptance, beyond controls and camera attachment.
 Public authenticated admission, TLS and resource-server deployment separation remain
 unimplemented. The development file server binds loopback and the match server has
 no resource routes. Generated sites contain port code/Wasm/CSS only; local game files
-remain separately supplied. No network snapshot format or resource-byte transfer has
-been introduced.
+remain separately supplied. Recovery messages carry accepted inputs and checksums.
+The local state record contains runtime values and resource keys.
 
 ## Running focused checks
 
@@ -152,7 +164,12 @@ with separately configured local files. Start a fresh match server for each test
 using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
 count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` when running the browser checks with Bun;
-`TM4_TEST_PLAYERS=8` selects the eight-client fault test. Chrome is required.
+`TM4_TEST_PLAYERS=8` selects the eight-client fault test. Run
+`bun tests/browser/check_network_replay.cjs` for direct and wire replay verification.
+It runs only the direct portion when no match endpoint and token are supplied.
+Use a fresh two-player server for each of the `boundary`, `expired` and `stalled`
+values of `TM4_REPLAY_SCENARIO`. Set `TM4_REPLAY_NETWORK_ONLY=1` to skip the direct
+check. Chrome is required.
 
 Ordinary `build:dev` uses release optimization and excludes test hooks, retaining
 only local-disc autoload. `build:diagnostic` owns fixtures and Debug output in

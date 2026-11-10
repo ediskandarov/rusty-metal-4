@@ -5,6 +5,10 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 pub struct SessionChannel;
 
+pub const REPLAY_SCHEMA: u16 = 1;
+pub const REPLAY_MAX_TICKS: usize = 900;
+pub const REPLAY_CHUNK_TICKS: usize = 24;
+
 #[derive(Component, Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ControllerIdentity {
     pub slot: u8,
@@ -57,7 +61,38 @@ pub struct RoundState {
     pub accepts_continue: bool,
     pub next_mode: i32,
     pub digest: u32,
+    pub sections: [u32; 5],
+    pub unsupported: Option<String>,
     pub scores: Vec<Score>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ReplayFrame {
+    pub inputs: Vec<Input>,
+    pub digest: u32,
+    pub sections: [u32; 5],
+}
+
+pub fn replay_checksum(frames: &[ReplayFrame]) -> u32 {
+    fn word(mut hash: u32, value: u32) -> u32 {
+        for byte in value.to_le_bytes() {
+            hash = (hash ^ u32::from(byte)).wrapping_mul(16_777_619);
+        }
+        hash
+    }
+    let mut hash = 2_166_136_261;
+    for frame in frames {
+        hash = word(hash, frame.digest);
+        for section in frame.sections {
+            hash = word(hash, section);
+        }
+        for input in &frame.inputs {
+            hash = word(hash, u32::from(input.buttons));
+            hash = word(hash, input.axes);
+            hash = word(hash, u32::from(input.analog));
+        }
+    }
+    hash
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -74,6 +109,8 @@ pub enum Request {
     Ready {
         epoch: u32,
         digest: u32,
+        #[serde(default)]
+        recoverable: bool,
     },
     Input {
         epoch: u32,
@@ -82,6 +119,10 @@ pub enum Request {
         input: Input,
     },
     Progress {
+        tick: u32,
+    },
+    Recover {
+        epoch: u32,
         tick: u32,
     },
     Completed {
@@ -113,6 +154,17 @@ pub enum Message {
         inputs: Vec<Input>,
         state: RoundState,
         acknowledged: Vec<Option<u32>>,
+    },
+    RecoveryBegin {
+        schema: u16,
+        epoch: u32,
+        ticks: u32,
+        initial_digest: u32,
+        checksum: u32,
+    },
+    RecoveryFrames {
+        start: u32,
+        frames: Vec<ReplayFrame>,
     },
     InputAck {
         sequence: u32,

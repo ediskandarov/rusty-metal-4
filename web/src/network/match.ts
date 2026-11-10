@@ -1,17 +1,34 @@
 import type { Frame, Input, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
-import { configureMatch, enqueueStep } from "./protocol.ts";
+import { configureMatch, enqueueStep, stateSections } from "./protocol.ts";
+import type { ReplayBegin, ReplayChunk } from "./replay.ts";
+import { ReplayCheckpoint } from "./replay.ts";
 import { connectNetwork } from "./transport.ts";
 
 type Message =
   | Start
   | Frame
+  | ReplayBegin
+  | ReplayChunk
   | { type: "input_ack"; sequence: number; tick: number | null; rejected: string | null }
   | { type: "welcome"; slot: number }
   | { type: "error"; message: string };
 
+const checkpointDeliveryTimeout = 2_000;
+const replayTimeout = 5_000;
+
+type Recovery = {
+  after: number;
+  abort: AbortController;
+  checkpoint?: ReplayCheckpoint;
+  replaying: boolean;
+};
+
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
   return (
     local.digest === remote.digest &&
+    local.sections?.length === remote.sections.length &&
+    remote.sections.every((value, index) => local.sections?.[index] === value) &&
+    local.unsupported === remote.unsupported &&
     local.remaining === remote.remaining &&
     local.winner === remote.winner &&
     local.roundFinished === remote.roundFinished &&
@@ -41,7 +58,12 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   let lastSent = 0;
   let epoch = 0;
   const history = new Map<number, Input>();
-  const diagnostics = (port.netDiagnostics = {
+  let initialDigest = 0;
+  let initialRecoverable = false;
+  let recovery: Recovery | undefined;
+  let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
+  let recoveryUsed = false;
+  const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
     pendingInputs: 0,
     rejectedInputs: 0,
     processedSequence: 0,
@@ -57,6 +79,9 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     delete port.netMatchInput;
     pending.length = 0;
     history.clear();
+    clearTimeout(recoveryDeadline);
+    recovery?.abort.abort();
+    recovery = undefined;
     diagnostics.pendingInputs = 0;
     if (cancel) queueMicrotask(() => engine._WebNetCancelMatch());
     status.textContent = message;
@@ -67,9 +92,29 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     cleanup(message, true);
   };
   const runNext = () => {
-    if (closed || running) return;
+    if (closed || running || recovery) return;
     running = pending.shift();
     if (running) enqueueStep(engine, running);
+  };
+
+  const replay = async (active: Recovery, checkpoint: ReplayCheckpoint) => {
+    const { signal } = active.abort;
+    active.replaying = true;
+    clearTimeout(recoveryDeadline);
+    recoveryDeadline = setTimeout(() => fail("Replay simulation timed out"), replayTimeout);
+    try {
+      await checkpoint.restore(engine, port, signal);
+      if (signal.aborted) return;
+      while (pending[0] && pending[0].tick < checkpoint.ticks)
+        port.netMatchServerState = pending.shift()?.state;
+      recovery = undefined;
+      clearTimeout(recoveryDeadline);
+      diagnostics.recoveredTick = checkpoint.ticks;
+      status.textContent = "Player " + (slot + 1) + " of " + players;
+      runNext();
+    } catch (error) {
+      if (!signal.aborted) fail(error);
+    }
   };
 
   status.textContent = "Connecting to Deathmatch…";
@@ -119,7 +164,21 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     const { state } = frame;
     port.netMatchServerState = state;
     if (!sameOutcome(local, state)) {
-      fail("Simulation diverged from the server at tick " + frame.tick);
+      diagnostics.divergence = stateSections.filter(
+        (_, i) => local.sections?.[i] !== state.sections[i],
+      );
+      if (!initialRecoverable || recoveryUsed || state.unsupported || state.nextMode) {
+        fail("Simulation diverged from the server at tick " + frame.tick);
+        return;
+      }
+      recoveryUsed = true;
+      recovery = { after: frame.tick, abort: new AbortController(), replaying: false };
+      status.textContent = "Restoring the match…";
+      recoveryDeadline = setTimeout(
+        () => fail("Replay checkpoint timed out"),
+        checkpointDeliveryTimeout,
+      );
+      send({ type: "recover", epoch, tick: frame.tick });
       return;
     }
     if (state.roundFinished) {
@@ -141,6 +200,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   };
 
   socket.onmessage = (data: unknown) => {
+    if (closed) return;
     try {
       const message = data as Message;
       switch (message.type) {
@@ -158,8 +218,27 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           status.textContent = "Loading Deathmatch…";
           if (!port.netMatch) throw new Error("The game did not become ready at tick zero");
           if (closed) return;
-          send({ type: "ready", epoch, digest: port.netMatch?.digest });
+          initialDigest = port.netMatch.digest ?? 0;
+          initialRecoverable = port.netMatch.unsupported === null;
+          send({ type: "ready", epoch, digest: initialDigest });
           status.textContent = "Player " + (slot + 1) + " of " + players;
+          break;
+        }
+        case "recovery_begin":
+          if (
+            !recovery ||
+            recovery.checkpoint ||
+            message.ticks <= recovery.after ||
+            message.ticks > nextFrame
+          )
+            throw new Error("Unexpected replay checkpoint");
+          recovery.checkpoint = new ReplayCheckpoint(message, epoch, players, initialDigest);
+          break;
+        case "recovery_frames": {
+          const checkpoint = recovery?.checkpoint;
+          if (!recovery || !checkpoint || recovery.replaying)
+            throw new Error("Unexpected replay input block");
+          if (checkpoint.add(message)) void replay(recovery, checkpoint);
           break;
         }
         case "input_ack":

@@ -16,11 +16,13 @@ use lightyear::websocket::server::{ServerConfig, WebSocketServerIo};
 use tm4_network::{
     input::{ControllerCommand, Input, InputHistory},
     protocol::{
-        Catalog, Compatibility, ControllerIdentity, Message, Request, SessionChannel, protocol,
+        Catalog, Compatibility, ControllerIdentity, Message, REPLAY_CHUNK_TICKS, REPLAY_MAX_TICKS,
+        REPLAY_SCHEMA, ReplayFrame, Request, SessionChannel, protocol, replay_checksum,
     },
 };
 
 const TICK_RATE: u64 = 30;
+const REPLAY_GRACE_TICKS: usize = TICK_RATE as usize;
 const MAX_PLAYERS: usize = 8;
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / TICK_RATE);
 
@@ -34,6 +36,7 @@ struct Player {
     controller: Option<Entity>,
     received_sequence: u32,
     progress_tick: u32,
+    recovery_used: bool,
 }
 
 #[derive(Component)]
@@ -60,6 +63,8 @@ struct Match {
     loading_since: Instant,
     overruns: u32,
     in_flight: Option<(Vec<Input>, Instant)>,
+    replay: Vec<ReplayFrame>,
+    replay_available: bool,
 }
 
 fn send(
@@ -153,10 +158,15 @@ impl Match {
                 self.catalog = Some(catalog);
                 send(links, entity, &Message::Welcome { slot: None });
             }
-            Request::Ready { epoch, digest } if self.started && epoch == 1 => {
+            Request::Ready {
+                epoch,
+                digest,
+                recoverable,
+            } if self.started && epoch == 1 => {
                 if is_authority {
                     self.authority_ready = true;
                     self.initial_digest = Some(digest);
+                    self.replay_available = recoverable;
                 } else if let Some(slot) = slot {
                     self.players[slot].ready = true;
                     self.players[slot].initial_digest = Some(digest);
@@ -187,12 +197,67 @@ impl Match {
                     player.progress_tick = player.progress_tick.max(tick);
                 }
             }
+            Request::Recover { epoch: 1, tick }
+                if self.started && !self.ended && tick < self.tick && slot.is_some() =>
+            {
+                let player = &mut self.players[slot.unwrap()];
+                if player.recovery_used
+                    || !self.replay_available
+                    || tick as usize >= self.replay.len()
+                {
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: "Authoritative replay checkpoint is unavailable.".into(),
+                        },
+                    );
+                    return;
+                }
+                player.recovery_used = true;
+                send(
+                    links,
+                    entity,
+                    &Message::RecoveryBegin {
+                        schema: REPLAY_SCHEMA,
+                        epoch: 1,
+                        ticks: self.replay.len() as u32,
+                        initial_digest: self.initial_digest.expect("stepping requires readiness"),
+                        checksum: replay_checksum(&self.replay),
+                    },
+                );
+                for (index, chunk) in self.replay.chunks(REPLAY_CHUNK_TICKS).enumerate() {
+                    send(
+                        links,
+                        entity,
+                        &Message::RecoveryFrames {
+                            start: (index * REPLAY_CHUNK_TICKS) as u32,
+                            frames: chunk.to_vec(),
+                        },
+                    );
+                }
+            }
             Request::Completed { tick, state }
                 if is_authority
                     && tick == self.tick
                     && state.scores.len() == self.players.len() =>
             {
                 if let Some((inputs, _)) = self.in_flight.take() {
+                    if !self.replay_available
+                        || state.unsupported.is_some()
+                        || tick as usize >= REPLAY_MAX_TICKS + REPLAY_GRACE_TICKS
+                    {
+                        self.replay_available = false;
+                        self.replay.clear();
+                    } else if self.replay.len() < REPLAY_MAX_TICKS
+                        && self.replay.len() == tick as usize
+                    {
+                        self.replay.push(ReplayFrame {
+                            inputs: inputs.clone(),
+                            digest: state.digest,
+                            sections: state.sections,
+                        });
+                    }
                     self.broadcast(
                         links,
                         &Message::Frame {
@@ -265,6 +330,9 @@ fn update(
             .iter()
             .any(|p| p.entity == Some(entity) && game.tick.saturating_sub(p.progress_tick) > 90);
         if stalled || (!known && now.duration_since(admission.opened) > Duration::from_secs(10)) {
+            if stalled {
+                eprintln!("Client session progress timed out.");
+            }
             commands.trigger(Unlink {
                 entity,
                 reason: UnlinkReason::UserRequested(Some("Session progress timed out".into())),
@@ -561,6 +629,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         loading_since: Instant::now(),
         overruns: 0,
         in_flight: None,
+        replay: Vec::new(),
+        replay_available: false,
     });
     app.add_systems(Update, update);
     app.add_systems(

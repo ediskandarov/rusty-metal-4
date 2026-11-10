@@ -320,6 +320,8 @@ void WebLevelNetworkStep(void)
 void WebLevelFrame(void)
 {
     if (WebNetMatchActive()) {
+        if (WebNetReplaying())
+            return;
         WebNetMatchPollInput();
         if (WebNetMatchViewSlot() >= 0 && WebRenderBeginLevelFrame())
             draw_network_view(WebNetMatchViewSlot());

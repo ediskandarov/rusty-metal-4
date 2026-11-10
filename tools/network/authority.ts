@@ -64,7 +64,12 @@ export async function connectAuthority(page: Page, endpoint: string, token: stri
                   throw new Error("The game refused the match setup");
                 if (!port.netMatch)
                   throw new Error("The simulator did not become ready at tick zero");
-                send({ type: "ready", epoch: message.epoch, digest: port.netMatch?.digest });
+                send({
+                  type: "ready",
+                  epoch: message.epoch,
+                  digest: port.netMatch.digest,
+                  recoverable: port.netMatch.unsupported === null,
+                });
                 break;
               }
               case "step":

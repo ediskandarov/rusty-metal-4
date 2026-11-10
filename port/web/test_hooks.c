@@ -1,5 +1,6 @@
 /* Diagnostic entry points only; not linked into the normal browser target. */
 #include "test_hooks.h"
+#include "net_state.h"
 #include "src/modules/menu/private.h"
 #include "src/main/object/private.h"
 #include "src/modules/menu/private.h"
@@ -26,6 +27,7 @@
 #include "tm4/modules/weap.h"
 #include "tm4/vector.h"
 #include <emscripten.h>
+#include <stdint.h>
 #include <string.h>
 #include <strings.h>
 
@@ -93,6 +95,106 @@ EMSCRIPTEN_KEEPALIVE void WebTestInspectObjectCallbacks(void)
                 object->interact);
         }
     }
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestOffsetReplayHeap(void)
+{
+    return MemAlloc(384) != NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE uintptr_t WebTestReplayCarAddress(void)
+{
+    return (uintptr_t)GameInfo.players[0].car;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestNetworkPlaybackVoices(void)
+{
+    int count = 0;
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
+         object = object->next) {
+        const SoundEmitter* emitter = ObjectGetPayload(object);
+        for (s32 i = 0; i < emitter->voice_count; ++i)
+            count += emitter->voices[i].voice_id >= 0;
+    }
+    return count;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPerturbNetworkCar(s32 slot)
+{
+    if (slot < 0 || slot >= ArrayCount(GameInfo.players) || !GameInfo.players[slot].car)
+        return 0;
+    GameInfo.players[slot].car->energy -= 128;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestDetonationCheckpointIdentity(void)
+{
+    Car* first = GameInfo.players[0].car;
+    Car* second = GameInfo.players[1].car;
+    if (!first || !second)
+        return 0;
+
+    for (s32 i = 0; i < CarWeaponCount; ++i) {
+        CarWeaponInstance* weapon = &first->weapons[i];
+        CarWeaponInstance* alternate = &second->weapons[i];
+        if (!weapon->descriptor->detonate || !weapon->descriptor->name
+            || !alternate->descriptor->name
+            || strcmp(weapon->descriptor->name, alternate->descriptor->name))
+            continue;
+
+        void* device = ObjectCreate(
+            "weaponBomb", OBJECT_DESTROY_WITH_OWNER, first, "remote", &first->position);
+        if (!device)
+            return 0;
+        CarTrackDetonationDevice(weapon, first, device);
+        CarDetonationNode* node = CarDetonationDevices;
+        if (!node || node->object != device) {
+            ObjectDestroy(device);
+            return 0;
+        }
+
+        const WebNetStateDigest before = WebNetCaptureDigest(1);
+        node->weapon = alternate;
+        const WebNetStateDigest reassigned = WebNetCaptureDigest(1);
+        node->weapon = NULL;
+        const WebNetStateDigest unresolved = WebNetCaptureDigest(1);
+        node->weapon = weapon;
+        ObjectDestroy(device);
+        return !before.unsupported && !reassigned.unsupported && before.cars != reassigned.cars
+            && unresolved.unsupported && !strcmp(unresolved.unsupported, "detonation device reference");
+    }
+    return 0;
+}
+
+static void test_projectile_destructor(WeaponProjectile* projectile)
+{
+    (void)projectile;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestProjectileCheckpointCallbacks(void)
+{
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_DEFAULT].first; object;
+         object = object->next) {
+        if (strcmp(object->name, "weaponProjectile"))
+            continue;
+
+        WeaponProjectile* projectile = ObjectGetPayload(object);
+        const WeaponProjectilePhysics physics = projectile->physics;
+        const WeaponProjectileDestroy on_destroy = projectile->on_destroy;
+        const WebNetStateDigest before = WebNetCaptureDigest(1);
+        projectile->physics = NULL;
+        const WebNetStateDigest altered_physics = WebNetCaptureDigest(1);
+        projectile->physics = physics;
+        projectile->on_destroy = test_projectile_destructor;
+        const WebNetStateDigest altered_destructor = WebNetCaptureDigest(1);
+        projectile->on_destroy = on_destroy;
+        const WebNetStateDigest restored = WebNetCaptureDigest(1);
+        return !before.unsupported && !restored.unsupported && restored.objects == before.objects
+            && altered_physics.unsupported && !strcmp(altered_physics.unsupported, "weaponProjectile")
+            && altered_destructor.unsupported
+            && !strcmp(altered_destructor.unsupported, "weaponProjectile");
+    }
+    return 0;
 }
 
 static void test_approach_scenery(void);
