@@ -92,13 +92,6 @@ def main():
         for lod, groups in lods.items():
             if groups:
                 out.append(f"{name} {lod}: " + ", ".join(sorted(groups)))
-    out += [
-        "",
-        "Evelyn selected cap: 360 visible faces / 960 padded group-local vertices, one LOD.",
-        "Thumper is the armed road-car comparison. The allowance prioritizes curved body/roof surfaces",
-        "and recognizable glazing/arches; four twelve-sided wheels use coherent original rim textures.",
-        "The same original 192x64-word bitmap slot is used; new art occupies one 256x64 4-bit page + palette/shadow.",
-    ]
     text = "\n".join(out) + "\n"
     print(text, end="")
     if args.report:

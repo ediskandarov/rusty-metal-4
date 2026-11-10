@@ -1,6 +1,7 @@
 import { type MrDirectory, readMr } from "../compatibility/mr.ts";
 import type { DiscAssets } from "../loader/types.ts";
-import { binary, stringEntry, stringValue, writeMr } from "./mr-writer.ts";
+import { installEngineSound } from "./independent-car.ts";
+import { binary, directory, stringEntry, stringValue, writeMr } from "./mr-writer.ts";
 import { type CarMod, maxCarMods } from "./package.ts";
 
 function folder(root: MrDirectory, path: string): MrDirectory {
@@ -21,7 +22,9 @@ function clone(value: MrDirectory): MrDirectory {
 
 /** The menu consumes car-space vertices; the driving renderer applies wheel pivots itself. */
 export function createCarPreview(model: MrDirectory): MrDirectory {
-  const preview = clone(model);
+  const preview = directory();
+  preview.folders.set("display", clone(folder(model, "display")));
+  preview.folders.get("display")!.folders.delete("turbo");
   const resolution = folder(preview, "display/resolution");
   const source = resolution.files.get("VertexList")!;
   const bytes = source.bytes.slice();
@@ -70,52 +73,63 @@ export async function installCarMods(assets: DiscAssets, mods: readonly CarMod[]
     return (await readMr(bytes)).root;
   }
   const main = await archive("/DATA/MAIN.MR");
-  const menu = await archive("/DATA/MENU.MR");
+  const menu = mods.some((mod) => mod.manifest.version === 1)
+    ? await archive("/DATA/MENU.MR")
+    : undefined;
   const previews = await archive("/DATA/MENU/CHAR.MR");
   const characters = folder(main, "objects/car/characters");
-  const screens = folder(menu, "menu/screens");
+  const screens = menu && folder(menu, "menu/screens");
   const menuCars = folder(previews, "menucars");
   const originals = [...characters.folders];
   const names = new Set(originals.map(([name]) => name.toLowerCase()));
   const ids = new Set<string>();
   for (const mod of mods) {
-    const { id, name, base } = mod.manifest;
+    const { id, name } = mod.manifest;
     const filename = `m${id}`;
+    const infoPath = `/DATA/MENU/${filename.toUpperCase()}.TIM`;
     if (
       ids.has(id) ||
       names.has(name.toLowerCase()) ||
       files.has(`/DATA/${filename.toUpperCase()}.MR`) ||
+      (mod.manifest.version === 2 && files.has(infoPath)) ||
       menuCars.files.has(filename)
     )
       throw new Error(`Mod conflicts with an existing car: ${name} (${id})`);
     ids.add(id);
     names.add(name.toLowerCase());
-    const source = originals.find(([, value]) => {
-      const entry = value.files.get("filename");
-      return entry && stringValue(entry).toLowerCase() === base;
-    });
-    if (!source) throw new Error(`${name}: base car ${base} is absent from this disc`);
-    const model = await archive(`/DATA/${base.toUpperCase()}.MR`);
-    const originalDisplay = folder(model, "display");
-    const display = clone(originalDisplay);
-    const replacement = mod.model.folders.get("display")!;
-    for (const [key, value] of replacement.files) display.files.set(key, value);
-    // Replace the entire geometry tree: old LODs must not reappear at a distance.
-    display.folders.set("resolution", clone(folder(replacement, "resolution")));
-    model.folders.set("display", display);
-    for (const [key, value] of mod.model.files) model.files.set(key, value);
+    let model: MrDirectory;
+    let character: MrDirectory;
+    if (mod.manifest.version === 1) {
+      const { base } = mod.manifest;
+      const source = originals.find(([, value]) => {
+        const entry = value.files.get("filename");
+        return entry && stringValue(entry).toLowerCase() === base;
+      });
+      if (!source) throw new Error(`${name}: base car ${base} is absent from this disc`);
+      model = await archive(`/DATA/${base.toUpperCase()}.MR`);
+      const display = folder(model, "display");
+      const replacement = folder(mod.model, "display");
+      for (const [key, value] of replacement.files) display.files.set(key, value);
+      display.folders.set("resolution", clone(folder(replacement, "resolution")));
+      for (const [key, value] of mod.model.files) model.files.set(key, value);
+      character = clone(source[1]);
+      character.files.set("behavior", stringEntry(base));
+      const info = screens?.folders.get(base);
+      if (info) screens?.folders.set(filename, clone(info));
+    } else {
+      model = clone(mod.model);
+      installEngineSound(model, id);
+      character = directory();
+      files.set(infoPath, model.files.get("info.tim")!.bytes);
+      model.files.delete("info.tim");
+    }
     files.set(`/DATA/${filename.toUpperCase()}.MR`, writeMr(model));
-    const character = clone(source[1]);
     character.files.set("filename", stringEntry(filename));
-    character.files.set("behavior", stringEntry(base));
     characters.folders.set(name, character);
     menuCars.files.set(filename, binary(writeMr(createCarPreview(mod.model))));
-    // Info pages are inherited alongside behavior until a mod supplies its own presentation.
-    const info = screens.folders.get(base);
-    if (info) screens.folders.set(filename, clone(info));
   }
   files.set("/DATA/MAIN.MR", writeMr(main));
-  files.set("/DATA/MENU.MR", writeMr(menu));
+  if (menu) files.set("/DATA/MENU.MR", writeMr(menu));
   files.set("/DATA/MENU/CHAR.MR", writeMr(previews));
   const manifestBytes = files.get("/DATA/files.tsv");
   if (!manifestBytes) throw new Error("Missing disc file index");

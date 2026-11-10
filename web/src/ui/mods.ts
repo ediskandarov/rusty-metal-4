@@ -25,7 +25,10 @@ export function initializeMods() {
       for (const mod of packages) {
         const item = document.createElement("li");
         const caption = document.createElement("span");
-        caption.textContent = `${mod.manifest.name} · base: ${mod.manifest.base}`;
+        caption.textContent =
+          mod.manifest.version === 1
+            ? `${mod.manifest.name} · base: ${mod.manifest.base}`
+            : mod.manifest.name;
         item.append(caption);
         const remove = document.createElement("button");
         remove.type = "button";

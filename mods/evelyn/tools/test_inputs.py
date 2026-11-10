@@ -8,7 +8,7 @@ import unittest
 import zlib
 from pathlib import Path
 
-from build import read_png, validate_authoring_options
+from build import SCALE, read_png, validate_authoring_options
 
 
 def png(mode, pixel, transparency=None):
@@ -63,17 +63,20 @@ class InputTests(unittest.TestCase):
 
     def test_metadata_contract(self):
         model = {
-            "units_per_meter": 50,
+            "units_per_meter": SCALE,
             "attachments": {
                 "machine_gun_left": {"direction": [0, 0, 1]},
                 "machine_gun_right": {"direction": [0, 0, 1]},
+                "special_launcher": {"direction": [0, 0, 1]},
+                "turbo_left": {"direction": [0, 0, -1]},
+                "turbo_right": {"direction": [0, 0, -1]},
             },
         }
         validate_authoring_options(model)
         model["units_per_meter"] = 100
         with self.assertRaisesRegex(ValueError, "units_per_meter"):
             validate_authoring_options(model)
-        model["units_per_meter"] = 50
+        model["units_per_meter"] = SCALE
         model["attachments"]["machine_gun_right"]["direction"] = [1, 0, 0]
         with self.assertRaisesRegex(ValueError, "attachment direction"):
             validate_authoring_options(model)

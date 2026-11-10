@@ -14,17 +14,23 @@ import { packCarMod, readCarMod } from "../../web/src/mods/package.ts";
 
 const manifest = {
   format: "tm4-rewired-mod",
-  version: 1,
+  version: 2,
   kind: "car",
   id: "evelyn",
   name: "Evelyn",
-  base: "thump",
 } as const;
 async function modelBytes() {
   return new Uint8Array(await Bun.file("mods/evelyn/resources/EVELYN.MR").arrayBuffer());
 }
 async function packageBytes() {
   return packCarMod(manifest, await modelBytes());
+}
+async function inheritedPackageBytes() {
+  const { root } = await readMr(await modelBytes());
+  for (const key of root.files.keys()) if (key !== "machineGuns") root.files.delete(key);
+  for (const key of root.folders.keys()) if (key !== "display") root.folders.delete(key);
+  root.folders.get("display")!.folders.delete("turbo");
+  return packCarMod({ ...manifest, version: 1, base: "thump" }, writeMr(root));
 }
 function fixture(): DiscAssets {
   const main = directory(),
@@ -91,11 +97,61 @@ test("standalone authored car package round-trips and rejects unsupported capabi
   decoded.files.set("script", binary(new Uint8Array(4)));
   await expect(packCarMod(manifest, writeMr(decoded))).rejects.toThrow("unsupported resource");
   await expect(readCarMod(bytes.slice(0, -8))).rejects.toThrow();
+  await expect(packCarMod({ ...manifest, base: "thump" }, await modelBytes())).rejects.toThrow(
+    "Unknown manifest field",
+  );
 });
-test("installation adds a car and preview without replacing originals or modifying the package", async () => {
+
+test("independent cars reject missing or malformed native resources", async () => {
+  const { root } = await readMr(await modelBytes());
+  const turbo = root.folders.get("display")!.folders.get("turbo")!;
+  const outlet = turbo.folders.get("left")!;
+  const originalWidth = outlet.files.get("width")!;
+  outlet.files.set("width", { ...originalWidth, bytes: new Uint8Array(4) });
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("width outside");
+  outlet.files.set("width", originalWidth);
+  const special = root.folders.get("special")!;
+  const launch = special.files.get("launchFunc")!;
+  special.files.set("launchFunc", stringEntry("CarLaunchThump"));
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow(
+    "Unsupported independent special",
+  );
+  special.files.set("launchFunc", launch);
+  const near = root.folders.get("display")!.folders.get("resolution")!.folders.get("r0")!;
+  const count = near.files.get("NumFaces")!;
+  const badCount = count.bytes.slice();
+  new DataView(badCount.buffer).setInt32(0, 65536, true);
+  near.files.set("NumFaces", { ...count, bytes: badCount });
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("LOD face counts disagree");
+  near.files.set("NumFaces", count);
+  const sample = root.files.get("engineSample")!;
+  const bytes = sample.bytes.slice();
+  bytes[1] = 0;
+  root.files.set("engineSample", { ...sample, bytes });
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("ADPCM block");
+  root.files.delete("engineSample");
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("engineSample");
+});
+test("independent cars require a complete native Info screen", async () => {
+  const { root } = await readMr(await modelBytes());
+  const info = root.files.get("info.tim")!;
+  root.files.delete("info.tim");
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("info.tim");
+  root.files.set("info.tim", { ...info, bytes: info.bytes.slice(0, -4) });
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("Truncated TIM");
+  const smaller = info.bytes.slice(0, info.bytes.length - 320 * 2);
+  const view = new DataView(smaller.buffer);
+  view.setUint32(8, smaller.length - 8, true);
+  view.setUint16(18, 239, true);
+  root.files.set("info.tim", { ...info, bytes: smaller });
+  await expect(packCarMod(manifest, writeMr(root))).rejects.toThrow("320×240 direct-color TIM");
+});
+test("independent car and preview install without base archives or changes to the package", async () => {
   const assets = fixture(),
     original = assets.files,
     mod = await readCarMod(await packageBytes());
+  original.delete("/DATA/THUMP.MR");
+  original.delete("/DATA/MENU.MR");
   const before = mod.bytes.slice();
   await installCarMods(assets, [mod]);
   expect(original.has("/DATA/MEVELYN.MR")).toBe(false);
@@ -104,28 +160,54 @@ test("installation adds a car and preview without replacing originals or modifyi
   const cars = main.folders.get("objects")!.folders.get("car")!.folders.get("characters")!;
   expect(cars.folders.size).toBe(2);
   expect(stringValue(cars.folders.get("Evelyn")!.files.get("filename"))).toBe("mevelyn");
-  expect(stringValue(cars.folders.get("Evelyn")!.files.get("behavior"))).toBe("thump");
+  expect(cars.folders.get("Evelyn")!.files.has("behavior")).toBe(false);
+  expect(assets.files.get("/DATA/MENU/MEVELYN.TIM")).toEqual(
+    mod.model.files.get("info.tim")!.bytes,
+  );
+  expect(original.has("/DATA/MENU/MEVELYN.TIM")).toBe(false);
   expect(stringValue(cars.folders.get("SuperThumper")!.files.get("filename"))).toBe("thump");
   const car = (await readMr(assets.files.get("/DATA/MEVELYN.MR")!)).root;
-  expect(car.files.get("physics")!.bytes).toEqual(new Uint8Array([1, 2, 3, 4]));
-  expect(car.folders.get("display")!.folders.get("resolution")!.folders.has("r0")).toBe(true);
+  expect(car.folders.get("physics")!.files.get("maxAxleTorque")!.bytes).toEqual(
+    mod.model.folders.get("physics")!.files.get("maxAxleTorque")!.bytes,
+  );
+  expect(car.files.get("car.vab")!.type).toBe(16);
+  expect(stringValue(car.files.get("engineSoundName"))).toBe("mod_evelyn");
+  expect(car.files.has("engineSample")).toBe(false);
+  expect(car.files.has("info.tim")).toBe(false);
+  expect(mod.model.files.has("engineSample")).toBe(true);
+  expect(car.folders.get("display")!.folders.has("turbo")).toBe(true);
   const previews = (await readMr(assets.files.get("/DATA/MENU/CHAR.MR")!)).root.folders.get(
     "menucars",
   )!;
   expect(previews.files.has("thump")).toBe(true);
-  expect(previews.files.has("mevelyn")).toBe(true);
-  expect(new TextDecoder().decode(assets.files.get("/DATA/files.tsv"))).toContain(
-    "/DATA/MEVELYN.MR",
-  );
+  const preview = (await readMr(previews.files.get("mevelyn")!.bytes)).root;
+  expect(preview.folders.get("display")!.folders.has("turbo")).toBe(false);
+  expect(preview.files.size).toBe(0);
+  const index = new TextDecoder().decode(assets.files.get("/DATA/files.tsv"));
+  expect(index).toContain("/DATA/MEVELYN.MR");
+  expect(index).toContain("/DATA/MENU/MEVELYN.TIM");
 });
-test("failed mod installation is atomic and missing dependencies are explicit", async () => {
+test("version 1 retains inherited parameters and reports missing archives atomically", async () => {
+  const mod = await readCarMod(await inheritedPackageBytes());
   const assets = fixture(),
-    original = assets.files,
-    mod = await readCarMod(await packageBytes());
-  await expect(installCarMods(assets, [mod, mod])).rejects.toThrow("conflicts");
-  expect(assets.files).toBe(original);
-  assets.files.delete("/DATA/THUMP.MR");
+    original = assets.files;
+  await installCarMods(assets, [mod]);
+  const main = (await readMr(assets.files.get("/DATA/MAIN.MR")!)).root;
+  const cars = main.folders.get("objects")!.folders.get("car")!.folders.get("characters")!;
+  expect(stringValue(cars.folders.get("Evelyn")!.files.get("behavior"))).toBe("thump");
+  const car = (await readMr(assets.files.get("/DATA/MEVELYN.MR")!)).root;
+  expect(car.files.get("physics")!.bytes).toEqual(new Uint8Array([1, 2, 3, 4]));
+  assets.files = original;
+  original.delete("/DATA/THUMP.MR");
   await expect(installCarMods(assets, [mod])).rejects.toThrow("Missing mod dependency");
+  expect(assets.files).toBe(original);
+});
+
+test("conflicting independent mods leave the session unchanged", async () => {
+  const assets = fixture(),
+    original = assets.files;
+  const mod = await readCarMod(await packageBytes());
+  await expect(installCarMods(assets, [mod, mod])).rejects.toThrow("conflicts");
   expect(assets.files).toBe(original);
 });
 

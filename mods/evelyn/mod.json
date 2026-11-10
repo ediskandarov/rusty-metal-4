@@ -1,9 +1,8 @@
 {
   "format": "tm4-rewired-mod",
-  "version": 1,
+  "version": 2,
   "kind": "car",
   "id": "evelyn",
   "name": "Evelyn",
-  "base": "thump",
   "resource": "resources/EVELYN.MR"
 }

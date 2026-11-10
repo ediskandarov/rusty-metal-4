@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Author, export and render the standalone Evelyn prototype; Python stdlib only."""
+"""Author, export and render Evelyn using only the Python standard library."""
 
 from __future__ import annotations
 import argparse
@@ -12,25 +12,27 @@ import struct
 import zlib
 from pathlib import Path
 
+from info_card import character_info
+
 ROOT = Path(__file__).resolve().parents[1]
-SCALE = 50  # authoring choice, matching the scale field found in original car resources
+SCALE = 80  # 203-unit wheelbase in the game
 PALETTE = [
     (0, 0, 0),
     (24, 26, 28),
     (48, 48, 45),
     (77, 71, 59),
-    (112, 70, 40),
-    (166, 80, 34),
-    (212, 103, 35),
-    (232, 129, 53),
-    (241, 190, 105),
+    (112, 53, 28),
+    (168, 68, 25),
+    (220, 92, 30),
+    (245, 136, 51),
+    (255, 192, 121),
     (135, 108, 53),
     (189, 151, 70),
     (231, 196, 111),
-    (41, 62, 67),
-    (75, 100, 104),
+    (36, 54, 70),
+    (108, 151, 172),
     (201, 211, 190),
-    (151, 39, 30),
+    (222, 41, 34),
 ]
 TILES = [
     "paint",
@@ -50,6 +52,18 @@ TILES = [
     "underbody",
     "patch",
 ]
+
+REFLECTION = {
+    "paint": 60,
+    "paint_dark": 30,
+    "glass": 96,
+    "gold": 28,
+    "gold_metal": 24,
+    "steel": 10,
+    "light": 14,
+    "tail": 20,
+}
+
 BASE = [6, 5, 1, 12, 1, 2, 10, 14, 1, 15, 14, 1, 4, 1, 1, 3]
 
 
@@ -192,9 +206,14 @@ def atlas():
                     if x % 8 == 0:
                         c = 2
                 elif name == "tail":
-                    c = 8 if y < 7 else 15
-                    if y % 5 == 0:
-                        c = 4
+                    if y < 4 or y > 27 or x < 3 or x > 28:
+                        c = 1
+                    elif y < 20:
+                        c = 15
+                    else:
+                        c = 8 if x < 20 else 14
+                    if y in (10, 15, 19):
+                        c = 3
                 elif name == "vent":
                     c = 2 if y % 6 in (0, 1) else 1
                 elif name == "gold_metal":
@@ -293,6 +312,8 @@ class Mesh:
         normal = unit(cross(sub(points[1], points[0]), sub(points[2], points[0])))
         if outward is not None and dot(normal, outward) < 0:
             points.reverse()
+            if uv is not None:
+                uv = uv[::-1]
             normal = tuple(-x for x in normal)
         indices = []
         for p in points:
@@ -328,45 +349,8 @@ class Mesh:
         ]:
             self.face(ps, material, n)
 
-    def cylinder(
-        self, center, radius, length, axis="z", material="steel", segments=8, caps=True
-    ):
-        def p(a, t):
-            v = (radius * math.cos(a), radius * math.sin(a), t)
-            if axis == "x":
-                v = (t, v[0], v[1])
-            return add(center, v)
-
-        for i in range(segments):
-            a, b = i * math.tau / segments, (i + 1) * math.tau / segments
-            self.face(
-                [
-                    p(a, -length / 2),
-                    p(b, -length / 2),
-                    p(b, length / 2),
-                    p(a, length / 2),
-                ],
-                material,
-                sub(p((a + b) / 2, 0), center),
-            )
-        if caps:
-            for side in (-1, 1):
-                c = list(center)
-                c[0 if axis == "x" else 2] += side * length / 2
-                n = (side, 0, 0) if axis == "x" else (0, 0, side)
-                for i in range(segments):
-                    self.face(
-                        [
-                            c,
-                            p(i * math.tau / segments, side * length / 2),
-                            p((i + 1) * math.tau / segments, side * length / 2),
-                        ],
-                        material,
-                        n,
-                    )
-
     def data(self):
-        smooth = self.name.startswith("body_") or self.name in (
+        smooth = self.name.startswith(("body_", "front_", "rear_", "cabin_")) or self.name in (
             "hood",
             "roof",
             "windscreens",
@@ -391,13 +375,18 @@ class Mesh:
         }
 
 
-def author():
+def author(distant=False):
     groups = []
 
     def group(n, p=(0, 0, 0), wheel=False):
         m = Mesh(n, p, wheel)
         groups.append(m)
         return m
+
+    exhaust_x, exhaust_y, exhaust_z = 0.53, 0.295, -2.312
+
+    def bumper_depth(col, depth):
+        return depth - max(0, abs(col) - 0.5) / 0.5 * (depth - 2.02)
 
     def lerp_table(z, table):
         for (a, va), (b, vb) in zip(table, table[1:]):
@@ -445,27 +434,10 @@ def author():
                 return 0.32 + math.sqrt(0.37**2 - (z - c) ** 2)
         return 0.23
 
-    zs = [
-        -2.02,
-        -1.92,
-        -1.65,
-        -1.54,
-        -1.28,
-        -1.02,
-        -0.91,
-        -0.65,
-        0.12,
-        0.64,
-        0.89,
-        1.0,
-        1.26,
-        1.52,
-        1.63,
-        1.92,
-        2.02,
-    ]
+    zs = [-2.02, -1.65, -1.28, -0.91, 0.12, 0.89, 1.26, 1.63, 2.02]
+    if distant:
+        zs.remove(0.12)
     for side, label in [(-1, "left"), (1, "right")]:
-        m = group("body_" + label)
 
         def row(z, i):
             bottom = arch(z)
@@ -480,7 +452,9 @@ def author():
                 return (side * (w - 0.025), top, z)
             return (side * (w - 0.075), top + 0.065, z)
 
-        for a, b in zip(zs, zs[1:]):
+        for i, (a, b) in enumerate(zip(zs, zs[1:])):
+            if i in (0, 4):
+                m = group(f"body_{label}_{i}")
             for j in range(3):
                 if j == 0 and min(arch(a), arch(b)) >= 0.57:
                     continue
@@ -488,51 +462,28 @@ def author():
                 if max(p[1] for p in ps) - min(p[1] for p in ps) < 0.015:
                     continue
                 m.face(ps, "paint" if j else "paint_dark", (side, 0, 0))
-        m = group("wheel_arch_" + label)
-        for center in (-1.28, 1.26):
-            for i in range(6):
-                a, b = i * math.pi / 6, (i + 1) * math.pi / 6
-                m.face(
-                    [
-                        (
-                            side * (breadth(center) + 0.018),
-                            0.32 + 0.37 * math.sin(a),
-                            center + 0.37 * math.cos(a),
-                        ),
-                        (
-                            side * (breadth(center) + 0.018),
-                            0.32 + 0.37 * math.sin(b),
-                            center + 0.37 * math.cos(b),
-                        ),
-                        (
-                            side * (breadth(center) + 0.04),
-                            0.32 + 0.405 * math.sin(b),
-                            center + 0.405 * math.cos(b),
-                        ),
-                        (
-                            side * (breadth(center) + 0.04),
-                            0.32 + 0.405 * math.sin(a),
-                            center + 0.405 * math.cos(a),
-                        ),
-                    ],
-                    "hood",
-                    (side, 1, 0),
-                )
         # Arched four-door greenhouse. B pillar sits just behind the driver's seat.
         m = group("cabin_" + label)
         outline = [
             (0.73, 0.98),
-            (0.44, 1.22),
+            (0.43, 1.22),
             (0.15, 1.40),
             (-0.12, 1.46),
             (-0.70, 1.44),
             (-0.94, 1.33),
+            (-1.20, 1.13),
             (-1.46, 0.98),
         ]
 
         # Coordinates above are Z,Y; tuck roof shoulders inward, instead of flat slab sides.
         def cab(z, y):
-            return (side * (0.77 - (y - 0.98) * 0.31), y, z)
+            width = lerp_table(z, [
+                (-1.46, 0.77), (-1.20, 0.71), (-0.94, 0.66),
+                (-0.70, 0.63), (-0.12, 0.62), (0.15, 0.64), (0.43, 0.69), (0.73, 0.755),
+            ])
+            roof_height = lerp_table(z, sorted(outline))
+            width += (roof_height - y) * 0.27
+            return (side * width, y, z)
 
         for i in range(len(outline) - 1):
             a, b = outline[i], outline[i + 1]
@@ -557,27 +508,18 @@ def author():
             ps = [cab(z, y) for z, y in window]
             ps = [(p[0] + side * 0.015, p[1], p[2]) for p in ps]
             # Convex window fans split into triangles; dedicated UV shading keeps them coherent.
-            for i in range(1, len(ps) - 1):
-                m.face([ps[0], ps[i], ps[i + 1]], "glass", (side, 0, 0))
+            for i in range(1, len(ps) - 1, 2):
+                m.face([ps[0], *ps[i:i + 3]], "glass", (side, 0, 0))
         # Door outlines and handles make the two doors legible without texture noise.
         m = group("door_details_" + label)
-        for z in (0.70, -0.24, -1.28):
-            lo = max(arch(z), 0.26)
-            mid = max(lo, 0.57)
+        for z in (-0.24, 0.64):
             w = breadth(z)
-            rows = [(lo, w - 0.06), (mid, w + 0.04), (shoulder(z), w - 0.005)]
-            for (ya, xa), (yb, xb) in zip(rows, rows[1:]):
-                if yb - ya > 0.01:
-                    m.face(
-                        [
-                            (side * xa, ya, z),
-                            (side * xa, ya, z + 0.018),
-                            (side * xb, yb, z + 0.018),
-                            (side * xb, yb, z),
-                        ],
-                        "window_edge",
-                        (side, 0, 0),
-                    )
+            m.face([
+                (side * (w + 0.031), 0.56, z),
+                (side * (w + 0.031), 0.56, z + 0.016),
+                (side * (w - 0.020), shoulder(z), z + 0.016),
+                (side * (w - 0.020), shoulder(z), z),
+            ], "window_edge", (side, 0, 0))
         for z in (-0.08, -0.95):
             m.face(
                 [
@@ -590,7 +532,7 @@ def author():
                 (side, 0, 0),
             )
     # Curved hood: two longitudinal breaks and a raised center across its width.
-    m = group("hood")
+    hood = m = group("hood")
     hr = [
         (2.15, 0.865, 0.695),
         (1.75, 0.91, 0.735),
@@ -598,28 +540,24 @@ def author():
         (0.73, 0.98, 0.755),
     ]
     for (za, ya, wa), (zb, yb, wb) in zip(hr, hr[1:]):
-        columns = (
-            [(-1, -0.6), (-0.6, 0), (0, 0.6), (0.6, 1)]
-            if za == 2.15
-            else [(-1, 0), (0, 1)]
-        )
+        columns = [(-1, -0.5), (-0.5, 0), (0, 0.5), (0.5, 1)]
         for a, b in columns:
             m.face(
                 [
                     (
                         wa * a,
                         ya + (0.035 if a == 0 and za != 2.15 else 0),
-                        za - (0.13 if za == 2.15 and abs(a) == 1 else 0),
+                        bumper_depth(a, za) if za == 2.15 else za,
                     ),
                     (
                         wa * b,
                         ya + (0.035 if b == 0 and za != 2.15 else 0),
-                        za - (0.13 if za == 2.15 and abs(b) == 1 else 0),
+                        bumper_depth(b, za) if za == 2.15 else za,
                     ),
                     (wb * b, yb + (0.035 if b == 0 else 0), zb),
                     (wb * a, yb + (0.035 if a == 0 else 0), zb),
                 ],
-                "hood",
+                "paint",
                 (0, 1, 0),
             )
     # Crown the roof both lengthwise and across its width.
@@ -664,11 +602,7 @@ def author():
         [(-1.46, 0.98, 0.77), (-1.85, 0.94, 0.74), (-2.15, 0.865, 0.695)],
         [(-1.85, 0.94, 0.74), (-2.15, 0.865, 0.695)],
     ):
-        columns = (
-            [(-1, -0.6), (-0.6, 0), (0, 0.6), (0.6, 1)]
-            if zb == -2.15
-            else [(-1, 0), (0, 1)]
-        )
+        columns = [(-1, -0.5), (-0.5, 0), (0, 0.5), (0.5, 1)]
         for a, b in columns:
             m.face(
                 [
@@ -677,110 +611,110 @@ def author():
                     (
                         wb * b,
                         yb + (0.025 if b == 0 and zb != -2.15 else 0),
-                        zb + (0.13 if zb == -2.15 and abs(b) == 1 else 0),
+                        -bumper_depth(b, -zb) if zb == -2.15 else zb,
                     ),
                     (
                         wb * a,
                         yb + (0.025 if a == 0 and zb != -2.15 else 0),
-                        zb + (0.13 if zb == -2.15 and abs(a) == 1 else 0),
+                        -bumper_depth(a, -zb) if zb == -2.15 else zb,
                     ),
                 ],
                 "paint",
                 (0, 1, 0),
             )
-    # Chamfered nose and tail: changing widths/depths replace the old vertical boxes.
-    for label, sign in [("front", 1), ("rear", -1)]:
+    # Wrap the face of each bumper into the fenders. The recesses are cuts in the panel.
+    front_rows = [
+        (0.23, 0.76, 2.18), (0.53, 0.80, 2.26),
+        (0.59, 0.80, 2.24), (0.81, 0.74, 2.20), (0.865, 0.695, 2.15),
+    ]
+    rear_rows = [
+        (0.23, 0.75, 2.19), (0.50, 0.78, 2.25),
+        (0.58, 0.78, 2.23), (0.79, 0.75, 2.22), (0.865, 0.695, 2.15),
+    ]
+    # Only the lamp row needs the extra break at ±0.80. On the other rows
+    # the outer sections are coplanar and use the same paint.
+    painted_columns = (-1, -0.5, 0.5, 1)
+    lamp_columns = (-1, -0.80, -0.5, 0.5, 0.80, 1)
+
+    def fascia_point(row, col, sign):
+        y, width, depth = row
+        return (width * col, y, sign * bumper_depth(col, depth))
+
+    for label, sign, rows in [("front", 1, front_rows), ("rear", -1, rear_rows)]:
         m = group(label + "_bumper")
-        rows = [
-            (0.23, 0.70, 2.12),
-            (0.42, 0.795, 2.24),
-            (0.57, 0.795, 2.24),
-            (0.80, 0.745, 2.20),
-            (0.865, 0.695, 2.15),
-        ]
-        for (ya, wa, za), (yb, wb, zb) in zip(rows, rows[1:]):
-            for a, b in [(-1, -0.6), (-0.6, 0.6), (0.6, 1)]:
-                depth = lambda t, z: 2.02 if abs(t) == 1 else z
-                m.face(
-                    [
-                        (wa * a, ya, sign * depth(a, za)),
-                        (wa * b, ya, sign * depth(b, za)),
-                        (wb * b, yb, sign * depth(b, zb)),
-                        (wb * a, yb, sign * depth(a, zb)),
-                    ],
-                    "paint_dark" if ya < 0.3 else "paint",
-                    (0, 0, sign),
-                )
-    m = group("lamps_grilles")
-    m.face(
-        [
-            (-0.42, 0.35, 2.26),
-            (0.42, 0.35, 2.26),
-            (0.42, 0.51, 2.26),
-            (-0.42, 0.51, 2.26),
-        ],
-        "grille",
-        (0, 0, 1),
-    )
-    m.face(
-        [
-            (-0.30, 0.62, 2.23),
-            (0.30, 0.62, 2.23),
-            (0.26, 0.77, 2.20),
-            (-0.26, 0.77, 2.20),
-        ],
-        "grille",
-        (0, 0, 1),
-    )
-    for side in (-1, 1):
-        cx = side * 0.53
-        ps = [
-            (
-                cx + 0.17 * math.cos(i * math.tau / 8),
-                0.735 + 0.145 * math.sin(i * math.tau / 8),
-                2.26 - max(0, abs(cx + 0.17 * math.cos(i * math.tau / 8)) - 0.45) * 0.6,
-            )
-            for i in range(8)
-        ]
-        for ids in ((0, 1, 2, 3), (0, 3, 4, 5), (0, 5, 6, 7)):
-            points = [ps[i] for i in ids]
-            uv = [
-                [
-                    143 + round((p[0] - cx) / 0.17 * 14),
-                    47 - round((p[1] - 0.735) / 0.145 * 14),
+        for i, (low, high) in enumerate(zip(rows, rows[1:])):
+            columns = lamp_columns if i == 2 else painted_columns
+            for j, (a, b) in enumerate(zip(columns, columns[1:])):
+                material = "paint_dark" if i == 0 else "paint"
+                center = a == -0.5 and b == 0.5
+                if i == 0 and center and sign == 1:
+                    material = "grille"
+                if i == 2 and center:
+                    material = "grille" if sign == 1 else "window_edge"
+                if i == 2 and j in (1, 3):
+                    material = "light" if sign == 1 else "tail"
+                if i == 1 and sign == -1 and center:
+                    material = "plate"
+                ps = [
+                    fascia_point(low, a, sign), fascia_point(low, b, sign),
+                    fascia_point(high, b, sign), fascia_point(high, a, sign),
                 ]
-                for p in points
-            ]
-            m.face(points, "light", (0, 0, 1), uv=uv)
-        a, b = sorted((side * 0.45, side * 0.73))
-        m.face(
-            [
-                (a, 0.60, -2.28 + max(0, abs(a) - 0.45) * 0.70),
-                (b, 0.60, -2.28 + max(0, abs(b) - 0.45) * 0.70),
-                (b, 0.80, -2.245 + max(0, abs(b) - 0.45) * 0.65),
-                (a, 0.80, -2.245 + max(0, abs(a) - 0.45) * 0.65),
-            ],
-            "tail",
-            (0, 0, -1),
-        )
-    m.face(
-        [
-            (-0.22, 0.44, -2.26),
-            (0.22, 0.44, -2.26),
-            (0.22, 0.61, -2.26),
-            (-0.22, 0.61, -2.26),
-        ],
-        "plate",
-        (0, 0, -1),
-        uv=[[94, 33], [65, 33], [65, 62], [94, 62]],
-    )
+                uv = uv_tile(material)
+                if material in ("tail", "light", "plate"):
+                    u0, v0 = uv[0]
+                    u1, v1 = uv[2]
+                    uv = [[u0, v1], [u1, v1], [u1, v0], [u0, v0]]
+                    if sign < 0:
+                        uv = [[u0 + u1 - u, v] for u, v in uv]
+                m.face(ps, material, (0, 0, sign), uv=uv)
+        # Rounded corners close the seams between the bumper and side skins.
+        for side in (-1, 1):
+            w = breadth(2.02 * sign)
+            top = shoulder(2.02 * sign)
+            m.face(
+                [(side * (w - 0.07), 0.23, sign * 2.02),
+                 (side * (w + 0.025), 0.57, sign * 2.02),
+                 (side * rows[2][1], rows[2][0], sign * 2.02),
+                 (side * rows[0][1], rows[0][0], sign * 2.02)],
+                "paint_dark", (side, 0, 0),
+            )
+            m.face(
+                [(side * (w + 0.025), 0.57, sign * 2.02),
+                 (side * (w - 0.025), top, sign * 2.02),
+                 (side * rows[-1][1], rows[-1][0], sign * 2.02),
+                 (side * rows[2][1], rows[2][0], sign * 2.02)],
+                "paint", (side, 0, 0),
+            )
+    for side, label in [(-1, "left"), (1, "right")]:
+        m = group("exhaust_" + label)
+        x, y, z = side * exhaust_x, exhaust_y, exhaust_z
+        opening = [(x - 0.069, y - 0.063, z), (x + 0.069, y - 0.063, z),
+                   (x + 0.069, y + 0.063, z), (x - 0.069, y + 0.063, z)]
+        back = [(x + (p[0] - x) * 1.15, y + (p[1] - y) * 1.15, z + 0.19) for p in opening]
+        for i, normal in enumerate(((0, -1, 0), (1, 0, 0), (0, 1, 0), (-1, 0, 0))):
+            j = (i + 1) % 4
+            m.face([opening[i], opening[j], back[j], back[i]], "steel", normal)
+        m.face(opening, "underbody", (0, 0, -1))
     m = group("underbody")
-    m.face(
-        [(-0.7, 0.22, -1.8), (0.7, 0.22, -1.8), (0.7, 0.22, 1.8), (-0.7, 0.22, 1.8)],
-        "underbody",
-        (0, -1, 0),
-    )
-    # Twelve-sided round tires; rim/spoke art uses a single coherent mapped disc.
+
+    def floor_edge(z, side):
+        return (side * (breadth(z) - 0.07), arch(z), z)
+
+    # Close the floor against the existing rocker profile. At the wheel
+    # openings the panel rises inside the arch and leaves the tire clear.
+    floor_stations = [z for z in zs if z != 0.12]
+    for a, b in zip(floor_stations, floor_stations[1:]):
+        m.face(
+            [floor_edge(a, -1), floor_edge(a, 1), floor_edge(b, 1), floor_edge(b, -1)],
+            "underbody", (0, -1, 0),
+        )
+    for sign, row in [(-1, rear_rows[0]), (1, front_rows[0])]:
+        a, b, c, d = [fascia_point(row, col, sign) for col in painted_columns]
+        middle = (0, row[0], sign * 2.02)
+        for points in ([a, b, middle], [middle, b, c], [middle, c, d]):
+            m.face(points, "underbody", (0, -1, 0))
+    # Rim/spoke art is mapped across each complete outer tire wall.
+    wheel_segments = 8
     for name, x, z in [
         ("fl_wheel", -0.76, 1.26),
         ("fr_wheel", 0.76, 1.26),
@@ -789,8 +723,8 @@ def author():
     ]:
         m = group(name, (x, 0.32, z), True)
         side = 1 if x > 0 else -1
-        for i in range(12):
-            a, b = i * math.tau / 12, (i + 1) * math.tau / 12
+        for i in range(wheel_segments):
+            a, b = i * math.tau / wheel_segments, (i + 1) * math.tau / wheel_segments
             m.face(
                 [
                     (-0.10, 0.32 * math.sin(a), 0.32 * math.cos(a)),
@@ -805,19 +739,13 @@ def author():
             ring = [
                 (
                     s * 0.10,
-                    0.32 * math.sin(i * math.tau / 12),
-                    0.32 * math.cos(i * math.tau / 12),
+                    0.32 * math.sin(i * math.tau / wheel_segments),
+                    0.32 * math.cos(i * math.tau / wheel_segments),
                 )
-                for i in range(12)
+                for i in range(wheel_segments)
             ]
-            for ids in (
-                (0, 1, 2, 3),
-                (0, 3, 4, 5),
-                (0, 5, 6, 7),
-                (0, 7, 8, 9),
-                (0, 9, 10, 11),
-            ):
-                ps = [ring[i] for i in ids]
+            for i in range(1, wheel_segments - 1, 2):
+                ps = [ring[j] for j in (0, i, i + 1, i + 2)]
                 uv = [
                     [223 + round(p[2] / 0.32 * 29), 31 - round(p[1] / 0.32 * 29)]
                     for p in ps
@@ -835,24 +763,20 @@ def author():
                 )
     m = group("wing")
     for x in (-0.70, 0.70):
-        m.box((x - 0.035, 0.92, -2.00), (x + 0.035, 1.17, -1.78), "paint")
+        m.face([(x, 0.93, -2.00), (x, 0.93, -1.76), (x, 1.17, -1.86),
+                (x, 1.17, -1.99)], "paint", (1, 0, 0))
     m.box((-0.80, 1.15, -2.01), (0.80, 1.20, -1.77), "paint")
     for side, label in [(-1, "left"), (1, "right")]:
         m = group("fender_gun_" + label)
         x = side * 0.89
-        lo, hi = sorted((side * 0.85, side * 0.93))
-        m.box((lo, 0.88, 0.76), (hi, 1.00, 1.10), "steel")
-        m.cylinder((x, 0.94, 1.40), 0.03, 0.60, "z", "steel", 4, False)
-        m.face(
-            [
-                (x - 0.03, 0.91, 1.72),
-                (x + 0.03, 0.91, 1.72),
-                (x + 0.03, 0.97, 1.72),
-                (x - 0.03, 0.97, 1.72),
-            ],
-            "underbody",
-            (0, 0, 1),
-        )
+        tip = [(x - 0.035, 0.915, 1.72), (x + 0.035, 0.915, 1.72), (x, 0.972, 1.72)]
+        root = [(side * 0.78, 0.88, 0.77), (side * 0.94, 0.88, 0.77), (x, 1.025, 0.77)]
+        if side < 0:
+            root[0], root[1] = root[1], root[0]
+        for i, normal in enumerate(((0, -1, 0), (1, 1, 0), (-1, 1, 0))):
+            j = (i + 1) % 3
+            m.face([root[i], root[j], tip[j], tip[i]], "steel", normal)
+        m.face(tip, "underbody", (0, 0, 1))
         m = group("mirror_" + label)
         inner = [
             (side * 0.82, 1.01, 0.60),
@@ -872,21 +796,43 @@ def author():
                 "glass" if i == 2 else "paint",
                 [(0, 0, 1), (0, 1, 0), (0, 0, -1)][i],
             )
-    m = group("hood_vents")
-    for side in (-1, 1):
-        a, b = sorted((side * 0.20, side * 0.49))
-        m.face(
-            [(a, 0.982, 1.20), (b, 0.982, 1.20), (b, 0.95, 1.61), (a, 0.95, 1.61)],
-            "vent",
-            (0, 1, 0),
-        )
+    if not distant:
+        # Keep the scoop and vents with the bonnet so their order stays fixed
+        # as the group order changes during rotation.
+        m = hood
+        scoop_base = [(-0.23, 0.98, 1.10), (0.23, 0.98, 1.10),
+                      (0.20, 0.97, 1.48), (-0.20, 0.97, 1.48)]
+        scoop_lip = [(-0.19, 1.05, 1.12), (0.19, 1.05, 1.12),
+                     (0.15, 1.08, 1.48), (-0.15, 1.08, 1.48)]
+        m.face(scoop_lip, "paint", (0, 1, 0))
+        for i, direction in enumerate([(0, 0, -1), (1, 0, 0), (0, 0, 1), (-1, 0, 0)]):
+            j = (i + 1) % 4
+            m.face([scoop_base[i], scoop_base[j], scoop_lip[j], scoop_lip[i]],
+                   "grille" if i == 2 else "paint_dark", direction)
+        for side in (-1, 1):
+            a, b = sorted((side * 0.20, side * 0.49))
+            m.face(
+                [(a, 0.982, 1.20), (b, 0.982, 1.20), (b, 0.95, 1.61), (a, 0.95, 1.61)],
+                "vent",
+                (0, 1, 0),
+            )
+    for side, label in [(-1, "left"), (1, "right")]:
+        m = group("sill_" + label)
+        m.face([(side * 0.80, 0.19, -0.88), (side * 0.80, 0.19, 0.86),
+                (side * 0.817, 0.29, 0.86), (side * 0.817, 0.29, -0.88)],
+               "window_edge", (side, 0, 0))
+    if distant:
+        detail_prefixes = ("door_details_", "fender_gun_", "mirror_", "hood_",
+                           "sill_", "exhaust_")
+        return [g.data() for g in groups if not g.name.startswith(detail_prefixes)]
     return {
-        "name": "Evelyn resource prototype",
+        "name": "Evelyn",
         "units": "meters",
         "axes": "X right, Y up, Z forward; export X right, Y down, Z forward",
         "units_per_meter": SCALE,
-        "budget": {"visible_faces": 360, "padded_group_vertices": 960},
+        "budget": {"visible_faces": 262, "padded_group_vertices": 566},
         "groups": [g.data() for g in groups],
+        "distant_groups": author(distant=True),
         "attachments": {
             "machine_gun_left": {
                 "position": [-0.89, 0.94, 1.72],
@@ -896,10 +842,12 @@ def author():
                 "position": [0.89, 0.94, 1.72],
                 "direction": [0, 0, 1],
             },
-            "future_special_rail": {
-                "position": [0, 0.97, -1.48],
+            "special_launcher": {
+                "position": [0, 1.00, 2.19],
                 "direction": [0, 0, 1],
             },
+            "turbo_left": {"position": [-exhaust_x, exhaust_y, exhaust_z], "direction": [0, 0, -1]},
+            "turbo_right": {"position": [exhaust_x, exhaust_y, exhaust_z], "direction": [0, 0, -1]},
         },
     }
 
@@ -910,7 +858,7 @@ def game(v):
 
 def write_obj(model):
     lines = [
-        "# Original Evelyn prototype; meters, Y up, Z forward",
+        "# Original Evelyn mesh; meters, Y up, Z forward",
         "mtllib evelyn.mtl",
         "s off",
     ]
@@ -978,11 +926,32 @@ def pack_mr(entries):
 def validate_authoring_options(model):
     if model.get("units_per_meter") != SCALE:
         raise ValueError(f"Unsupported units_per_meter: this exporter requires {SCALE}")
-    for name in ("machine_gun_left", "machine_gun_right"):
-        if model["attachments"][name].get("direction") != [0, 0, 1]:
-            raise ValueError(
-                f"Unsupported attachment direction for {name}: expected [0, 0, 1]"
+    for name, z in [("machine_gun_left", 1), ("machine_gun_right", 1),
+                    ("special_launcher", 1), ("turbo_left", -1), ("turbo_right", -1)]:
+        if model["attachments"].get(name, {}).get("direction") != [0, 0, z]:
+            raise ValueError(f"Unsupported attachment direction for {name}: expected [0, 0, {z}]")
+
+
+def engine_sample():
+    """Synthesize a periodic four-cylinder pulse train as PS1 ADPCM blocks."""
+    blocks = 96
+    sample_count = blocks * 28
+    data = bytearray()
+    for block in range(blocks):
+        data.extend((5, 6 if block == 0 else 3 if block == blocks - 1 else 2))
+        samples = []
+        for offset in range(28):
+            phase = math.tau * (block * 28 + offset) / sample_count
+            rumble = sum(
+                strength * math.sin(phase * harmonic + shift)
+                for harmonic, strength, shift in [
+                    (8, 3.0, 0), (16, 1.4, 0.1), (24, 1.0, 0.2),
+                    (32, 0.6, 0.3), (40, 0.4, 0.4), (27, 0.3, 0), (43, 0.2, 0),
+                ]
             )
+            samples.append(round(rumble) & 15)
+        data.extend(samples[i] | samples[i + 1] << 4 for i in range(0, 28, 2))
+    return bytes(data)
 
 
 def export(model):
@@ -991,133 +960,184 @@ def export(model):
     faces = bytearray()
     vertices = bytearray()
     normals = bytearray()
-    groups = []
 
     def put(p, data, kind=3, count=65535):
         entries[p] = (kind, count, data)
 
-    def number(p, n):
-        put(p, struct.pack("<i", n), 4)
+    def number(p, n, kind=4):
+        put(p, struct.pack("<i", n), kind)
 
-    # Groups are split for PS1's 800-byte remaining scratchpad, without changing wheel identity.
-    # Wheels need one group each, so deduplicate normals and vertices after quantization.
-    for gi, g in enumerate(model["groups"]):
-        gv = []
-        gn = []
-        gf = []
-        for source_face in g["faces"]:
-            f = dict(source_face)
-            vv = []
-            uv = []
-            coords = []
-            for i, t in zip(f["v"], f["uv"]):
-                p = game(g["vertices"][i])
-                if p not in coords:
-                    vv.append(i)
-                    uv.append(t)
-                    coords.append(p)
-            if len(vv) < 3:
-                continue
-            if (
-                dot(
-                    cross(sub(coords[1], coords[0]), sub(coords[2], coords[0])),
-                    cross(sub(coords[1], coords[0]), sub(coords[2], coords[0])),
-                )
-                == 0
-            ):
-                continue
-            f["v"], f["uv"] = vv, uv
-            ids = []
-            for i in f["v"]:
-                p = game(g["vertices"][i])
-                if p not in gv:
-                    gv.append(p)
-                ids.append(gv.index(p))
-            nids = []
-            for vertex_id, projected_id in zip(f["v"], ids):
-                n = g["vertex_normals"][vertex_id] if g.get("smooth") else f["normal"]
-                face_direction = unit(
-                    cross(
-                        sub(coords[3 if len(coords) == 4 else 2], coords[0]),
-                        sub(coords[1], coords[0]),
+    def string(p, value):
+        data = value.encode("ascii") + b"\0"
+        put(p, data + b"\0" * (-len(data) % 4), 2)
+
+    def mount(name):
+        a = model["attachments"][name]
+        x, y, z = a["direction"]
+        return struct.pack("<8h", *game(a["position"]), 0,
+                           round(x * 4096), round(-y * 4096), round(z * 4096), 0)
+
+    def crumple(vertex):
+        x, y, z = vertex
+        front = max(0, (z / SCALE - 1.59) / 0.68) * max(0, min(1, -x / SCALE / 0.58))
+        rear = max(0, (-z / SCALE - 1.78) / 0.53) * max(0, (abs(x) / SCALE - 0.59) / 0.21)
+        return [round(x + front * 5), round(y - front * 9 - rear * 5),
+                round(z - front * 21 + rear * 9)]
+
+    def encode_lod(path, source_groups):
+        start_v, start_n = len(vertices) // 8, len(normals) // 8
+        groups = []
+        # Each local range stays within the renderer's 800-byte scratch allocation.
+        for gi, g in enumerate(source_groups):
+            gv = []
+            gn = []
+            gf = []
+            for source_face in g["faces"]:
+                f = dict(source_face)
+                vv = []
+                uv = []
+                coords = []
+                for i, t in zip(f["v"], f["uv"]):
+                    p = game(g["vertices"][i])
+                    if p not in coords:
+                        vv.append(i)
+                        uv.append(t)
+                        coords.append(p)
+                if len(vv) < 3:
+                    continue
+                if (
+                    dot(
+                        cross(sub(coords[1], coords[0]), sub(coords[2], coords[0])),
+                        cross(sub(coords[1], coords[0]), sub(coords[2], coords[0])),
                     )
+                    == 0
+                ):
+                    continue
+                f["v"], f["uv"] = vv, uv
+                ids = []
+                for i in f["v"]:
+                    p = game(g["vertices"][i])
+                    if p not in gv:
+                        gv.append(p)
+                    ids.append(gv.index(p))
+                nids = []
+                for vertex_id, projected_id in zip(f["v"], ids):
+                    n = g["vertex_normals"][vertex_id] if g.get("smooth") else f["normal"]
+                    face_direction = unit(
+                        cross(
+                            sub(coords[3 if len(coords) == 4 else 2], coords[0]),
+                            sub(coords[1], coords[0]),
+                        )
+                    )
+                    face_direction = (
+                        face_direction[0],
+                        -face_direction[1],
+                        face_direction[2],
+                    )
+                    if dot(n, face_direction) < 0.1:
+                        n = face_direction
+                    normal = [round(-n[0] * 4096), round(n[1] * 4096), round(-n[2] * 4096)]
+                    nr = normal + [projected_id]
+                    ni = next((j for j, n in enumerate(gn) if n == nr), len(gn))
+                    if ni == len(gn):
+                        gn.append(nr)
+                    nids.append(ni)
+                # TM4 accepts positive NCLIP and uses inward-facing lighting normals.
+                # Keep the reflected perimeter; only convert quads to GPU strip order.
+                order = [0, 1, 2] if len(ids) == 3 else [0, 1, 3, 2]
+                iv = [ids[i] for i in order]
+                uv = [f["uv"][i] for i in order]
+                nids = [nids[i] for i in order]
+                if len(iv) == 3:
+                    iv.append(iv[-1])
+                    uv.append(uv[-1])
+                    nids.append(nids[-1])
+                code = 0x24 if len(ids) == 3 else 0x2C
+                two_sided = int(g["name"] == "wing")
+                record = struct.pack(
+                    "<4B2BH2BH4B8B",
+                    code,
+                    two_sided,
+                    REFLECTION.get(f["material"], 0),
+                    0,
+                    *uv[0],
+                    44,
+                    *uv[1],
+                    10,
+                    *uv[2],
+                    *uv[3],
+                    *iv,
+                    *nids,
                 )
-                face_direction = (
-                    face_direction[0],
-                    -face_direction[1],
-                    face_direction[2],
+                assert len(record) == 24
+                gf.append(record)
+            while len(gv) % 3:
+                gv.append(gv[-1])
+            scratch = len(gv) * 4 + len(gn) * 6
+            if scratch > 800 or len(gv) > 255 or len(gn) > 255:
+                raise ValueError(
+                    f"{g['name']}: scratch={scratch}, vertices={len(gv)}, normals={len(gn)}; split the art group"
                 )
-                if dot(n, face_direction) < 0.1:
-                    n = face_direction
-                normal = [round(-n[0] * 4096), round(n[1] * 4096), round(-n[2] * 4096)]
-                nr = normal + [projected_id]
-                ni = next((j for j, n in enumerate(gn) if n == nr), len(gn))
-                if ni == len(gn):
-                    gn.append(nr)
-                nids.append(ni)
-            # TM4 accepts positive NCLIP and uses inward-facing lighting normals.
-            # Keep the reflected perimeter; only convert quads to GPU strip order.
-            order = [0, 1, 2] if len(ids) == 3 else [0, 1, 3, 2]
-            iv = [ids[i] for i in order]
-            uv = [f["uv"][i] for i in order]
-            nids = [nids[i] for i in order]
-            if len(iv) == 3:
-                iv.append(iv[-1])
-                uv.append(uv[-1])
-                nids.append(nids[-1])
-            code = 0x24 if len(ids) == 3 else 0x2C
-            two_sided = int(g["name"] == "wing")
-            record = struct.pack(
-                "<4B2BH2BH4B8B",
-                code,
-                two_sided,
-                0,
-                0,
-                *uv[0],
-                44,
-                *uv[1],
-                10,
-                *uv[2],
-                *uv[3],
-                *iv,
-                *nids,
+            firstf, firstv, firstn = len(faces) // 24, len(vertices) // 8, len(normals) // 8
+            frame = struct.pack("<6h", firstf, len(gf), firstv, len(gv), firstn, len(gn))
+            if g["wheel"]:
+                center = game(g["pivot"])
+            else:
+                center = [
+                    round((min(v[i] for v in gv) + max(v[i] for v in gv)) / 2)
+                    for i in range(3)
+                ]
+            damaged_vertices = gv if g["wheel"] else [crumple(vertex) for vertex in gv]
+            damaged = frame
+            if damaged_vertices != gv:
+                damaged = struct.pack("<6h", firstf, len(gf), firstv + len(gv), len(gv),
+                                      firstn, len(gn))
+            group = frame + damaged + struct.pack("<3hBb", *center, int(g["wheel"]), gi)
+            put(path + "Groups/" + g["name"], group)
+            # addPrim prepends packets: overlay faces must be submitted before their backing panels.
+            faces.extend(b"".join(reversed(gf)))
+            vertices.extend(b"".join(struct.pack("<3hH", *v, 0) for v in gv))
+            if damaged_vertices != gv:
+                vertices.extend(b"".join(struct.pack("<3hH", *v, 0) for v in damaged_vertices))
+            normals.extend(b"".join(struct.pack("<4h", *n) for n in gn))
+            groups.append(
+                {
+                    "name": g["name"],
+                    "faces": len(gf),
+                    "vertices": len(gv),
+                    "normals": len(gn),
+                    "scratch_bytes": scratch,
+                    "center": center,
+                }
             )
-            assert len(record) == 24
-            gf.append(record)
-        while len(gv) % 3:
-            gv.append(gv[-1])
-        scratch = len(gv) * 4 + len(gn) * 6
-        if scratch > 800 or len(gv) > 255 or len(gn) > 255:
-            raise ValueError(
-                f"{g['name']}: scratch={scratch}, vertices={len(gv)}, normals={len(gn)}; split the art group"
+
+        number(path + "NumFaces", sum(group["faces"] for group in groups))
+        number(path + "NumVertices", len(vertices) // 8 - start_v)
+        number(path + "NumVertexNormals", len(normals) // 8 - start_n)
+        number(path + "NumGroups", len(groups))
+        # The ordering table prepends packets, so submit near groups first.
+        # The recessed floor must draw under the skirts and wheels even at a grazing angle.
+        views = bytearray()
+        for facing in range(16):
+            zc = [0.25, 0.90, -0.25, -0.90][(facing & 6) // 2]
+            xc = math.sqrt(1 - zc * zc) * (-1 if facing & 1 else 1)
+            yc = 0.7 if facing & 8 else -0.7
+            ids = sorted(
+                range(len(groups)),
+                key=lambda i: (
+                    groups[i]["name"] == "underbody",
+                    dot(groups[i]["center"], (xc, yc, zc)),
+                ),
             )
-        firstf, firstv, firstn = len(faces) // 24, len(vertices) // 8, len(normals) // 8
-        frame = struct.pack("<6h", firstf, len(gf), firstv, len(gv), firstn, len(gn))
-        if g["wheel"]:
-            center = game(g["pivot"])
-        else:
-            center = [
-                round((min(v[i] for v in gv) + max(v[i] for v in gv)) / 2)
-                for i in range(3)
-            ]
-        group = frame * 2 + struct.pack("<3hBb", *center, int(g["wheel"]), gi)
-        put("display/resolution/r0/Groups/" + g["name"], group)
-        # addPrim prepends packets: overlay faces must be submitted before their backing panels.
-        faces.extend(b"".join(reversed(gf)))
-        vertices.extend(b"".join(struct.pack("<3hH", *v, 0) for v in gv))
-        normals.extend(b"".join(struct.pack("<4h", *n) for n in gn))
-        groups.append(
-            {
-                "name": g["name"],
-                "faces": len(gf),
-                "vertices": len(gv),
-                "normals": len(gn),
-                "scratch_bytes": scratch,
-                "center": center,
-            }
-        )
-    assert len(faces) // 24 <= model["budget"]["visible_faces"], "Face budget exceeded"
-    assert len(vertices) // 8 <= model["budget"]["padded_group_vertices"], (
+            views.extend([len(groups), *ids])
+        put(path + "viewtable", bytes(views))
+        return groups
+
+    groups = encode_lod("display/resolution/r0/", model["groups"])
+    distant_groups = encode_lod("display/resolution/r1/", model["distant_groups"])
+    number("display/resolution/r0/maxDistanceToDisplay", 1664)
+    assert sum(g["faces"] for g in groups) <= model["budget"]["visible_faces"], "Face budget exceeded"
+    assert sum(g["vertices"] for g in groups) <= model["budget"]["padded_group_vertices"], (
         "Vertex budget exceeded"
     )
     for name, data in [
@@ -1126,25 +1146,13 @@ def export(model):
         ("VertexNormalList", normals),
     ]:
         put("display/resolution/" + name, bytes(data))
-    for base in ("display/resolution/", "display/resolution/r0/"):
-        for n, v in [
-            ("NumFaces", len(faces) // 24),
-            ("NumVertices", len(vertices) // 8),
-            ("NumVertexNormals", len(normals) // 8),
-            ("NumGroups", len(groups)),
-        ]:
-            number(base + n, v)
-    # All groups visible from each direction; sort their bounds far-to-near for painter rendering.
-    views = bytearray()
-    for facing in range(16):
-        zc = [0.25, 0.90, -0.25, -0.90][(facing & 6) // 2]
-        xc = math.sqrt(1 - zc * zc) * (-1 if facing & 1 else 1)
-        yc = 0.7 if facing & 8 else -0.7
-        ids = sorted(
-            range(len(groups)), key=lambda i: dot(groups[i]["center"], (xc, yc, zc))
-        )
-        views.extend([len(groups), *ids])
-    put("display/resolution/r0/viewtable", bytes(views))
+    for name, value in [
+        ("NumFaces", len(faces) // 24),
+        ("NumVertices", len(vertices) // 8),
+        ("NumVertexNormals", len(normals) // 8),
+        ("NumGroups", len(groups) + len(distant_groups)),
+    ]:
+        number("display/resolution/" + name, value)
     number("display/resolution/scale", SCALE)
     put("display/resolution/translate", struct.pack("<4h", 0, 0, 0, 0), 5)
     # Match original car.bit footprint: one RECT + 192×64 16-bit VRAM words.
@@ -1167,12 +1175,41 @@ def export(model):
         struct.pack("<4h", 640, 0, 192, 64) + struct.pack("<%dH" % len(words), *words),
     )
     put("display/shadow", struct.pack("<2BH2BH", 64, 16, 44, 127, 47, 11))
-    anchors = []
-    for name in ("machine_gun_left", "machine_gun_right"):
-        a = model["attachments"][name]
-        anchors.append(struct.pack("<8h", *game(a["position"]), 0, 0, 0, 4096, 0))
-    put("machineGuns", b"".join(anchors), 26, 2)
-    # Custom authoring metadata is kept separate, not injected as an invented runtime contract.
+    guns = ("machine_gun_left", "machine_gun_right")
+    put("machineGuns", b"".join(mount(name) for name in guns), 26, len(guns))
+    put("Laser", mount("special_launcher"), 26, 1)
+    put("engineSample", engine_sample())
+    put("radarDotColor", bytes([66, 152, 236, 0]), 14)
+    number("healthEnergyMax", 9700)
+
+    for name, value in [
+        ("massBottom", 218), ("massTop", 111), ("maxAxleTorque", 20_700_000),
+        ("engineAxleFric", 31_600), ("frictionAdvantageFront", 1820),
+        ("frictionAdvantageBack", 1536), ("turboEngineMultiplier", 8192),
+        ("turboEngineAxleFricMultiplier", 6272), ("damageGiveFactor", 3584),
+        ("damageReceiveFactor", 3328),
+    ]:
+        number("physics/" + name, value, 13)
+    for name, value in [("physicsBoxHeight", 53), ("physicsBoxWidth", 136),
+                        ("physicsBoxLength", 320)]:
+        number("physics/" + name, value)
+    string("physics/wheelDrive", "four wheel")
+
+    string("special/name", "Laser")
+    string("special/hudName", "Ion Lance")
+    string("special/launchFunc", "CarLaunchLaser")
+    number("special/initial", 3)
+    number("special/max", 6)
+    number("special/delay", 10240, 13)
+    number("special/regen", 62)
+
+    put("display/turbo/emmiter", struct.pack("<4h", *game((0, 0.35, -2.45)), 0), 5)
+    for side in ("left", "right"):
+        path = "display/turbo/" + side
+        put(path + "/pos", mount("turbo_" + side), 15)
+        number(path + "/length", 59)
+        number(path + "/width", 18)
+    put("info.tim", character_info(render(model, None, 32, 19, 210, 137)))
     payload = pack_mr(entries)
     (ROOT / "resources/EVELYN.MR").write_bytes(payload)
     if (ROOT / "resources/raw").exists():
@@ -1306,7 +1343,9 @@ def render(model, path, azimuth=35, elevation=20, w=1200, h=800, gray=False):
                     gray_value=gray_value,
                     corner_normals=[cn[i] for i in tri] if cn else None,
                 )
-    png(path, w, h, pix)
+    if path is not None:
+        png(path, w, h, pix)
+    return pix
 
 
 def main():

@@ -1,0 +1,32 @@
+diff --git a/src/modules/menu/car_design.c b/src/modules/menu/car_design.c
+--- a/src/modules/menu/car_design.c
++++ b/src/modules/menu/car_design.c
+@@ -336,7 +336,8 @@
+     s32* track = RegGetFileDataPS(
+         GameGetCharacterNameDirectoryPtr(MenuGameState.character_names[MenuCurrentPlayer]),
+         MenuBioTrackKey);
+-    RedbookMusic(1, MenuOnBioTrack, *track);
++    if (track)
++        RedbookMusic(1, MenuOnBioTrack, *track);
+ }
+ 
+ void MenuProcessAllyScreen(void)
+diff --git a/src/modules/car/effects.c b/src/modules/car/effects.c
+--- a/src/modules/car/effects.c
++++ b/src/modules/car/effects.c
+@@ -126,13 +126,13 @@
+     s32 side;
+     register s32 target_bucket TM4_BIND_REGISTER("$3");
+ 
+-    if ((u8*)packet + 3 * sizeof(*packet) >= end)
+-        return;
+     PushMatrix();
+     if (GameInfo.pause_player)
+         srandrand((unsigned long)car);
+     color_base = car->turbo_amount * 127 / 8;
+     for (i = 0; i < car->turbo_emitter_count; i++) {
++        if ((u8*)packet + 3 * sizeof(*packet) >= end)
++            break;
+         base_width = car->turbo_emitters[i].width;
+         width_y = base_width + randrand() % (base_width / 8) - base_width / 16;
+         width_x = base_width + randrand() % (base_width / 8) - base_width / 16;
