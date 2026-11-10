@@ -744,6 +744,14 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAimAtDestroyable(void)
     return 0;
 }
 
+EMSCRIPTEN_KEEPALIVE int WebTestAimAtWeakDestroyable(void)
+{
+    if (!WebTestAimAtDestroyable())
+        return 0;
+    test_destroyable->hit_points = 1;
+    return 1;
+}
+
 EMSCRIPTEN_KEEPALIVE s32 WebTestApproachCrane(s32 place_target)
 {
     Car* player = GameInfo.players[0].car;

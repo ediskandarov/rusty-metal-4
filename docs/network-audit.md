@@ -24,8 +24,9 @@ reads every newly received buffer record before fixed-step trimming, then applie
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
 live. Recovery streams the authoritative match journal to rebuild the C world.
-The diagnostic build also includes a separate native Lightyear rollback probe.
-Live-match prediction, C state replication and network presentation interpolation remain open.
+Live matches can opt into native Lightyear prediction for the stock Construction
+Yard Deathmatch. The diagnostic build also includes a smaller native rollback probe.
+Portable C state replication and network presentation interpolation remain open.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -142,7 +143,7 @@ Capture requires a completed simulation tick with no staged input. Restore rewin
 the same running instance, then the ordinary C step accepts recorded controls.
 During replay the headless instance suppresses external tick publication, audio
 playback, rumble and presentation. Finishing replay re-enables tick publication.
-The authority and browser still use journal recovery on the network.
+Ordinary matches use journal recovery on the network.
 
 The checkpoint preserves the fixed-address simulation allocation arena, including
 allocator headers, live objects, weapons, contact histories and gameplay sound emitters.
@@ -153,9 +154,9 @@ and navigation links in the resource arena. The undo log rejects addresses outsi
 that arena. A resource allocation or free, unsupported object state or an exhausted
 world undo log also invalidates restoration. The experiment
 uses a 4 MiB simulation arena and up to 2,048 world edits. Stopping the match
-releases the history. Rendered instances, bots,
-other maps, car packs, independent Wasm modules and sanitizer builds are outside
-this local rollback path.
+releases the history. The headless checkpoint test and the rendered live mode use
+the same allocator and world undo log. Bots, other maps, car packs, independent
+Wasm modules and sanitizer builds are outside the checkpoint scope.
 
 [The local checkpoint check](../tests/browser/check_local_checkpoint.cjs) uses
 Orbital and Pizza Boy in headless Chromium. It restores tick 80 with a live projectile
@@ -190,16 +191,37 @@ the adapter stops the probe when that happens.
 canonical bytes and all five subsystem checksums on every repeated tick against an
 independent run of the final inputs. The peer releases scripted inputs over
 Lightyear on loopback, with the browser test advancing the fixed clock. This
-exercises real native receipt and rollback without enabling prediction in ordinary
-matches. Rendered correction, live remote-input policy and mod state remain open.
+exercises native receipt and rollback with a controlled clock and input script.
 
 ### Latency and presentation — R6/R8
 
-Clients execute authoritative inputs after receipt. Local prediction, correction
-smoothing, remote interpolation and stable replay-event identities remain open.
-The offline renderer retains its own interpolation path. WebSocket
-head-of-line blocking still applies. R8 integration requires smoothing a
-restored client during live play.
+The optional live mode waits for native clock synchronization and replicated slot
+ownership before reporting readiness. The server announces a common Lightyear tick
+anchor and uses that clock to dispatch one authoritative C step at 30 Hz. It keeps
+the existing slot authorization, tick and epoch checks, and missing-input policy.
+Client intent and server-accepted controls use distinct native input types. Only the
+server publishes accepted input, and a short overlapping packet history covers
+jitter and delayed delivery. The client uses native fixed ticks for local input and
+stages the controls applied by C in Lightyear's input buffers. Confirmation compares
+the retained C digests at the corresponding completed authority tick.
+
+The rendered client draws the predicted head using the existing network renderer.
+Drawing submits render-owned packets and restores the simulation's active camera,
+GTE registers and effect RNG state. During replay, screen
+messages, texture uploads, mixer updates and tick publication are suppressed. The
+audio bridge detaches restored emitter voice IDs and rebinds still-valid hardware
+voices by emitter identity when replay finishes. One-shots created inside the
+corrected interval are skipped. Prediction currently snaps to its corrected pose
+without adding another presentation delay. Offline interpolation is separate.
+
+Lightyear can adjust its clock speed during play. A whole-tick clock resync,
+input or confirmation beyond the 12-tick history, or an unsupported gameplay
+state closes that client session. The authority and other clients keep running.
+The server still writes its journal, which the ordinary non-predicting match uses
+for recovery. The rendered mode is verified with Orbital and Pizza Boy. An eight-slot attempt
+reached all slot assignments but the default larger roster used car callbacks
+outside checkpoint coverage. Broader map, roster, high-latency and presentation
+smoothing coverage remain open.
 
 ### Session identity and modes — R1/R2/R7
 
@@ -227,8 +249,17 @@ against that site to test same-instance rollback without a match server. For the
 native probe, run `cargo run --manifest-path network/Cargo.toml --features rollback_probe
 --example rollback_peer -- 19326` and then `bun tests/browser/check_lightyear_rollback.cjs`.
 Set `TM4_ROLLBACK_ENDPOINT` if using a different loopback port.
-Start a fresh match server for each network test
-using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
+To play the experimental rendered match, start the site with your local disc
+and run `TM4_NATIVE_PREDICTION=1 TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2`.
+Open the printed match link in two browser windows. An empty lobby waits for
+the first player. After someone joins, the other players have five minutes to
+arrive. Start a new match server after the match has been played. The test
+`bun tests/browser/check_live_rollback.cjs` uses a fresh prediction-enabled
+match server and launches its own Chromium authority. Supply the endpoint and
+authority token as for the journal tests. It conditions client receive traffic
+at 72±12 ms by default and uses real keyboard input in both rendered clients.
+
+Start a fresh match server for each network test using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
 count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` when running the browser checks with Bun;
 `TM4_TEST_PLAYERS=8` selects the eight-client fault test. Run

@@ -7,6 +7,7 @@
 #include "tm4/main/pad.h"
 #include "tm4/main/registry.h"
 #include "tm4/main/system.h"
+#include "rollback_audio.h"
 #include "tm4/modules/car.h"
 
 #include "tm4/main/loadfiles.h"
@@ -42,6 +43,7 @@ static struct {
 } match;
 
 static char* configured_cars[8];
+static int rendered_prediction;
 static void start_session(void);
 
 EMSCRIPTEN_KEEPALIVE int WebNetSelectCar(s32 slot, const char* name)
@@ -202,11 +204,25 @@ static const char* checkpoint_resource_blocker(void)
     return NULL;
 }
 
+EMSCRIPTEN_KEEPALIVE int WebNetEnableRenderedPrediction(void)
+{
+    if (match.players || WebLevelActive() || WebAuthorityStartup()
+        || EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
+        return 0;
+    rendered_prediction = 1;
+    return 1;
+}
+
+int WebNetRenderedPrediction(void)
+{
+    return rendered_prediction && match.players && match.view_slot >= 0;
+}
+
 int WebNetLocalCheckpointSupported(void)
 {
-    return match.players && match.view_slot < 0 && WebAuthorityStartup()
-        && !checkpoint_resource_blocker()
-        && EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; });
+    return match.players && !checkpoint_resource_blocker()
+        && (WebNetRenderedPrediction() || (match.view_slot < 0 && WebAuthorityStartup()
+            && EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; })));
 }
 
 static int local_checkpoint_boundary(void)
@@ -225,7 +241,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebNetCaptureLocalCheckpoint(void)
 {
     if (!local_checkpoint_boundary() || match.local_replaying)
         return local_checkpoint_error(
-            "capture requires a supported headless match at a live tick boundary");
+            "capture requires a supported match at a live tick boundary");
     u32 size = WebCheckpointCapture(match.tick, 0);
     if (!size)
         return local_checkpoint_error("simulation state or checkpoint capacity rejected capture");
@@ -259,10 +275,14 @@ EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalTick(u32 tick)
 {
     if (!local_checkpoint_boundary())
         return local_checkpoint_error(
-            "restore requires a supported headless match at a tick boundary");
+            "restore requires a supported match at a tick boundary");
+    if (WebNetRenderedPrediction())
+        WebRollbackAudioRemember();
     const char* blocker = WebCheckpointRestore(tick);
     if (blocker)
         return local_checkpoint_error(blocker);
+    if (WebNetRenderedPrediction())
+        WebRollbackAudioDetach();
     match.local_replaying = 1;
     match.tick = tick;
     local_checkpoint_error(NULL);
@@ -279,6 +299,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetFinishLocalReplay(void)
 {
     if (!local_checkpoint_boundary() || !match.local_replaying)
         return local_checkpoint_error("replay must finish at a tick boundary");
+    if (WebNetRenderedPrediction())
+        WebRollbackAudioReconcile();
     match.local_replaying = 0;
     local_checkpoint_error(NULL);
     return 1;
@@ -343,6 +365,8 @@ EMSCRIPTEN_KEEPALIVE void WebNetCancelMatch(void)
     if (match.players) {
         WebLevelStop();
         WebNetMatchEnd();
+    } else {
+        rendered_prediction = 0;
     }
 }
 
@@ -496,6 +520,7 @@ void WebNetMatchPublishTick(void)
 
 void WebNetMatchEnd(void)
 {
+    rendered_prediction = 0;
     memset(&match, 0, sizeof(match));
     memset(configured_cars, 0, sizeof(configured_cars));
     EM_ASM({

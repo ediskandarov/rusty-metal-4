@@ -1,10 +1,11 @@
 //! This module owns a separate Wasm memory from Emscripten. wasm-bindgen copies
 //! strings across JS/Rust; controller values are scalars. No C pointer crosses it.
-use crate::input::{ControllerCommand, PendingInputs};
+use crate::input::{ControllerCommand, Input, PendingInputs};
+use crate::live_prediction::{self, LivePrediction};
 use bevy_app::{App, FixedPreUpdate, Update};
 use bevy_ecs::prelude::*;
 use lightyear::prelude::client::*;
-use lightyear::prelude::input::native::{ActionState, InputMarker};
+use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
 use lightyear::prelude::*;
 use std::collections::VecDeque;
 
@@ -35,6 +36,7 @@ struct PendingInput(PendingInputs);
 
 fn attach_controls(
     mut commands: Commands,
+    slots: Query<Entity, (With<ControllerIdentity>, Without<ActionState<Input>>)>,
     query: Query<
         Entity,
         (
@@ -44,6 +46,11 @@ fn attach_controls(
         ),
     >,
 ) {
+    for entity in &slots {
+        commands
+            .entity(entity)
+            .insert(NativeBuffer::<Input>::default());
+    }
     for entity in &query {
         commands.entity(entity).insert((
             ActionState::<ControllerCommand>::default(),
@@ -66,6 +73,7 @@ fn write_input(
 pub struct NetworkClient {
     app: App,
     connection: Entity,
+    prediction_ready: Option<Request>,
 }
 
 #[wasm_bindgen]
@@ -86,6 +94,7 @@ impl NetworkClient {
             tick_duration: std::time::Duration::from_secs_f64(1.0 / 30.0),
         });
         protocol(&mut app);
+        live_prediction::install(&mut app);
         app.init_resource::<PendingInput>();
         app.init_resource::<Inbox>();
         app.add_systems(Update, receive);
@@ -109,7 +118,11 @@ impl NetworkClient {
         app.finish();
         app.cleanup();
         app.world_mut().trigger(LinkStart { entity: connection });
-        Self { app, connection }
+        Self {
+            app,
+            connection,
+            prediction_ready: None,
+        }
     }
 
     pub fn connected(&self) -> bool {
@@ -147,12 +160,63 @@ impl NetworkClient {
                 })
                 .map_err(|_| JsValue::from_str("Controller button-edge history is full"));
         }
+        if matches!(request, Request::Ready { .. })
+            && self
+                .app
+                .world()
+                .resource::<LivePrediction>()
+                .expected_slots
+                .is_some()
+        {
+            self.prediction_ready = Some(request);
+            return Ok(None);
+        }
         self.app
             .world_mut()
             .get_mut::<MessageSender<Request>>(self.connection)
             .ok_or_else(|| JsValue::from_str("Connection closed"))?
             .send::<SessionChannel>(request);
         Ok(None)
+    }
+
+    pub fn prepare_prediction(&mut self, slots: u8) {
+        live_prediction::prepare(self.app.world_mut(), slots);
+    }
+
+    pub fn begin_prediction(
+        &mut self,
+        anchor: u32,
+        epoch: u32,
+        players: u8,
+        slot: u8,
+        checkpoint_depth: u16,
+    ) -> Result<(), JsValue> {
+        live_prediction::begin(
+            self.app.world_mut(),
+            anchor,
+            epoch,
+            players,
+            slot,
+            checkpoint_depth,
+        )
+        .map_err(JsValue::from_str)
+    }
+
+    pub fn prediction_input(
+        &mut self,
+        buttons: u16,
+        axes: u32,
+        analog: bool,
+    ) -> Result<(), JsValue> {
+        self.app
+            .world_mut()
+            .resource_mut::<LivePrediction>()
+            .sample(Input {
+                buttons,
+                axes,
+                analog,
+            })
+            .map_err(JsValue::from_str)
     }
 
     /// Diagnostic packet delay acts before Lightyear decoding, not on C input callbacks.
@@ -184,12 +248,20 @@ impl NetworkClient {
             "jitterMs": link.map(|l| l.stats.jitter.as_secs_f64() * 1000.0),
             "queuedPackets": link.map(|l| l.recv.len() + l.send.len()),
             "pendingInputs": self.app.world().resource::<PendingInput>().0.len(),
+            "prediction": self.app.world().resource::<LivePrediction>().diagnostics(),
         })
         .to_string()
     }
 
     pub fn update(&mut self) -> Result<String, JsValue> {
         self.app.update();
+        if self.prediction_ready.is_some() && live_prediction::ready(self.app.world_mut()) {
+            self.app
+                .world_mut()
+                .get_mut::<MessageSender<Request>>(self.connection)
+                .ok_or_else(|| JsValue::from_str("Connection closed"))?
+                .send::<SessionChannel>(self.prediction_ready.take().unwrap());
+        }
         let mut inbox = self.app.world_mut().resource_mut::<Inbox>();
         if inbox.overflow {
             return Err(JsValue::from_str(
@@ -197,6 +269,8 @@ impl NetworkClient {
             ));
         }
         let messages: Vec<_> = inbox.messages.drain(..).collect();
+        let messages = LivePrediction::drain_confirmed(self.app.world_mut(), messages)
+            .map_err(|error| JsValue::from_str(&error))?;
         let values: Vec<_> = messages
             .into_iter()
             .map(|message| {

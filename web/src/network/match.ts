@@ -1,3 +1,4 @@
+import { attachLivePrediction } from "./livePrediction.ts";
 import type { Frame, Input, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
 import { configureMatch, enqueueStep, stateSections } from "./protocol.ts";
 import type { ReplayBegin, ReplayChunk } from "./replay.ts";
@@ -6,6 +7,8 @@ import { connectNetwork } from "./transport.ts";
 
 type Message =
   | Start
+  | (Omit<Start, "type"> & { type: "prediction_prepare" })
+  | { type: "prediction_begin"; anchor: number }
   | Frame
   | ReplayBegin
   | ReplayChunk
@@ -41,9 +44,20 @@ function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
   );
 }
 
+export function setMatchStatus(
+  status: HTMLElement,
+  state: "lobby" | "playing" | "error",
+  message: string,
+) {
+  status.dataset.matchState = state;
+  status.textContent = message;
+}
+
 export async function joinMatch(engine: NetworkEngine, endpoint: string, status: HTMLElement) {
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
-  status.textContent = "Preparing network session…";
+  const show = (state: "lobby" | "playing" | "error", message: string) =>
+    setMatchStatus(status, state, message);
+  show("lobby", "Connecting to Deathmatch…");
 
   const socket = await connectNetwork(endpoint);
   const pending: Frame[] = [];
@@ -62,6 +76,8 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   let recovery: Recovery | undefined;
   let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
   let recoveryUsed = false;
+  let prediction: ReturnType<typeof attachLivePrediction> | undefined;
+  let predictionStarted = false;
   const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
     pendingInputs: 0,
     rejectedInputs: 0,
@@ -71,24 +87,25 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   });
 
   const send = (message: object) => socket.send(message);
-  const cleanup = (message: string, cancel: boolean) => {
+  const cleanup = (message: string, state: "lobby" | "error") => {
     if (closed) return;
     closed = true;
     delete port.netMatchTick;
     delete port.netMatchInput;
+    prediction?.close();
     pending.length = 0;
     history.clear();
     clearTimeout(recoveryDeadline);
     recovery?.abort.abort();
     recovery = undefined;
     diagnostics.pendingInputs = 0;
-    if (cancel) queueMicrotask(() => engine._WebNetCancelMatch());
-    status.textContent = message;
+    queueMicrotask(() => engine._WebNetCancelMatch());
+    show(state, message);
     socket.close();
   };
   const fail = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
-    cleanup(message, true);
+    cleanup(message, "error");
   };
   const runNext = () => {
     if (closed || running || recovery) return;
@@ -108,16 +125,23 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     }
     if (state.nextMode) {
       const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      cleanup("Match finished · " + result, true);
+      cleanup("Match finished · " + result, "lobby");
     }
   };
 
-  status.textContent = "Connecting to Deathmatch…";
   socket.onopen = () => send({ type: "join", compatibility: port.compatibility });
   socket.onerror = (error) => fail(error);
 
   port.netMatchInput = (buttons, axes, analog) => {
     if (closed || recovery || socket.readyState !== WebSocket.OPEN) return;
+    if (prediction) {
+      try {
+        socket.predictionInput(buttons, axes, analog);
+      } catch (error) {
+        fail(error);
+      }
+      return;
+    }
     if (
       lastInput?.buttons === buttons &&
       lastInput.axes === axes &&
@@ -171,7 +195,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
       pending.length = 0;
       history.clear();
       diagnostics.pendingInputs = 0;
-      status.textContent = "Restoring the match…";
+      show("lobby", "Restoring the match…");
       armJournalTimeout();
       send({ type: "recover", epoch, tick: frame.tick });
       return;
@@ -195,22 +219,46 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           if (!Number.isInteger(message.slot) || message.slot < 0 || message.slot >= 8)
             throw new Error("Invalid player slot");
           slot = message.slot;
-          status.textContent = "Player " + (slot + 1) + " · Waiting for the other players";
+          show(
+            "lobby",
+            "Player " +
+              (slot + 1) +
+              " · Waiting for the other players\nFor local play, open this match link in another window.",
+          );
           break;
+        case "prediction_prepare":
         case "start": {
-          if (players || slot < 0 || !configureMatch(engine, message, slot))
+          show("lobby", "Loading Deathmatch…");
+          if (message.type === "prediction_prepare") {
+            if (prediction || players || message.world !== "Construction Yard")
+              throw new Error("Live rollback requires a stock Construction Yard match");
+            prediction = attachLivePrediction(engine, port);
+            delete port.netMatchTick;
+            socket.preparePrediction(message.players);
+          }
+          if (players || slot < 0 || !configureMatch(engine, { ...message, type: "start" }, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");
           players = message.players;
           epoch = message.epoch;
-          status.textContent = "Loading Deathmatch…";
           if (!port.netMatch) throw new Error("The game did not become ready at tick zero");
           if (closed) return;
           initialDigest = port.netMatch.digest ?? 0;
           initialRecoverable = port.netMatch.unsupported === null;
+          if (prediction && !initialRecoverable)
+            throw new Error(
+              "Live rollback cannot restore this roster: " + port.netMatch.unsupported,
+            );
           send({ type: "ready", epoch, digest: initialDigest });
-          status.textContent = "Player " + (slot + 1) + " of " + players;
+          show("lobby", "Waiting for all players to finish loading…");
           break;
         }
+        case "prediction_begin":
+          if (!prediction || predictionStarted || !players)
+            throw new Error("Unexpected live prediction clock anchor");
+          socket.beginPrediction(message.anchor, epoch, players, slot, prediction.depth);
+          predictionStarted = true;
+          show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
+          break;
         case "recovery_begin":
           if (!recovery || recovery.journal || message.head !== nextFrame)
             throw new Error("Unexpected match journal");
@@ -252,7 +300,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           clearTimeout(recoveryDeadline);
           nextFrame = message.tick;
           port.netMatchServerState = message.state;
-          status.textContent = "Player " + (slot + 1) + " of " + players;
+          show("playing", "Player " + (slot + 1) + " of " + players);
           displayOutcome(message.state);
           break;
         case "input_ack":
@@ -275,7 +323,14 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           }
           if (message.tick !== nextFrame++ || message.inputs.length !== players)
             throw new Error("Received an out-of-order match frame");
+          if (predictionStarted) {
+            port.netConfirmedTick = message.tick + 1;
+            port.netMatchServerState = message.state;
+            displayOutcome(message.state);
+            break;
+          }
           if (recovery) break;
+          if (message.tick === 0) show("playing", "Player " + (slot + 1) + " of " + players);
           if (pending.length >= 120) throw new Error("Could not keep up with the server");
           pending.push(message);
           runNext();

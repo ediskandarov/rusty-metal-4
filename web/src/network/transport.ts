@@ -8,6 +8,15 @@ interface RustClient {
   send(json: string): number | undefined;
   update(): string;
   diagnostics(): string;
+  prepare_prediction(players: number): void;
+  begin_prediction(
+    anchor: number,
+    epoch: number,
+    players: number,
+    slot: number,
+    depth: number,
+  ): void;
+  prediction_input(buttons: number, axes: number, analog: boolean): void;
   condition(latency: number, jitter: number): void;
   free(): void;
 }
@@ -41,7 +50,27 @@ export async function connectNetwork(endpoint: string) {
         jitterMs: number;
         queuedPackets: number;
         pendingInputs: number;
+        prediction: {
+          head: number;
+          confirmed: number;
+          rollbacks: number;
+          replayed: number;
+          maxDepth: number;
+          historyBytes: number;
+          peakBytes: number;
+          buttonEdges: number;
+        };
       },
+    preparePrediction: (players: number) => client.prepare_prediction(players),
+    beginPrediction: (
+      anchor: number,
+      epoch: number,
+      players: number,
+      slot: number,
+      depth: number,
+    ) => client.begin_prediction(anchor, epoch, players, slot, depth),
+    predictionInput: (buttons: number, axes: number, analog: boolean) =>
+      client.prediction_input(buttons, axes, analog),
     condition: (latency: number, jitter: number) => client.condition(latency, jitter),
     onopen: (() => {}) as () => void,
     onmessage: ((_message: unknown) => {}) as (message: unknown) => void,

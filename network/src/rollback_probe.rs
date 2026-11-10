@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 pub const STEP: Duration = Duration::from_nanos(33_333_333);
-pub const ROLLBACK_DEPTH: u16 = 12;
+pub use crate::protocol::PREDICTION_DEPTH as ROLLBACK_DEPTH;
 
 #[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProbeSlot;

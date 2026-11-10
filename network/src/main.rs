@@ -16,6 +16,7 @@ use bevy_ecs::prelude::*;
 use lightyear::prelude::server::*;
 use lightyear::prelude::*;
 use lightyear::websocket::server::{ServerConfig, WebSocketServerIo};
+use tm4_network::protocol as game_protocol;
 use tm4_network::{
     input::{ControllerCommand, Input, InputHistory},
     protocol::{
@@ -69,6 +70,51 @@ struct Admission {
     unacknowledged: HashSet<lightyear::transport::packet::message::MessageId>,
 }
 
+#[derive(Default)]
+struct AcceptedTimeline {
+    anchor: Option<Tick>,
+    recent: VecDeque<Vec<Input>>,
+}
+
+impl AcceptedTimeline {
+    fn packet(
+        &mut self,
+        tick: u32,
+        inputs: &[Input],
+        players: &[Player],
+    ) -> game_protocol::AcceptedInputs {
+        use lightyear::input::input_message::{ActionStateSequence, InputTarget, PerTargetData};
+        use lightyear::prelude::input::native::{ActionState, NativeBuffer, NativeStateSequence};
+        self.recent.push_back(inputs.to_vec());
+        if self.recent.len() > usize::from(game_protocol::PREDICTION_DEPTH + 1) {
+            self.recent.pop_front();
+        }
+        let end = self.anchor.unwrap() + tick as i32 + 1;
+        let mut packet = game_protocol::AcceptedInputs::new(end);
+        packet.rebroadcast = true;
+        let start = end - (self.recent.len() - 1) as u32;
+        for (slot, player) in players.iter().enumerate() {
+            let Some(controller) = player.controller else {
+                continue;
+            };
+            let mut buffer = NativeBuffer::<Input>::default();
+            for (offset, inputs) in self.recent.iter().enumerate() {
+                buffer.set(start + offset as i32, ActionState(inputs[slot]));
+            }
+            packet.inputs.push(PerTargetData {
+                target: InputTarget::Entity(controller),
+                states: NativeStateSequence::build_from_input_buffer(
+                    &buffer,
+                    self.recent.len(),
+                    end,
+                )
+                .expect("accepted history contains a row for every slot"),
+            });
+        }
+        packet
+    }
+}
+
 #[derive(Resource)]
 struct Match {
     players: Vec<Player>,
@@ -82,6 +128,7 @@ struct Match {
     ended: bool,
     tick: u32,
     next_step: Instant,
+    lobby_since: Option<Instant>,
     loading_since: Instant,
     overruns: u32,
     in_flight: Option<(Vec<Input>, Instant)>,
@@ -92,6 +139,7 @@ struct Match {
     journal_sealed: bool,
     replay_available: bool,
     fast_until: u32,
+    prediction: Option<AcceptedTimeline>,
 }
 
 fn send(
@@ -261,6 +309,18 @@ impl Match {
                     );
                 }
             }
+            Request::Join { .. } if self.ended || self.started => send(
+                links,
+                entity,
+                &Message::Error {
+                    message: if self.ended {
+                        "This lobby is closed. Open a new match link to play."
+                    } else {
+                        "This match has already started. Open a new match link to play."
+                    }
+                    .into(),
+                },
+            ),
             Request::Authority {
                 token,
                 compatibility,
@@ -301,7 +361,13 @@ impl Match {
                 sequence,
                 tick,
                 input,
-            } if self.started && epoch == 1 => {
+            } if self.started
+                && epoch == 1
+                && self
+                    .prediction
+                    .as_ref()
+                    .is_none_or(|timeline| timeline.anchor.is_some()) =>
+            {
                 if let Some(player) = slot.map(|slot| &mut self.players[slot])
                     && player.replay.receives_live()
                 {
@@ -326,7 +392,11 @@ impl Match {
                 }
             }
             Request::Recover { epoch: 1, tick }
-                if self.started && !self.ended && tick < self.tick && slot.is_some() =>
+                if self.started
+                    && !self.ended
+                    && self.prediction.is_none()
+                    && tick < self.tick
+                    && slot.is_some() =>
             {
                 let player = &mut self.players[slot.unwrap()];
                 if !self.replay_available || !matches!(player.replay, Replay::Available) {
@@ -448,6 +518,8 @@ impl Match {
 }
 
 fn update(
+    native_timeline: Res<LocalTimeline>,
+    mut accepted_senders: Query<&mut MessageSender<game_protocol::AcceptedInputs>, With<Connected>>,
     mut game: ResMut<Match>,
     mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
     mut receivers: Query<(Entity, &mut MessageReceiver<Request>, &mut Admission)>,
@@ -545,8 +617,19 @@ fn update(
         }
     }
 
-    if !game.started && !game.ended && game.loading_since.elapsed() > Duration::from_secs(300) {
-        game.fail(&mut links, "Lobby expired after five minutes.");
+    if !game.started && !game.ended {
+        if game.players.iter().any(|player| player.entity.is_some()) {
+            if game.lobby_since.get_or_insert_with(Instant::now).elapsed()
+                > Duration::from_secs(300)
+            {
+                game.fail(
+                    &mut links,
+                    "Lobby expired while waiting for players. Open a new match link to play.",
+                );
+            }
+        } else {
+            game.lobby_since = None;
+        }
     }
     let Some(authority) = game.authority else {
         return;
@@ -576,13 +659,32 @@ fn update(
             seed: 12345,
             epoch: 1,
         };
+        if game.prediction.is_some() && start.world != "Construction Yard" {
+            game.fail(
+                &mut links,
+                "Live rollback requires stock Construction Yard.",
+            );
+            return;
+        }
         let message = Message::Start(start.clone());
-        game.session = Some(start);
+        game.session = Some(start.clone());
         send(&mut links, authority, &message);
-        game.broadcast(&mut links, &message);
+        if game.prediction.is_some() {
+            game.broadcast(&mut links, &Message::PredictionPrepare(start));
+        } else {
+            game.broadcast(&mut links, &message);
+        }
     }
 
     let now = Instant::now();
+    if game.prediction.is_some() && game.authority_ready && game.tick == 0 && !game.replay_available
+    {
+        game.fail(
+            &mut links,
+            "This roster contains car behavior that live rollback cannot restore.",
+        );
+        return;
+    }
     if !game.authority_ready || game.players.iter().any(|player| !player.ready) {
         game.next_step = now;
         if now.duration_since(game.loading_since) > Duration::from_secs(45) {
@@ -621,6 +723,16 @@ fn update(
         }
         game.next_step = Instant::now();
     }
+    if game
+        .prediction
+        .as_ref()
+        .is_some_and(|timeline| timeline.anchor.is_none())
+    {
+        let anchor = native_timeline.tick() + 12;
+        game.prediction.as_mut().unwrap().anchor = Some(anchor);
+        game.next_step = now + STEP * 12;
+        game.broadcast(&mut links, &Message::PredictionBegin { anchor: anchor.0 });
+    }
     if game.tick >= JOURNAL_MAX_TICKS {
         game.fail(&mut links, "The match reached its journal disk budget.");
         return;
@@ -631,7 +743,7 @@ fn update(
         }
         return;
     }
-    let fast = game.tick < game.fast_until;
+    let fast = game.prediction.is_none() && game.tick < game.fast_until;
     if !fast && now.saturating_duration_since(game.next_step) > Duration::from_millis(250) {
         game.fail(
             &mut links,
@@ -639,7 +751,15 @@ fn update(
         );
         return;
     }
-    if fast || now >= game.next_step {
+    let should_step = match game
+        .prediction
+        .as_ref()
+        .and_then(|timeline| timeline.anchor)
+    {
+        Some(anchor) => native_timeline.tick() >= anchor + game.tick as i32 + 1,
+        None => fast || now >= game.next_step,
+    };
+    if should_step {
         if !fast && now.saturating_duration_since(game.next_step) > STEP {
             game.overruns += 1;
         }
@@ -649,6 +769,21 @@ fn update(
             .iter_mut()
             .map(|player| player.history.sample(tick))
             .collect();
+        if game.prediction.is_some() {
+            let game = &mut *game;
+            let packet = game
+                .prediction
+                .as_mut()
+                .unwrap()
+                .packet(tick, &inputs, &game.players);
+            for player in &game.players {
+                if let Some(entity) = player.entity
+                    && let Ok(mut sender) = accepted_senders.get_mut(entity)
+                {
+                    sender.send::<lightyear::prelude::input::InputChannel>(packet.clone());
+                }
+            }
+        }
         send(
             &mut links,
             authority,
@@ -822,6 +957,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 ReplicationSender,
                 Transport::new(PriorityConfig::new(128 * 1024)),
                 MessageSender::<Message>::default(),
+                MessageSender::<game_protocol::AcceptedInputs>::default(),
                 MessageReceiver::<Request>::default(),
             ));
         },
@@ -854,6 +990,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ended: false,
         tick: 0,
         next_step: Instant::now(),
+        lobby_since: None,
         loading_since: Instant::now(),
         overruns: 0,
         in_flight: None,
@@ -866,6 +1003,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         journal_sealed: false,
         replay_available: false,
         fast_until,
+        prediction: (env::var("TM4_NATIVE_PREDICTION").as_deref() == Ok("1"))
+            .then(AcceptedTimeline::default),
     });
     app.add_systems(Update, update);
     app.add_systems(

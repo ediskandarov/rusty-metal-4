@@ -1,0 +1,33 @@
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -401,6 +401,8 @@
+     ScreenMessageQueue* base;
+     ScreenMessageQueue* queue;
+     const s32 queue_count = ArrayCount(ScreenLocalMessages);
++    if (WebNetRenderedPrediction() && WebNetReplaying())
++        return;
+     player = WebNetLocalView(player);
+     if (player < 0 || player >= queue_count || player >= GameInfo.player_count)
+         return;
+--- a/src/main/sound.c
++++ b/src/main/sound.c
+@@ -1,5 +1,6 @@
+ #include "tm4/main/sound.h"
+ #include "port/web/net_match.h"
++#include <emscripten.h>
+
+ #include "tm4/fixed.h"
+ #include "tm4/integer.h"
+@@ -377,6 +378,12 @@
+ void SoundStartVoice(
+     s32 program, s32 index, s32 offset_q12, s32 voice, s32 pitch, s32 left, s32 right)
+ {
++    if (WebNetRenderedPrediction())
++        EM_ASM({
++            tm4Port.predictionSoundStarts = (tm4Port.predictionSoundStarts || 0) + 1;
++            if ($0)
++                tm4Port.predictionReplaySoundStarts = (tm4Port.predictionReplaySoundStarts || 0) + 1;
++        }, WebNetReplaying());
+     SpuVoiceAttr attr;
+     u32 mask = SPU_KEYCH(voice);
+     SpuSetKey(SPU_OFF, mask);

@@ -197,6 +197,7 @@ add_executable(tm4_web
     "${TM4_WEB}/level.c"
     "${TM4_WEB}/net_match.c"
     "${TM4_WEB}/checkpoint.c"
+    "${TM4_WEB}/rollback_audio.c"
     "${TM4_WEB}/net_state.c"
     "${TM4_WEB}/net_state_cars.c"
     "${TM4_WEB}/net_state_objects.c"

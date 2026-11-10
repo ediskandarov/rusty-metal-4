@@ -135,6 +135,8 @@ void WebLevelStart(void)
     SoundStopSounds();
     RenderConstructor();
     ScreenInitialize();
+    if (WebNetMatchActive() && WebNetMatchViewSlot() >= 0)
+        SetDispMask(1);
     WebCheckpointArenaSelect(checkpoint_arena);
     WebCarStart();
     WebCheckpointArenaSelect(0);
@@ -227,6 +229,9 @@ static void finish_session(void)
         WebLevelStart();
 }
 
+u32 WebCheckpointGteCapture(void* output, u32 capacity);
+void WebCheckpointGteRestore(const void* input);
+
 static void process_level_step(void)
 {
 #ifdef TM4_WEB_TEST_HOOKS
@@ -234,10 +239,22 @@ static void process_level_step(void)
     WebTestMotionInput();
 #endif
     WebCarStep();
-    SoundProcess();
-    if (!checkpoint_arena) {
-        WorldAnimateTextures();
-        ScreenProcess();
+    if (checkpoint_arena && WebNetRenderedPrediction()) {
+        u8 gte[256];
+        if (!WebNetReplaying() && WebCheckpointGteCapture(gte, sizeof(gte))) {
+            WebCheckpointArenaSelect(0);
+            SoundProcess();
+            WorldAnimateTextures();
+            ScreenProcess();
+            WebCheckpointGteRestore(gte);
+            WebCheckpointArenaSelect(1);
+        }
+    } else {
+        SoundProcess();
+        if (!checkpoint_arena) {
+            WorldAnimateTextures();
+            ScreenProcess();
+        }
     }
     ++simulation_steps;
 }
@@ -314,6 +331,11 @@ static void demo_frame(void)
 
 static void draw_network_view(s32 slot)
 {
+    u8 gte[256];
+    Camera* active_view = GameInfo.active_view;
+    int saved_gte = WebNetRenderedPrediction();
+    if (saved_gte && !WebCheckpointGteCapture(gte, sizeof(gte)))
+        return;
     const Tm4GamePlayer* player = &GameInfo.players[slot];
     /* Turbo effects draw from the secondary RNG between simulation ticks. */
     const u32 effect_seed = WebRenderEffectRandomState();
@@ -321,6 +343,10 @@ static void draw_network_view(s32 slot)
     RenderBuildFrame();
     srandrand(effect_seed);
     WebRenderPresentLevelFrame();
+    if (saved_gte) {
+        WebCheckpointGteRestore(gte);
+        GameInfo.active_view = active_view;
+    }
     ++frames;
     EM_ASM(
         {

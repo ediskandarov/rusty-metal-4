@@ -2,7 +2,7 @@ import { loadDisc } from "./loader/loader.ts";
 import { directorySources, remoteSources } from "./loader/sources.ts";
 import type { DiscSources } from "./loader/types.ts";
 import { installCarMods } from "./mods/install.ts";
-import { joinMatch } from "./network/match.ts";
+import { joinMatch, setMatchStatus } from "./network/match.ts";
 import { hasNetworkEngine } from "./network/protocol.ts";
 import { prepareIsolation } from "./runtime/isolation.ts";
 import { startGame } from "./runtime/start.ts";
@@ -49,19 +49,24 @@ async function launch(resolveSources: () => DiscSources) {
     await installCarMods(assets, selectedMods);
     progress.textContent = "Starting game…";
     runtimeStarted = true;
+    const endpoint = new URLSearchParams(location.search).get("match");
+    const status = element("status", HTMLElement);
+    if (endpoint) {
+      setMatchStatus(status, "lobby", "Preparing Deathmatch…");
+      element("resources", HTMLDetailsElement).open = false;
+    }
     // Hide before starting SDL so its initial viewport uses the final page layout.
     startup.hidden = true;
     await startGame(assets, canvas, selectedMods.length);
-    const status = element("status", HTMLElement);
-    status.textContent = "";
-    const endpoint = new URLSearchParams(location.search).get("match");
     if (endpoint) {
       const runtime = globalThis.Module;
       if (!hasNetworkEngine(runtime))
         throw new Error("This build does not include the network runtime");
       void joinMatch(runtime, endpoint, status).catch((error: unknown) => {
-        status.textContent = error instanceof Error ? error.message : String(error);
+        setMatchStatus(status, "error", error instanceof Error ? error.message : String(error));
       });
+    } else {
+      status.textContent = "";
     }
     if (!new URLSearchParams(location.search).has("preview")) canvas.focus();
   } catch (error) {

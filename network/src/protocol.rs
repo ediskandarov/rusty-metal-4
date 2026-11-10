@@ -5,6 +5,11 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 pub struct SessionChannel;
 
+pub type AcceptedInputs = lightyear::input::input_message::InputMessage<
+    lightyear::prelude::input::native::NativeStateSequence<Input>,
+>;
+pub const PREDICTION_DEPTH: u16 = 12;
+
 pub const REPLAY_SCHEMA: u16 = 2;
 pub const JOURNAL_DISK_BYTES: usize = 1024 * 1024 * 1024;
 pub const JOURNAL_MAX_TICKS: u32 =
@@ -48,6 +53,19 @@ pub fn protocol(app: &mut App) {
     app.add_plugins(lightyear::prelude::input::native::InputPlugin::<
         ControllerCommand,
     >::default());
+    #[cfg(all(feature = "client", target_family = "wasm"))]
+    app.add_plugins(lightyear::prelude::input::native::InputPlugin::<Input> {
+        config: lightyear::prelude::input::InputConfig {
+            rebroadcast_inputs: true,
+            // The client consumes this stream but only the match server may send it.
+            send_interval: std::time::Duration::MAX,
+            ..Default::default()
+        },
+    });
+    #[cfg(not(all(feature = "client", target_family = "wasm")))]
+    app.register_message::<AcceptedInputs>()
+        .add_map_entities()
+        .add_direction(NetworkDirection::ServerToClient);
     app.insert_resource(ReplicationMetadata::new(
         std::time::Duration::from_secs_f64(1.0 / 30.0),
     ));
@@ -142,6 +160,10 @@ pub enum Message {
         slot: Option<usize>,
     },
     Start(SessionStart),
+    PredictionPrepare(SessionStart),
+    PredictionBegin {
+        anchor: u32,
+    },
     Step {
         tick: u32,
         inputs: Vec<Input>,

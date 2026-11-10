@@ -1,4 +1,5 @@
 use super::*;
+use crate::live_prediction::CheckpointTick;
 use aeronet_io::connection::LocalAddr;
 use bevy_app::{FixedPreUpdate, FixedUpdate, PreUpdate};
 use bevy_time::TimeUpdateStrategy;
@@ -27,9 +28,6 @@ extern "C" {
     #[wasm_bindgen(js_namespace = tm4Rollback, js_name = finish)]
     fn finish() -> bool;
 }
-
-#[derive(Component, Clone, Debug, PartialEq)]
-struct CheckpointTick(u32);
 
 #[derive(Resource, Default)]
 struct ProbeState {
@@ -248,17 +246,7 @@ impl RollbackProbe {
             ActionState::<Input>::default(),
             InputMarker::<Input>::default(),
         ));
-        let mut history = PredictionHistory::default();
-        history.add_predicted(base, Some(CheckpointTick(0)));
-        self.checkpoint = Some(
-            world
-                .spawn((
-                    DeterministicPredicted::default(),
-                    CheckpointTick(0),
-                    history,
-                ))
-                .id(),
-        );
+        self.checkpoint = Some(CheckpointTick::spawn(world, base));
         let mut state = world.resource_mut::<ProbeState>();
         state.base = Some(base);
         state.remote = Some(remote);

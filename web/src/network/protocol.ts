@@ -67,6 +67,18 @@ export interface NetworkPort {
   netMatchTick?: () => void;
   netMatchInput?: (buttons: number, axes: number, analog: boolean) => void;
   netMatchServerState?: RoundState;
+  netConfirmedTick?: number;
+  netPredictionCost?: {
+    captures: number;
+    captureMs: number;
+    restores: number;
+    restoreMs: number;
+    maxRestoreMs: number;
+    steps: number;
+    stepMs: number;
+    replayStepMs: number;
+    maxRollbackMs: number;
+  };
   netDiagnostics?: {
     pendingInputs: number;
     rejectedInputs: number;
@@ -77,7 +89,22 @@ export interface NetworkPort {
     replayChunks?: number;
     replayMs?: number;
     divergence?: string[];
-    transport: { rttMs: number; jitterMs: number; queuedPackets: number; pendingInputs: number };
+    transport: {
+      rttMs: number;
+      jitterMs: number;
+      queuedPackets: number;
+      pendingInputs: number;
+      prediction?: {
+        head: number;
+        confirmed: number;
+        rollbacks: number;
+        replayed: number;
+        maxDepth: number;
+        historyBytes: number;
+        peakBytes: number;
+        buttonEdges: number;
+      };
+    };
   };
 }
 

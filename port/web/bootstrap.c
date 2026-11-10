@@ -365,7 +365,7 @@ static void initialize_platform(void)
 
 static void browser_frame(void)
 {
-    if (WebLevelCheckpointActive())
+    if (WebLevelCheckpointActive() && !WebNetRenderedPrediction())
         return;
     apply_render_settings();
     WebApplyCheats();
