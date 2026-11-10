@@ -357,8 +357,8 @@ static void initialize_platform(void)
     SetVideoMode(MODE_NTSC);
     GameInitialize();
     SoundInitializeSpu();
-    /* Keep SDL on RAF scheduling before installing the browser main loop. */
-    Psyz_VideoSetVsyncMode(PSYZ_VSYNC_ON);
+    if (!authority_startup)
+        Psyz_VideoSetVsyncMode(PSYZ_VSYNC_ON);
     if (!direct_startup)
         WebMovieStart("N89STUDI", 0, startup_intro);
 }
@@ -396,6 +396,8 @@ int main(int argc, char** argv)
     initialize_platform();
     WebNetPublishCatalog();
     EM_ASM({ tm4Port.platformReady = true; });
+    if (authority_startup)
+        emscripten_exit_with_live_runtime();
     emscripten_set_main_loop(browser_frame, 0, 1);
     return 0;
 }

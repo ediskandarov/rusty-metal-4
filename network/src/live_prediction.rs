@@ -1,7 +1,8 @@
 use crate::input::{ControllerCommand, Input};
 use crate::protocol::{ControllerIdentity, Message, PREDICTION_DEPTH};
-use bevy_app::{App, FixedPreUpdate, FixedUpdate, PreUpdate};
+use bevy_app::{App, FixedPostUpdate, FixedPreUpdate, FixedUpdate, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
+use bevy_time::{Fixed, Time, Virtual};
 use lightyear::input::client::InputSystems;
 use lightyear::prelude::client::InputDelayConfig;
 use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
@@ -22,10 +23,13 @@ extern "C" {
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn live_digest_section(index: u8) -> u32;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
-    fn finish_live_replay() -> bool;
+    fn finish_live_replay() -> u8;
+    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
+    fn set_live_presentation_phase(phase: f64, correction: f32);
 }
 
 const HISTORY: usize = PREDICTION_DEPTH as usize + 1;
+const VERIFICATION_HISTORY: usize = 2 * PREDICTION_DEPTH as usize + 1;
 const MAX_SLOTS: usize = 8;
 const MAX_EDGES: usize = 16;
 type Digests = [u32; 6];
@@ -62,10 +66,12 @@ pub struct LivePrediction {
     confirmations: VecDeque<Message>,
     received_mismatch: bool,
     restoring: bool,
+    correction_started: Option<f64>,
     sequence: u32,
     head: u32,
     confirmed: u32,
     rollbacks: u32,
+    window_waits: u32,
     replayed: u32,
     depth: u32,
     bytes: u32,
@@ -74,11 +80,14 @@ pub struct LivePrediction {
 }
 
 impl LivePrediction {
-    pub fn diagnostics(&self) -> serde_json::Value {
+    pub fn diagnostics(&self, wait: &PredictionWindowWait) -> serde_json::Value {
         serde_json::json!({
             "head": self.head,
             "confirmed": self.confirmed,
             "rollbacks": self.rollbacks,
+            "windowWaits": self.window_waits,
+            "waitingForInput": wait.is_waiting(),
+            "acceptedDepth": wait.prediction_depth(),
             "replayed": self.replayed,
             "maxDepth": self.depth,
             "historyBytes": self.bytes,
@@ -103,6 +112,12 @@ impl LivePrediction {
         let Some(session) = session else {
             return Ok(inbox);
         };
+        if let Some(error) = inbox
+            .iter()
+            .find(|message| matches!(message, Message::Error { .. }))
+        {
+            return Ok(vec![error.clone()]);
+        }
         let frontier = world
             .query::<(&ControllerIdentity, &NativeBuffer<Input>)>()
             .iter(world)
@@ -184,6 +199,11 @@ pub fn install(app: &mut App) {
         write_local.in_set(InputSystems::WriteClientInputs),
     );
     app.add_systems(FixedUpdate, step_world);
+    app.add_systems(
+        FixedPostUpdate,
+        (update_prediction_wait, discard_waiting_overstep).chain(),
+    );
+    app.add_systems(PostUpdate, (update_prediction_wait, presentation_phase));
     app.add_systems(
         PreUpdate,
         (
@@ -374,8 +394,14 @@ fn step_world(
         }
         let frontier = buffer.last_remote_tick.unwrap_or(session.anchor);
         if native_tick - frontier > i32::from(PREDICTION_DEPTH) {
-            state.error =
-                Some("Accepted inputs fell outside the retained prediction window".into());
+            state.error = Some(format!(
+                "Accepted inputs fell outside the retained prediction window (slot {slot}, native {}, accepted through {}, buffered {:?}..{:?}, C head {tick}, confirmed {})",
+                native_tick.0,
+                frontier.0,
+                buffer.start_tick.map(|t| t.0),
+                buffer.end_tick().map(|t| t.0),
+                state.confirmed,
+            ));
             return;
         }
         let input = if native_tick <= frontier {
@@ -429,12 +455,57 @@ fn step_world(
     state.head = checkpoint.0;
     state.bytes = bytes;
     state.peak_bytes = state.peak_bytes.max(bytes);
-    if state.checksums.len() == HISTORY {
+    if state.checksums.len() == VERIFICATION_HISTORY {
         state.checksums.pop_front();
     }
     state.checksums.push_back((checkpoint.0, hashes(), applied));
     if state.restoring {
         state.replayed += 1;
+    }
+}
+
+fn update_prediction_wait(
+    mut state: ResMut<LivePrediction>,
+    timeline: Res<LocalTimeline>,
+    slots: Query<(&ControllerIdentity, &NativeBuffer<Input>)>,
+    mut wait: ResMut<PredictionWindowWait>,
+) {
+    let Some(session) = state.session else {
+        return;
+    };
+    let tick = timeline.tick();
+    if tick <= session.anchor || state.restoring || state.error.is_some() {
+        return;
+    }
+    let mut count = 0;
+    let frontier = slots
+        .iter()
+        .filter(|(identity, _)| identity.slot < session.slots)
+        .map(|(_, buffer)| {
+            count += 1;
+            buffer.last_remote_tick.unwrap_or(session.anchor)
+        })
+        .reduce(|a, b| if a - b <= 0 { a } else { b });
+    let frontier = if count == session.slots {
+        frontier
+    } else {
+        Some(session.anchor)
+    };
+    if wait.update(tick, frontier, PREDICTION_DEPTH) && wait.is_waiting() {
+        state.window_waits += 1;
+    }
+}
+
+fn discard_waiting_overstep(
+    state: Res<LivePrediction>,
+    wait: Res<PredictionWindowWait>,
+    mut fixed: ResMut<Time<Fixed>>,
+) {
+    // Lightyear applies the wait to the next frame. Cancel additional fixed
+    // ticks already accumulated by this frame before any can cross the bound.
+    if wait.is_waiting() && !state.restoring {
+        let overstep = fixed.overstep();
+        fixed.discard_overstep(overstep);
     }
 }
 
@@ -475,8 +546,29 @@ fn restore_world(
     state.checksums.retain(|(tick, _, _)| *tick <= checkpoint.0);
 }
 
-fn end_replay(mut state: ResMut<LivePrediction>) {
-    if std::mem::take(&mut state.restoring) && !finish_live_replay() && state.error.is_none() {
-        state.error = Some("The game refused to end Lightyear rollback".into());
+fn end_replay(mut state: ResMut<LivePrediction>, time: Res<Time<Virtual>>) {
+    if std::mem::take(&mut state.restoring) {
+        match finish_live_replay() {
+            0 if state.error.is_none() => {
+                state.error = Some("The game refused to end Lightyear rollback".into());
+            }
+            2 => state.correction_started = Some(time.elapsed_secs_f64()),
+            _ => {}
+        }
     }
+}
+
+fn presentation_phase(
+    state: Res<LivePrediction>,
+    fixed: Res<Time<Fixed>>,
+    time: Res<Time<Virtual>>,
+) {
+    if state.session.is_none() {
+        return;
+    }
+    let correction = state.correction_started.map_or(0.0, |start| {
+        let elapsed = (time.elapsed_secs_f64() - start) as f32;
+        CorrectionEase::Smoothstep.remaining(elapsed, 0.100)
+    });
+    set_live_presentation_phase(fixed.overstep_fraction_f64().clamp(0.0, 1.0), correction);
 }

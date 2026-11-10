@@ -183,6 +183,10 @@ impl NetworkClient {
         live_prediction::prepare(self.app.world_mut(), slots);
     }
 
+    pub fn prediction_clock(&self) -> u32 {
+        self.app.world().resource::<LocalTimeline>().tick().0
+    }
+
     pub fn begin_prediction(
         &mut self,
         anchor: u32,
@@ -248,7 +252,9 @@ impl NetworkClient {
             "jitterMs": link.map(|l| l.stats.jitter.as_secs_f64() * 1000.0),
             "queuedPackets": link.map(|l| l.recv.len() + l.send.len()),
             "pendingInputs": self.app.world().resource::<PendingInput>().0.len(),
-            "prediction": self.app.world().resource::<LivePrediction>().diagnostics(),
+            "nativeTick": self.app.world().resource::<LocalTimeline>().tick().0,
+            "prediction": self.app.world().resource::<LivePrediction>()
+                .diagnostics(self.app.world().resource::<PredictionWindowWait>()),
         })
         .to_string()
     }

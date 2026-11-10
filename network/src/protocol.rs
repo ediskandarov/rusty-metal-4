@@ -151,6 +151,11 @@ pub enum Request {
         tick: u32,
         state: RoundState,
     },
+    PredictionClock {
+        epoch: u32,
+        anchor: u32,
+        tick: u32,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -198,5 +203,8 @@ pub enum Message {
     Finished,
     Error {
         message: String,
+    },
+    PredictionOffer {
+        anchor: u32,
     },
 }

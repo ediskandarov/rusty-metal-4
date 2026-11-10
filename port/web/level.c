@@ -8,6 +8,7 @@
 #include "movie.h"
 #include "net_match.h"
 #include "render_sync.h"
+#include "rollback_audio.h"
 #include "tm4/main/carresources.h"
 #include "tm4/main/cd.h"
 #include "tm4/main/game.h"
@@ -156,6 +157,8 @@ void WebLevelStart(void)
     frames = 0;
     motion = (WebRenderMotionSettings){ 0 };
     WebInterpolationReset();
+    if (WebNetRenderedPrediction())
+        WebRollbackAudioReset();
     demo_draw_enabled = 1;
     last_step = emscripten_get_now();
     WebRenderResetTiming();
@@ -231,6 +234,8 @@ static void finish_session(void)
 
 u32 WebCheckpointGteCapture(void* output, u32 capacity);
 void WebCheckpointGteRestore(const void* input);
+void WebScreenBeginPredictedTick(u32 tick);
+void WebScreenFinishPredictedTick(void);
 
 static void process_level_step(void)
 {
@@ -239,6 +244,9 @@ static void process_level_step(void)
     WebTestMotionInput();
 #endif
     WebCarStep();
+    ++simulation_steps;
+    if (WebAuthorityStartup())
+        return;
     if (checkpoint_arena && WebNetRenderedPrediction()) {
         u8 gte[256];
         if (!WebNetReplaying() && WebCheckpointGteCapture(gte, sizeof(gte))) {
@@ -256,7 +264,6 @@ static void process_level_step(void)
             ScreenProcess();
         }
     }
-    ++simulation_steps;
 }
 
 static void present_level_frame(Tm4RenderBuffer* buffer, double phase)
@@ -340,7 +347,11 @@ static void draw_network_view(s32 slot)
     /* Turbo effects draw from the secondary RNG between simulation ticks. */
     const u32 effect_seed = WebRenderEffectRandomState();
     RenderBeginFrame();
+    if (saved_gte)
+        WebInterpolationNetworkBeginDraw();
     RenderBuildFrame();
+    if (saved_gte)
+        WebInterpolationEndDraw();
     srandrand(effect_seed);
     WebRenderPresentLevelFrame();
     if (saved_gte) {
@@ -360,10 +371,19 @@ void WebLevelNetworkStep(void)
 {
     if (!active || !WebNetMatchTakeInput())
         return;
+    int rendered = WebNetRenderedPrediction();
+    if (rendered) {
+        WebInterpolationNetworkBeginStep();
+        WebScreenBeginPredictedTick((u32)MainFrameCount + 1);
+    }
     WebCheckpointArenaSelect(checkpoint_arena);
     process_level_step();
     GameProcessMode();
     WebCheckpointArenaSelect(0);
+    if (rendered) {
+        WebScreenFinishPredictedTick();
+        WebInterpolationNetworkFinishStep();
+    }
     ++MainFrameCount;
     EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     WebNetMatchPublishTick();

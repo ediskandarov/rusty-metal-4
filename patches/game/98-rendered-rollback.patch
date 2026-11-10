@@ -1,24 +1,122 @@
 --- a/src/main/screen.c
 +++ b/src/main/screen.c
-@@ -401,6 +401,8 @@
-     ScreenMessageQueue* base;
-     ScreenMessageQueue* queue;
+@@ -12,6 +12,9 @@
+ #include "tm4/main/render.h"
+ #include "tm4/main/screen.h"
+ #include "port/web/net_match.h"
++#include "port/web/checkpoint.h"
++#include <emscripten.h>
++#include <string.h>
+
+ #include "tm4_scalar.h"
+
+@@ -102,6 +105,53 @@
+ static char HudPlayerTexturePath[];
+ static char HudEnemyTexturePath[];
+ static ScreenMessageQueue ScreenLocalMessages[4];
++static struct {
++    u32 tick;
++    ScreenMessageQueue queue;
++} NetworkMessages[2 * WebCheckpointHistoryTicks + 1];
++static ScreenMessageQueue* NetworkMessageTick;
++
++void WebScreenBeginPredictedTick(u32 tick)
++{
++    size_t index = tick % ArrayCount(NetworkMessages);
++    NetworkMessages[index].tick = tick;
++    NetworkMessages[index].queue.count = 0;
++    NetworkMessageTick = &NetworkMessages[index].queue;
++}
++
++void WebScreenFinishPredictedTick(void)
++{
++    NetworkMessageTick = NULL;
++}
++
++static void append_local_message(ScreenMessageQueue* queue)
++{
++    if (queue->count == ScreenLocalMessageLimit) {
++        for (s32 i = 1; i < queue->count; ++i)
++            strcpy(queue->messages[i - 1], queue->messages[i]);
++        --queue->count;
++        queue->timer = 60;
++    } else if (!queue->count) {
++        queue->timer = 60;
++    }
++}
++
++EMSCRIPTEN_KEEPALIVE int WebNetConfirmPresentationTick(u32 tick)
++{
++    if (!WebNetRenderedPrediction() || !tick || WebNetReplaying())
++        return 0;
++    size_t index = tick % ArrayCount(NetworkMessages);
++    if (NetworkMessages[index].tick != tick)
++        return 0;
++    NetworkMessages[index].tick = 0;
++    ScreenMessageQueue* confirmed = &NetworkMessages[index].queue;
++    ScreenMessageQueue* visible = &ScreenLocalMessages[0];
++    for (s32 i = 0; i < confirmed->count; ++i) {
++        append_local_message(visible);
++        strcpy(visible->messages[visible->count++], confirmed->messages[i]);
++    }
++    return confirmed->count;
++}
+ static char ScreenMessageFontName[];
+ static char FontTextureDirectory[];
+ static char ScreenPowerupDisplaySymbol[];
+@@ -398,23 +448,19 @@
+ #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002F8F0
+ void ScreenLocalMessageRegisterV(s32 player, const char* format, va_list arguments)
+ {
+-    ScreenMessageQueue* base;
+-    ScreenMessageQueue* queue;
      const s32 queue_count = ArrayCount(ScreenLocalMessages);
-+    if (WebNetRenderedPrediction() && WebNetReplaying())
-+        return;
      player = WebNetLocalView(player);
      if (player < 0 || player >= queue_count || player >= GameInfo.player_count)
          return;
+-    base = ScreenLocalMessages;
+-    queue = &base[player];
+-    if (queue->count == ScreenLocalMessageLimit) {
+-        ScreenRemoveLocalMessage(player);
+-        queue->timer = 60;
+-    } else if (queue->count == 0) {
+-        queue->timer = 60;
+-    }
+-    FormatStringV(
+-        ScreenLocalMessages[player].messages[ScreenLocalMessages[player].count], format, arguments);
+-    ScreenLocalMessages[player].count++;
++    ScreenMessageQueue* queue = &ScreenLocalMessages[player];
++    if (WebNetRenderedPrediction()) {
++        queue = NetworkMessageTick;
++        if (!queue)
++            return;
++    }
++    append_local_message(queue);
++    FormatStringV(queue->messages[queue->count], format, arguments);
++    ++queue->count;
+ }
+ #endif
+
+@@ -495,6 +541,8 @@
+ #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002FE64
+ void ScreenInitialize(void)
+ {
++    memset(NetworkMessages, 0, sizeof(NetworkMessages));
++    NetworkMessageTick = NULL;
+     s32 player;
+     const s32 queue_count = ArrayCount(ScreenLocalMessages);
+
 --- a/src/main/sound.c
 +++ b/src/main/sound.c
-@@ -1,5 +1,6 @@
+@@ -1,5 +1,7 @@
  #include "tm4/main/sound.h"
  #include "port/web/net_match.h"
++#include "port/web/rollback_audio.h"
 +#include <emscripten.h>
 
  #include "tm4/fixed.h"
  #include "tm4/integer.h"
-@@ -377,6 +378,12 @@
+@@ -377,6 +379,12 @@
  void SoundStartVoice(
      s32 program, s32 index, s32 offset_q12, s32 voice, s32 pitch, s32 left, s32 right)
  {
@@ -31,3 +129,66 @@
      SpuVoiceAttr attr;
      u32 mask = SPU_KEYCH(voice);
      SpuSetKey(SPU_OFF, mask);
+@@ -743,8 +751,6 @@
+ }
+ #endif
+
+-enum { PlaybackFinished = -2 };
+-
+ void WebNetSuppressReplayedSounds(void)
+ {
+     for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
+@@ -752,7 +758,7 @@
+         SoundEmitter* emitter = ObjectGetPayload(object);
+         for (s32 i = 0; i < emitter->voice_count; ++i)
+             if (emitter->voices[i].duration_frames >= 0)
+-                emitter->voices[i].voice_id = PlaybackFinished;
++                emitter->voices[i].voice_id = WebAudioPlaybackFinished;
+     }
+ }
+
+@@ -793,7 +799,7 @@
+                         if (network) {
+                             emitter->voices[index].voice_id =
+                                 emitter->voices[index].duration_frames < 0
+-                                ? SOUND_VOICE_UNASSIGNED : PlaybackFinished;
++                                ? SOUND_VOICE_UNASSIGNED : WebAudioPlaybackFinished;
+                         } else if (SoundSamples[SoundPrograms[emitter->program_id]
+                                              .attributes[emitter->voices[index].attribute_index]
+                                              .sample]
+@@ -851,7 +857,7 @@
+             } else
+                 distance = 0;
+             for (index = 0; index < emitter->voice_count; index++) {
+-                if (network && emitter->voices[index].voice_id == PlaybackFinished)
++                if (network && emitter->voices[index].voice_id == WebAudioPlaybackFinished)
+                     continue;
+                 if (count < SOUND_HARDWARE_VOICES)
+                     candidate = count++;
+@@ -931,11 +937,12 @@
+                 return;
+             }
+             emitter->voices[index].voice_id = voice;
+-            if (SoundVoiceOwners[voice].emitter)
+-                SoundVoiceOwners[voice]
+-                    .emitter->voices[SoundVoiceOwners[voice].emitter_voice_index]
+-                    .voice_id
+-                    = SOUND_VOICE_UNASSIGNED;
++            if (SoundVoiceOwners[voice].emitter) {
++                SoundEmitterVoice* previous = &SoundVoiceOwners[voice]
++                    .emitter->voices[SoundVoiceOwners[voice].emitter_voice_index];
++                previous->voice_id = network && previous->duration_frames >= 0
++                    ? WebAudioPlaybackFinished : SOUND_VOICE_UNASSIGNED;
++            }
+             if (!SoundCandidates[candidate].listener)
+                 SoundPanVolume(
+                     emitter->voices[index].pan, emitter->voices[index].volume * 129, &left, &right);
+@@ -960,6 +967,8 @@
+                           emitter->voices[index].duration_frames)
+                     : 0,
+                 voice, pitch, left, right);
++            if (WebNetRenderedPrediction())
++                WebRollbackAudioStarted(emitter, index);
+             active |= SPU_VOICECH(voice);
+         }
+     }

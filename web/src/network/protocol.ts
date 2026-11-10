@@ -84,6 +84,7 @@ export interface NetworkPort {
     rejectedInputs: number;
     processedSequence: number;
     receivedFrames: number;
+    clockOffers?: number;
     recoveredTick?: number;
     replayBytes?: number;
     replayChunks?: number;
@@ -94,10 +95,20 @@ export interface NetworkPort {
       jitterMs: number;
       queuedPackets: number;
       pendingInputs: number;
+      nativeTick: number;
+      pump: {
+        pollGapMs: number;
+        maxPollGapMs: number;
+        maxUpdateMs: number;
+        visibility: DocumentVisibilityState;
+      };
       prediction?: {
         head: number;
         confirmed: number;
         rollbacks: number;
+        windowWaits: number;
+        waitingForInput: boolean;
+        acceptedDepth: number;
         replayed: number;
         maxDepth: number;
         historyBytes: number;

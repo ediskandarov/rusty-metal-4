@@ -14,6 +14,8 @@
 #include "src/modules/levels/w_yard/private.h"
 #include "overlays.h"
 #include "tm4/main/game.h"
+#include "tm4/main/screen.h"
+#include "tm4/main/sound.h"
 #include "tm4/main/pad.h"
 #include "tm4/main/system.h"
 #include "tm4/main/tournament.h"
@@ -363,6 +365,18 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestNetworkCarContact(void)
 {
     Car* player = GameInfo.players[0].car;
     return player && player->collision_history != NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestNetworkWallContact(s32 slot)
+{
+    const Car* car = GameInfo.players[slot].car;
+    if (!car)
+        return 0;
+    for (s32 i = 0; i < ArrayCount(car->particles); ++i) {
+        if (car->particles[i].contact_state && abs(car->particles[i].normal.vy) < ONE / 2)
+            return 1;
+    }
+    return 0;
 }
 
 /* Keep radial-wave targets on the player's floor and outside walls or ledges. */
@@ -861,9 +875,62 @@ EMSCRIPTEN_KEEPALIVE void WebTestDefeatOpponents(void)
     defeat_opponents_pending = 1;
 }
 
+static unsigned test_audio_pending;
+
+EMSCRIPTEN_KEEPALIVE void WebTestScheduleRollbackAudio(unsigned mask)
+{
+    test_audio_pending = mask;
+}
+
+EMSCRIPTEN_KEEPALIVE unsigned WebTestStopRollbackAudio(s32 serial)
+{
+    for (Tm4ObjectHeader* header = ObjectLists[OBJECT_LIST_SOUND].first; header; header = header->next) {
+        if (header->serial != serial)
+            continue;
+        SoundEmitter* emitter = ObjectGetPayload(header);
+        unsigned stopped = 0;
+        for (s32 i = 0; i < emitter->voice_count; ++i) {
+            if (emitter->voices[i].voice_id >= 0) {
+                SoundStopSound(emitter->voices[i].voice_id);
+                ++stopped;
+            }
+        }
+        return stopped;
+    }
+    return 0;
+}
+
+static void test_rollback_audio(void)
+{
+    if (!test_audio_pending)
+        return;
+    char* programs[] = { "machineGun", "carLanding", "frozenLoop" };
+    EM_ASM({ tm4Port.testAudioSerials = []; });
+    for (unsigned i = 0; i < ArrayCount(programs); ++i) {
+        void* emitter = test_audio_pending & (1 << i)
+            ? ObjectCreate("soundEmitter", 0, programs[i], 0) : NULL;
+        EM_ASM({ tm4Port.testAudioSerials.push($0); },
+            emitter ? ObjectGetHeader(emitter)->serial : -1);
+    }
+    test_audio_pending = 0;
+}
+
+static s32 test_hud_slot;
+static s32 test_hud_count;
+
+EMSCRIPTEN_KEEPALIVE void WebTestNetworkHudMessages(s32 slot, s32 count)
+{
+    test_hud_slot = slot;
+    test_hud_count = count;
+}
+
 /* Browser commands may arrive during an Asyncify yield; mutate objects at a tick boundary. */
 void WebTestApplyPendingActions(void)
 {
+    for (s32 i = 0; i < test_hud_count && i < 3; ++i)
+        ScreenLocalMessageRegister(test_hud_slot, "ROLLBACK TEST %d", i + 1);
+    test_hud_count = 0;
+    test_rollback_audio();
     test_approach_scenery();
     test_coop_actions();
     test_damage_helicopter();

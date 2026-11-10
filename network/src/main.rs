@@ -29,6 +29,7 @@ use tm4_network::{
 const TICK_RATE: u64 = 30;
 const REPLAY_IDLE: Duration = Duration::from_secs(5);
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / TICK_RATE);
+const SIMULATOR_LAG_LIMIT: Duration = Duration::from_millis(250);
 
 #[derive(Default)]
 struct Player {
@@ -70,13 +71,82 @@ struct Admission {
     unacknowledged: HashSet<lightyear::transport::packet::message::MessageId>,
 }
 
+const START_LEAD_TICKS: i32 = 12;
+const MAX_START_LEAD_TICKS: i32 = 180;
+const MAX_START_ATTEMPTS: u8 = 5;
+
+struct ClockOffer {
+    anchor: Tick,
+    sent: Tick,
+    votes: [Option<Tick>; MAX_PLAYERS],
+}
+
+#[derive(Debug, PartialEq)]
+enum PredictionStart {
+    Waiting,
+    Offer(Tick),
+    Commit(Tick),
+    Unavailable,
+}
+
 #[derive(Default)]
 struct AcceptedTimeline {
     anchor: Option<Tick>,
+    offer: Option<ClockOffer>,
+    attempts: u8,
     recent: VecDeque<Vec<Input>>,
 }
 
 impl AcceptedTimeline {
+    fn vote(&mut self, slot: usize, anchor: Tick, tick: Tick) {
+        if let Some(offer) = &mut self.offer
+            && offer.anchor == anchor
+            && offer.votes[slot].is_none()
+        {
+            offer.votes[slot] = Some(tick);
+        }
+    }
+
+    fn negotiate(&mut self, now: Tick, players: usize) -> PredictionStart {
+        let lead = if let Some(offer) = &self.offer {
+            let votes = &offer.votes[..players];
+            if votes.iter().any(Option::is_none) {
+                return PredictionStart::Waiting;
+            }
+            let round_trip = (now - offer.sent).max(1);
+            let latest =
+                votes.iter().flatten().fold(
+                    now,
+                    |latest, &tick| {
+                        if tick - latest > 0 { tick } else { latest }
+                    },
+                );
+            // Allow a full measured exchange for final delivery, plus room for
+            // each browser's prediction clock to advance while the vote travels.
+            let runway = 2 * round_trip + 2;
+            if offer.anchor - latest >= runway {
+                let anchor = offer.anchor;
+                self.anchor = Some(anchor);
+                self.offer = None;
+                return PredictionStart::Commit(anchor);
+            }
+            (latest - now).saturating_add(3 * round_trip + START_LEAD_TICKS)
+        } else {
+            START_LEAD_TICKS
+        };
+        if self.attempts >= MAX_START_ATTEMPTS || lead > MAX_START_LEAD_TICKS {
+            return PredictionStart::Unavailable;
+        }
+        let anchor = now + lead;
+        self.offer = Some(ClockOffer {
+            anchor,
+            sent: now,
+            votes: [None; MAX_PLAYERS],
+        });
+        self.attempts += 1;
+        PredictionStart::Offer(anchor)
+    }
+
     fn packet(
         &mut self,
         tick: u32,
@@ -132,6 +202,7 @@ struct Match {
     loading_since: Instant,
     overruns: u32,
     in_flight: Option<(Vec<Input>, Instant)>,
+    last_step_round_trip: Option<Duration>,
     session: Option<SessionStart>,
     last_state: Option<RoundState>,
     journal_directory: PathBuf,
@@ -356,6 +427,18 @@ impl Match {
                     self.players[slot].initial_digest = Some(digest);
                 }
             }
+            Request::PredictionClock {
+                epoch: 1,
+                anchor,
+                tick,
+            } if self.started && !self.ended && self.prediction.is_some() => {
+                if let Some(slot) = slot.filter(|&slot| self.players[slot].ready) {
+                    self.prediction
+                        .as_mut()
+                        .unwrap()
+                        .vote(slot, Tick(anchor), Tick(tick));
+                }
+            }
             Request::Input {
                 epoch,
                 sequence,
@@ -464,7 +547,8 @@ impl Match {
                     && tick == self.tick
                     && state.scores.len() == self.players.len() =>
             {
-                if let Some((inputs, _)) = self.in_flight.take() {
+                if let Some((inputs, dispatched)) = self.in_flight.take() {
+                    self.last_step_round_trip = Some(dispatched.elapsed());
                     let result = self
                         .journal
                         .as_mut()
@@ -677,6 +761,18 @@ fn update(
     }
 
     let now = Instant::now();
+    if game
+        .prediction
+        .as_ref()
+        .is_some_and(|timeline| timeline.anchor.is_none())
+        && game.players.iter().any(|player| player.entity.is_none())
+    {
+        game.fail(
+            &mut links,
+            "A player disconnected before the match clocks were agreed.",
+        );
+        return;
+    }
     if game.prediction.is_some() && game.authority_ready && game.tick == 0 && !game.replay_available
     {
         game.fail(
@@ -723,44 +819,80 @@ fn update(
         }
         game.next_step = Instant::now();
     }
-    if game
-        .prediction
-        .as_ref()
-        .is_some_and(|timeline| timeline.anchor.is_none())
+    let players = game.players.len();
+    let loading_expired = now.duration_since(game.loading_since) > Duration::from_secs(45);
+    if let Some(timeline) = &mut game.prediction
+        && timeline.anchor.is_none()
     {
-        let anchor = native_timeline.tick() + 12;
-        game.prediction.as_mut().unwrap().anchor = Some(anchor);
-        game.next_step = now + STEP * 12;
-        game.broadcast(&mut links, &Message::PredictionBegin { anchor: anchor.0 });
+        if loading_expired {
+            game.fail(
+                &mut links,
+                "Players did not synchronize their match clocks.",
+            );
+            return;
+        }
+        let native_tick = native_timeline.tick();
+        match timeline.negotiate(native_tick, players) {
+            PredictionStart::Offer(anchor) => {
+                game.broadcast(&mut links, &Message::PredictionOffer { anchor: anchor.0 });
+                return;
+            }
+            PredictionStart::Waiting => return,
+            PredictionStart::Commit(anchor) => {
+                game.broadcast(&mut links, &Message::PredictionBegin { anchor: anchor.0 });
+            }
+            PredictionStart::Unavailable => {
+                game.fail(
+                    &mut links,
+                    "The players could not agree on a safe match start tick.",
+                );
+                return;
+            }
+        }
     }
     if game.tick >= JOURNAL_MAX_TICKS {
         game.fail(&mut links, "The match reached its journal disk budget.");
         return;
     }
+    let native_lag = game
+        .prediction
+        .as_ref()
+        .and_then(|timeline| timeline.anchor)
+        .map(|anchor| native_timeline.tick() - (anchor + game.tick as i32 + 1));
+    let lag = native_lag.map_or_else(
+        || now.saturating_duration_since(game.next_step),
+        |ticks| STEP * ticks.max(0) as u32,
+    );
+    let fast = native_lag.is_none() && game.tick < game.fast_until;
     if let Some((_, since)) = game.in_flight {
         if now.duration_since(since) > Duration::from_secs(3) {
             game.fail(&mut links, "The simulator did not finish its tick.");
+            return;
         }
-        return;
+        if native_lag.is_none() || lag <= SIMULATOR_LAG_LIMIT {
+            return;
+        }
     }
-    let fast = game.prediction.is_none() && game.tick < game.fast_until;
-    if !fast && now.saturating_duration_since(game.next_step) > Duration::from_millis(250) {
+    if !fast && lag > SIMULATOR_LAG_LIMIT {
+        eprintln!(
+            "Authority tick {} late by {} ms (native lag {:?}, in-flight {:?}, last step round trip {:?})",
+            game.tick,
+            lag.as_millis(),
+            native_lag,
+            game.in_flight
+                .as_ref()
+                .map(|(_, since)| now.duration_since(*since)),
+            game.last_step_round_trip,
+        );
         game.fail(
             &mut links,
             "Simulator overrun: more than 250 ms behind the 30 Hz schedule.",
         );
         return;
     }
-    let should_step = match game
-        .prediction
-        .as_ref()
-        .and_then(|timeline| timeline.anchor)
-    {
-        Some(anchor) => native_timeline.tick() >= anchor + game.tick as i32 + 1,
-        None => fast || now >= game.next_step,
-    };
+    let should_step = native_lag.map_or_else(|| fast || now >= game.next_step, |ticks| ticks >= 0);
     if should_step {
-        if !fast && now.saturating_duration_since(game.next_step) > STEP {
+        if !fast && lag > STEP {
             game.overruns += 1;
         }
         let tick = game.tick;
@@ -793,11 +925,13 @@ fn update(
             },
         );
         game.in_flight = Some((inputs, now));
-        game.next_step = if fast {
-            now + STEP
-        } else {
-            game.next_step + STEP
-        };
+        if native_lag.is_none() {
+            game.next_step = if fast {
+                now + STEP
+            } else {
+                game.next_step + STEP
+            };
+        }
     }
 }
 
@@ -994,6 +1128,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         loading_since: Instant::now(),
         overruns: 0,
         in_flight: None,
+        last_step_round_trip: None,
         session: None,
         last_state: None,
         journal_directory: env::var_os("TM4_JOURNAL_DIR")
@@ -1029,5 +1164,51 @@ fn main() -> Result<(), Box<dyn Error>> {
     loop {
         app.update();
         thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[cfg(test)]
+mod prediction_start_tests {
+    use super::*;
+
+    #[test]
+    fn a_late_vote_reoffers_before_commit_and_ignores_old_votes() {
+        let mut timeline = AcceptedTimeline::default();
+        assert_eq!(
+            timeline.negotiate(Tick(100), 2),
+            PredictionStart::Offer(Tick(112))
+        );
+        timeline.vote(0, Tick(112), Tick(104));
+        assert_eq!(timeline.negotiate(Tick(118), 2), PredictionStart::Waiting);
+        timeline.vote(1, Tick(112), Tick(123));
+        let PredictionStart::Offer(anchor) = timeline.negotiate(Tick(120), 2) else {
+            panic!("Expired offer was not replaced");
+        };
+        assert!(timeline.anchor.is_none());
+        timeline.vote(0, Tick(112), Tick(124));
+        timeline.vote(1, anchor, Tick(126));
+        assert_eq!(timeline.negotiate(Tick(125), 2), PredictionStart::Waiting);
+        timeline.vote(0, anchor, Tick(129));
+        assert_eq!(
+            timeline.negotiate(Tick(127), 2),
+            PredictionStart::Commit(anchor)
+        );
+        assert_eq!(timeline.anchor, Some(anchor));
+    }
+
+    #[test]
+    fn an_unusable_peer_cannot_unbound_the_offer_window() {
+        let mut timeline = AcceptedTimeline::default();
+        assert_eq!(
+            timeline.negotiate(Tick(100), 2),
+            PredictionStart::Offer(Tick(112))
+        );
+        timeline.vote(0, Tick(112), Tick(104));
+        timeline.vote(1, Tick(112), Tick(350));
+        assert_eq!(
+            timeline.negotiate(Tick(106), 2),
+            PredictionStart::Unavailable
+        );
+        assert!(timeline.anchor.is_none());
     }
 }

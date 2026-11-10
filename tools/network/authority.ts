@@ -18,18 +18,24 @@ type ServerMessage =
   | { type: "error"; message: string };
 
 type AuthorityPage = typeof globalThis & {
-  Module: NetworkEngine;
+  Module: NetworkEngine & { _WebGetPresentedFrames(): number };
   tm4Port: NetworkPort;
   tm4Network: { connect: typeof connectNetwork; configure: typeof configureMatch };
 };
 
-export async function connectAuthority(page: Page, endpoint: string, token: string) {
+export async function connectAuthority(
+  page: Page,
+  endpoint: string,
+  token: string,
+  timing = false,
+) {
   await page.evaluate(
-    async ({ endpoint, token }) => {
+    async ({ endpoint, token, timing }) => {
       const socket = await (globalThis as AuthorityPage).tm4Network.connect(endpoint);
       return new Promise<void>((resolve, reject) => {
         const { Module: engine, tm4Port: port } = globalThis as AuthorityPage;
         const send = (message: object) => socket.send(message);
+        let worstStep = 0;
         socket.onopen = () =>
           send({
             type: "authority",
@@ -72,7 +78,8 @@ export async function connectAuthority(page: Page, endpoint: string, token: stri
                 });
                 break;
               }
-              case "step":
+              case "step": {
+                const started = timing ? performance.now() : 0;
                 for (const [slot, input] of message.inputs.entries()) {
                   if (
                     !engine._WebNetSetInput(
@@ -87,7 +94,20 @@ export async function connectAuthority(page: Page, endpoint: string, token: stri
                 }
                 if (!engine._WebNetQueueTick(message.tick))
                   throw new Error("The game refused to run tick " + message.tick);
+                if (timing) {
+                  const elapsed = performance.now() - started;
+                  if (
+                    message.tick < 3 ||
+                    message.tick % 60 === 0 ||
+                    (elapsed > 33 && elapsed > worstStep)
+                  )
+                    console.log(
+                      `Authority tick ${message.tick}, step ${elapsed.toFixed(2)} ms, frames ${engine._WebGetPresentedFrames()}`,
+                    );
+                  worstStep = Math.max(worstStep, elapsed);
+                }
                 break;
+              }
               case "finished":
                 cleanup();
                 resolve();
@@ -102,7 +122,7 @@ export async function connectAuthority(page: Page, endpoint: string, token: stri
         };
       });
     },
-    { endpoint, token },
+    { endpoint, token, timing },
   );
 }
 
@@ -125,7 +145,10 @@ if (import.meta.main) {
   try {
     const page = await browser.newPage();
     page.on("console", (message) => {
-      if (message.type() === "error" || /Match cars|initialized/.test(message.text()))
+      if (
+        message.type() === "error" ||
+        /Match cars|initialized|Authority tick/.test(message.text())
+      )
         console.error(message.text());
     });
     const url = new URL(site);
@@ -133,7 +156,7 @@ if (import.meta.main) {
     await page.goto(url.href);
     await page.waitForFunction(() => (globalThis as AuthorityPage).tm4Port?.compatibility);
 
-    await connectAuthority(page, endpoint, token);
+    await connectAuthority(page, endpoint, token, process.env.TM4_AUTHORITY_TIMING === "1");
   } finally {
     await browser.close();
   }

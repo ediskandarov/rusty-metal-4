@@ -8,7 +8,7 @@ import { connectNetwork } from "./transport.ts";
 type Message =
   | Start
   | (Omit<Start, "type"> & { type: "prediction_prepare" })
-  | { type: "prediction_begin"; anchor: number }
+  | { type: "prediction_offer" | "prediction_begin"; anchor: number }
   | Frame
   | ReplayBegin
   | ReplayChunk
@@ -49,8 +49,8 @@ export function setMatchStatus(
   state: "lobby" | "playing" | "error",
   message: string,
 ) {
-  status.dataset.matchState = state;
-  status.textContent = message;
+  if (status.dataset.matchState !== state) status.dataset.matchState = state;
+  if (status.textContent !== message) status.textContent = message;
 }
 
 export async function joinMatch(engine: NetworkEngine, endpoint: string, status: HTMLElement) {
@@ -78,6 +78,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   let recoveryUsed = false;
   let prediction: ReturnType<typeof attachLivePrediction> | undefined;
   let predictionStarted = false;
+  let offeredAnchor: number | undefined;
   const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
     pendingInputs: 0,
     rejectedInputs: 0,
@@ -121,7 +122,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   const displayOutcome = (state: RoundState) => {
     if (state.roundFinished) {
       const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      status.textContent = state.acceptsContinue ? result + " · Press Cross to continue" : result;
+      show("playing", state.acceptsContinue ? result + " · Press Cross to continue" : result);
     }
     if (state.nextMode) {
       const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
@@ -130,7 +131,16 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   };
 
   socket.onopen = () => send({ type: "join", compatibility: port.compatibility });
-  socket.onerror = (error) => fail(error);
+  socket.onerror = (error) => {
+    try {
+      diagnostics.transport = socket.diagnostics();
+      console.error("Match clock at disconnect", diagnostics.transport);
+    } catch {
+      // The last verified frame still has transport diagnostics after a runtime trap.
+    } finally {
+      fail(error);
+    }
+  };
 
   port.netMatchInput = (buttons, axes, analog) => {
     if (closed || recovery || socket.readyState !== WebSocket.OPEN) return;
@@ -252,8 +262,21 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           show("lobby", "Waiting for all players to finish loading…");
           break;
         }
-        case "prediction_begin":
+        case "prediction_offer":
           if (!prediction || predictionStarted || !players)
+            throw new Error("Unexpected live prediction clock offer");
+          offeredAnchor = message.anchor;
+          diagnostics.clockOffers = (diagnostics.clockOffers ?? 0) + 1;
+          show("lobby", "Synchronizing match clocks…");
+          send({
+            type: "prediction_clock",
+            epoch,
+            anchor: message.anchor,
+            tick: socket.predictionClock(),
+          });
+          break;
+        case "prediction_begin":
+          if (!prediction || predictionStarted || !players || message.anchor !== offeredAnchor)
             throw new Error("Unexpected live prediction clock anchor");
           socket.beginPrediction(message.anchor, epoch, players, slot, prediction.depth);
           predictionStarted = true;
@@ -324,6 +347,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           if (message.tick !== nextFrame++ || message.inputs.length !== players)
             throw new Error("Received an out-of-order match frame");
           if (predictionStarted) {
+            prediction?.confirm(message.tick + 1);
             port.netConfirmedTick = message.tick + 1;
             port.netMatchServerState = message.state;
             displayOutcome(message.state);

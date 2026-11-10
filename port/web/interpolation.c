@@ -1,5 +1,6 @@
 #include <LIBGTE.H>
 #include "interpolation.h"
+#include "net_match.h"
 #include "src/modules/afc/private.h"
 #include "src/modules/anim/private.h"
 #include "src/modules/carprt/private.h"
@@ -17,6 +18,7 @@
 #include "tm4/main/game.h"
 #include "tm4/main/math3d.h"
 #include "tm4/main/object.h"
+#include "tm4/main/pad.h"
 #include "tm4/main/system.h"
 #include "tm4/modules/auger.h"
 #include "tm4/modules/camera.h"
@@ -127,6 +129,36 @@ static int test_capture_motion;
 static const Car* car_identity;
 static const Car* car_pose;
 
+enum {
+    NetworkPoseLimit = 1024,
+    NetworkAnimPartLimit = 4096,
+    NetworkCorrectionDistance = 256,
+    NetworkForwardDistance = 96
+};
+
+typedef struct {
+    u32 serial;
+    u32 target_serial;
+    MATRIX offset;
+} RenderCorrection;
+
+typedef struct {
+    u32 serial;
+    u32 target_serial;
+    MATRIX base;
+    MATRIX visible;
+} RenderObservation;
+
+static RenderCorrection correction_car, correction_camera;
+static RenderObservation observed_car, observed_camera;
+static double network_phase, correction_phase, correction_weight;
+static int network_history, network_drawing;
+static int network_pair_continuous, observed_pair_continuous;
+static unsigned correction_count, correction_distance;
+#ifdef TM4_WEB_TEST_HOOKS
+static unsigned network_forward_block;
+#endif
+
 MATRIX* CarCrusherDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
 MATRIX* CarSlamDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
 MATRIX* CarToyDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
@@ -170,6 +202,16 @@ void WebInterpolationReset(void)
     anim_size_count = 0;
     memset(cars, 0, sizeof(cars));
     memset(cameras, 0, sizeof(cameras));
+    network_history = network_drawing = 0;
+    network_pair_continuous = observed_pair_continuous = 0;
+    network_phase = 1;
+    correction_weight = 0;
+    correction_car = correction_camera = (RenderCorrection){ 0 };
+    observed_car = observed_camera = (RenderObservation){ 0 };
+    correction_count = correction_distance = 0;
+#ifdef TM4_WEB_TEST_HOOKS
+    network_forward_block = 0;
+#endif
 }
 
 static SVECTOR fireball_position(const WeaponFireball* fireball)
@@ -206,6 +248,8 @@ static int projectile_in_flight(const WeaponProjectile* projectile)
 
 static ObjectPose* append_object(const Tm4ObjectHeader* header)
 {
+    if (network_history && object_count == NetworkPoseLimit)
+        return NULL;
     if (object_count == object_capacity) {
         size_t capacity = object_capacity ? object_capacity * 2 : 64;
         ObjectPose* poses = realloc(objects, capacity * sizeof(*objects));
@@ -242,10 +286,14 @@ static void capture_anim(const Tm4ObjectHeader* header, const Anim* anim)
     pose->anim.first = anim_size_count;
     pose->anim.count = 0;
     size_t count = anim->type->part_count;
+    if (network_history && count > NetworkAnimPartLimit - anim_size_count)
+        return;
     if (anim_size_count + count > anim_size_capacity) {
         size_t capacity = anim_size_capacity ? anim_size_capacity * 2 : 64;
         if (capacity < anim_size_count + count)
             capacity = anim_size_count + count;
+        if (network_history && capacity > NetworkAnimPartLimit)
+            capacity = NetworkAnimPartLimit;
         AnimSize* sizes = realloc(anim_sizes, capacity * sizeof(*anim_sizes));
         if (!sizes)
             return;
@@ -467,8 +515,10 @@ void WebInterpolationBeginStep(void)
             pose->wheels[wheel].suspension = car->wheels[wheel].direction.fields.displacement;
         }
     }
-    for (s32 i = 0; i < GameInfo.player_count; ++i) {
-        const Camera* camera = GameInfo.players[i].camera;
+    s32 views = network_history ? 1 : GameInfo.player_count;
+    for (s32 i = 0; i < views; ++i) {
+        s32 slot = network_history ? WebNetMatchViewSlot() : i;
+        const Camera* camera = GameInfo.players[slot].camera;
         CameraPose* pose = &next_cameras[i];
         const CameraPose* previous = completed ? find_camera_pose(camera) : NULL;
         int carry = previous && previous->forecast.ready;
@@ -485,6 +535,8 @@ void WebInterpolationBeginStep(void)
 
 void WebInterpolationCutCamera(const Camera* camera)
 {
+    if (!WebNetReplaying() && correction_camera.serial == serial(camera))
+        correction_camera.serial = 0;
     for (s32 i = 0; i < ArrayCount(cameras); ++i) {
         if (cameras[i].serial == serial(camera))
             cameras[i].serial = 0;
@@ -494,6 +546,12 @@ void WebInterpolationCutCamera(const Camera* camera)
 void WebInterpolationCutCar(const Car* car)
 {
     u32 id = serial(car);
+    if (!WebNetReplaying()) {
+        if (correction_car.serial == id)
+            correction_car.serial = 0;
+        if (correction_camera.target_serial == id)
+            correction_camera.serial = 0;
+    }
     for (s32 i = 0; i < ArrayCount(cars); ++i) {
         if (cars[i].serial == id)
             cars[i].serial = 0;
@@ -531,7 +589,37 @@ void WebInterpolationEndDraw(void)
 {
     if (drawing)
         srandrand(restore_effect_seed);
-    drawing = 0;
+    drawing = network_drawing = 0;
+}
+
+void WebInterpolationNetworkBeginStep(void)
+{
+    network_history = 1;
+    WebInterpolationBeginStep();
+}
+
+EMSCRIPTEN_KEEPALIVE void WebNetSetPresentationPhase(double phase, double correction)
+{
+    network_phase = phase;
+    correction_weight = correction;
+}
+
+void WebInterpolationNetworkBeginDraw(void)
+{
+    WebRenderMotionSettings settings = WebRenderGetMotionSettings();
+    settings.lead = 0;
+    WebInterpolationBeginDraw(settings, network_phase);
+    network_drawing = 1;
+#ifdef TM4_WEB_TEST_HOOKS
+    if (test_capture_motion)
+        EM_ASM({
+            tm4Port.networkMotion = ({
+                phase : $0, objects : $1, animationParts : $2, corrections : $3,
+                maxCorrectionUnits : $4, correctionWeight : $5, forwardBlock : $6
+            });
+        }, fraction, object_count, anim_size_count, correction_count, correction_distance,
+            settings.enabled ? correction_weight : 0.0, network_forward_block);
+#endif
 }
 
 static s32 sample_value(s32 a, s32 b, double at)
@@ -688,7 +776,8 @@ static int sample_matrix(const MATRIX* before, const MATRIX* after, MATRIX* resu
 static int interpolate_matrix(
     const MATRIX* before, const MATRIX* after, MATRIX* result, s32 maximum_delta)
 {
-    return sample_matrix(before, after, result, maximum_delta, fraction, predicting());
+    return sample_matrix(
+        before, after, result, maximum_delta, fraction, network_drawing || predicting());
 }
 
 static int car_prediction_blocked(const Car* car)
@@ -762,6 +851,52 @@ void WebInterpolationFinishStep(double lead)
     completed = 1;
 }
 
+static int changed_steering(s32 slot)
+{
+    const PadCache* pad = &PadJpad[slot];
+    const Tm4GameBindings* config = &GameInfo.players[slot].bindings[pad->has_analog];
+    u16 steering = config->actions[GameControlSteerLeft] | config->actions[GameControlSteerRight];
+    return ((pad->pressed_buttons | pad->released_buttons) & steering)
+        || (pad->has_analog && abs(pad->axes[2] - pad->previous_axes[2]) > 48);
+}
+
+static void finish_network_forecast(PoseForecast* forecast, const MATRIX* before, const MATRIX* live)
+{
+    double lead = 1.0;
+    for (s32 axis = 0; axis < 3; ++axis) {
+        double travel = fabs((double)live->t[axis] - before->t[axis]);
+        if (travel > 0)
+            lead = fmin(lead, NetworkForwardDistance / travel);
+    }
+    forecast->from = *live;
+    forecast->ready = sample_matrix(before, live, &forecast->to, 1024, 1 + lead, 1);
+}
+
+void WebInterpolationNetworkFinishStep(void)
+{
+    s32 slot = WebNetMatchViewSlot();
+    const Tm4GamePlayer* player = &GameInfo.players[slot];
+    const Car* car = player->car;
+    const Camera* camera = player->camera;
+    CarPose* car_sample = car ? find_car_pose(car) : NULL;
+    CameraPose* camera_sample = find_camera_pose(camera);
+    int contact = car && car_prediction_blocked(car);
+    int steering = changed_steering(slot);
+    int continuous = car_sample && camera_sample && camera->object == car;
+    network_pair_continuous = continuous;
+#ifdef TM4_WEB_TEST_HOOKS
+    network_forward_block = contact | (steering << 1) | (!continuous << 2);
+#endif
+    if (!contact && !steering && continuous) {
+        finish_network_forecast(&car_sample->forecast, &car_sample->transform, &car->transform);
+        finish_network_forecast(&camera_sample->forecast, &camera_sample->transform,
+            &camera->camera_to_world);
+        if (!car_sample->forecast.ready || !camera_sample->forecast.ready)
+            car_sample->forecast.ready = camera_sample->forecast.ready = 0;
+    }
+    completed = 1;
+}
+
 static int sample_pose(const MATRIX* before, const MATRIX* live, const PoseForecast* forecast,
     MATRIX* sample)
 {
@@ -780,6 +915,188 @@ static int sample_pose(const MATRIX* before, const MATRIX* live, const PoseForec
     return 1;
 }
 
+static void multiply_rotation(const MATRIX* a, const MATRIX* b, MATRIX* out)
+{
+    for (s32 row = 0; row < 3; ++row) {
+        for (s32 col = 0; col < 3; ++col) {
+            s32 component = 0;
+            for (s32 i = 0; i < 3; ++i)
+                component += a->m[row][i] * b->m[i][col];
+            out->m[row][col] = component / ONE;
+        }
+    }
+}
+
+static int apply_correction(const RenderCorrection* correction, const MATRIX* live, MATRIX* pose)
+{
+    if (correction_weight <= 0 || !motion_settings.enabled || !correction->serial)
+        return 0;
+    const MATRIX identity = { .m = { { ONE, 0, 0 }, { 0, ONE, 0 }, { 0, 0, ONE } } };
+    MATRIX offset;
+    if (!sample_matrix(&identity, &correction->offset, &offset, NetworkCorrectionDistance,
+            correction_weight, 1))
+        return 0;
+    *pose = *live;
+    multiply_rotation(&offset, live, pose);
+    for (s32 i = 0; i < 3; ++i)
+        pose->t[i] += offset.t[i];
+    return 1;
+}
+
+static int network_base(const PoseForecast* forecast, const MATRIX* live, double phase,
+    MATRIX* pose)
+{
+    if (motion_settings.enabled && completed && forecast && forecast->ready && phase > 0
+        && sample_matrix(&forecast->from, &forecast->to, pose, NetworkForwardDistance, phase, 1))
+        return 1;
+    *pose = *live;
+    return 0;
+}
+
+static int network_pose(const RenderCorrection* correction, u32 id, u32 target,
+    const PoseForecast* forecast, const MATRIX* live, MATRIX* pose)
+{
+    MATRIX base;
+    int sampled = network_base(forecast, live, draw_phase, &base);
+    if (correction->serial == id && correction->target_serial == target
+        && apply_correction(correction, &base, pose))
+        return 1;
+    *pose = base;
+    return sampled;
+}
+
+static const PoseForecast* local_car_forecast(const Car* car)
+{
+    const CarPose* previous = find_car_pose(car);
+    return previous ? &previous->forecast : NULL;
+}
+
+static const PoseForecast* local_camera_forecast(const Camera* camera)
+{
+    const CameraPose* previous = find_camera_pose(camera);
+    return previous ? &previous->forecast : NULL;
+}
+
+static int local_car_transform(const Car* car, MATRIX* pose)
+{
+    return network_pose(&correction_car, serial(car), 0, local_car_forecast(car),
+        &car->transform, pose);
+}
+
+static RenderObservation observe_pose(const RenderCorrection* correction, u32 id, u32 target,
+    const PoseForecast* forecast, const MATRIX* live)
+{
+    RenderObservation observed = { .serial = id, .target_serial = target };
+    network_base(forecast, live, correction_phase, &observed.base);
+    if (correction->serial != id || correction->target_serial != target
+        || !apply_correction(correction, &observed.base, &observed.visible))
+        observed.visible = observed.base;
+    return observed;
+}
+
+void WebInterpolationNetworkRememberCorrection(void)
+{
+    const Tm4GamePlayer* player = &GameInfo.players[WebNetMatchViewSlot()];
+    const Car* car = player->car;
+    const Camera* camera = player->camera;
+    correction_phase = fmin(1, fmax(0, network_phase));
+    observed_pair_continuous = network_pair_continuous;
+    observed_car = car ? observe_pose(&correction_car, serial(car), 0,
+        local_car_forecast(car), &car->transform) : (RenderObservation){ 0 };
+    observed_camera = observe_pose(&correction_camera, serial(camera), serial(camera->object),
+        local_camera_forecast(camera), &camera->camera_to_world);
+    completed = 0;
+}
+
+static int same_pose(const MATRIX* a, const MATRIX* b)
+{
+    return !memcmp(a->m, b->m, sizeof(a->m)) && !memcmp(a->t, b->t, sizeof(a->t));
+}
+
+static unsigned finish_correction(RenderCorrection* correction, const RenderObservation* before,
+    const RenderObservation* after)
+{
+    correction->serial = 0;
+    if (!before->serial || before->serial != after->serial
+        || before->target_serial != after->target_serial || same_pose(&before->visible, &after->base))
+        return 0;
+    double basis[3][3];
+    if (!sample_rotation_arc(&after->base, &before->visible, basis, 1.01))
+        return 0;
+    MATRIX inverse;
+    for (s32 row = 0; row < 3; ++row)
+        for (s32 col = 0; col < 3; ++col)
+            inverse.m[row][col] = after->base.m[col][row];
+    multiply_rotation(&before->visible, &inverse, &correction->offset);
+    unsigned distance = 0;
+    for (s32 i = 0; i < 3; ++i) {
+        double delta = (double)before->visible.t[i] - after->base.t[i];
+        if (fabs(delta) > NetworkCorrectionDistance)
+            return 0;
+        correction->offset.t[i] = (s32)delta;
+        if ((unsigned)fabs(delta) > distance)
+            distance = (unsigned)fabs(delta);
+    }
+    correction->serial = after->serial;
+    correction->target_serial = after->target_serial;
+    return distance;
+}
+
+static int same_observed_base(const RenderObservation* before, const RenderObservation* after)
+{
+    return before->serial == after->serial && before->target_serial == after->target_serial
+        && same_pose(&before->base, &after->base);
+}
+
+int WebInterpolationNetworkFinishCorrection(void)
+{
+    const Tm4GamePlayer* player = &GameInfo.players[WebNetMatchViewSlot()];
+    const Car* car = player->car;
+    const Camera* camera = player->camera;
+    RenderObservation new_car = car ? observe_pose(&correction_car, serial(car), 0,
+        local_car_forecast(car), &car->transform) : (RenderObservation){ 0 };
+    RenderObservation new_camera = observe_pose(&correction_camera, serial(camera),
+        serial(camera->object), local_camera_forecast(camera), &camera->camera_to_world);
+    if (same_observed_base(&observed_car, &new_car) && same_observed_base(&observed_camera, &new_camera))
+        return 0;
+
+    if (!observed_pair_continuous || !network_pair_continuous) {
+        correction_car.serial = correction_camera.serial = 0;
+        return 0;
+    }
+
+    unsigned car_distance = finish_correction(&correction_car, &observed_car, &new_car);
+    unsigned camera_distance = finish_correction(&correction_camera, &observed_camera, &new_camera);
+    if (car_distance > correction_distance)
+        correction_distance = car_distance;
+    if (camera_distance > correction_distance)
+        correction_distance = camera_distance;
+    if (!correction_car.serial && !correction_camera.serial)
+        return 0;
+    ++correction_count;
+    return 1;
+}
+
+#ifdef TM4_WEB_TEST_HOOKS
+EMSCRIPTEN_KEEPALIVE int WebTestNetworkForecastStep(s32 delta, double phase)
+{
+    const MATRIX before = { .m = { { ONE, 0, 0 }, { 0, ONE, 0 }, { 0, 0, ONE } } };
+    MATRIX live = before, sample;
+    live.t[0] = delta;
+    PoseForecast forecast;
+    finish_network_forecast(&forecast, &before, &live);
+    if (!forecast.ready || !sample_matrix(&forecast.from, &forecast.to, &sample,
+            NetworkForwardDistance, phase, 1))
+        return 0;
+    return sample.t[0];
+}
+#endif
+
+static int local_car(const Car* car)
+{
+    return network_drawing && GameInfo.players[WebNetMatchViewSlot()].car == car;
+}
+
 static int can_sample_pose(void)
 {
     return drawing && (draw_forecast || has_sample());
@@ -787,13 +1104,17 @@ static int can_sample_pose(void)
 
 static Camera* sample_camera(Camera* camera, Camera* pose)
 {
-    const CameraPose* previous = can_sample_pose() ? find_camera_pose(camera) : NULL;
-    if (!previous)
-        return camera;
     *pose = *camera;
-    if (!sample_pose(&previous->transform, &camera->camera_to_world, &previous->forecast,
-            &pose->camera_to_world))
-        return camera;
+    if (network_drawing) {
+        if (!network_pose(&correction_camera, serial(camera), serial(camera->object),
+                local_camera_forecast(camera), &camera->camera_to_world, &pose->camera_to_world))
+            return camera;
+    } else {
+        const CameraPose* previous = can_sample_pose() ? find_camera_pose(camera) : NULL;
+        if (!previous || !sample_pose(&previous->transform, &camera->camera_to_world,
+                &previous->forecast, &pose->camera_to_world))
+            return camera;
+    }
     InverseMatrix(&pose->camera_to_world, &pose->world_to_camera);
     return pose;
 }
@@ -814,6 +1135,17 @@ static void trace_transform(const void* object, const char* name, const MATRIX* 
         return;
     trace_motion(object, name, live->t[0], live->t[1], live->t[2], heading(live),
         render->t[0], render->t[1], render->t[2], heading(render), live != render);
+    if (network_drawing) {
+        EM_ASM({
+            const sample = tm4Port.motionSamples?.at(-1);
+            if (sample) {
+                sample.forwardBlock = $0;
+                sample.correction = !!$1;
+            }
+        }, network_forward_block,
+            correction_weight > 0 && (correction_car.serial == serial(object)
+                || correction_camera.serial == serial(object)));
+    }
     if (draw_forecast && forecast && forecast->ready && live != render) {
         EM_ASM(
             {
@@ -845,6 +1177,14 @@ Camera* WebInterpolationCamera(Camera* camera, Camera* pose)
 
 static Car* sample_car(Car* car, Car* pose)
 {
+    if (local_car(car)) {
+        *pose = *car;
+        if (!local_car_transform(car, &pose->transform))
+            return car;
+        car_identity = car;
+        car_pose = pose;
+        return pose;
+    }
     const CarPose* previous = can_sample_pose() ? find_car_pose(car) : NULL;
     if (previous) {
         *pose = *car;
@@ -876,9 +1216,11 @@ Car* WebInterpolationCar(Car* car, Car* pose)
 {
     Car* render = sample_car(car, pose);
 #ifdef TM4_WEB_TEST_HOOKS
-    if (drawing && test_capture_motion && car == GameInfo.players[0].car) {
+    if (drawing && test_capture_motion
+        && (network_drawing || car == GameInfo.players[0].car)) {
         const CarPose* previous = draw_forecast ? find_car_pose(car) : NULL;
-        trace_transform(car, "player car", &car->transform, &render->transform,
+        const char* name = network_drawing && !local_car(car) ? "remote car" : "player car";
+        trace_transform(car, name, &car->transform, &render->transform,
             previous ? &previous->forecast : NULL);
     }
 #endif
@@ -1099,7 +1441,7 @@ s32 WebInterpolationCraneGround(const void* crane, s32 current)
 s32 WebInterpolationCarAccessory(const Car* car, s32 slot, s32 angle)
 {
     const Car* identity = WebInterpolationCarIdentity(car);
-    const CarPose* previous = has_sample() ? find_car_pose(identity) : NULL;
+    const CarPose* previous = has_sample() && !local_car(identity) ? find_car_pose(identity) : NULL;
     /* Clamps and direction changes on articulated attachments are step-owned. */
     int sampled = previous && !predicting() && previous->accessory
         && previous->accessory == car->callback_context;
@@ -1113,6 +1455,11 @@ s32 WebInterpolationCarAccessory(const Car* car, s32 slot, s32 angle)
 
 MATRIX* WebInterpolationCarTransform(const Car* car, MATRIX* sample)
 {
+    if (local_car(car)) {
+        if (!local_car_transform(car, sample))
+            *sample = car->transform;
+        return sample;
+    }
     const CarPose* previous = can_sample_pose() ? find_car_pose(car) : NULL;
     if (!previous || !sample_pose(&previous->transform, &car->transform, &previous->forecast, sample))
         *sample = car->transform;

@@ -26,7 +26,7 @@ replication ownership, bandwidth priority, RTT/jitter and packet conditioning ar
 live. Recovery streams the authoritative match journal to rebuild the C world.
 Live matches can opt into native Lightyear prediction for the stock Construction
 Yard Deathmatch. The diagnostic build also includes a smaller native rollback probe.
-Portable C state replication and network presentation interpolation remain open.
+Portable C state replication remains open.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -196,32 +196,62 @@ exercises native receipt and rollback with a controlled clock and input script.
 ### Latency and presentation — R6/R8
 
 The optional live mode waits for native clock synchronization and replicated slot
-ownership before reporting readiness. The server announces a common Lightyear tick
-anchor and uses that clock to dispatch one authoritative C step at 30 Hz. It keeps
-the existing slot authorization, tick and epoch checks, and missing-input policy.
+ownership before reporting readiness. The server offers a common Lightyear tick
+anchor and asks each browser for its current native tick. A late offer is
+replaced using the measured exchange and the furthest-ahead browser. Negotiation
+allows five offers within the loading deadline and all simulations stay at tick
+zero until the server commits. The authority dispatches at 30 Hz and checks
+overruns on that same native timeline. The authority browser has no render loop
+and skips per-tick texture and HUD work. The server keeps the existing slot
+authorization, tick and epoch checks, and missing-input policy.
 Client intent and server-accepted controls use distinct native input types. Only the
 server publishes accepted input, and a short overlapping packet history covers
 jitter and delayed delivery. The client uses native fixed ticks for local input and
 stages the controls applied by C in Lightyear's input buffers. Confirmation compares
-the retained C digests at the corresponding completed authority tick.
+the retained C digests at the corresponding completed authority tick. The
+client keeps 25 digest/input and HUD rows for confirmation delivery, separately
+from the 12-tick C rollback history.
 
-The rendered client draws the predicted head using the existing network renderer.
-Drawing submits render-owned packets and restores the simulation's active camera,
-GTE registers and effect RNG state. During replay, screen
-messages, texture uploads, mixer updates and tick publication are suppressed. The
-audio bridge detaches restored emitter voice IDs and rebinds still-valid hardware
-voices by emitter identity when replay finishes. One-shots created inside the
-corrected interval are skipped. Prediction currently snaps to its corrected pose
-without adding another presentation delay. Offline interpolation is separate.
+Remote cars, projectiles, trails, and supported persistent effects use the existing
+C render samplers between two adjacent predicted poses. The phase comes from
+Bevy's fixed overstep, as used by Lightyear's frame interpolation. The local
+car and camera draw forward from the predicted head by up to one tick and 96
+world units per axis. Contact, sudden steering changes and camera target changes
+cut the forward sample. Replay rebuilds that sample and compares both timelines
+at the same presentation phase. A correction of at most 256 world units per axis
+and roughly 60 degrees eases out over 100 ms on the rebuilt sample. Identical
+replays keep the pose and any active correction's remaining duration. Teleports
+and larger corrections cut. The renderer uses the live object list for spawns, despawns and
+impacts on the current predicted tick. The pose buffer
+caps at 1,024 objects and 4,096 animation parts. The existing smoothing toggle
+disables both paths. The smoothing delay slider still controls offline motion.
 
-Lightyear can adjust its clock speed during play. A whole-tick clock resync,
-input or confirmation beyond the 12-tick history, or an unsupported gameplay
-state closes that client session. The authority and other clients keep running.
-The server still writes its journal, which the ordinary non-predicting match uses
-for recovery. The rendered mode is verified with Orbital and Pizza Boy. An eight-slot attempt
-reached all slot assignments but the default larger roster used car callbacks
-outside checkpoint coverage. Broader map, roster, high-latency and presentation
-smoothing coverage remain open.
+The wire carries accepted inputs and hashes. Lightyear's delayed replication
+interpolation needs a confirmed component stream, and its automatic visual
+correction writes ECS pose components. This port uses native rollback, phase,
+and easing while keeping the poses and draw rules in C.
+
+Draws restore the simulation camera, GTE and effect RNG. Replay submits no
+frames, mixer starts, texture uploads or external tick notifications. HUD
+messages are staged by tick and local slot, rebuilt during replay and shown once
+after confirmation. Audible voices keep a stable emitter/attribute identity.
+Corrected one-shots still alive at the new head may play once if they were
+unheard. Effects that begin and end entirely during replay are skipped.
+
+Lightyear can adjust its clock speed during play. At the 12-tick accepted-input
+boundary it pauses the fixed clock and resumes when two ticks of headroom
+return. This covers temporary gaps and startup clock lead. A whole-tick clock
+resync, excess confirmation backlog, or unsupported gameplay state closes that
+client session. The authority and other clients keep running.
+The server journal still supports ordinary non-predicting match recovery.
+Rendered play was verified with Orbital and Pizza Boy. An eight-slot attempt
+reached all slot assignments, but the default larger roster used car callbacks
+outside checkpoint coverage. Two-player Chromium checks passed at 72±12 and
+100±30 ms receive conditioning. With the clock pause enabled, a foreground
+Playwright WebKit client reached the boundary at 170±65 ms and resumed after the
+artificial delay was removed. Safari itself remains unverified. Players reported
+jerky motion in a manual Chrome session. Matching offline motion quality and
+covering more maps and rosters remain open.
 
 ### Session identity and modes — R1/R2/R7
 
@@ -258,6 +288,15 @@ arrive. Start a new match server after the match has been played. The test
 match server and launches its own Chromium authority. Supply the endpoint and
 authority token as for the journal tests. It conditions client receive traffic
 at 72±12 ms by default and uses real keyboard input in both rendered clients.
+Run `bun tests/browser/check_prediction_start.cjs` with a fresh server to
+exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.cjs`
+with a fresh server to exercise the production authority command and both clients'
+default render settings. Set `TM4_MANUAL_BROWSER=webkit` for Playwright WebKit
+and `TM4_MANUAL_WINDOW_WAIT=1` to exercise pause and resume at the bound. Set `TM4_CLOCK_FREEZE_MS=700` to
+suspend the receiving tab during the first offer. The standalone rendered browser check
+`bun tests/browser/check_rollback_audio.cjs` uses the real mixer to check finite
+sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` and `TM4_LIVE_JITTER_MS` to try other profiles. Set
+`TM4_LIVE_SCREENSHOT_DIR` to save compositor screenshots.
 
 Start a fresh match server for each network test using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
 count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and

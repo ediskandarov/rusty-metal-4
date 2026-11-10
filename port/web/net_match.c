@@ -1,6 +1,7 @@
 #include "net_match.h"
 #include "net_state.h"
 #include "checkpoint.h"
+#include "interpolation.h"
 #include "cheats.h"
 #include "level.h"
 #include "tm4/main/game.h"
@@ -276,8 +277,10 @@ EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalTick(u32 tick)
     if (!local_checkpoint_boundary())
         return local_checkpoint_error(
             "restore requires a supported match at a tick boundary");
-    if (WebNetRenderedPrediction())
+    if (WebNetRenderedPrediction()) {
+        WebInterpolationNetworkRememberCorrection();
         WebRollbackAudioRemember();
+    }
     const char* blocker = WebCheckpointRestore(tick);
     if (blocker)
         return local_checkpoint_error(blocker);
@@ -299,11 +302,14 @@ EMSCRIPTEN_KEEPALIVE int WebNetFinishLocalReplay(void)
 {
     if (!local_checkpoint_boundary() || !match.local_replaying)
         return local_checkpoint_error("replay must finish at a tick boundary");
-    if (WebNetRenderedPrediction())
+    int correction = 0;
+    if (WebNetRenderedPrediction()) {
         WebRollbackAudioReconcile();
+        correction = WebInterpolationNetworkFinishCorrection();
+    }
     match.local_replaying = 0;
     local_checkpoint_error(NULL);
-    return 1;
+    return correction ? 2 : 1;
 }
 
 EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)

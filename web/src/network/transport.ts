@@ -9,6 +9,7 @@ interface RustClient {
   update(): string;
   diagnostics(): string;
   prepare_prediction(players: number): void;
+  prediction_clock(): number;
   begin_prediction(
     anchor: number,
     epoch: number,
@@ -42,33 +43,48 @@ export async function connectNetwork(endpoint: string) {
   let closed = false;
   let opened = false;
   const started = performance.now();
+  let lastPoll = started;
+  let pollGapMs = 0;
+  let maxPollGapMs = 0;
+  let maxUpdateMs = 0;
   const transport = {
     readyState: 0,
-    diagnostics: () =>
-      JSON.parse(client.diagnostics()) as {
+    diagnostics: () => ({
+      ...(JSON.parse(client.diagnostics()) as {
         rttMs: number;
         jitterMs: number;
         queuedPackets: number;
         pendingInputs: number;
+        nativeTick: number;
         prediction: {
           head: number;
           confirmed: number;
           rollbacks: number;
+          windowWaits: number;
+          waitingForInput: boolean;
+          acceptedDepth: number;
           replayed: number;
           maxDepth: number;
           historyBytes: number;
           peakBytes: number;
           buttonEdges: number;
         };
-      },
+      }),
+      pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
+    }),
     preparePrediction: (players: number) => client.prepare_prediction(players),
+    predictionClock: () => client.prediction_clock(),
     beginPrediction: (
       anchor: number,
       epoch: number,
       players: number,
       slot: number,
       depth: number,
-    ) => client.begin_prediction(anchor, epoch, players, slot, depth),
+    ) => {
+      client.begin_prediction(anchor, epoch, players, slot, depth);
+      lastPoll = performance.now();
+      maxPollGapMs = maxUpdateMs = 0;
+    },
     predictionInput: (buttons: number, axes: number, analog: boolean) =>
       client.prediction_input(buttons, axes, analog),
     condition: (latency: number, jitter: number) => client.condition(latency, jitter),
@@ -92,8 +108,13 @@ export async function connectNetwork(endpoint: string) {
     },
   };
   const timer = setInterval(() => {
+    const now = performance.now();
+    pollGapMs = now - lastPoll;
+    maxPollGapMs = Math.max(maxPollGapMs, pollGapMs);
+    lastPoll = now;
     try {
       const messages = JSON.parse(client.update()) as unknown[];
+      maxUpdateMs = Math.max(maxUpdateMs, performance.now() - now);
       const connected = client.connected();
       if (!opened && connected) {
         opened = true;
@@ -106,6 +127,7 @@ export async function connectNetwork(endpoint: string) {
       }
       for (const message of messages) transport.onmessage(message);
     } catch (error) {
+      maxUpdateMs = Math.max(maxUpdateMs, performance.now() - now);
       console.error("Lightyear runtime failure", error);
       transport.onerror(error);
       transport.close();
