@@ -41,7 +41,7 @@ await run(
     "--lib",
     "--no-default-features",
     "--features",
-    "client",
+    mode === "diagnostic" ? "client,rollback_probe" : "client",
     "--target",
     "wasm32-unknown-unknown",
     "--manifest-path",

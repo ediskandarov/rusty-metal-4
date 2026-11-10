@@ -226,7 +226,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebNetCaptureLocalCheckpoint(void)
     if (!local_checkpoint_boundary() || match.local_replaying)
         return local_checkpoint_error(
             "capture requires a supported headless match at a live tick boundary");
-    u32 size = WebCheckpointCapture();
+    u32 size = WebCheckpointCapture(match.tick, 0);
     if (!size)
         return local_checkpoint_error("simulation state or checkpoint capacity rejected capture");
     match.checkpoint_tick = match.tick;
@@ -234,19 +234,45 @@ EMSCRIPTEN_KEEPALIVE u32 WebNetCaptureLocalCheckpoint(void)
     return size;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalCheckpoint(void)
+EMSCRIPTEN_KEEPALIVE u32 WebNetRetainLocalCheckpoint(u32 tick)
+{
+    if (!local_checkpoint_boundary() || tick != match.tick)
+        return local_checkpoint_error("checkpoint capture tick does not match the simulation boundary");
+    const u32 size = WebCheckpointCapture(tick, 1);
+    if (!size)
+        return local_checkpoint_error("simulation state or checkpoint history rejected capture");
+    local_checkpoint_error(NULL);
+    return size;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebNetLocalCheckpointStorageBytes(void)
+{
+    return WebCheckpointStorageBytes();
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebNetLocalRollbackDepth(void)
+{
+    return WebCheckpointHistoryTicks;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalTick(u32 tick)
 {
     if (!local_checkpoint_boundary())
         return local_checkpoint_error(
             "restore requires a supported headless match at a tick boundary");
-    const char* blocker = WebCheckpointRestore();
+    const char* blocker = WebCheckpointRestore(tick);
     if (blocker)
         return local_checkpoint_error(blocker);
     match.local_replaying = 1;
-    match.tick = match.checkpoint_tick;
+    match.tick = tick;
     local_checkpoint_error(NULL);
     WebNetMatchPublishTick();
     return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalCheckpoint(void)
+{
+    return WebNetRestoreLocalTick(match.checkpoint_tick);
 }
 
 EMSCRIPTEN_KEEPALIVE int WebNetFinishLocalReplay(void)

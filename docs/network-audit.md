@@ -24,7 +24,8 @@ reads every newly received buffer record before fixed-step trimming, then applie
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
 live. Recovery streams the authoritative match journal to rebuild the C world.
-Local prediction, C state replication and network presentation interpolation remain open.
+The diagnostic build also includes a separate native Lightyear rollback probe.
+Live-match prediction, C state replication and network presentation interpolation remain open.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -136,7 +137,7 @@ state snapshots and reconnect admission remain open.
 
 ### Same-instance C checkpoint
 
-An opt-in headless Construction Yard Deathmatch can retain one in-process checkpoint.
+An opt-in headless Construction Yard Deathmatch can retain a same-instance checkpoint.
 Capture requires a completed simulation tick with no staged input. Restore rewinds
 the same running instance, then the ordinary C step accepts recorded controls.
 During replay the headless instance suppresses external tick publication, audio
@@ -151,8 +152,8 @@ arena. World mutation hooks save touched geometry, display and collision flags,
 and navigation links in the resource arena. The undo log rejects addresses outside
 that arena. A resource allocation or free, unsupported object state or an exhausted
 world undo log also invalidates restoration. The experiment
-uses a 4 MiB simulation arena and up to 2,048 world edits per checkpoint. Replacing
-the checkpoint or stopping the match releases its history. Rendered instances, bots,
+uses a 4 MiB simulation arena and up to 2,048 world edits. Stopping the match
+releases the history. Rendered instances, bots,
 other maps, car packs, independent Wasm modules and sanitizer builds are outside
 this local rollback path.
 
@@ -163,6 +164,34 @@ replayed ticks, three times. Combat exercises steering, contact, weapon damage a
 projectile creation, impact and removal. A second case destroys and restores scenery,
 including its display and collision state, and checks another 180 ticks. The test
 also perturbs car, world and RNG state and hides a startup archive while restoring.
+
+### Native Lightyear rollback probe
+
+The diagnostic probe uses the same headless C world with two stock cars. A loopback
+Rust peer sends delayed native `InputMessage<NativeStateSequence<Input>>` packets.
+Lightyear's `ClientInputPlugin` compares received inputs with its `NativeBuffer`.
+With input `RollbackMode::Check`, `RollbackSystems::Check` selects the tick before
+the first mismatch. `RollbackSystems::Prepare` restores a locally registered
+`CheckpointTick` on the `DeterministicPredicted` world entity. The adapter reads that
+handle after Prepare and restores the C payload. Lightyear then reruns `FixedMain`,
+which resolves inputs in `FixedPreUpdate` and calls the ordinary C step in
+`FixedUpdate`. `EndRollback` ends C replay mode.
+
+C owns the checkpoint payloads and resource undo log. Lightyear owns input history,
+the rollback decision, and the repeated ticks. The browser bridge passes scalar
+inputs and checkpoint tick IDs between the separate Wasm instances. The rolling
+history keeps the current checkpoint and up to 12 prior ticks with an 8 MiB
+snapshot budget. Its world undo marks share one log. Restoring a tick reverses only
+later mutations and discards later checkpoints. Eviction releases log entries older
+than the oldest retained tick. Lightyear refuses corrections beyond 12 ticks, and
+the adapter stops the probe when that happens.
+
+[The browser probe check](../tests/browser/check_lightyear_rollback.cjs) compares
+canonical bytes and all five subsystem checksums on every repeated tick against an
+independent run of the final inputs. The peer releases scripted inputs over
+Lightyear on loopback, with the browser test advancing the fixed clock. This
+exercises real native receipt and rollback without enabling prediction in ordinary
+matches. Rendered correction, live remote-input policy and mod state remain open.
 
 ### Latency and presentation — R6/R8
 
@@ -194,7 +223,10 @@ fingerprints, accepted controls, outcomes and checksums.
 
 Build `bun run build:diagnostic`, then serve `bun run dev:diagnostic --port 18180`
 with separately configured local files. Run `bun tests/browser/check_local_checkpoint.cjs`
-against that site to test same-instance rollback without a match server.
+against that site to test same-instance rollback without a match server. For the
+native probe, run `cargo run --manifest-path network/Cargo.toml --features rollback_probe
+--example rollback_peer -- 19326` and then `bun tests/browser/check_lightyear_rollback.cjs`.
+Set `TM4_ROLLBACK_ENDPOINT` if using a different loopback port.
 Start a fresh match server for each network test
 using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
 count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and

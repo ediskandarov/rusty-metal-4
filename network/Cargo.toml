@@ -13,11 +13,16 @@ crate-type = ["cdylib", "rlib"]
 default = ["server"]
 server = ["lightyear/server"]
 client = ["lightyear/client"]
+rollback_probe = []
 
 [[bin]]
 name = "tm4-deathmatch-server"
 path = "src/main.rs"
 required-features = ["server"]
+
+[[example]]
+name = "rollback_peer"
+required-features = ["server", "rollback_probe"]
 
 [dependencies]
 aeronet_io = "0.21"

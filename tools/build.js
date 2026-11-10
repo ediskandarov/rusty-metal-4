@@ -45,6 +45,15 @@ const result = await Bun.build({
 });
 if (!result.success) throw new AggregateError(result.logs, "Browser bundle failed");
 if (!diagnostics) await rm(join(site, "web.js.map"), { force: true });
+if (diagnostics) {
+  const probe = await Bun.build({
+    entrypoints: [join(root, "web/src/network/rollbackProbe.ts")],
+    outdir: site,
+    naming: "rollback-probe.js",
+    target: "browser",
+  });
+  if (!probe.success) throw new AggregateError(probe.logs, "Rollback probe bundle failed");
+}
 await cp(
   join(root, "node_modules/coi-serviceworker/coi-serviceworker.min.js"),
   join(site, "coi-serviceworker.js"),
