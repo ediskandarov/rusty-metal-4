@@ -1049,14 +1049,15 @@ def export(model):
                 )
                 if dot(n, face_direction) < 0.1:
                     n = face_direction
-                normal = [round(n[0] * 4096), round(-n[1] * 4096), round(n[2] * 4096)]
+                normal = [round(-n[0] * 4096), round(n[1] * 4096), round(-n[2] * 4096)]
                 nr = normal + [projected_id]
                 ni = next((j for j, n in enumerate(gn) if n == nr), len(gn))
                 if ni == len(gn):
                     gn.append(nr)
                 nids.append(ni)
-            # Reflection Y conversion reverses winding; reverse perimeter then convert to GPU order.
-            order = [0, 2, 1] if len(ids) == 3 else [0, 3, 1, 2]
+            # TM4 accepts positive NCLIP and uses inward-facing lighting normals.
+            # Keep the reflected perimeter; only convert quads to GPU strip order.
+            order = [0, 1, 2] if len(ids) == 3 else [0, 1, 3, 2]
             iv = [ids[i] for i in order]
             uv = [f["uv"][i] for i in order]
             nids = [nids[i] for i in order]
@@ -1101,7 +1102,8 @@ def export(model):
             ]
         group = frame * 2 + struct.pack("<3hBb", *center, int(g["wheel"]), gi)
         put("display/resolution/r0/Groups/" + g["name"], group)
-        faces.extend(b"".join(gf))
+        # addPrim prepends packets: overlay faces must be submitted before their backing panels.
+        faces.extend(b"".join(reversed(gf)))
         vertices.extend(b"".join(struct.pack("<3hH", *v, 0) for v in gv))
         normals.extend(b"".join(struct.pack("<4h", *n) for n in gn))
         groups.append(

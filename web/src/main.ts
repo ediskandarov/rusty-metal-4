@@ -1,9 +1,11 @@
 import { loadDisc } from "./loader/loader.ts";
 import { directorySources, remoteSources } from "./loader/sources.ts";
 import type { DiscSources } from "./loader/types.ts";
+import { installCarMods } from "./mods/install.ts";
 import { prepareIsolation } from "./runtime/isolation.ts";
 import { startGame } from "./runtime/start.ts";
 import { element } from "./ui/dom.ts";
+import { initializeMods } from "./ui/mods.ts";
 import { initializePopups } from "./ui/popups.ts";
 import { initializeResources } from "./ui/resources.ts";
 
@@ -14,6 +16,7 @@ const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
 initializePopups();
 const resources = initializeResources();
+const mods = initializeMods();
 let starting = false;
 let runtimeStarted = false;
 
@@ -29,6 +32,7 @@ async function launch(resolveSources: () => DiscSources) {
   starting = true;
   folderPicker.disabled = true;
   try {
+    const selectedMods = await mods.beginSession();
     const sources = resolveSources();
     await resources.inspect(sources);
     if (!crossOriginIsolated)
@@ -39,6 +43,8 @@ async function launch(resolveSources: () => DiscSources) {
       },
       warn,
     });
+    progress.textContent = "Preparing mods…";
+    await installCarMods(assets, selectedMods);
     progress.textContent = "Starting game…";
     runtimeStarted = true;
     // Hide before starting SDL so its initial viewport uses the final page layout.
@@ -52,6 +58,7 @@ async function launch(resolveSources: () => DiscSources) {
     progress.textContent = runtimeStarted ? `${message}\nReload the page to try again.` : message;
     console.error(error);
   } finally {
+    mods.finishStartup(runtimeStarted);
     starting = runtimeStarted;
     folderPicker.disabled = runtimeStarted;
   }

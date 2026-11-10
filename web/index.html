@@ -28,6 +28,19 @@
           aria-describedby="disc-formats"
         />
       </label>
+      <details id="startup-mods">
+        <summary>Optional mods</summary>
+        <p>Choose or drop .tm4mod packages anywhere on this page. Saved locally in this browser.</p>
+        <input
+          id="startup-mod-files"
+          type="file"
+          accept=".tm4mod"
+          multiple
+          aria-label="Mod packages"
+        />
+        <ul id="startup-mod-list" class="mod-list"></ul>
+        <p id="startup-mod-status" role="status"></p>
+      </details>
       <p id="startup-progress"></p>
       <ul id="startup-warnings"></ul>
     </section>
@@ -252,7 +265,24 @@
           <div id="resource-list"></div>
         </aside>
       </details>
+      <details id="mods">
+        <summary>Mods</summary>
+        <div class="settings-panel" id="mod-panel">
+          <p>Choose or drop .tm4mod packages anywhere on this page. Restart to apply changes.</p>
+          <input
+            id="mod-files"
+            type="file"
+            accept=".tm4mod"
+            multiple
+            aria-label="Add mod packages"
+          />
+          <ul id="mod-list" class="mod-list"></ul>
+          <p id="mod-status" role="status"></p>
+          <button id="mod-restart" type="button" hidden>Restart with selected mods</button>
+        </div>
+      </details>
     </div>
+    <div id="mod-drop-hint" role="status" hidden></div>
     <script type="module" src="web.js"></script>
   </body>
 </html>

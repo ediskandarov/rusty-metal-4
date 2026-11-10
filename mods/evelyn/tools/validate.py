@@ -197,19 +197,19 @@ def unpack_model(blob):
             )
             need(clut == 44 and page == 10, "Texture binding")
             need(all(1 <= u <= 254 and 1 <= v <= 62 for u, v in uv), "UV bounds")
-            order = [0, 2, 1] if degree == 3 else [0, 2, 3, 1]
+            order = [0, 1, 2] if degree == 3 else [0, 1, 3, 2]
             length = math.sqrt(sum(c * c for c in normal))
             n = [c * 4096 / length for c in normal]
             cn = [normals[fn + ni[k]] for k in order]
             group["faces"].append(
                 {
                     "corner_normals": [
-                        (c[0] / 4096, -c[1] / 4096, c[2] / 4096) for c in cn
+                        (-c[0] / 4096, c[1] / 4096, -c[2] / 4096) for c in cn
                     ],
                     "double_sided": bool(f[1]),
                     "v": [iv[k] for k in order],
                     "uv": [uv[k] for k in order],
-                    "normal": (n[0] / 4096, -n[1] / 4096, n[2] / 4096),
+                    "normal": (-n[0] / 4096, n[1] / 4096, -n[2] / 4096),
                 }
             )
         covered_vertices.update(range(fv, fv + vc))

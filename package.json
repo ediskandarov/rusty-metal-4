@@ -14,7 +14,8 @@
     "fmt:check": "bun fmt --no-script --check tools web tests package.json config tsconfig.json bunfig.toml",
     "lint": "bun lint --no-script tools web tests",
     "typecheck": "tsc --noEmit && tsc --project web/tsconfig.json --noEmit",
-    "test:pages": "bun tests/browser/check_pages.cjs"
+    "test:pages": "bun tests/browser/check_pages.cjs",
+    "build:mod": "bun tools/mods/build.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "^1.0.11",

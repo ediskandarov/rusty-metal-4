@@ -188,3 +188,36 @@ body {
   font-size: 10px;
   color: #a4b1c0;
 }
+
+.mod-list {
+  padding-left: 1.2rem;
+}
+.mod-list li {
+  margin: 0.8rem 0;
+}
+.mod-list button {
+  margin-left: 0.7rem;
+}
+.mod-list small {
+  display: block;
+  color: #c5ad7c;
+}
+#mod-panel input {
+  max-width: 100%;
+}
+
+#mod-drop-hint:not([hidden]) {
+  position: fixed;
+  inset: 12px;
+  z-index: 10000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border: 2px dashed #86bfff;
+  border-radius: 12px;
+  background: #081421e8;
+  color: #fff;
+  font-size: 1.25rem;
+  text-align: center;
+  pointer-events: none;
+}
