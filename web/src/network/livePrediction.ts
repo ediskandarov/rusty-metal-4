@@ -8,7 +8,6 @@ interface PredictionEngine extends NetworkEngine {
   _WebNetRestoreLocalTick(tick: number): number;
   _WebNetFinishLocalReplay(): number;
   _WebNetConfirmPresentationTick(tick: number): number;
-  _WebNetSetPresentationPhase(phase: number, correction: number): void;
 }
 
 interface Bridge {
@@ -23,8 +22,7 @@ interface Bridge {
   ): boolean;
   step_live_tick(tick: number): boolean;
   live_digest_section(index: number): number;
-  finish_live_replay(): number;
-  set_live_presentation_phase(phase: number, correction: number): void;
+  finish_live_replay(): boolean;
 }
 
 declare global {
@@ -81,14 +79,12 @@ export function attachLivePrediction(runtime: NetworkEngine, port: NetworkPort) 
     },
     live_digest_section: (index) =>
       (index === 0 ? port.netMatch?.digest : port.netMatch?.sections?.[index - 1]) ?? 0,
-    set_live_presentation_phase: (phase, correction) =>
-      engine._WebNetSetPresentationPhase(phase, correction),
     finish_live_replay() {
       const result = engine._WebNetFinishLocalReplay();
       if (replayStarted !== undefined)
         cost.maxRollbackMs = Math.max(cost.maxRollbackMs, performance.now() - replayStarted);
       replayStarted = undefined;
-      return result;
+      return !!result;
     },
   };
   return {

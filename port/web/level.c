@@ -51,6 +51,7 @@ static unsigned int simulation_steps;
 static double last_step;
 static WebRenderMotionSettings motion;
 static int demo_draw_enabled;
+static int network_frame_pending;
 
 EMSCRIPTEN_KEEPALIVE unsigned int WebGetSimulationSteps(void)
 {
@@ -155,6 +156,7 @@ void WebLevelStart(void)
         PadSetVibrationEnabled(
             i, GameInfo.mode == GAME_MODE_PLAY && GameInfo.players[i].vibration_enabled);
     frames = 0;
+    network_frame_pending = 0;
     motion = (WebRenderMotionSettings){ 0 };
     WebInterpolationReset();
     if (WebNetRenderedPrediction())
@@ -347,11 +349,7 @@ static void draw_network_view(s32 slot)
     /* Turbo effects draw from the secondary RNG between simulation ticks. */
     const u32 effect_seed = WebRenderEffectRandomState();
     RenderBeginFrame();
-    if (saved_gte)
-        WebInterpolationNetworkBeginDraw();
     RenderBuildFrame();
-    if (saved_gte)
-        WebInterpolationEndDraw();
     srandrand(effect_seed);
     WebRenderPresentLevelFrame();
     if (saved_gte) {
@@ -372,18 +370,15 @@ void WebLevelNetworkStep(void)
     if (!active || !WebNetMatchTakeInput())
         return;
     int rendered = WebNetRenderedPrediction();
-    if (rendered) {
-        WebInterpolationNetworkBeginStep();
+    if (rendered)
         WebScreenBeginPredictedTick((u32)MainFrameCount + 1);
-    }
     WebCheckpointArenaSelect(checkpoint_arena);
     process_level_step();
     GameProcessMode();
     WebCheckpointArenaSelect(0);
-    if (rendered) {
+    if (rendered)
         WebScreenFinishPredictedTick();
-        WebInterpolationNetworkFinishStep();
-    }
+    network_frame_pending = 1;
     ++MainFrameCount;
     EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     WebNetMatchPublishTick();
@@ -395,8 +390,10 @@ void WebLevelFrame(void)
         if (WebNetReplaying())
             return;
         WebNetMatchPollInput();
-        if (WebNetMatchViewSlot() >= 0 && WebRenderBeginLevelFrame())
+        if (WebNetMatchViewSlot() >= 0 && network_frame_pending && WebRenderBeginLevelFrame()) {
+            network_frame_pending = 0;
             draw_network_view(WebNetMatchViewSlot());
+        }
         return;
     }
     if (GameInfo.mode == GAME_MODE_DEMO) {

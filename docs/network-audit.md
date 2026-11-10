@@ -212,24 +212,11 @@ the retained C digests at the corresponding completed authority tick. The
 client keeps 25 digest/input and HUD rows for confirmation delivery, separately
 from the 12-tick C rollback history.
 
-Remote cars, projectiles, trails, and supported persistent effects use the existing
-C render samplers between two adjacent predicted poses. The phase comes from
-Bevy's fixed overstep, as used by Lightyear's frame interpolation. The local
-car and camera draw forward from the predicted head by up to one tick and 96
-world units per axis. Contact, sudden steering changes and camera target changes
-cut the forward sample. Replay rebuilds that sample and compares both timelines
-at the same presentation phase. A correction of at most 256 world units per axis
-and roughly 60 degrees eases out over 100 ms on the rebuilt sample. Identical
-replays keep the pose and any active correction's remaining duration. Teleports
-and larger corrections cut. The renderer uses the live object list for spawns, despawns and
-impacts on the current predicted tick. The pose buffer
-caps at 1,024 objects and 4,096 animation parts. The existing smoothing toggle
-disables both paths. The smoothing delay slider still controls offline motion.
-
-The wire carries accepted inputs and hashes. Lightyear's delayed replication
-interpolation needs a confirmed component stream, and its automatic visual
-correction writes ECS pose components. This port uses native rollback, phase,
-and easing while keeping the poses and draw rules in C.
+Network matches render the latest simulated state at 30 FPS, only after a new
+simulation step, with no interpolation, extrapolation or visual correction.
+The renderer keeps the fixed simulation and input-driven rollback intact.
+Rendering controls lock motion smoothing and frame rate for the match and restore
+single-player settings afterwards. Other graphics options remain available.
 
 Draws restore the simulation camera, GTE and effect RNG. Replay submits no
 frames, mixer starts, texture uploads or external tick notifications. HUD
@@ -249,9 +236,8 @@ reached all slot assignments, but the default larger roster used car callbacks
 outside checkpoint coverage. Two-player Chromium checks passed at 72±12 and
 100±30 ms receive conditioning. With the clock pause enabled, a foreground
 Playwright WebKit client reached the boundary at 170±65 ms and resumed after the
-artificial delay was removed. Safari itself remains unverified. Players reported
-jerky motion in a manual Chrome session. Matching offline motion quality and
-covering more maps and rosters remain open.
+artificial delay was removed. Safari itself remains unverified. Smooth high-rate
+network presentation is deferred. Covering more maps and rosters remains open.
 
 ### Session identity and modes — R1/R2/R7
 

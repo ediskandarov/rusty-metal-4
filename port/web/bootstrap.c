@@ -136,7 +136,7 @@ static void apply_render_settings(void)
             tm4Port.renderDithering = $1;
             tm4Port.carLodDistance = $2;
             tm4Port.drawDistance = $3;
-            tm4Port.renderLimit = $4;
+            tm4Port.renderLimit = tm4Port.networkSynchronous ? 30 : $4;
         },
         Psyz_VideoGetInternalResolution(), Psyz_VideoGetDitheringMode(),
         WebCarLodDistanceScale, WebDrawDistanceScale, render_settings.limit);

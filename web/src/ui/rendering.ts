@@ -44,6 +44,8 @@ function smoothingSettings(module: GameModule, changed: () => void) {
   const enabled = element("render-smoothing", HTMLInputElement);
   const slider = element("render-smoothing-delay", HTMLInputElement);
   const readout = element("render-smoothing-readout", HTMLOutputElement);
+  let networkMode = false;
+  let offlineEnabled = enabled.checked;
   const milliseconds = (value: number) => `${Number(value.toFixed(1))} ms`;
 
   function applyDelay() {
@@ -58,7 +60,7 @@ function smoothingSettings(module: GameModule, changed: () => void) {
   }
 
   function applyEnabled() {
-    slider.disabled = !enabled.checked;
+    slider.disabled = networkMode || !enabled.checked;
     module._WebSetRenderSmoothing(Number(enabled.checked));
   }
 
@@ -71,11 +73,29 @@ function smoothingSettings(module: GameModule, changed: () => void) {
     changed();
   });
 
-  return (preset: Preset) => {
-    enabled.checked = preset === "ultra";
-    slider.value = String(smoothingDelays.length - 1);
-    applyDelay();
-    applyEnabled();
+  return {
+    matches(preset: Preset) {
+      return (
+        enabled.checked === (preset === "ultra") &&
+        slider.value === String(smoothingDelays.length - 1)
+      );
+    },
+    preset(preset: Preset) {
+      enabled.checked = preset === "ultra";
+      slider.value = String(smoothingDelays.length - 1);
+      applyDelay();
+      applyEnabled();
+    },
+    network(active: boolean) {
+      if (active === networkMode) return;
+      if (active) offlineEnabled = enabled.checked;
+      networkMode = active;
+      enabled.disabled = active;
+      enabled.checked = active ? false : offlineEnabled;
+      applyEnabled();
+      if (active) readout.value = "Disabled in network matches";
+      else applyDelay();
+    },
   };
 }
 
@@ -84,12 +104,22 @@ export function initializeRendering(module: GameModule) {
   const changed = () => {
     selector.value = "custom";
   };
+  let networkMode = false;
+  const limit = element("render-limit", HTMLSelectElement);
+  let offlineLimit = limit.value;
+  const networkNote = element("network-render-note", HTMLParagraphElement);
+  const limitSetting = selectSetting(
+    "render-limit",
+    module._WebSetRenderLimit,
+    { ultra: 120, ps1: 30 },
+    changed,
+  );
+  const smoothing = smoothingSettings(module, changed);
   const settings = [
     selectSetting("render-scale", module._WebSetRenderScale, { ultra: 8, ps1: 1 }, changed),
     selectSetting("car-lod-distance", module._WebSetCarLodDistance, { ultra: 8, ps1: 1 }, changed),
     selectSetting("draw-distance", module._WebSetDrawDistance, { ultra: 8, ps1: 1 }, changed),
     selectSetting("render-dithering", module._WebSetRenderDithering, { ultra: 0, ps1: 0 }, changed),
-    selectSetting("render-limit", module._WebSetRenderLimit, { ultra: 120, ps1: 30 }, changed),
     toggleSetting(
       "subpixel-vertices",
       module._WebSetSubpixelVertices,
@@ -102,14 +132,35 @@ export function initializeRendering(module: GameModule) {
       { ultra: true, ps1: false },
       changed,
     ),
-    smoothingSettings(module, changed),
   ];
   function apply(preset: Preset) {
     for (const setting of settings) setting(preset);
+    if (!networkMode) {
+      limitSetting(preset);
+      smoothing.preset(preset);
+    }
     selector.value = preset;
   }
   selector.addEventListener("change", () => {
     if (selector.value === "ultra" || selector.value === "ps1") apply(selector.value);
+  });
+  window.addEventListener("tm4-network-mode", (event) => {
+    const active = (event as CustomEvent<boolean>).detail;
+    if (active === networkMode) return;
+    if (active) offlineLimit = limit.value;
+    networkMode = active;
+    networkNote.hidden = !active;
+    limit.disabled = active;
+    limit.value = active ? "30" : offlineLimit;
+    module._WebSetRenderLimit(Number(limit.value));
+    smoothing.network(active);
+    const preset = selector.value;
+    if (
+      !active &&
+      (preset === "ultra" || preset === "ps1") &&
+      (limit.value !== (preset === "ultra" ? "120" : "30") || !smoothing.matches(preset))
+    )
+      changed();
   });
   apply("ultra");
   return { reset: () => apply("ultra") };

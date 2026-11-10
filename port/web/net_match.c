@@ -1,7 +1,6 @@
 #include "net_match.h"
 #include "net_state.h"
 #include "checkpoint.h"
-#include "interpolation.h"
 #include "cheats.h"
 #include "level.h"
 #include "tm4/main/game.h"
@@ -151,6 +150,9 @@ EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s3
     match.view_slot = view_slot;
     EM_ASM({
         tm4Port.networkSynchronous = true;
+        tm4Port.renderLimit = 30;
+        tm4Port.renderSmoothing = false;
+        window.dispatchEvent(new CustomEvent("tm4-network-mode", { detail: true }));
         tm4Port.netSession = ({ status : "loading" });
     });
     start_session();
@@ -277,10 +279,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalTick(u32 tick)
     if (!local_checkpoint_boundary())
         return local_checkpoint_error(
             "restore requires a supported match at a tick boundary");
-    if (WebNetRenderedPrediction()) {
-        WebInterpolationNetworkRememberCorrection();
+    if (WebNetRenderedPrediction())
         WebRollbackAudioRemember();
-    }
     const char* blocker = WebCheckpointRestore(tick);
     if (blocker)
         return local_checkpoint_error(blocker);
@@ -302,14 +302,11 @@ EMSCRIPTEN_KEEPALIVE int WebNetFinishLocalReplay(void)
 {
     if (!local_checkpoint_boundary() || !match.local_replaying)
         return local_checkpoint_error("replay must finish at a tick boundary");
-    int correction = 0;
-    if (WebNetRenderedPrediction()) {
+    if (WebNetRenderedPrediction())
         WebRollbackAudioReconcile();
-        correction = WebInterpolationNetworkFinishCorrection();
-    }
     match.local_replaying = 0;
     local_checkpoint_error(NULL);
-    return correction ? 2 : 1;
+    return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
@@ -534,5 +531,6 @@ void WebNetMatchEnd(void)
         delete tm4Port.netCapturedState;
         delete tm4Port.localCheckpointError;
         tm4Port.networkSynchronous = false;
+        window.dispatchEvent(new CustomEvent("tm4-network-mode", { detail: false }));
     });
 }

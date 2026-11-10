@@ -37,9 +37,9 @@ void WebRenderSetLimit(unsigned int rate)
 
 static unsigned int effective_render_limit(void)
 {
-    /* Vanilla presents one pose per tick. Larger splits reuse packet storage. */
-    if (!WebRenderGetMotionSettings().enabled || GameInfo.player_count > 2)
-        return 30;
+    /* Network play displays simulation poses; larger splits reuse packet storage. */
+    if (WebNetMatchActive() || !WebRenderGetMotionSettings().enabled || GameInfo.player_count > 2)
+        return SIMULATION_FPS;
     return render_limit;
 }
 

@@ -1,4 +1,4 @@
-/* global tm4Port */
+/* global tm4Port, Module */
 const assert = require("node:assert/strict");
 const { join } = require("node:path");
 const { chromium, webkit } = require("playwright");
@@ -72,6 +72,13 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
         confirmed: tm4Port.netConfirmedTick ?? 0,
         frames: tm4Port.levelFrames ?? 0,
         renderLimit: tm4Port.renderLimit,
+        timingLocked:
+          document.querySelector("#render-limit").disabled &&
+          document.querySelector("#render-limit").value === "30" &&
+          document.querySelector("#render-smoothing").disabled &&
+          !document.querySelector("#render-smoothing").checked &&
+          document.querySelector("#render-smoothing-delay").disabled,
+        now: performance.now(),
         visible: document.visibilityState,
         wait: tm4Port.testInputWait,
       }));
@@ -106,11 +113,17 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
     }
     const final = await Promise.all(players.map((page) => waitConfirmed(page, 300)));
     assert(
-      final.every(
-        ({ frames, renderLimit }, i) => frames > initial[i].frames && renderLimit === 120,
-      ),
+      final.every(({ frames, renderLimit, timingLocked, now }, i) => {
+        const fps = (1000 * (frames - initial[i].frames)) / (now - initial[i].now);
+        return frames > initial[i].frames && renderLimit === 30 && timingLocked && fps <= 32;
+      }),
       JSON.stringify(final),
     );
+    await players[0].locator("#render-settings > summary").click();
+    for (const preset of ["ps1", "ultra"]) {
+      await players[0].selectOption("#render-preset", preset);
+      assert((await sample(players[0])).timingLocked);
+    }
     assert.deepEqual(errors, []);
     if (forceWait) {
       assert.equal(final[1].wait?.acceptedDepth, 12, JSON.stringify(final));
@@ -118,7 +131,23 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
     }
     if (process.env.TM4_MANUAL_SCREENSHOT)
       await players[0].screenshot({ path: process.env.TM4_MANUAL_SCREENSHOT });
-    results = { initial, final };
+    const restored = await players[0].evaluate(async () => {
+      Module._WebNetCancelMatch();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      return {
+        limit: document.querySelector("#render-limit").value,
+        limitEnabled: !document.querySelector("#render-limit").disabled,
+        smoothing: document.querySelector("#render-smoothing").checked,
+        smoothingEnabled: !document.querySelector("#render-smoothing").disabled,
+      };
+    });
+    assert.deepEqual(restored, {
+      limit: "120",
+      limitEnabled: true,
+      smoothing: true,
+      smoothingEnabled: true,
+    });
+    results = { initial, final, restored };
   } finally {
     authority.kill();
     await browser.close();

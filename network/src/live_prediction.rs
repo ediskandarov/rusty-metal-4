@@ -2,7 +2,7 @@ use crate::input::{ControllerCommand, Input};
 use crate::protocol::{ControllerIdentity, Message, PREDICTION_DEPTH};
 use bevy_app::{App, FixedPostUpdate, FixedPreUpdate, FixedUpdate, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
-use bevy_time::{Fixed, Time, Virtual};
+use bevy_time::{Fixed, Time};
 use lightyear::input::client::InputSystems;
 use lightyear::prelude::client::InputDelayConfig;
 use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
@@ -23,9 +23,7 @@ extern "C" {
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn live_digest_section(index: u8) -> u32;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
-    fn finish_live_replay() -> u8;
-    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
-    fn set_live_presentation_phase(phase: f64, correction: f32);
+    fn finish_live_replay() -> bool;
 }
 
 const HISTORY: usize = PREDICTION_DEPTH as usize + 1;
@@ -66,7 +64,6 @@ pub struct LivePrediction {
     confirmations: VecDeque<Message>,
     received_mismatch: bool,
     restoring: bool,
-    correction_started: Option<f64>,
     sequence: u32,
     head: u32,
     confirmed: u32,
@@ -203,7 +200,7 @@ pub fn install(app: &mut App) {
         FixedPostUpdate,
         (update_prediction_wait, discard_waiting_overstep).chain(),
     );
-    app.add_systems(PostUpdate, (update_prediction_wait, presentation_phase));
+    app.add_systems(PostUpdate, update_prediction_wait);
     app.add_systems(
         PreUpdate,
         (
@@ -546,29 +543,8 @@ fn restore_world(
     state.checksums.retain(|(tick, _, _)| *tick <= checkpoint.0);
 }
 
-fn end_replay(mut state: ResMut<LivePrediction>, time: Res<Time<Virtual>>) {
-    if std::mem::take(&mut state.restoring) {
-        match finish_live_replay() {
-            0 if state.error.is_none() => {
-                state.error = Some("The game refused to end Lightyear rollback".into());
-            }
-            2 => state.correction_started = Some(time.elapsed_secs_f64()),
-            _ => {}
-        }
+fn end_replay(mut state: ResMut<LivePrediction>) {
+    if std::mem::take(&mut state.restoring) && !finish_live_replay() && state.error.is_none() {
+        state.error = Some("The game refused to end Lightyear rollback".into());
     }
-}
-
-fn presentation_phase(
-    state: Res<LivePrediction>,
-    fixed: Res<Time<Fixed>>,
-    time: Res<Time<Virtual>>,
-) {
-    if state.session.is_none() {
-        return;
-    }
-    let correction = state.correction_started.map_or(0.0, |start| {
-        let elapsed = (time.elapsed_secs_f64() - start) as f32;
-        CorrectionEase::Smoothstep.remaining(elapsed, 0.100)
-    });
-    set_live_presentation_phase(fixed.overstep_fraction_f64().clamp(0.0, 1.0), correction);
 }
