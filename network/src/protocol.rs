@@ -162,12 +162,6 @@ pub enum Request {
         #[serde(default)]
         recoverable: bool,
     },
-    Input {
-        epoch: u32,
-        sequence: u32,
-        tick: u32,
-        input: Input,
-    },
     Progress {
         tick: u32,
     },
@@ -245,7 +239,7 @@ pub enum Message {
         tick: u32,
         inputs: Vec<Input>,
         state: RoundState,
-        acknowledged: Vec<Option<u32>>,
+        fallback_processed: Vec<Option<u32>>,
     },
     RecoveryBegin {
         schema: u16,
@@ -263,10 +257,9 @@ pub enum Message {
         tick: u32,
         state: RoundState,
     },
-    InputAck {
+    InputRejected {
         sequence: u32,
-        tick: Option<u32>,
-        rejected: Option<Rejection>,
+        reason: Rejection,
     },
     Finished,
     Error {

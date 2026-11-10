@@ -143,30 +143,23 @@ impl NetworkClient {
         if json.len() > 8192 && kind != "snapshot_upload" {
             return Err(JsValue::from_str("Message exceeds bridge limit"));
         }
+        if kind == "input" {
+            let command = serde_json::from_value::<ControllerCommand>(value)
+                .map_err(|e| JsValue::from_str(&e.to_string()))?;
+            return self
+                .app
+                .world_mut()
+                .resource_mut::<PendingInput>()
+                .0
+                .enqueue(command)
+                .map_err(|_| JsValue::from_str("Controller button-edge history is full"));
+        }
         let request: Request = serde_json::from_value(serde_json::json!({kind: value}))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         if let Request::SnapshotUpload { data, .. } = &request
             && data.len() > crate::protocol::SNAPSHOT_CHUNK_BYTES
         {
             return Err(JsValue::from_str("Snapshot block exceeds bridge limit"));
-        }
-        if let Request::Input {
-            epoch,
-            sequence,
-            tick,
-            input,
-        } = request
-        {
-            let mut pending = self.app.world_mut().resource_mut::<PendingInput>();
-            return pending
-                .0
-                .enqueue(ControllerCommand {
-                    epoch,
-                    sequence,
-                    tick,
-                    input,
-                })
-                .map_err(|_| JsValue::from_str("Controller button-edge history is full"));
         }
         if matches!(request, Request::Ready { .. })
             && self

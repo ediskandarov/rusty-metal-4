@@ -19,7 +19,7 @@ type Message =
   | ReplayBegin
   | ReplayChunk
   | { type: "recovery_end"; tick: number; state: RoundState }
-  | { type: "input_ack"; sequence: number; tick: number | null; rejected: string | null }
+  | { type: "input_rejected"; sequence: number; reason: string }
   | { type: "welcome"; slot: number }
   | { type: "error"; message: string };
 
@@ -91,12 +91,12 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   let slot = -1;
   let players = 0;
   let sequence = 0;
-  let nextFrame = 0;
+  let nextFallbackFrame = 0;
   let closed = false;
   let lastInput: Input | undefined;
   let lastSent = 0;
   let epoch = 0;
-  const history = new Map<number, Input>();
+  const history = new Set<number>();
   let initialDigest = 0;
   let initialRecoverable = false;
   let recovery: Recovery | undefined;
@@ -208,11 +208,11 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
         type: "input",
         epoch,
         sequence: ++sequence,
-        tick: nextFrame + 6,
+        tick: nextFallbackFrame + 6,
         input,
       });
       if (superseded !== undefined) history.delete(superseded);
-      history.set(sequence, input);
+      history.add(sequence);
       diagnostics.pendingInputs = history.size;
       if (history.size > 60) {
         fail("Input acknowledgement stalled; controls stopped");
@@ -248,6 +248,12 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
       show("lobby", "Restoring the match…");
       armJournalTimeout();
       send({ type: "recover", epoch, tick: frame.tick });
+      return;
+    }
+    try {
+      if (frame.tick % 15 === 0) send({ type: "progress", tick: frame.tick });
+    } catch (error) {
+      fail(error);
       return;
     }
     displayOutcome(state);
@@ -466,7 +472,6 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             message.sequence,
           );
           predictionStarted = true;
-          nextFrame = message.head;
           port.netConfirmedTick = message.head;
           diagnostics.recoveredTick = message.head;
           diagnostics.replayMs = performance.now() - recovery.requestedAt;
@@ -474,7 +479,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           armJournalTimeout();
           break;
         case "resume_active":
-          if (!resumePending || !predictionStarted || !resume || message.head !== nextFrame)
+          if (!resumePending || !predictionStarted || !resume || message.head !== resume.target)
             throw new Error("Unexpected reconnect acknowledgement");
           resumePending = false;
           resume = undefined;
@@ -483,7 +488,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "recovery_begin":
-          if (!recovery || recovery.journal || message.head !== nextFrame)
+          if (!recovery || recovery.journal || message.head !== nextFallbackFrame)
             throw new Error("Unexpected match journal");
           recovery.journal = new ReplayJournal(
             message,
@@ -521,37 +526,35 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           diagnostics.recoveredTick = message.tick;
           recovery = undefined;
           clearTimeout(recoveryDeadline);
-          nextFrame = message.tick;
+          nextFallbackFrame = message.tick;
           port.netMatchServerState = message.state;
           show("playing", "Player " + (slot + 1) + " of " + players);
           displayOutcome(message.state);
           break;
-        case "input_ack":
-          if (message.rejected) {
-            history.delete(message.sequence);
-            diagnostics.rejectedInputs++;
-            diagnostics.pendingInputs = history.size;
-          }
+        case "input_rejected":
+          history.delete(message.sequence);
+          diagnostics.rejectedInputs++;
+          diagnostics.pendingInputs = history.size;
           break;
         case "frame": {
           diagnostics.receivedFrames++;
-          if (message.tick % 15 === 0) send({ type: "progress", tick: message.tick });
           diagnostics.transport = socket.diagnostics();
-          const acknowledged = message.acknowledged[slot];
-          if (acknowledged !== null && acknowledged !== undefined) {
-            diagnostics.processedSequence = acknowledged;
-            for (const sequence of history.keys())
-              if (sequence <= acknowledged) history.delete(sequence);
-            diagnostics.pendingInputs = history.size;
-          }
-          if (message.tick !== nextFrame++ || message.inputs.length !== players)
-            throw new Error("Received an out-of-order match frame");
           if (predictionStarted) {
+            if (message.tick % 15 === 0) send({ type: "progress", tick: message.tick });
             prediction?.confirm(message.tick + 1);
             port.netConfirmedTick = message.tick + 1;
             port.netMatchServerState = message.state;
             displayOutcome(message.state);
             break;
+          }
+          if (message.tick !== nextFallbackFrame++ || message.inputs.length !== players)
+            throw new Error("Received an out-of-order match frame");
+          const processed = message.fallback_processed[slot];
+          if (processed !== null && processed !== undefined) {
+            diagnostics.processedSequence = processed;
+            for (const sequence of history.keys())
+              if (sequence <= processed) history.delete(sequence);
+            diagnostics.pendingInputs = history.size;
           }
           if (recovery) break;
           if (message.tick === 0) show("playing", "Player " + (slot + 1) + " of " + players);

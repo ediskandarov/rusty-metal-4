@@ -8,9 +8,10 @@ this page records actual coverage and limitations, not revised requirements.
 
 C owns gameplay, including physics, weapons and scoring. A server-owned Chromium
 instance runs that C/Wasm simulation. The native Rust server selects accepted inputs
-and advances it on a 30 Hz schedule, with one outstanding step. A delay over 250 ms
-fails the session explicitly instead of silently slowing the schedule. Clients do
-not gate the authority's simulation after initial readiness.
+and advances it on Lightyear's 30 Hz timeline, with one outstanding step.
+Prediction uses a negotiated start tick. The non-predicting path aligns to the
+same native clock when it enters realtime play. A delay over 250 ms fails the
+session explicitly. After initial readiness, clients cannot gate the authority.
 
 Both browser and server run Lightyear 0.30.1 / Bevy 0.19. The browser Rust/Wasm module
 is separate from Emscripten. wasm-bindgen copies owned strings at the JS boundary;
@@ -47,14 +48,12 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   locally supplied gameplay archives/images/sound banks. Optional music/movies and
   menu files are excluded. Fingerprints are compatibility checks only. Roster and
   map selection use names supplied by the authority; local exposed cheats are blocked.
-- Render/device samples with unchanged buttons coalesce at the native input boundary;
-  newer held state stays separate from an older button edge. Superseded unsent
-  sequences leave JS acknowledgement history immediately. Input transitions retain
-  sequence and intended tick. Multiple transitions aimed
-  at one tick occupy successive ticks, preserving normal press/release semantics.
-  History is bounded to 60 records, future acceptance to 60 ticks, and held input
-  reuse to nine ticks. Frames acknowledge processed sequences; late/future/full
-  requests are explicitly rejected. Lightyear retransmissions are deduplicated.
+- Lightyear carries controller samples and the authority's accepted input history.
+  The server retains a bounded acceptance queue for each slot, preserves button
+  edges, and expires held input after nine ticks. Future acceptance and the queue
+  are bounded to 60 ticks and 60 records. Prediction verifies C results against
+  accepted inputs at the same native tick. The non-predicting client still uses
+  the processed-sequence frontier and rejection feedback to bound pending controls.
 - A departed client loses queued controls immediately; its car remains in combat
   under original game rules. Survivors continue. Finished/error paths release C resources,
   input queues and callbacks, permitting another direct initialization in the page.
@@ -63,11 +62,10 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   scheduled gameplay commands in the current mode. The first 8 MiB of packed
   rows are cached in memory. Additional rows are read from disk during replay.
   A 1 GiB worst-case per-match disk budget ends the match explicitly if reached.
-- Construction Yard recovery offers one attempt per client. It validates the
-  journal header and each ordered block, verifies every replayed tick and returns
-  to live inputs only after reaching the authority's head. At most four blocks
-  of up to 64 ticks are in flight per recovering client. Replay yields between
-  batches, and missing progress disconnects only the recovering client.
+- Non-predicting Construction Yard clients still have one recovery attempt from
+  the journal, with at most four in-flight blocks of 64 ticks. This path serves
+  configurations outside portable checkpoint coverage. Predicting clients use
+  native rollback and, where enabled, snapshot reconnect with a short suffix.
 - Network sound emitters expire and fade on simulation ticks. SPU completion, voice
   assignment and listener choice govern playback only. Replay suppresses mixing and
   marks already replayed one-shots as finished for presentation. Offline sound keeps
@@ -131,7 +129,7 @@ check accelerates 15 minutes of combat, then measures recovery with the authorit
 back at live 30 Hz. The disk tests exercise an eight-slot history of the same
 length, forced cache spill, corrupt records and incomplete files.
 
-Recovery uses the current match's startup and journal. Constructors run again
+The non-predicting recovery path rebuilds the match from its startup and journal
 using local files. Unknown object classes, unknown timer callbacks, opaque car
 callbacks, independent Wasm modules and other maps cannot use journal recovery.
 
@@ -142,7 +140,7 @@ Capture requires a completed simulation tick with no staged input. Restore rewin
 the same running instance, then the ordinary C step accepts recorded controls.
 During replay the headless instance suppresses external tick publication, audio
 playback, rumble and presentation. Finishing replay re-enables tick publication.
-Ordinary matches use journal recovery on the network.
+The non-predicting network fallback uses journal recovery.
 
 The checkpoint preserves the fixed-address simulation allocation arena, including
 allocator headers, live objects, weapons, contact histories and gameplay sound emitters.

@@ -27,7 +27,7 @@ export type RoundState = {
 export type Frame = Omit<Step, "type"> & {
   type: "frame";
   state: RoundState;
-  acknowledged: (number | null)[];
+  fallback_processed: (number | null)[];
 };
 
 export interface NetworkEngine {

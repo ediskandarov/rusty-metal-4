@@ -14,6 +14,7 @@ use std::{
 use aeronet_io::connection::LocalAddr;
 use bevy_app::{App, PostUpdate, PreUpdate, Update};
 use bevy_ecs::prelude::*;
+use lightyear::prelude::input::native::{ActionState, NativeBuffer, NativeStateSequence};
 use lightyear::prelude::server::*;
 use lightyear::prelude::*;
 use lightyear::websocket::server::{ServerConfig, WebSocketServerIo};
@@ -104,7 +105,7 @@ struct AcceptedTimeline {
     anchor: Option<Tick>,
     offer: Option<ClockOffer>,
     attempts: u8,
-    recent: VecDeque<Vec<Input>>,
+    accepted: [NativeBuffer<Input>; MAX_PLAYERS],
 }
 
 impl AcceptedTimeline {
@@ -164,32 +165,22 @@ impl AcceptedTimeline {
         players: &[Player],
     ) -> game_protocol::AcceptedInputs {
         use lightyear::input::input_message::{ActionStateSequence, InputTarget, PerTargetData};
-        use lightyear::prelude::input::native::{ActionState, NativeBuffer, NativeStateSequence};
-        self.recent.push_back(inputs.to_vec());
-        if self.recent.len() > usize::from(game_protocol::PREDICTION_DEPTH + 1) {
-            self.recent.pop_front();
-        }
         let end = self.anchor.unwrap() + tick as i32 + 1;
         let mut packet = game_protocol::AcceptedInputs::new(end);
         packet.rebroadcast = true;
-        let start = end - (self.recent.len() - 1) as u32;
         for (slot, player) in players.iter().enumerate() {
-            let Some(controller) = player.controller else {
-                continue;
-            };
-            let mut buffer = NativeBuffer::<Input>::default();
-            for (offset, inputs) in self.recent.iter().enumerate() {
-                buffer.set(start + offset as i32, ActionState(inputs[slot]));
+            let buffer = &mut self.accepted[slot];
+            buffer.set(end, ActionState(inputs[slot]));
+            if buffer.len() > usize::from(game_protocol::PREDICTION_DEPTH + 1) {
+                buffer.pop(end - u32::from(game_protocol::PREDICTION_DEPTH + 1));
             }
-            packet.inputs.push(PerTargetData {
-                target: InputTarget::Entity(controller),
-                states: NativeStateSequence::build_from_input_buffer(
-                    &buffer,
-                    self.recent.len(),
-                    end,
-                )
-                .expect("accepted history contains a row for every slot"),
-            });
+            if let Some(controller) = player.controller {
+                packet.inputs.push(PerTargetData {
+                    target: InputTarget::Entity(controller),
+                    states: NativeStateSequence::build_from_input_buffer(buffer, buffer.len(), end)
+                        .expect("accepted history contains a row for every slot"),
+                });
+            }
         }
         packet
     }
@@ -207,10 +198,9 @@ struct Match {
     started: bool,
     ended: bool,
     tick: u32,
-    next_step: Instant,
+    fallback_clock: Option<(Tick, u32)>,
     lobby_since: Option<Instant>,
     loading_since: Instant,
-    overruns: u32,
     in_flight: Option<(Vec<Input>, Instant)>,
     last_step_round_trip: Option<Duration>,
     session: Option<SessionStart>,
@@ -751,34 +741,6 @@ impl Match {
                         .vote(slot, Tick(anchor), Tick(tick));
                 }
             }
-            Request::Input {
-                epoch,
-                sequence,
-                tick,
-                input,
-            } if self.started
-                && epoch == 1
-                && self
-                    .prediction
-                    .as_ref()
-                    .is_none_or(|timeline| timeline.anchor.is_some()) =>
-            {
-                if let Some(player) = slot.map(|slot| &mut self.players[slot])
-                    && player.receives_live()
-                {
-                    let earliest = self.tick + u32::from(self.in_flight.is_some());
-                    let result = player.history.enqueue(earliest, sequence, tick, input);
-                    send(
-                        links,
-                        entity,
-                        &Message::InputAck {
-                            sequence,
-                            tick: result.ok(),
-                            rejected: result.err(),
-                        },
-                    );
-                }
-            }
             Request::Progress { tick } if tick <= self.tick => {
                 if let Some(player) = slot.map(|slot| &mut self.players[slot])
                     && player.receives_live()
@@ -892,11 +854,14 @@ impl Match {
                         tick,
                         inputs,
                         state: state.clone(),
-                        acknowledged: self
-                            .players
-                            .iter()
-                            .map(|player| player.history.processed_sequence)
-                            .collect(),
+                        fallback_processed: if self.prediction.is_none() {
+                            self.players
+                                .iter()
+                                .map(|player| player.history.processed_sequence)
+                                .collect()
+                        } else {
+                            Vec::new()
+                        },
                     };
                     for player in &mut self.players {
                         if let Some(attempt) = player.resume.as_mut() {
@@ -1021,10 +986,7 @@ fn update(
         }
     }
     for (entity, request) in requests {
-        // Controller input enters through Lightyear's native tick/input channel.
-        if !matches!(request, Request::Input { .. }) {
-            game.request(&mut links, entity, request);
-        }
+        game.request(&mut links, entity, request);
     }
     game.pump_replay(&mut links);
     game.pump_resume(&mut links);
@@ -1134,7 +1096,6 @@ fn update(
         return;
     }
     if !game.authority_ready || game.players.iter().any(|player| !player.ready) {
-        game.next_step = now;
         if now.duration_since(game.loading_since) > Duration::from_secs(45) {
             game.fail(&mut links, "Session loading exceeded 45 seconds.");
         }
@@ -1169,7 +1130,6 @@ fn update(
                 return;
             }
         }
-        game.next_step = Instant::now();
     }
     let players = game.players.len();
     let loading_expired = now.duration_since(game.loading_since) > Duration::from_secs(45);
@@ -1206,31 +1166,39 @@ fn update(
         game.fail(&mut links, "The match reached its journal disk budget.");
         return;
     }
-    let native_lag = game
-        .prediction
-        .as_ref()
-        .and_then(|timeline| timeline.anchor)
-        .map(|anchor| native_timeline.tick() - (anchor + game.tick as i32 + 1));
-    let lag = native_lag.map_or_else(
-        || now.saturating_duration_since(game.next_step),
-        |ticks| STEP * ticks.max(0) as u32,
-    );
-    let fast = native_lag.is_none() && game.tick < game.fast_until;
+    let now_tick = native_timeline.tick();
+    let predicting = game.prediction.is_some();
+    let fast = !predicting && game.tick < game.fast_until;
+    let due = if fast {
+        now_tick
+    } else if let Some(timeline) = &game.prediction {
+        timeline.anchor.unwrap() + game.tick as i32 + 1
+    } else {
+        let tick = game.tick;
+        // An accelerated run can have more C ticks than Lightyear ticks.
+        // Align the two clocks at the first paced tick, then advance together.
+        let (native_start, game_start) = *game
+            .fallback_clock
+            .get_or_insert_with(|| (now_tick + i32::from(tick != 0), tick));
+        native_start + (tick - game_start) as i32
+    };
+    let lag_ticks = now_tick - due;
+    let lag = STEP * lag_ticks.max(0) as u32;
     if let Some((_, since)) = game.in_flight {
         if now.duration_since(since) > Duration::from_secs(3) {
             game.fail(&mut links, "The simulator did not finish its tick.");
             return;
         }
-        if native_lag.is_none() || lag <= SIMULATOR_LAG_LIMIT {
+        if !predicting || lag <= SIMULATOR_LAG_LIMIT {
             return;
         }
     }
     if !fast && lag > SIMULATOR_LAG_LIMIT {
         eprintln!(
-            "Authority tick {} late by {} ms (native lag {:?}, in-flight {:?}, last step round trip {:?})",
+            "Authority tick {} late by {} ms ({} Lightyear ticks, in-flight {:?}, last step round trip {:?})",
             game.tick,
             lag.as_millis(),
-            native_lag,
+            lag_ticks,
             game.in_flight
                 .as_ref()
                 .map(|(_, since)| now.duration_since(*since)),
@@ -1242,11 +1210,7 @@ fn update(
         );
         return;
     }
-    let should_step = native_lag.map_or_else(|| fast || now >= game.next_step, |ticks| ticks >= 0);
-    if should_step {
-        if !fast && lag > STEP {
-            game.overruns += 1;
-        }
+    if lag_ticks >= 0 {
         let tick = game.tick;
         let inputs: Vec<_> = game
             .players
@@ -1277,13 +1241,6 @@ fn update(
             },
         );
         game.in_flight = Some((inputs, now));
-        if native_lag.is_none() {
-            game.next_step = if fast {
-                now + STEP
-            } else {
-                game.next_step + STEP
-            };
-        }
     }
 }
 
@@ -1324,38 +1281,53 @@ fn bound_reliable_history(
 fn accept_native_inputs(
     mut game: ResMut<Match>,
     mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
-    controllers: Query<(
-        &ControllerIdentity,
-        &lightyear::prelude::input::native::NativeBuffer<ControllerCommand>,
-    )>,
+    controllers: Query<(&ControllerIdentity, &NativeBuffer<ControllerCommand>)>,
 ) {
+    if !game.started
+        || game.ended
+        || game
+            .prediction
+            .as_ref()
+            .is_some_and(|timeline| timeline.anchor.is_none())
+    {
+        return;
+    }
+    let earliest = game.tick + u32::from(game.in_flight.is_some());
+    let fallback = game.prediction.is_none();
     for (identity, buffer) in &controllers {
-        let Some(mut tick) = buffer.start_tick else {
+        let (Some(mut tick), Some((last, _))) = (buffer.start_tick, buffer.get_last_with_tick())
+        else {
             continue;
         };
-        let Some((last, _)) = buffer.get_last_with_tick() else {
-            continue;
-        };
-        for _ in 0..64 {
+        let player = &mut game.players[usize::from(identity.slot)];
+        for _ in 0..buffer.len() {
             if tick > last {
                 break;
             }
             if let Some(action) = buffer.get(tick) {
                 let command = action.0;
-                let player = &mut game.players[identity.slot as usize];
                 if player.resume.is_none() && command.sequence > player.received_sequence {
                     player.received_sequence = command.sequence;
-                    if let Some(owner) = player.entity {
-                        game.request(
-                            &mut links,
-                            owner,
-                            Request::Input {
-                                epoch: command.epoch,
-                                sequence: command.sequence,
-                                tick: command.tick,
-                                input: command.input,
-                            },
+                    if command.epoch == 1
+                        && player.receives_live()
+                        && let Some(owner) = player.entity
+                    {
+                        let result = player.history.enqueue(
+                            earliest,
+                            command.sequence,
+                            command.tick,
+                            command.input,
                         );
+                        if fallback && let Err(reason) = result {
+                            send(
+                                &mut links,
+                                owner,
+                                &Message::InputRejected {
+                                    sequence: command.sequence,
+                                    reason,
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -1475,10 +1447,9 @@ fn main() -> Result<(), Box<dyn Error>> {
         started: false,
         ended: false,
         tick: 0,
-        next_step: Instant::now(),
+        fallback_clock: None,
         lobby_since: None,
         loading_since: Instant::now(),
-        overruns: 0,
         in_flight: None,
         last_step_round_trip: None,
         session: None,

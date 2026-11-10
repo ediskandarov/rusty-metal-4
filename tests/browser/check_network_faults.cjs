@@ -96,8 +96,8 @@ const { chromium } = require("playwright");
                 if (peer.frames.length > 240) peer.frames.shift();
                 if (message.tick % 15 === 0) socket.send({ type: "progress", tick: message.tick });
                 break;
-              case "input_ack":
-                if (message.rejected) peer.rejected.push(message);
+              case "input_rejected":
+                peer.rejected.push(message);
                 break;
               case "error":
                 throw new Error(message.message);
@@ -192,7 +192,9 @@ const { chromium } = require("playwright");
       [...Array(9).fill(0x40), ...Array(5).fill(0)],
       "Stale controls did not expire after nine ticks",
     );
-    const rejected = await target.evaluate(() => peer.rejected.map((ack) => ack.rejected));
+    const rejected = await target.evaluate(() =>
+      peer.rejected.map((rejection) => rejection.reason),
+    );
     assert.deepEqual(rejected, ["late", "future"]);
     const cdp = await target.context().newCDPSession(target);
     const before = await clients[0].evaluate(() => peer.tick);
