@@ -365,6 +365,8 @@ static void initialize_platform(void)
 
 static void browser_frame(void)
 {
+    if (WebLevelCheckpointActive())
+        return;
     apply_render_settings();
     WebApplyCheats();
 #ifdef TM4_WEB_TEST_HOOKS

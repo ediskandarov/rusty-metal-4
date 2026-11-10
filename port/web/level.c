@@ -1,6 +1,8 @@
 #include <libgte.h>
 #include "level.h"
 #include "car.h"
+#include "checkpoint.h"
+#include "checkpoint_memory.h"
 #include "interpolation.h"
 #include "loading.h"
 #include "movie.h"
@@ -42,6 +44,7 @@ void WebTestMotionInput(void);
 
 /* Browser frame loop for the recovered game session and world renderer. */
 static int active;
+static int checkpoint_arena;
 static unsigned int frames;
 static unsigned int simulation_steps;
 static double last_step;
@@ -113,6 +116,8 @@ void WebLevelStart(void)
     SoundSetSoundMasterVolume(GameInfo.sound_volume);
     WebCarEnable();
     ObjectConstructor();
+    checkpoint_arena = WebNetLocalCheckpointSupported() && WebCheckpointArenaOpen();
+    WebCheckpointArenaSelect(checkpoint_arena);
     s32 camera_count
         = GameInfo.player_count + (WebNetMatchActive() ? GameInfo.extra_player_count : 0);
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i) {
@@ -123,13 +128,16 @@ void WebLevelStart(void)
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i)
         EM_ASM({ tm4Port.cameraSlots.push(!!$0); }, GameInfo.players[i].camera);
     ObjectStartupInstance();
+    WebCheckpointArenaSelect(0);
     SoundSetMusicVolume(GameInfo.music_volume);
     if (!WebAuthorityStartup())
         RedbookMusic(1, restore_music_volume, *(s32*)RegGetFileDataPS(metadata, "musicTrackNum"));
     SoundStopSounds();
     RenderConstructor();
     ScreenInitialize();
+    WebCheckpointArenaSelect(checkpoint_arena);
     WebCarStart();
+    WebCheckpointArenaSelect(0);
     if (!WebNetMatchActive()) {
         PadGetPad(8);
         PadGetPad(8);
@@ -140,7 +148,7 @@ void WebLevelStart(void)
     MainFrameCount = 0;
     PadResetVibration();
     PadInitVibrationDirectory();
-    for (s32 i = 0; i < GameInfo.player_count; ++i)
+    for (s32 i = 0; !checkpoint_arena && i < GameInfo.player_count; ++i)
         PadSetVibrationEnabled(
             i, GameInfo.mode == GAME_MODE_PLAY && GameInfo.players[i].vibration_enabled);
     frames = 0;
@@ -179,13 +187,21 @@ int WebLevelActive(void)
     return active;
 }
 
+int WebLevelCheckpointActive(void)
+{
+    return checkpoint_arena;
+}
+
 void WebLevelStop(void)
 {
+    WebCheckpointDiscard();
     WebInterpolationReset();
     PadStopPad();
     RedbookPause();
     SoundStopSounds();
+    WebCheckpointArenaSelect(checkpoint_arena);
     ObjectDestructor();
+    WebCheckpointArenaSelect(0);
     RenderDestructor();
     RegRemoveReg("cars");
     RegRemoveReg("game");
@@ -194,6 +210,9 @@ void WebLevelStop(void)
     WorldCells = NULL;
     SoundDestructor();
     CarResourcesExtractAll();
+    if (checkpoint_arena)
+        WebCheckpointArenaClose();
+    checkpoint_arena = 0;
     active = 0;
 }
 
@@ -216,8 +235,10 @@ static void process_level_step(void)
 #endif
     WebCarStep();
     SoundProcess();
-    WorldAnimateTextures();
-    ScreenProcess();
+    if (!checkpoint_arena) {
+        WorldAnimateTextures();
+        ScreenProcess();
+    }
     ++simulation_steps;
 }
 
@@ -313,8 +334,10 @@ void WebLevelNetworkStep(void)
 {
     if (!active || !WebNetMatchTakeInput())
         return;
+    WebCheckpointArenaSelect(checkpoint_arena);
     process_level_step();
     GameProcessMode();
+    WebCheckpointArenaSelect(0);
     ++MainFrameCount;
     EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     WebNetMatchPublishTick();

@@ -42,6 +42,8 @@ export interface GameModule extends GameExports {
 
 export interface ModuleOptions {
   canvas: HTMLCanvasElement;
+  tm4ResourceMods?: number;
+  tm4LocalCheckpoint?: boolean;
   noInitialRun: boolean;
   print(text: string): void;
   printErr(text: string): void;

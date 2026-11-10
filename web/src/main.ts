@@ -51,7 +51,7 @@ async function launch(resolveSources: () => DiscSources) {
     runtimeStarted = true;
     // Hide before starting SDL so its initial viewport uses the final page layout.
     startup.hidden = true;
-    await startGame(assets, canvas);
+    await startGame(assets, canvas, selectedMods.length);
     const status = element("status", HTMLElement);
     status.textContent = "";
     const endpoint = new URLSearchParams(location.search).get("match");

@@ -131,9 +131,38 @@ length, forced cache spill, corrupt records and incomplete files.
 
 Recovery uses the current match's startup and journal. Constructors run again
 using local files. Unknown object classes, unknown timer callbacks, opaque car
-callbacks, independent Wasm modules and other maps cannot use recovery. Direct
-state snapshots and reconnect admission are deferred. The C diagnostic writer
-covers the audited Construction Yard fields.
+callbacks, independent Wasm modules and other maps cannot use recovery. Portable
+state snapshots and reconnect admission remain open.
+
+### Same-instance C checkpoint
+
+An opt-in headless Construction Yard Deathmatch can retain one in-process checkpoint.
+Capture requires a completed simulation tick with no staged input. Restore rewinds
+the same running instance, then the ordinary C step accepts recorded controls.
+During replay the headless instance suppresses external tick publication, audio
+playback, rumble and presentation. Finishing replay re-enables tick publication.
+The authority and browser still use journal recovery on the network.
+
+The checkpoint preserves the fixed-address simulation allocation arena, including
+allocator headers, live objects, weapons, contact histories and gameplay sound emitters.
+It also saves session and input state, both RNG streams, the game clock, GTE registers
+and object/grid roots. Registry assets and class tables stay loaded in their original
+arena. World mutation hooks save touched geometry, display and collision flags,
+and navigation links in the resource arena. The undo log rejects addresses outside
+that arena. A resource allocation or free, unsupported object state or an exhausted
+world undo log also invalidates restoration. The experiment
+uses a 4 MiB simulation arena and up to 2,048 world edits per checkpoint. Replacing
+the checkpoint or stopping the match releases its history. Rendered instances, bots,
+other maps, car packs, independent Wasm modules and sanitizer builds are outside
+this local rollback path.
+
+[The local checkpoint check](../tests/browser/check_local_checkpoint.cjs) uses
+Orbital and Pizza Boy in headless Chromium. It restores tick 80 with a live projectile
+and compares the canonical bytes and all five subsystem checksums on each of 180
+replayed ticks, three times. Combat exercises steering, contact, weapon damage and
+projectile creation, impact and removal. A second case destroys and restores scenery,
+including its display and collision state, and checks another 180 ticks. The test
+also perturbs car, world and RNG state and hides a startup archive while restoring.
 
 ### Latency and presentation — R6/R8
 
@@ -164,7 +193,9 @@ fingerprints, accepted controls, outcomes and checksums.
 ## Running focused checks
 
 Build `bun run build:diagnostic`, then serve `bun run dev:diagnostic --port 18180`
-with separately configured local files. Start a fresh match server for each test
+with separately configured local files. Run `bun tests/browser/check_local_checkpoint.cjs`
+against that site to test same-instance rollback without a match server.
+Start a fresh match server for each network test
 using `TM4_MATCH_LISTEN=127.0.0.1:18182`, a diagnostic `TM4_AUTHORITY_TOKEN`, and player
 count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` when running the browser checks with Bun;

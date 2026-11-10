@@ -1,5 +1,6 @@
 /* Diagnostic entry points only; not linked into the normal browser target. */
 #include "test_hooks.h"
+#include "checkpoint.h"
 #include "net_state.h"
 #include "src/modules/menu/private.h"
 #include "src/main/object/private.h"
@@ -117,6 +118,33 @@ EMSCRIPTEN_KEEPALIVE int WebTestNetworkPlaybackVoices(void)
             count += emitter->voices[i].voice_id >= 0;
     }
     return count;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestChangeCheckpointResources(void)
+{
+    void* allocation = MemAlloc(32);
+    if (!allocation)
+        return 0;
+    MemFree(allocation);
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestCheckpointWorldArenaOverlap(void)
+{
+    Car* car = GameInfo.players[0].car;
+    if (!car)
+        return 0;
+    WebCheckpointWorldWrite(&car->energy, sizeof(car->energy));
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE void WebTestLocalCheckpointProjectiles(void)
+{
+    EM_ASM({ tm4Port.testLiveProjectiles = []; });
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list)
+        for (Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next)
+            if (!strcmp(header->name, "weaponProjectile"))
+                EM_ASM({ tm4Port.testLiveProjectiles.push($0); }, header->serial);
 }
 
 EMSCRIPTEN_KEEPALIVE int WebTestPerturbNetworkCar(s32 slot)
@@ -635,6 +663,16 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestDestroyablePresent(void)
     }
     return present;
 }
+EMSCRIPTEN_KEEPALIVE int WebTestPerturbLocalCheckpoint(void)
+{
+    rand();
+    randrand();
+    if (!test_destroyable_world || !WebTestDestroyablePresent())
+        return 0;
+    WorldObjectSet(test_destroyable_world, 0);
+    return 1;
+}
+
 EMSCRIPTEN_KEEPALIVE s32 WebTestAimAtDestroyable(void)
 {
     Car* car = GameInfo.players[0].car;

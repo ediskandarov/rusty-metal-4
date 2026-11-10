@@ -2,7 +2,11 @@ import type { DiscAssets } from "../loader/types.ts";
 import { initializeSettings } from "../ui/settings.ts";
 import { requireRuntime } from "./module.ts";
 
-export async function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): Promise<void> {
+export async function startGame(
+  assets: DiscAssets,
+  canvas: HTMLCanvasElement,
+  resourceMods = 0,
+): Promise<void> {
   const digest = async (bytes: Uint8Array<ArrayBuffer>) =>
     Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (value) =>
       value.toString(16).padStart(2, "0"),
@@ -15,10 +19,13 @@ export async function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): 
   const content = await digest(new TextEncoder().encode(fingerprints.join("\n")));
   const build = (await (await fetch("simulation-build.json")).json()) as { sha256: string };
 
+  const parameters = new URLSearchParams(location.search);
   return new Promise((resolve, reject) => {
     globalThis.tm4Assets = assets;
     globalThis.Module = {
       canvas,
+      tm4ResourceMods: resourceMods,
+      tm4LocalCheckpoint: parameters.get("checkpoint") === "1",
       noInitialRun: true,
       print: (text) => console.log(text),
       printErr: (text) => console.error(text),
@@ -39,7 +46,6 @@ export async function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): 
           }
           module._WebMusicConfigureDisc(assets.tracks.length, assets.leadout);
           initializeSettings(module, canvas);
-          const parameters = new URLSearchParams(location.search);
           module.callMain(
             parameters.has("match") || parameters.has("authority") || parameters.has("session")
               ? ["--session", ...(parameters.has("authority") ? ["--authority"] : [])]

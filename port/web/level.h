@@ -9,4 +9,5 @@ void WebLevelFrame(void);
 void WebLevelNetworkStep(void);
 void WebLevelStop(void);
 int WebLevelActive(void);
+int WebLevelCheckpointActive(void);
 #endif

@@ -9,6 +9,7 @@ int WebAuthorityStartup(void);
 void WebNetPublishCatalog(void);
 int WebNetMatchActive(void);
 int WebNetReplaying(void);
+int WebNetLocalCheckpointSupported(void);
 void WebNetSuppressReplayedSounds(void);
 int WebNetMatchViewSlot(void);
 void WebNetMatchPollInput(void);

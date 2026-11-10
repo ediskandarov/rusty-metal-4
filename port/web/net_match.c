@@ -1,5 +1,6 @@
 #include "net_match.h"
 #include "net_state.h"
+#include "checkpoint.h"
 #include "cheats.h"
 #include "level.h"
 #include "tm4/main/game.h"
@@ -34,7 +35,10 @@ static struct {
     s32 view_slot;
     PadCache physical_pad;
     int tick_pending;
+    int stepping;
     int replaying;
+    int local_replaying;
+    u32 checkpoint_tick;
 } match;
 
 static char* configured_cars[8];
@@ -198,6 +202,62 @@ static const char* checkpoint_resource_blocker(void)
     return NULL;
 }
 
+int WebNetLocalCheckpointSupported(void)
+{
+    return match.players && match.view_slot < 0 && WebAuthorityStartup()
+        && !checkpoint_resource_blocker()
+        && EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; });
+}
+
+static int local_checkpoint_boundary(void)
+{
+    return WebNetLocalCheckpointSupported() && WebLevelCheckpointActive() && WebLevelActive()
+        && !match.replaying && !match.stepping && !match.tick_pending && !match.input_mask;
+}
+
+static int local_checkpoint_error(const char* message)
+{
+    EM_ASM({ tm4Port.localCheckpointError = $0 ? UTF8ToString($0) : null; }, message);
+    return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebNetCaptureLocalCheckpoint(void)
+{
+    if (!local_checkpoint_boundary() || match.local_replaying)
+        return local_checkpoint_error(
+            "capture requires a supported headless match at a live tick boundary");
+    u32 size = WebCheckpointCapture();
+    if (!size)
+        return local_checkpoint_error("simulation state or checkpoint capacity rejected capture");
+    match.checkpoint_tick = match.tick;
+    local_checkpoint_error(NULL);
+    return size;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalCheckpoint(void)
+{
+    if (!local_checkpoint_boundary())
+        return local_checkpoint_error(
+            "restore requires a supported headless match at a tick boundary");
+    const char* blocker = WebCheckpointRestore();
+    if (blocker)
+        return local_checkpoint_error(blocker);
+    match.local_replaying = 1;
+    match.tick = match.checkpoint_tick;
+    local_checkpoint_error(NULL);
+    WebNetMatchPublishTick();
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetFinishLocalReplay(void)
+{
+    if (!local_checkpoint_boundary() || !match.local_replaying)
+        return local_checkpoint_error("replay must finish at a tick boundary");
+    match.local_replaying = 0;
+    local_checkpoint_error(NULL);
+    return 1;
+}
+
 EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
 {
     static u8 buffer[256 * 1024];
@@ -218,13 +278,13 @@ EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
 
 int WebNetReplaying(void)
 {
-    return match.replaying;
+    return match.replaying || match.local_replaying;
 }
 
 EMSCRIPTEN_KEEPALIVE int WebNetBeginReplay(void)
 {
-    if (!WebNetMatchActive() || !WebLevelActive() || match.replaying || match.tick_pending
-        || match.input_mask || checkpoint_resource_blocker())
+    if (!WebNetMatchActive() || !WebLevelActive() || WebNetReplaying() || match.stepping
+        || match.tick_pending || match.input_mask || checkpoint_resource_blocker())
         return 0;
 
     RegistryDirectory* directory = RegGetCurrentDirectoryPtr();
@@ -311,7 +371,8 @@ void WebNetMatchSeed(void)
 
 EMSCRIPTEN_KEEPALIVE int WebNetSetInput(u32 tick, s32 slot, u32 buttons, u32 axes, s32 analog)
 {
-    if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.tick_pending
+    if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.stepping
+        || match.tick_pending
         || slot < 0 || slot >= match.players || buttons > 0xffff || (analog != 0 && analog != 1))
         return 0;
 
@@ -326,12 +387,15 @@ EMSCRIPTEN_KEEPALIVE int WebNetSetInput(u32 tick, s32 slot, u32 buttons, u32 axe
 
 EMSCRIPTEN_KEEPALIVE int WebNetQueueTick(u32 tick)
 {
-    if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.tick_pending
+    if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.stepping
+        || match.tick_pending
         || match.input_mask != (1u << match.players) - 1)
         return 0;
 
     match.tick_pending = 1;
+    match.stepping = 1;
     WebLevelNetworkStep();
+    match.stepping = 0;
     return 1;
 }
 
@@ -374,6 +438,8 @@ void WebNetMatchPublishTick(void)
     digest = (digest ^ state.sound) * 16777619u;
     if (!unsupported)
         unsupported = state.unsupported;
+    if (unsupported && WebLevelCheckpointActive())
+        WebCheckpointRejectState();
     EM_ASM(
         {
             Object.assign(tm4Port.netMatch, {
@@ -398,7 +464,7 @@ void WebNetMatchPublishTick(void)
             { tm4Port.netMatch.scores.push({ wins : $0, losses : $1 }); }, player->wins,
             player->losses);
     }
-    if (match.tick && !match.replaying)
+    if (match.tick && !WebNetReplaying())
         EM_ASM({ tm4Port.netMatchTick ?.(); });
 }
 
@@ -409,6 +475,7 @@ void WebNetMatchEnd(void)
     EM_ASM({
         delete tm4Port.netMatch;
         delete tm4Port.netCapturedState;
+        delete tm4Port.localCheckpointError;
         tm4Port.networkSynchronous = false;
     });
 }

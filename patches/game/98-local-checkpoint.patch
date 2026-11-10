@@ -1,0 +1,142 @@
+--- a/src/main/system.c
++++ b/src/main/system.c
+@@ -143,6 +143,12 @@
+ u32 WebRenderEffectRandomState(void)
+ {
+     return SystemRandomRandomState;
++}
++
++void WebCheckpointSetRandomState(u32 random, u32 effects)
++{
++    SystemRandomState = random;
++    SystemRandomRandomState = effects;
+ }
+ #endif
+ #endif
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -18,6 +18,7 @@
+ #include "tm4/main/render.h"
+ #ifdef __psyz
+ #include "port/web/subpixel.h"
++#include "port/web/checkpoint.h"
+ #endif
+ 
+ #include <SYS/TYPES.H>
+@@ -1010,10 +1011,16 @@
+         switch (face->header.color0.components.cd & TM4_FACE_TYPE_MASK) {
+         case TM4_FACE_FT3:
+         case TM4_FACE_FT4:
++#ifdef __psyz
++            WebCheckpointWorldWrite(&face->flat.enabled, sizeof(face->flat.enabled));
++#endif
+             face->flat.enabled = enabled;
+             break;
+         case TM4_FACE_GT3:
+         case TM4_FACE_GT4:
++#ifdef __psyz
++            WebCheckpointWorldWrite(&face->gouraud.color3.components.cd, sizeof(face->gouraud.color3.components.cd));
++#endif
+             face->gouraud.color3.components.cd = enabled;
+             break;
+         }
+@@ -1035,6 +1042,9 @@
+     WorldSetTransformMatrix(matrix, "$6");
+     for (index = 0; index < points->count; ++index) {
+         SVECTOR* point = points->vertices[index].vertex;
++#ifdef __psyz
++        WebCheckpointWorldWrite(point, sizeof(*point));
++#endif
+         gte_ldv0(point);
+         gte_rtv0tr();
+         WorldStoreShortVector(point);
+@@ -1061,6 +1071,9 @@
+         return 0;
+     for (index = 0; index < mesh->count; ++index) {
+         point = mesh->vertices[index].vertex;
++#ifdef __psyz
++        WebCheckpointWorldWrite(point, sizeof(*point));
++#endif
+         point_x = point->vx;
+         point_y = point->vy;
+         point_z = point->vz;
+@@ -1729,8 +1742,14 @@
+     enabled = enabled == 1;
+     if (list == NULL)
+         return 0;
+-    for (index = 0; index < list->count; ++index)
+-        CollisionPolygonEnabled(list->entries[index].polygon) = enabled;
++    for (index = 0; index < list->count; ++index) {
++        Tm4CollisionPolygon* polygon = list->entries[index].polygon;
++#ifdef __psyz
++        WebCheckpointWorldWrite(
++            &CollisionPolygonEnabled(polygon), sizeof(CollisionPolygonEnabled(polygon)));
++#endif
++        CollisionPolygonEnabled(polygon) = enabled;
++    }
+     return 1;
+ }
+ 
+@@ -1747,8 +1766,13 @@
+     list = object->collision_poly_info;
+     if (list == NULL)
+         return 0;
+-    for (i = 0; i < list->count; ++i)
+-        list->entries[i].polygon->owner = owner;
++    for (i = 0; i < list->count; ++i) {
++        Tm4CollisionPolygon* polygon = list->entries[i].polygon;
++#ifdef __psyz
++        WebCheckpointWorldWrite(&polygon->owner, sizeof(polygon->owner));
++#endif
++        polygon->owner = owner;
++    }
+     return 1;
+ }
+ 
+@@ -1768,6 +1792,9 @@
+         /* Constrain the GTE vector-address base to $a3 for the observed load sequence. */
+         register Tm4CollisionPolygon* polygon TM4_BIND_REGISTER("$7")
+             = polygons->entries[polygon_index].polygon;
++#ifdef __psyz
++        WebCheckpointWorldWrite(polygon, sizeof(*polygon));
++#endif
+         s32 vertex_index;
+ 
+         for (vertex_index = 0; vertex_index < CollisionPolygonVertexCount(polygon);
+@@ -1802,6 +1829,9 @@
+         return 0;
+     for (polygonIndex = 0; polygonIndex < collisionList->count; polygonIndex++) {
+         Tm4CollisionPolygon* polygon = collisionList->entries[polygonIndex].polygon;
++#ifdef __psyz
++        WebCheckpointWorldWrite(polygon, sizeof(*polygon));
++#endif
+         s32 vertexIndex;
+ 
+         for (vertexIndex = 0; vertexIndex < CollisionPolygonVertexCount(polygon); ++vertexIndex) {
+--- a/src/modules/car/ai_paths.c
++++ b/src/modules/car/ai_paths.c
+@@ -1,3 +1,4 @@
++#include "port/web/checkpoint.h"
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
+@@ -143,13 +144,15 @@
+     for (i = aiWorldInfo.resource.objects[number].edge_count - 1; i >= 0; i--) {
+         CarAiObjectEdge* pair = (CarAiObjectEdge*)((u32)i * sizeof(CarAiObjectEdge)
+             + (u32)aiWorldInfo.resource.objects[number].edges);
+-        aiWorldInfo.areas[pair->area].edges[pair->edge].enabled
+-            = aiWorldInfo.resource.objects[number].states[state].edge_states[i];
++        u8* enabled = &aiWorldInfo.areas[pair->area].edges[pair->edge].enabled;
++        WebCheckpointWorldWrite(enabled, sizeof(*enabled));
++        *enabled = aiWorldInfo.resource.objects[number].states[state].edge_states[i];
+     }
+     for (i = aiWorldInfo.resource.objects[number].node_count - 1; i >= 0; i--) {
+         s32 node = aiWorldInfo.resource.objects[number].node_indices[i];
+-        aiWorldInfo.resource.nodes[node].enabled
+-            = aiWorldInfo.resource.objects[number].states[state].node_states[i];
++        u8* enabled = &aiWorldInfo.resource.nodes[node].enabled;
++        WebCheckpointWorldWrite(enabled, sizeof(*enabled));
++        *enabled = aiWorldInfo.resource.objects[number].states[state].node_states[i];
+     }
+ }
+ 
