@@ -5,9 +5,28 @@ use lightyear::prelude::*;
 use serde::{Deserialize, Serialize};
 pub struct SessionChannel;
 
-pub const REPLAY_SCHEMA: u16 = 1;
-pub const REPLAY_MAX_TICKS: usize = 900;
-pub const REPLAY_CHUNK_TICKS: usize = 24;
+pub const REPLAY_SCHEMA: u16 = 2;
+pub const JOURNAL_DISK_BYTES: usize = 1024 * 1024 * 1024;
+pub const JOURNAL_MAX_TICKS: u32 =
+    ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
+pub const REPLAY_CHUNK_TICKS: u32 = 64;
+pub const REPLAY_WINDOW_CHUNKS: usize = 4;
+pub const MAX_PLAYERS: usize = 8;
+
+pub const JOURNAL_FRAME_PREFIX: usize = 29;
+pub const JOURNAL_INPUT_BYTES: usize = 7;
+
+pub const fn journal_frame_bytes(players: usize) -> usize {
+    JOURNAL_FRAME_PREFIX + JOURNAL_INPUT_BYTES * players
+}
+
+pub fn checksum(seed: u32, bytes: &[u8]) -> u32 {
+    bytes.iter().fold(seed, |hash, byte| {
+        (hash ^ u32::from(*byte)).wrapping_mul(16_777_619)
+    })
+}
+
+pub const CHECKSUM_SEED: u32 = 2_166_136_261;
 
 #[derive(Component, Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ControllerIdentity {
@@ -67,32 +86,13 @@ pub struct RoundState {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ReplayFrame {
-    pub inputs: Vec<Input>,
-    pub digest: u32,
-    pub sections: [u32; 5],
-}
-
-pub fn replay_checksum(frames: &[ReplayFrame]) -> u32 {
-    fn word(mut hash: u32, value: u32) -> u32 {
-        for byte in value.to_le_bytes() {
-            hash = (hash ^ u32::from(byte)).wrapping_mul(16_777_619);
-        }
-        hash
-    }
-    let mut hash = 2_166_136_261;
-    for frame in frames {
-        hash = word(hash, frame.digest);
-        for section in frame.sections {
-            hash = word(hash, section);
-        }
-        for input in &frame.inputs {
-            hash = word(hash, u32::from(input.buttons));
-            hash = word(hash, input.axes);
-            hash = word(hash, u32::from(input.analog));
-        }
-    }
-    hash
+pub struct SessionStart {
+    pub players: usize,
+    pub world: String,
+    pub cars: Vec<String>,
+    pub compatibility: Compatibility,
+    pub seed: u32,
+    pub epoch: u32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -125,6 +125,10 @@ pub enum Request {
         epoch: u32,
         tick: u32,
     },
+    ReplayApplied {
+        epoch: u32,
+        tick: u32,
+    },
     Completed {
         tick: u32,
         state: RoundState,
@@ -137,14 +141,7 @@ pub enum Message {
     Welcome {
         slot: Option<usize>,
     },
-    Start {
-        players: usize,
-        world: String,
-        cars: Vec<String>,
-        compatibility: Compatibility,
-        seed: u32,
-        epoch: u32,
-    },
+    Start(SessionStart),
     Step {
         tick: u32,
         inputs: Vec<Input>,
@@ -158,13 +155,18 @@ pub enum Message {
     RecoveryBegin {
         schema: u16,
         epoch: u32,
-        ticks: u32,
+        head: u32,
         initial_digest: u32,
-        checksum: u32,
     },
     RecoveryFrames {
         start: u32,
-        frames: Vec<ReplayFrame>,
+        head: u32,
+        data: Vec<u8>,
+        checksum: u32,
+    },
+    RecoveryEnd {
+        tick: u32,
+        state: RoundState,
     },
     InputAck {
         sequence: u32,

@@ -76,19 +76,18 @@ simulation startup introduces resource distribution by the game server.
 - Public builds and deployment artifacts exclude original disc images, executables,
   archives, models, textures, audio, and movies.
 - The network protocol transfers configuration, resource identities/fingerprints,
-  inputs, dynamic gameplay state, and events. It does not upload or download original
+  accepted inputs, gameplay events and state checksums. It does not upload or download original
   resource files. Missing or incompatible resources produce a local diagnostic, not
   an automatic download from the host or another player.
-- State snapshots contain runtime state and references to locally loaded resources.
-  Do not use an unfiltered memory dump that includes embedded resource bytes as the
-  network snapshot format.
+- Match journals contain gameplay commands, events and stable resource identities.
+  Replaying them requires the original local resources and matching simulation build.
 - The existing diagnostic file server may read explicitly configured local files and
   serve them on loopback for local development/authority startup. Its `/__dev/` routes
   must not be exposed by the public service, proxy, tunnel, or multiplayer endpoint.
 - Resource fingerprints establish compatibility, not proof of ownership or permission
   to redistribute. Do not present the compatibility handshake as such proof.
 
-**Acceptance:** inspect public artifacts and captured match/snapshot traffic for
+**Acceptance:** inspect public artifacts, journal files and captured match traffic for
 original resource payloads. Public endpoints cannot serve `/__dev/disc.json` or
 `/__dev/files/*`; a client without local game files cannot obtain them from the match
 server. Direct authority startup does not make its configured files public.
@@ -119,8 +118,8 @@ indefinitely after recovery.
 ## R4. Expose a controllable simulation boundary
 
 The game adapter must support initialization, one fixed step with all accepted inputs,
-state capture, state restore, transition handling, and shutdown. These are capabilities,
-not a requirement for a large new framework or particular function names.
+canonical state checksums, replay from the agreed startup, transition handling, and
+shutdown. These are capabilities with no prescribed function names.
 
 ### Direct simulation startup — agreed
 
@@ -165,34 +164,29 @@ pause/failure policy instead of silently presenting slow simulation as healthy 3
 state on the supported browser/authority builds. Test with rendering disabled and at
 several render rates. Cross-version or native/Wasm determinism is not assumed.
 
-## R5. Capture and restore all causally relevant state
+## R5. Journal and replay the authoritative match
 
-Define a versioned state format covering everything that can affect subsequent steps:
-car transforms and physics, controls, ammunition and cooldowns, dynamic objects,
-projectiles, timers, map mechanisms, mode progress, all gameplay RNGs, and relevant
-global/overlay state. Include creation/destruction order and stable object references.
+Persist the agreed startup configuration and accepted inputs for the entire active
+match, in simulation order. Any additional event that changes gameplay must be
+represented at its simulation tick. Record canonical state checksums and subsystem
+checksums to verify replay and locate the first disagreement. Use stable resource
+and object identities where needed.
 
-Audit dependencies before excluding apparently cosmetic state: its allocation or RNG
-use may still affect gameplay. Do not transmit process addresses as object identity.
-The restore mechanism must rebuild references and ownership correctly.
+A client rebuilds from tick zero with its local resources, verifies the journal as
+it replays, and catches up to the advancing authority. Deliver the journal in
+bounded chunks and limit unconfirmed work, memory, storage and stalled connections
+explicitly. Match duration and the recovery history are independent of the
+15-minute validation benchmark. Direct state snapshots are deferred.
 
-Checksums use canonical gameplay state rather than selected visible fields or struct
-padding. Provide subsystem/object diagnostics to locate the first divergence. A hash
-checks consistency; it cannot recover state by itself.
-
-Provide periodic authoritative checkpoints and an on-demand recovery snapshot. A client
-can restore a checkpoint and replay subsequent accepted inputs. Reconnection and
-prediction correction use this same mechanism. Bound history and snapshot sizes.
-
-**Acceptance:** capture at tick N, run a recorded continuation, restore N, and replay;
-compare the complete state. Repeat during firing, collisions, object destruction,
-respawning where applicable, and map mechanisms. A damaged client can recover without
+**Acceptance:** replay a sustained combat history including firing, impacts,
+collisions and world mechanisms. Verify state equality and measure storage,
+replay time and browser responsiveness. A damaged client catches up without
 terminating the other players' match.
 
 ## R6. Handle latency separately from rendering
 
 Predict local control without waiting for the round trip. Reconcile using authoritative
-state and input acknowledgements: restore and replay when needed. Establish the
+commands and input acknowledgements. Rebuild and replay when needed. Establish the
 collision dependencies of prediction; predicting only one isolated car is insufficient
 when it exchanges impulses or damage with other dynamic objects.
 
@@ -204,9 +198,8 @@ Audio, HUD notifications, and effects need stable event identity and replay poli
 Rollback must not replay the same explosion sound, award a result twice, or duplicate
 persistent effects. Distinguish predicted effects from confirmed outcomes.
 
-A slow client must not replay an unbounded backlog. Use bounded catch-up and, when
-history is insufficient, recover from a current snapshot. A hidden tab cannot freeze
-the authority or other clients.
+A slow client uses bounded catch-up. If it cannot make progress, stop that client
+without holding the authority or other players.
 
 **Acceptance:** under latency/jitter, local controls respond through prediction and
 remote motion remains buffered. Corrections do not duplicate damage or effects.
@@ -220,8 +213,9 @@ deadline and an understandable failure message.
 
 A temporary disconnect retains participant identity for a bounded grace period and
 applies the agreed missing-input policy. Authenticate reclaiming that participant;
-a second connection cannot seize the slot. Resume from authoritative state and the
-current epoch, not tick zero. Reject messages from previous connections/epochs.
+a second connection cannot seize the slot. Rebuild from the current epoch's
+journal before restoring control at the authority's current tick. Reject messages
+from previous connections or epochs.
 
 A permanent departure is handled through a declared policy compatible with the mode's
 existing rules. Do not add an implicit new bot, invulnerability, or respawn rule.
@@ -246,9 +240,9 @@ Use the library's facilities for:
 
 - Tick/time synchronization and buffered, tick-indexed player input.
 - Typed messages, serialization, and channels with appropriate delivery guarantees.
-- Authoritative state replication and network object identity/lifetime.
+- Authoritative outcomes, journal delivery and network object identity/lifetime.
 - Client prediction, rollback/replay, and reconciliation.
-- Snapshot/presentation interpolation and correction smoothing.
+- Presentation interpolation and correction smoothing.
 - Bandwidth limits and replication priorities.
 - Connection diagnostics and controllable adverse-network testing where supported.
 

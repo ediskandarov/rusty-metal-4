@@ -73,6 +73,9 @@ export interface NetworkPort {
     processedSequence: number;
     receivedFrames: number;
     recoveredTick?: number;
+    replayBytes?: number;
+    replayChunks?: number;
+    replayMs?: number;
     divergence?: string[];
     transport: { rttMs: number; jitterMs: number; queuedPackets: number; pendingInputs: number };
   };

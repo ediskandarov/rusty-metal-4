@@ -49,7 +49,7 @@ export async function startGame(assets: DiscAssets, canvas: HTMLCanvasElement): 
             globalThis as typeof globalThis & {
               tm4Port: import("../network/protocol.ts").NetworkPort;
             }
-          ).tm4Port.compatibility = { protocol: 2, build: build.sha256, content };
+          ).tm4Port.compatibility = { protocol: 3, build: build.sha256, content };
           resolve();
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));

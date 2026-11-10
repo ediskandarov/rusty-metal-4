@@ -127,7 +127,6 @@ static int test_capture_motion;
 static const Car* car_identity;
 static const Car* car_pose;
 
-u32 WebRenderEffectRandomState(void);
 MATRIX* CarCrusherDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
 MATRIX* CarSlamDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
 MATRIX* CarToyDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);

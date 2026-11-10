@@ -24,6 +24,7 @@ const env = {
   TM4_MATCH_ENDPOINT: endpoint,
   TM4_MATCH_LISTEN: listen,
   TM4_AUTHORITY_TOKEN: token,
+  TM4_JOURNAL_DIR: process.env.TM4_JOURNAL_DIR ?? join(root, "build/network-journals"),
 };
 const executable =
   process.platform === "win32" ? "tm4-deathmatch-server.exe" : "tm4-deathmatch-server";

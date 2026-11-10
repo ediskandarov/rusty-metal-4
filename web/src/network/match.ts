@@ -1,7 +1,7 @@
 import type { Frame, Input, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
 import { configureMatch, enqueueStep, stateSections } from "./protocol.ts";
 import type { ReplayBegin, ReplayChunk } from "./replay.ts";
-import { ReplayCheckpoint } from "./replay.ts";
+import { ReplayJournal } from "./replay.ts";
 import { connectNetwork } from "./transport.ts";
 
 type Message =
@@ -9,18 +9,17 @@ type Message =
   | Frame
   | ReplayBegin
   | ReplayChunk
+  | { type: "recovery_end"; tick: number; state: RoundState }
   | { type: "input_ack"; sequence: number; tick: number | null; rejected: string | null }
   | { type: "welcome"; slot: number }
   | { type: "error"; message: string };
 
-const checkpointDeliveryTimeout = 2_000;
-const replayTimeout = 5_000;
+const journalIdleMs = 7_000;
 
 type Recovery = {
-  after: number;
   abort: AbortController;
-  checkpoint?: ReplayCheckpoint;
-  replaying: boolean;
+  requestedAt: number;
+  journal?: ReplayJournal;
 };
 
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
@@ -97,23 +96,19 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
     if (running) enqueueStep(engine, running);
   };
 
-  const replay = async (active: Recovery, checkpoint: ReplayCheckpoint) => {
-    const { signal } = active.abort;
-    active.replaying = true;
+  const armJournalTimeout = () => {
     clearTimeout(recoveryDeadline);
-    recoveryDeadline = setTimeout(() => fail("Replay simulation timed out"), replayTimeout);
-    try {
-      await checkpoint.restore(engine, port, signal);
-      if (signal.aborted) return;
-      while (pending[0] && pending[0].tick < checkpoint.ticks)
-        port.netMatchServerState = pending.shift()?.state;
-      recovery = undefined;
-      clearTimeout(recoveryDeadline);
-      diagnostics.recoveredTick = checkpoint.ticks;
-      status.textContent = "Player " + (slot + 1) + " of " + players;
-      runNext();
-    } catch (error) {
-      if (!signal.aborted) fail(error);
+    recoveryDeadline = setTimeout(() => fail("Match journal progress timed out"), journalIdleMs);
+  };
+
+  const displayOutcome = (state: RoundState) => {
+    if (state.roundFinished) {
+      const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
+      status.textContent = state.acceptsContinue ? result + " · Press Cross to continue" : result;
+    }
+    if (state.nextMode) {
+      const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
+      cleanup("Match finished · " + result, true);
     }
   };
 
@@ -122,7 +117,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   socket.onerror = (error) => fail(error);
 
   port.netMatchInput = (buttons, axes, analog) => {
-    if (closed || socket.readyState !== WebSocket.OPEN) return;
+    if (closed || recovery || socket.readyState !== WebSocket.OPEN) return;
     if (
       lastInput?.buttons === buttons &&
       lastInput.axes === axes &&
@@ -172,24 +167,16 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
         return;
       }
       recoveryUsed = true;
-      recovery = { after: frame.tick, abort: new AbortController(), replaying: false };
+      recovery = { abort: new AbortController(), requestedAt: performance.now() };
+      pending.length = 0;
+      history.clear();
+      diagnostics.pendingInputs = 0;
       status.textContent = "Restoring the match…";
-      recoveryDeadline = setTimeout(
-        () => fail("Replay checkpoint timed out"),
-        checkpointDeliveryTimeout,
-      );
+      armJournalTimeout();
       send({ type: "recover", epoch, tick: frame.tick });
       return;
     }
-    if (state.roundFinished) {
-      const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      status.textContent = state.acceptsContinue ? result + " · Press Cross to continue" : result;
-    }
-    if (state.nextMode) {
-      const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      cleanup("Match finished · " + result, true);
-      return;
-    }
+    displayOutcome(state);
     queueMicrotask(() => {
       try {
         runNext();
@@ -225,22 +212,49 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           break;
         }
         case "recovery_begin":
-          if (
-            !recovery ||
-            recovery.checkpoint ||
-            message.ticks <= recovery.after ||
-            message.ticks > nextFrame
-          )
-            throw new Error("Unexpected replay checkpoint");
-          recovery.checkpoint = new ReplayCheckpoint(message, epoch, players, initialDigest);
+          if (!recovery || recovery.journal || message.head !== nextFrame)
+            throw new Error("Unexpected match journal");
+          recovery.journal = new ReplayJournal(
+            message,
+            epoch,
+            players,
+            initialDigest,
+            engine,
+            port,
+            recovery.abort.signal,
+          );
+          armJournalTimeout();
           break;
         case "recovery_frames": {
-          const checkpoint = recovery?.checkpoint;
-          if (!recovery || !checkpoint || recovery.replaying)
-            throw new Error("Unexpected replay input block");
-          if (checkpoint.add(message)) void replay(recovery, checkpoint);
+          const active = recovery;
+          if (!active?.journal) throw new Error("Unexpected match journal block");
+          const applied = active.journal.accept(message);
+          diagnostics.replayBytes = (diagnostics.replayBytes ?? 0) + message.data.length;
+          diagnostics.replayChunks = (diagnostics.replayChunks ?? 0) + 1;
+          void applied
+            .then((tick) => {
+              if (active.abort.signal.aborted) return;
+              send({ type: "replay_applied", epoch, tick });
+              armJournalTimeout();
+            })
+            .catch((error) => {
+              if (!active.abort.signal.aborted) fail(error);
+            });
           break;
         }
+        case "recovery_end":
+          if (!recovery?.journal || !port.netMatch || !sameOutcome(port.netMatch, message.state))
+            throw new Error("Match journal did not reach the authority");
+          recovery.journal.finish(message.tick);
+          diagnostics.replayMs = performance.now() - recovery.requestedAt;
+          diagnostics.recoveredTick = message.tick;
+          recovery = undefined;
+          clearTimeout(recoveryDeadline);
+          nextFrame = message.tick;
+          port.netMatchServerState = message.state;
+          status.textContent = "Player " + (slot + 1) + " of " + players;
+          displayOutcome(message.state);
+          break;
         case "input_ack":
           if (message.rejected) {
             history.delete(message.sequence);
@@ -261,6 +275,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           }
           if (message.tick !== nextFrame++ || message.inputs.length !== players)
             throw new Error("Received an out-of-order match frame");
+          if (recovery) break;
           if (pending.length >= 120) throw new Error("Could not keep up with the server");
           pending.push(message);
           runNext();

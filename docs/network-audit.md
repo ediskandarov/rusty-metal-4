@@ -23,7 +23,7 @@ plugin buffers tick-indexed records and validates controlled targets. The server
 reads every newly received buffer record before fixed-step trimming, then applies
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
-live. Recovery uses a bounded authoritative input checkpoint to rebuild the C world.
+live. Recovery streams the authoritative match journal to rebuild the C world.
 Local prediction, C state replication and network presentation interpolation remain open.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
@@ -56,18 +56,21 @@ Sources: [Rust protocol](../network/src/protocol.rs),
 - A departed client loses queued controls immediately; its car remains in combat
   under original game rules. Survivors continue. Finished/error paths release C resources,
   input queues and callbacks, permitting another direct initialization in the page.
-- Construction Yard recovery retains up to 900 completed ticks from match startup.
-  The server keeps the full prefix for 30 more ticks so a request for an eligible
-  divergence can arrive in flight. A client can request one checkpoint. It validates
-  the version, epoch, initial digest, block order, size, controls and integrity checksum
-  before resetting C. Replay yields between bounded batches so transport progress can
-  continue. It verifies each replayed tick and catches up with accepted live inputs.
-  Delivery and replay have separate deadlines. Expired or unsupported checkpoints
-  are refused, and loss of progress disconnects only that client.
+- The server journals startup identity, accepted controls, per-tick checksums and
+  mode transitions to an append-only file. Inputs are the only externally
+  scheduled gameplay commands in the current mode. The first 8 MiB of packed
+  rows are cached in memory. Additional rows are read from disk during replay.
+  A 1 GiB worst-case per-match disk budget ends the match explicitly if reached.
+- Construction Yard recovery offers one attempt per client. It validates the
+  journal header and each ordered block, verifies every replayed tick and returns
+  to live inputs only after reaching the authority's head. At most four blocks
+  of up to 64 ticks are in flight per recovering client. Replay yields between
+  batches, and missing progress disconnects only the recovering client.
 - Network sound emitters expire and fade on simulation ticks. SPU completion, voice
   assignment and listener choice govern playback only. Replay suppresses mixing and
   marks already replayed one-shots as finished for presentation. Offline sound keeps
-  its existing expiry policy.
+  its existing expiry policy. Network rendering restores the secondary RNG after
+  drawing so turbo effects cannot change the next simulation checksum.
 - Diagnostic limits include loopback-only listening, 16 KiB WebSocket messages,
   bounded write buffering, 128 unacknowledged session messages, 13 links, 120 session messages/second/link, 128 received
   bridge messages, 90 ticks without client progress, ten seconds for unidentified
@@ -120,16 +123,17 @@ stay out of the record.
 checksums per tick and encoded bytes at selected ticks across reset and a separate
 instance. Its scripted contact, target and crane setup runs identically on each direct
 simulation. The wire test perturbs only one client's energy and uses ordinary
-accepted controls for recovery. Separate wire cases cover a delayed eligible request,
-expiry of its grace period, and progress loss during replay.
+accepted controls for recovery. The sustained and stalled wire cases exercise
+full-history catch-up and progress-based cancellation. The sustained two-client
+check accelerates 15 minutes of combat, then measures recovery with the authority
+back at live 30 Hz. The disk tests exercise an eight-slot history of the same
+length, forced cache spill, corrupt records and incomplete files.
 
-The recovery checkpoint contains the authoritative command prefix and per-tick
-digests. Restore runs constructors again from tick zero using local files. Loading
-the captured C record directly, recovery beyond the retained prefix, and reconnect
-snapshots remain open. Unknown object classes, unknown timer callbacks, opaque
-car callbacks, independent Wasm modules and other maps cannot use recovery. The
-covered classes and fields are a Construction Yard audit, with broader overlay
-globals and per-module state contracts still required for complete snapshots.
+Recovery uses the current match's startup and journal. Constructors run again
+using local files. Unknown object classes, unknown timer callbacks, opaque car
+callbacks, independent Wasm modules and other maps cannot use recovery. Direct
+state snapshots and reconnect admission are deferred. The C diagnostic writer
+covers the audited Construction Yard fields.
 
 ### Latency and presentation — R6/R8
 
@@ -154,8 +158,8 @@ visual/audio acceptance, beyond controls and camera attachment.
 Public authenticated admission, TLS and resource-server deployment separation remain
 unimplemented. The development file server binds loopback and the match server has
 no resource routes. Generated sites contain port code/Wasm/CSS only; local game files
-remain separately supplied. Recovery messages carry accepted inputs and checksums.
-The local state record contains runtime values and resource keys.
+remain separately supplied. The journal contains startup resource names and
+fingerprints, accepted controls, outcomes and checksums.
 
 ## Running focused checks
 
@@ -167,9 +171,17 @@ count 2 or 8. Set the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_TEST_PLAYERS=8` selects the eight-client fault test. Run
 `bun tests/browser/check_network_replay.cjs` for direct and wire replay verification.
 It runs only the direct portion when no match endpoint and token are supplied.
-Use a fresh two-player server for each of the `boundary`, `expired` and `stalled`
-values of `TM4_REPLAY_SCENARIO`. Set `TM4_REPLAY_NETWORK_ONLY=1` to skip the direct
-check. Chrome is required.
+Use a fresh server for each `TM4_REPLAY_SCENARIO` value. Set
+`TM4_REPLAY_NETWORK_ONLY=1` for the `stalled` or `long` case and set
+`TM4_REPLAY_PLAYERS` to the server's player count. A debug server launched with
+`TM4_TEST_FAST_UNTIL=27000` advances the first 15 simulated minutes without
+wall-clock pacing, then resumes 30 Hz before recovery. Chrome is required.
+
+The server writes to `build/network-journals` by default. Set `TM4_JOURNAL_DIR`
+to choose a separate directory. The server binary accepts
+`--inspect-journal <path>` to validate a file and report a finished, aborted or
+incomplete verified prefix and the first unsupported tick, if present. It flushes rows at least once every 30 ticks and
+syncs a finalized file. Retained files are managed by the operator.
 
 Ordinary `build:dev` uses release optimization and excludes test hooks, retaining
 only local-disc autoload. `build:diagnostic` owns fixtures and Debug output in

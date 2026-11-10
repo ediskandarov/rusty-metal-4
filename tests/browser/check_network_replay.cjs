@@ -192,95 +192,150 @@ async function direct(browser) {
 }
 
 const scenarios = {
-  standard: { divergentTick: 151, requestDelay: 0, expected: "recovered" },
-  boundary: { divergentTick: 898, requestDelay: 260, expected: "recovered" },
-  expired: { divergentTick: 898, requestDelay: 1350, expected: "unavailable" },
-  stalled: { divergentTick: 898, requestDelay: 260, expected: "disconnected" },
+  standard: { divergentTick: 151, stalled: false },
+  long: { divergentTick: 27_030, stalled: false },
+  stalled: { divergentTick: 350, stalled: true },
 };
 
 async function network(browser) {
   const scenarioName = process.env.TM4_REPLAY_SCENARIO ?? "standard";
   const scenario = scenarios[scenarioName];
-  assert(scenario, "unknown replay scenario");
+  const long = scenarioName === "long";
+  const players = Number(process.env.TM4_REPLAY_PLAYERS ?? 2);
+  assert(scenario && Number.isInteger(players) && players >= 2 && players <= 8);
   const { connectAuthority } = await import("../../tools/network/authority.ts");
-  const [authority, altered, survivor] = await Promise.all(
-    Array.from({ length: 3 }, () => browser.newPage()),
+  const [authority, ...clients] = await Promise.all(
+    Array.from({ length: players + 1 }, () => browser.newPage()),
   );
+  const [altered, survivor, ...background] = clients;
   let authorityError;
   try {
+    for (const page of background)
+      await page.addInitScript(() => {
+        window.requestAnimationFrame = () => 0;
+      });
     await Promise.all([
       ready(authority, "?authority=1"),
-      ...[altered, survivor].map((page) => ready(page, "?match=" + encodeURIComponent(endpoint))),
+      ...clients.map((page) => ready(page, "?match=" + encodeURIComponent(endpoint))),
     ]);
-    await altered.evaluate(async ({ divergentTick, requestDelay, expected }) => {
-      const runtime = await import(new URL("network/tm4_network.js", document.baseURI).href);
-      const metrics = (globalThis.tm4ReplayTest = {
-        submittedAt: 0,
-        began: 0,
-        ended: 0,
-        replaying: false,
-        replaySteps: 0,
-        timerTurns: 0,
-        suppressedProgress: 0,
-      });
-      const send = runtime.NetworkClient.prototype.send;
-      runtime.NetworkClient.prototype.send = function (json) {
-        const { type } = JSON.parse(json);
-        if (type === "progress" && expected === "disconnected" && metrics.replaying) {
-          metrics.suppressedProgress++;
-          return;
-        }
-        if (type === "recover" && requestDelay) {
-          setTimeout(() => {
-            metrics.submittedAt = tm4Port.netDiagnostics.receivedFrames;
-            send.call(this, json);
-          }, requestDelay);
-          return;
-        }
-        return send.call(this, json);
-      };
-
-      const begin = Module._WebNetBeginReplay;
-      Module._WebNetBeginReplay = () => {
-        const result = begin();
-        if (result) {
-          metrics.replaying = true;
-          metrics.began++;
-        }
-        return result;
-      };
-      const end = Module._WebNetEndReplay;
-      Module._WebNetEndReplay = () => {
-        metrics.replaying = false;
-        metrics.ended++;
-        end();
-      };
-      setInterval(() => {
-        if (metrics.replaying) metrics.timerTurns++;
-      }, 10);
-      const queue = Module._WebNetQueueTick;
-      let injected = false;
-      Module._WebNetQueueTick = (tick) => {
-        if (metrics.replaying) {
-          metrics.replaySteps++;
-          if (expected === "disconnected") {
-            const until = performance.now() + 6;
-            while (performance.now() < until) {
-              // Make this replay exceed the server's progress timeout.
+    if (long) {
+      await authority.evaluate((players) => {
+        tm4Port.catalog.cars = Array(players).fill("Orbital");
+        const queue = Module._WebNetQueueTick;
+        globalThis.tm4JournalCombat = {
+          initialHealth: Infinity,
+          minimumHealth: Infinity,
+          unsupported: null,
+          firedPhases: 0,
+          bulletsAtPhase: 0,
+        };
+        Module._WebNetQueueTick = (tick) => {
+          const result = queue(tick);
+          const combat = globalThis.tm4JournalCombat;
+          combat.unsupported ??= tm4Port.netMatch.unsupported;
+          if (tick % 20 === 0) {
+            for (const car of tm4Port.cars ?? []) {
+              if (tick === 0) combat.initialHealth = Math.min(combat.initialHealth, car.health);
+              combat.minimumHealth = Math.min(combat.minimumHealth, car.health);
             }
           }
-        } else if (!injected && tick === divergentTick) {
-          if (!Module._WebTestPerturbNetworkCar(1)) throw new Error("Could not perturb car");
-          injected = true;
+          if (tick % 4500 === 4499 && (tm4Port.bulletSpawns ?? 0) > combat.bulletsAtPhase) {
+            combat.firedPhases++;
+            combat.bulletsAtPhase = tm4Port.bulletSpawns;
+          }
+          return result;
+        };
+      }, players);
+      for (const [index, page] of [altered, survivor].entries()) {
+        try {
+          await page.waitForFunction(() => Boolean(tm4Port.netMatchInput), null, { polling: 100 });
+        } catch (error) {
+          const status = await page.locator("#status").textContent();
+          throw new Error("Match input bridge was unavailable: " + status, { cause: error });
         }
-        return queue(tick);
-      };
-    }, scenario);
+        await page.evaluate((index) => {
+          const input = tm4Port.netMatchInput;
+          tm4Port.netMatchInput = () => {
+            const tick = tm4Port.netMatch?.tick ?? 0;
+            const phase = (tick + 60 * index) % 240;
+            const steering = Math.floor(tick / 240) % 2 ? 0x2000 : 0x8000;
+            const buttons = phase < 75 ? 0x42 | steering : 0;
+            return input(buttons, 0, false);
+          };
+        }, index);
+      }
+    }
+    await altered.evaluate(
+      async ({ divergentTick, stalled, players }) => {
+        const runtime = await import(new URL("network/tm4_network.js", document.baseURI).href);
+        const metrics = (globalThis.tm4ReplayTest = {
+          began: 0,
+          ended: 0,
+          replaying: false,
+          replaySteps: 0,
+          timerTurns: 0,
+          suppressedProgress: 0,
+          maxTimerGap: 0,
+          resetMs: 0,
+        });
+        const send = runtime.NetworkClient.prototype.send;
+        runtime.NetworkClient.prototype.send = function (json) {
+          if (stalled && JSON.parse(json).type === "replay_applied") {
+            metrics.suppressedProgress++;
+            return;
+          }
+          return send.call(this, json);
+        };
+        let lastTimer = 0;
+        const begin = Module._WebNetBeginReplay;
+        Module._WebNetBeginReplay = () => {
+          const started = performance.now();
+          const result = begin();
+          if (result) {
+            metrics.resetMs = performance.now() - started;
+            metrics.replaying = true;
+            metrics.began++;
+            lastTimer = performance.now();
+          }
+          return result;
+        };
+        const end = Module._WebNetEndReplay;
+        Module._WebNetEndReplay = () => {
+          metrics.replaying = false;
+          metrics.ended++;
+          end();
+        };
+        setInterval(() => {
+          if (!metrics.replaying) return;
+          metrics.timerTurns++;
+          const now = performance.now();
+          metrics.maxTimerGap = Math.max(metrics.maxTimerGap, now - lastTimer);
+          lastTimer = now;
+        }, 10);
+        const queue = Module._WebNetQueueTick;
+        let injected = false;
+        Module._WebNetQueueTick = (tick) => {
+          if (metrics.replaying) {
+            metrics.replaySteps++;
+          } else if (!injected && tick === divergentTick) {
+            injected = Array.from({ length: players }, (_, i) => i).some((slot) =>
+              Module._WebTestPerturbNetworkCar(slot),
+            );
+            if (!injected) throw new Error("Could not perturb a live car");
+          }
+          return queue(tick);
+        };
+      },
+      { ...scenario, players },
+    );
+    const sessionStarted = Date.now();
     void connectAuthority(authority, endpoint, token).catch((error) => {
       authorityError = error;
     });
     await Promise.all(
-      [altered, survivor].map((page) => page.waitForFunction(() => tm4Port.netViewSlot >= 0)),
+      clients.map((page) =>
+        page.waitForFunction(() => tm4Port.netMatch?.tick > 0, null, { polling: 100 }),
+      ),
     );
     if (scenarioName === "standard") {
       await altered.keyboard.down("x");
@@ -292,11 +347,11 @@ async function network(browser) {
     await altered.waitForFunction(
       () =>
         tm4Port.netDiagnostics?.recoveredTick ||
-        /diverged|replay|refused|lost the Lightyear connection/i.test(
+        /diverged|journal|refused|lost the Lightyear connection|match finished/i.test(
           document.querySelector("#status").textContent.replace("Restoring the match…", ""),
         ),
       null,
-      { timeout: 45000 },
+      { timeout: long ? 1_200_000 : 45000 },
     );
     const result = await altered.evaluate(() => ({
       diagnostics: tm4Port.netDiagnostics,
@@ -304,34 +359,50 @@ async function network(browser) {
       status: document.querySelector("#status").textContent,
       local: tm4Port.netMatch,
     }));
-    assert.deepEqual(result.diagnostics.divergence, ["cars"]);
-    if (scenario.requestDelay)
-      assert(result.metrics.submittedAt >= 901, JSON.stringify(result.metrics));
-    if (scenario.expected === "recovered") {
+    assert.deepEqual(result.diagnostics.divergence, ["cars"], JSON.stringify(result));
+    if (!scenario.stalled) {
       assert(result.diagnostics.recoveredTick > scenario.divergentTick, JSON.stringify(result));
-      if (scenarioName === "boundary") assert.equal(result.diagnostics.recoveredTick, 900);
       assert.equal(result.metrics.began, 1);
       assert.equal(result.metrics.ended, 1);
       assert(result.metrics.timerTurns > 0, "no browser events ran during replay");
       assert.equal(result.metrics.replaySteps, result.diagnostics.recoveredTick);
-    } else if (scenario.expected === "unavailable") {
-      assert(result.metrics.submittedAt >= 931, JSON.stringify(result.metrics));
-      assert.match(result.status, /authoritative replay checkpoint is unavailable/i);
-      assert.equal(result.metrics.began, 0);
-      assert.equal(result.metrics.replaySteps, 0);
+      assert.equal(result.diagnostics.replayBytes, result.metrics.replaySteps * (29 + 7 * players));
+      if (long) {
+        assert(
+          result.diagnostics.recoveredTick >= scenario.divergentTick + 30,
+          "authority did not keep advancing during long replay",
+        );
+        const combat = await authority.evaluate(() => ({
+          ...globalThis.tm4JournalCombat,
+          bullets: tm4Port.bulletSpawns,
+          impacts: tm4Port.bulletImpacts,
+        }));
+        assert.equal(combat.unsupported, null, JSON.stringify(combat));
+        assert(
+          combat.firedPhases >= 4 &&
+            combat.bullets > 100 &&
+            combat.impacts > 0 &&
+            combat.minimumHealth < combat.initialHealth,
+          JSON.stringify(combat),
+        );
+        console.log(
+          "Long combat",
+          JSON.stringify({ ...combat, players, wallMs: Date.now() - sessionStarted }),
+        );
+      }
     } else {
       assert.match(result.status, /lost the Lightyear connection/i);
       assert.equal(result.metrics.began, 1);
       assert.equal(result.metrics.ended, 1);
-      assert(result.metrics.replaySteps > 0 && result.metrics.replaySteps < 900);
+      assert(result.metrics.replaySteps > 0 && result.metrics.replaySteps <= 4 * 64);
       assert(result.metrics.suppressedProgress > 0);
       assert.equal(result.local, undefined);
     }
 
     const survivorTick = await survivor.evaluate(() => tm4Port.netMatch.tick);
-    const pages = scenario.expected === "recovered" ? [altered, survivor] : [survivor];
+    const continuing = scenario.stalled ? [survivor] : [altered, survivor];
     await authority.waitForFunction((tick) => tm4Port.netMatch?.tick >= tick, survivorTick + 30);
-    for (const page of pages) {
+    for (const page of continuing) {
       await page.waitForFunction((tick) => tm4Port.netMatch?.tick >= tick, survivorTick + 30);
       const pair = await page.evaluate(() => [
         tm4Port.netMatch.digest,
@@ -341,13 +412,12 @@ async function network(browser) {
     }
     assert.ifError(authorityError);
     console.log(
-      "PASS wire replay",
+      "PASS wire journal",
       scenarioName,
-      result.diagnostics.recoveredTick ?? result.status,
-      JSON.stringify(result.metrics),
+      JSON.stringify({ ...result.metrics, ...result.diagnostics, status: result.status }),
     );
   } finally {
-    await Promise.all([authority.close(), altered.close(), survivor.close()]);
+    await Promise.all([authority.close(), ...clients.map((page) => page.close())]);
   }
 }
 

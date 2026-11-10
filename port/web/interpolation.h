@@ -28,6 +28,7 @@ void WebInterpolationBeginStep(void);
 void WebInterpolationFinishStep(double lead);
 void WebInterpolationCutCamera(const Camera* camera);
 void WebInterpolationCutCar(const Car* car);
+u32 WebRenderEffectRandomState(void);
 void WebInterpolationBeginDraw(WebRenderMotionSettings motion, double phase);
 void WebInterpolationEndDraw(void);
 WebRenderMotionSettings WebRenderGetMotionSettings(void);

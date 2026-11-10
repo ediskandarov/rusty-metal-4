@@ -294,8 +294,11 @@ static void demo_frame(void)
 static void draw_network_view(s32 slot)
 {
     const Tm4GamePlayer* player = &GameInfo.players[slot];
+    /* Turbo effects draw from the secondary RNG between simulation ticks. */
+    const u32 effect_seed = WebRenderEffectRandomState();
     RenderBeginFrame();
     RenderBuildFrame();
+    srandrand(effect_seed);
     WebRenderPresentLevelFrame();
     ++frames;
     EM_ASM(

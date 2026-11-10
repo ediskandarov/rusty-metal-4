@@ -1,8 +1,11 @@
+mod journal;
+
 use std::{
-    collections::HashSet,
+    collections::{HashSet, VecDeque},
     env,
     error::Error,
     net::SocketAddr,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -16,14 +19,14 @@ use lightyear::websocket::server::{ServerConfig, WebSocketServerIo};
 use tm4_network::{
     input::{ControllerCommand, Input, InputHistory},
     protocol::{
-        Catalog, Compatibility, ControllerIdentity, Message, REPLAY_CHUNK_TICKS, REPLAY_MAX_TICKS,
-        REPLAY_SCHEMA, ReplayFrame, Request, SessionChannel, protocol, replay_checksum,
+        CHECKSUM_SEED, Catalog, Compatibility, ControllerIdentity, JOURNAL_MAX_TICKS, MAX_PLAYERS,
+        Message, REPLAY_CHUNK_TICKS, REPLAY_SCHEMA, REPLAY_WINDOW_CHUNKS, Request, RoundState,
+        SessionChannel, SessionStart, checksum, protocol,
     },
 };
 
 const TICK_RATE: u64 = 30;
-const REPLAY_GRACE_TICKS: usize = TICK_RATE as usize;
-const MAX_PLAYERS: usize = 8;
+const REPLAY_IDLE: Duration = Duration::from_secs(5);
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / TICK_RATE);
 
 #[derive(Default)]
@@ -36,7 +39,26 @@ struct Player {
     controller: Option<Entity>,
     received_sequence: u32,
     progress_tick: u32,
-    recovery_used: bool,
+    replay: Replay,
+}
+
+#[derive(Default)]
+enum Replay {
+    #[default]
+    Available,
+    Streaming {
+        sent: u32,
+        unconfirmed: VecDeque<u32>,
+        progressed: Instant,
+    },
+    Spent,
+    Failed,
+}
+
+impl Replay {
+    fn receives_live(&self) -> bool {
+        matches!(self, Self::Available | Self::Spent)
+    }
 }
 
 #[derive(Component)]
@@ -63,8 +85,13 @@ struct Match {
     loading_since: Instant,
     overruns: u32,
     in_flight: Option<(Vec<Input>, Instant)>,
-    replay: Vec<ReplayFrame>,
+    session: Option<SessionStart>,
+    last_state: Option<RoundState>,
+    journal_directory: PathBuf,
+    journal: Option<journal::Journal>,
+    journal_sealed: bool,
     replay_available: bool,
+    fast_until: u32,
 }
 
 fn send(
@@ -88,12 +115,109 @@ impl Match {
         }
     }
 
+    fn finish_journal(&mut self, end: journal::End) -> bool {
+        let Some(journal) = &mut self.journal else {
+            return true;
+        };
+        if self.journal_sealed {
+            return true;
+        }
+        self.journal_sealed = true;
+        if let Err(error) = journal.finish(end) {
+            eprintln!("Journal finalization failed: {error}");
+            return false;
+        }
+        let (used, capacity) = journal.memory_bytes();
+        println!(
+            "Journal sealed ({end:?}): {} ticks, cache {used} bytes / {capacity} allocated",
+            journal.ticks(),
+        );
+        true
+    }
+
+    fn pump_replay(
+        &mut self,
+        links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+    ) {
+        let Some(journal) = &mut self.journal else {
+            return;
+        };
+        let head = journal.ticks();
+        for player in &mut self.players {
+            let Some(entity) = player.entity else {
+                continue;
+            };
+            let Replay::Streaming {
+                sent, unconfirmed, ..
+            } = &mut player.replay
+            else {
+                continue;
+            };
+            if !self.replay_available {
+                send(
+                    links,
+                    entity,
+                    &Message::Error {
+                        message: "Match journal reached unsupported simulation state.".into(),
+                    },
+                );
+                player.replay = Replay::Failed;
+                continue;
+            }
+            if unconfirmed.is_empty() && *sent == head {
+                send(
+                    links,
+                    entity,
+                    &Message::RecoveryEnd {
+                        tick: head,
+                        state: self.last_state.as_ref().unwrap().clone(),
+                    },
+                );
+                player.replay = Replay::Spent;
+                player.progress_tick = head;
+                continue;
+            }
+            while unconfirmed.len() < REPLAY_WINDOW_CHUNKS && *sent < head {
+                let end = (*sent + REPLAY_CHUNK_TICKS).min(head);
+                let data = match journal.range(*sent, end) {
+                    Ok(data) => data,
+                    Err(error) => {
+                        eprintln!("Reading recovery journal failed: {error}");
+                        send(
+                            links,
+                            entity,
+                            &Message::Error {
+                                message: "Unable to read the match journal.".into(),
+                            },
+                        );
+                        player.replay = Replay::Failed;
+                        break;
+                    }
+                };
+                send(
+                    links,
+                    entity,
+                    &Message::RecoveryFrames {
+                        start: *sent,
+                        head,
+                        checksum: checksum(CHECKSUM_SEED, &data),
+                        data,
+                    },
+                );
+                *sent = end;
+                unconfirmed.push_back(end);
+            }
+        }
+    }
+
     fn fail(
         &mut self,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
         message: &'static str,
     ) {
         self.ended = true;
+        self.replay_available = false;
+        self.finish_journal(journal::End::Aborted);
         let error = Message::Error {
             message: message.into(),
         };
@@ -163,7 +287,7 @@ impl Match {
                 digest,
                 recoverable,
             } if self.started && epoch == 1 => {
-                if is_authority {
+                if is_authority && !self.authority_ready {
                     self.authority_ready = true;
                     self.initial_digest = Some(digest);
                     self.replay_available = recoverable;
@@ -178,7 +302,9 @@ impl Match {
                 tick,
                 input,
             } if self.started && epoch == 1 => {
-                if let Some(player) = slot.map(|slot| &mut self.players[slot]) {
+                if let Some(player) = slot.map(|slot| &mut self.players[slot])
+                    && player.replay.receives_live()
+                {
                     let earliest = self.tick + u32::from(self.in_flight.is_some());
                     let result = player.history.enqueue(earliest, sequence, tick, input);
                     send(
@@ -193,7 +319,9 @@ impl Match {
                 }
             }
             Request::Progress { tick } if tick <= self.tick => {
-                if let Some(player) = slot.map(|slot| &mut self.players[slot]) {
+                if let Some(player) = slot.map(|slot| &mut self.players[slot])
+                    && player.replay.receives_live()
+                {
                     player.progress_tick = player.progress_tick.max(tick);
                 }
             }
@@ -201,40 +329,64 @@ impl Match {
                 if self.started && !self.ended && tick < self.tick && slot.is_some() =>
             {
                 let player = &mut self.players[slot.unwrap()];
-                if player.recovery_used
-                    || !self.replay_available
-                    || tick as usize >= self.replay.len()
-                {
+                if !self.replay_available || !matches!(player.replay, Replay::Available) {
                     send(
                         links,
                         entity,
                         &Message::Error {
-                            message: "Authoritative replay checkpoint is unavailable.".into(),
+                            message: "Authoritative journal recovery is unavailable.".into(),
                         },
                     );
                     return;
                 }
-                player.recovery_used = true;
+                let journal = self
+                    .journal
+                    .as_ref()
+                    .expect("completed ticks have a journal");
+                let (used, capacity) = journal.memory_bytes();
+                println!(
+                    "Recovery requested at {}: {} journal ticks, cache {used} bytes / {capacity} allocated",
+                    self.tick,
+                    journal.ticks(),
+                );
+                player.history.disconnect();
+                player.replay = Replay::Streaming {
+                    sent: 0,
+                    unconfirmed: VecDeque::with_capacity(REPLAY_WINDOW_CHUNKS),
+                    progressed: Instant::now(),
+                };
                 send(
                     links,
                     entity,
                     &Message::RecoveryBegin {
                         schema: REPLAY_SCHEMA,
                         epoch: 1,
-                        ticks: self.replay.len() as u32,
+                        head: self.tick,
                         initial_digest: self.initial_digest.expect("stepping requires readiness"),
-                        checksum: replay_checksum(&self.replay),
                     },
                 );
-                for (index, chunk) in self.replay.chunks(REPLAY_CHUNK_TICKS).enumerate() {
-                    send(
-                        links,
-                        entity,
-                        &Message::RecoveryFrames {
-                            start: (index * REPLAY_CHUNK_TICKS) as u32,
-                            frames: chunk.to_vec(),
-                        },
-                    );
+            }
+            Request::ReplayApplied { epoch: 1, tick } if slot.is_some() => {
+                let player = &mut self.players[slot.unwrap()];
+                if let Replay::Streaming {
+                    unconfirmed,
+                    progressed,
+                    ..
+                } = &mut player.replay
+                {
+                    if unconfirmed.front() == Some(&tick) {
+                        unconfirmed.pop_front();
+                        *progressed = Instant::now();
+                    } else {
+                        player.replay = Replay::Failed;
+                        send(
+                            links,
+                            entity,
+                            &Message::Error {
+                                message: "Invalid match journal progress.".into(),
+                            },
+                        );
+                    }
                 }
             }
             Request::Completed { tick, state }
@@ -243,36 +395,42 @@ impl Match {
                     && state.scores.len() == self.players.len() =>
             {
                 if let Some((inputs, _)) = self.in_flight.take() {
-                    if !self.replay_available
-                        || state.unsupported.is_some()
-                        || tick as usize >= REPLAY_MAX_TICKS + REPLAY_GRACE_TICKS
-                    {
-                        self.replay_available = false;
-                        self.replay.clear();
-                    } else if self.replay.len() < REPLAY_MAX_TICKS
-                        && self.replay.len() == tick as usize
-                    {
-                        self.replay.push(ReplayFrame {
-                            inputs: inputs.clone(),
-                            digest: state.digest,
-                            sections: state.sections,
-                        });
+                    let result = self
+                        .journal
+                        .as_mut()
+                        .expect("stepping requires a journal")
+                        .append(tick, &inputs, &state);
+                    if let Err(error) = result {
+                        eprintln!("Appending match journal failed: {error}");
+                        self.journal_sealed = true;
+                        self.fail(links, "The match journal could not be written.");
+                        return;
                     }
-                    self.broadcast(
-                        links,
-                        &Message::Frame {
-                            tick,
-                            inputs: inputs.clone(),
-                            state: state.clone(),
-                            acknowledged: self
-                                .players
-                                .iter()
-                                .map(|player| player.history.processed_sequence)
-                                .collect(),
-                        },
-                    );
+                    self.replay_available &= state.unsupported.is_none();
                     self.tick += 1;
                     self.ended = state.next_mode != 0;
+                    if self.ended && !self.finish_journal(journal::End::Finished) {
+                        self.fail(links, "The match journal could not be finalized.");
+                        return;
+                    }
+                    let message = Message::Frame {
+                        tick,
+                        inputs,
+                        state: state.clone(),
+                        acknowledged: self
+                            .players
+                            .iter()
+                            .map(|player| player.history.processed_sequence)
+                            .collect(),
+                    };
+                    for player in &self.players {
+                        if player.replay.receives_live()
+                            && let Some(entity) = player.entity
+                        {
+                            send(links, entity, &message);
+                        }
+                    }
+                    self.last_state = Some(state);
                     if self.ended {
                         send(links, entity, &Message::Finished);
                     }
@@ -301,6 +459,7 @@ fn update(
         if player.entity.is_some_and(|entity| !links.contains(entity)) {
             player.entity = None;
             player.history.disconnect();
+            player.replay = Replay::Failed;
             if !started {
                 if let Some(controller) = player.controller {
                     commands.entity(controller).despawn();
@@ -328,14 +487,27 @@ fn update(
         let stalled = game
             .players
             .iter()
-            .any(|p| p.entity == Some(entity) && game.tick.saturating_sub(p.progress_tick) > 90);
-        if stalled || (!known && now.duration_since(admission.opened) > Duration::from_secs(10)) {
-            if stalled {
-                eprintln!("Client session progress timed out.");
-            }
+            .find(|p| p.entity == Some(entity))
+            .and_then(|p| match p.replay {
+                Replay::Streaming { progressed, .. }
+                    if now.duration_since(progressed) > REPLAY_IDLE =>
+                {
+                    Some("Client journal progress timed out.")
+                }
+                Replay::Failed => Some("Client journal recovery failed."),
+                _ if p.replay.receives_live() && game.tick.saturating_sub(p.progress_tick) > 90 => {
+                    Some("Client session progress timed out.")
+                }
+                _ => None,
+            });
+        let unidentified = !known && now.duration_since(admission.opened) > Duration::from_secs(10);
+        if let Some(reason) =
+            stalled.or(unidentified.then_some("Unidentified connection timed out."))
+        {
+            eprintln!("{reason}");
             commands.trigger(Unlink {
                 entity,
-                reason: UnlinkReason::UserRequested(Some("Session progress timed out".into())),
+                reason: UnlinkReason::UserRequested(Some(reason.into())),
             });
             continue;
         }
@@ -359,6 +531,7 @@ fn update(
             game.request(&mut links, entity, request);
         }
     }
+    game.pump_replay(&mut links);
     for (slot, player) in game.players.iter_mut().enumerate() {
         if let Some(owner) = player.entity
             && player.controller.is_none()
@@ -395,7 +568,7 @@ fn update(
         }
         game.started = true;
         game.loading_since = Instant::now();
-        let message = Message::Start {
+        let start = SessionStart {
             players: game.players.len(),
             world: game.catalog.as_ref().unwrap().worlds[0].clone(),
             cars: game.catalog.as_ref().unwrap().cars[..game.players.len()].to_vec(),
@@ -403,6 +576,8 @@ fn update(
             seed: 12345,
             epoch: 1,
         };
+        let message = Message::Start(start.clone());
+        game.session = Some(start);
         send(&mut links, authority, &message);
         game.broadcast(&mut links, &message);
     }
@@ -427,21 +602,45 @@ fn update(
         );
         return;
     }
+    if game.journal.is_none() {
+        let header = journal::Header {
+            start: game.session.clone().unwrap(),
+            initial_digest: game.initial_digest.unwrap(),
+            recoverable: game.replay_available,
+        };
+        match journal::Journal::create(&game.journal_directory, &header) {
+            Ok(journal) => {
+                println!("Match journal: {}", journal.path.display());
+                game.journal = Some(journal);
+            }
+            Err(error) => {
+                eprintln!("Opening match journal failed: {error}");
+                game.fail(&mut links, "The match journal could not be opened.");
+                return;
+            }
+        }
+        game.next_step = Instant::now();
+    }
+    if game.tick >= JOURNAL_MAX_TICKS {
+        game.fail(&mut links, "The match reached its journal disk budget.");
+        return;
+    }
     if let Some((_, since)) = game.in_flight {
         if now.duration_since(since) > Duration::from_secs(3) {
             game.fail(&mut links, "The simulator did not finish its tick.");
         }
         return;
     }
-    if now.saturating_duration_since(game.next_step) > Duration::from_millis(250) {
+    let fast = game.tick < game.fast_until;
+    if !fast && now.saturating_duration_since(game.next_step) > Duration::from_millis(250) {
         game.fail(
             &mut links,
             "Simulator overrun: more than 250 ms behind the 30 Hz schedule.",
         );
         return;
     }
-    if now >= game.next_step {
-        if now.duration_since(game.next_step) > STEP {
+    if fast || now >= game.next_step {
+        if !fast && now.saturating_duration_since(game.next_step) > STEP {
             game.overruns += 1;
         }
         let tick = game.tick;
@@ -459,7 +658,11 @@ fn update(
             },
         );
         game.in_flight = Some((inputs, now));
-        game.next_step += STEP;
+        game.next_step = if fast {
+            now + STEP
+        } else {
+            game.next_step + STEP
+        };
     }
 }
 
@@ -541,7 +744,32 @@ fn accept_native_inputs(
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    let count: usize = env::args().nth(1).unwrap_or_else(|| "2".into()).parse()?;
+    let mut args = env::args().skip(1);
+    let first = args.next().unwrap_or_else(|| "2".into());
+    if first == "--inspect-journal" {
+        let path = args.next().ok_or("Expected the journal path")?;
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&journal::inspect(Path::new(&path))?)?
+        );
+        return Ok(());
+    }
+    let count: usize = first.parse()?;
+    let fast_until = if cfg!(debug_assertions) {
+        env::var("TM4_TEST_FAST_UNTIL")
+            .ok()
+            .map(|value| value.parse::<u32>())
+            .transpose()?
+            .unwrap_or(0)
+            .min(JOURNAL_MAX_TICKS)
+    } else {
+        0
+    };
+    if fast_until != 0 {
+        println!(
+            "Diagnostic authority advances without wall-clock pacing through tick {fast_until}"
+        );
+    }
     if !(2..=MAX_PLAYERS).contains(&count) {
         return Err("Expected a player count from 2 to 8".into());
     }
@@ -629,8 +857,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         loading_since: Instant::now(),
         overruns: 0,
         in_flight: None,
-        replay: Vec::new(),
+        session: None,
+        last_state: None,
+        journal_directory: env::var_os("TM4_JOURNAL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("build/network-journals")),
+        journal: None,
+        journal_sealed: false,
         replay_available: false,
+        fast_until,
     });
     app.add_systems(Update, update);
     app.add_systems(

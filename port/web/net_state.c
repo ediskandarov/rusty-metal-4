@@ -1,4 +1,5 @@
 #include "net_state.h"
+#include "interpolation.h"
 #include "net_state_fields.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
@@ -6,8 +7,6 @@
 #include "tm4/main/system.h"
 
 enum { InitialHash = 2166136261u };
-
-u32 WebRenderEffectRandomState(void);
 
 static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
 {
