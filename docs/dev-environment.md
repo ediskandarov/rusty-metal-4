@@ -68,16 +68,6 @@ Wasmtime reads the embedded simulation directly; no temporary asset extraction i
 needed. Upload validation runs on a blocking worker; setup commands cross to the
 native simulation thread. HTTP and Lightyear remain on separate ports.
 
-Only `v*` tags trigger server archive builds, GitHub Releases and Pages publication. CI builds the shared
-Web/Wasm bundle once, then builds and tests Linux x64, Windows x64 and macOS ARM64
-executables against that exact bundle. After checks pass, it publishes all three
-archives and `SHA256SUMS` in a GitHub Release; tags containing `-` produce
-prereleases. Pushes to main run formatting, lint, typechecks and unit tests only.
-Same-repository pull requests and manual runs on branches also build the Web/Wasm
-bundle and run the Pages smoke test, without publishing or building server executables.
-Fork pull requests run only the checks, without access to private game sources. The server
-serves its bundled player, so updating Pages does not change an older server's client.
-
 `TM4_SERVER_EXECUTABLE=<path> bun run test:server:standalone` copies the executable
 to an empty temporary directory and tests its built-in site without a checkout,
 external site or game disc. Rust tests with `--features embedded-server` require

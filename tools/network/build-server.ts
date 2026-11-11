@@ -26,8 +26,6 @@ const child = Bun.spawn(
     "build",
     "--locked",
     "--release",
-    "--config",
-    'profile.release.strip="symbols"',
     "--bin",
     "tm4-deathmatch-server",
     "--features",

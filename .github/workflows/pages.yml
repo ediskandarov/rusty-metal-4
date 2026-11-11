@@ -34,8 +34,9 @@ jobs:
 
   build:
     needs: checks
-    # Main pushes run checks only; forks never receive the private game deploy key.
+    # Forks never receive the private game deploy key.
     if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'pull_request' &&
@@ -77,12 +78,22 @@ jobs:
         run: |
           .emsdk/emsdk install 6.0.13
           .emsdk/emsdk activate 6.0.13
+      - name: Set up pinned Rust toolchain
+        run: bun tools/ci/setup-rust.ts
+      - name: Cache browser Rust dependencies and tools
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: network -> ../build/network-wasm
+          key: browser-ubuntu-24.04-${{ hashFiles('tools/network/build.ts') }}
+          cache-directories: build/rust-tools
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build release
         run: |
           source .emsdk/emsdk_env.sh
           bun run build
       - name: Upload shared server bundle
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: server-bundle
@@ -96,17 +107,17 @@ jobs:
           "$chrome" --version
           TM4_CHROME="$chrome" bun run test:pages
       - name: Configure Pages
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Upload release site
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: build/release/site
 
   deploy:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -122,7 +133,7 @@ jobs:
 
   server:
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || startsWith(github.ref, 'refs/tags/v')
     strategy:
       fail-fast: false
       matrix:
@@ -130,16 +141,11 @@ jobs:
           - runner: ubuntu-22.04
             platform: linux-x64
             executable: tm4-rewired-server
-          - runner: windows-2022
-            platform: windows-x64
-            executable: tm4-rewired-server.exe
           - runner: macos-15
             platform: macos-arm64
             executable: tm4-rewired-server
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
-    env:
-      CARGO_BUILD_JOBS: 2
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -147,6 +153,15 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.4"
+      - name: Set up pinned Rust toolchain
+        run: bun tools/ci/setup-rust.ts
+      - name: Cache native Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: network -> ../build/network-native
+          key: native-${{ matrix.runner }}-${{ matrix.platform }}
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: server-bundle
@@ -163,12 +178,11 @@ jobs:
           TM4_SERVER_EXECUTABLE: build/server-release/${{ matrix.platform }}/${{ matrix.executable }}
         run: bun run test:server:standalone
       - name: Upload server release archive
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: server-release-${{ matrix.platform }}
-          path: |
-            build/server-release/*.tar.gz
-            build/server-release/*.zip
+          path: build/server-release/*.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -194,7 +208,7 @@ jobs:
         shell: bash
         run: |
           cd build/release-assets
-          sha256sum *.tar.gz *.zip > SHA256SUMS
+          sha256sum *.tar.gz > SHA256SUMS
           prerelease=()
           if [[ "$RELEASE_TAG" == *-* ]]; then prerelease=(--prerelease); fi
-          gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${prerelease[@]}" *.tar.gz *.zip SHA256SUMS
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${prerelease[@]}" *.tar.gz SHA256SUMS
