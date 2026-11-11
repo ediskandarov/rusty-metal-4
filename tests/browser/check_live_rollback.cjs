@@ -1,5 +1,6 @@
 /* global Module, tm4Port */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium } = require("playwright");
 const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.cjs");
 
@@ -317,11 +318,12 @@ const summary = (page) =>
     target.searchParams.set("match", endpoint);
     await load(players[0], target);
     await instruments(players[0], true);
-    const waiting = players[0].locator('#status[data-match-state="lobby"]');
-    await waiting.filter({ hasText: "Waiting for the other players" }).waitFor();
+    const waiting = players[0].locator("#car-lobby");
+    await waiting.waitFor({ state: "visible", timeout: 60000 });
     assert(await waiting.isVisible());
     await load(players[1], target);
     await instruments(players[1], true);
+    await Promise.all(players.map(readyInLobby));
     const waitConfirmed = (page, targetTick, timeout = 12_000) =>
       page.waitForFunction((tick) => (tm4Port.netConfirmedTick ?? 0) >= tick, targetTick, {
         timeout,

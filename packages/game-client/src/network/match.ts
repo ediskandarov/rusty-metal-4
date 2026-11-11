@@ -5,7 +5,17 @@ import type { CatchupChunk } from "./replay.ts";
 import { checksum, maxResumeTicks, SnapshotReplay } from "./replay.ts";
 import { connectNetwork } from "./transport.ts";
 
+export type LobbyState = {
+  cars: string[];
+  players: { connected: boolean; car: string | null; ready: boolean }[];
+};
+
+export type LobbyView = (
+  state: (LobbyState & { slot: number; select: (car: string, ready: boolean) => void }) | null,
+) => void;
+
 type Message =
+  | (LobbyState & { type: "lobby" })
   | (Omit<Start, "type"> & { type: "prediction_prepare" | "resume_prepare" })
   | { type: "resume_credential"; token: string }
   | SnapshotBegin
@@ -69,7 +79,12 @@ function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
 
 export type MatchStatus = (state: "lobby" | "playing" | "error", message: string) => void;
 
-export async function joinMatch(engine: NetworkEngine, endpoint: string, show: MatchStatus) {
+export async function joinMatch(
+  engine: NetworkEngine,
+  endpoint: string,
+  show: MatchStatus,
+  lobby: LobbyView,
+) {
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
   show("lobby", "Connecting to Deathmatch…");
 
@@ -101,6 +116,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, show: M
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (closed) return;
     closed = true;
+    lobby(null);
     delete port.netMatchInput;
     prediction?.close();
     clearTimeout(recoveryDeadline);
@@ -187,6 +203,18 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, show: M
               " · Waiting for the other players\nFor local play, open this match link in another window.",
           );
           break;
+        case "lobby":
+          if (slot < 0 || slot >= message.players.length || prediction)
+            throw new Error("Invalid lobby state");
+          show("lobby", "");
+          lobby({
+            ...message,
+            slot,
+            select: (car, ready) => {
+              if (!closed && !prediction) send({ type: "select_car", car, ready });
+            },
+          });
+          break;
         case "resume_credential":
           if (!/^[0-9a-f]{64}$/.test(message.token)) throw new Error("Invalid match credential");
           try {
@@ -197,6 +225,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, show: M
           break;
         case "resume_prepare":
         case "prediction_prepare": {
+          lobby(null);
           show("lobby", "Loading Deathmatch…");
           if (prediction || slot < 0 || slot >= message.players)
             throw new Error("Invalid live prediction setup");

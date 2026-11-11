@@ -1,5 +1,6 @@
 /* global tm4Port */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium } = require("playwright");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
@@ -222,22 +223,9 @@ target.searchParams.set("match", endpoint);
       assert((await confirmed(page)) >= tick, await status(page));
     };
     const initial = [await open()];
-    await initial[0].waitForFunction(
-      () => {
-        const status = document.querySelector("#status");
-        return (
-          status?.textContent.includes("Waiting for the other players") ||
-          status?.dataset.matchState === "error"
-        );
-      },
-      null,
-      { timeout: 35_000 },
-    );
-    assert(
-      (await status(initial[0])).includes("Waiting for the other players"),
-      await status(initial[0]),
-    );
+    await initial[0].locator("#car-lobby").waitFor({ state: "visible", timeout: 60000 });
     for (let i = 1; i < players; i++) initial.push(await open());
+    await Promise.all(initial.map(readyInLobby));
     await Promise.all(initial.map((page) => waitTick(page, 60)));
     if (combat)
       for (const page of initial) {

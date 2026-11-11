@@ -1,5 +1,6 @@
 /* global tm4Port, Module */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium, webkit } = require("playwright");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
@@ -26,12 +27,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
     );
     for (const page of players) page.on("pageerror", (error) => errors.push(error.message));
     await players[0].goto(target.href);
-    await players[0]
-      .locator("#status")
-      .filter({ hasText: "Waiting for the other players" })
-      .waitFor({
-        timeout: 60_000,
-      });
+    await players[0].locator("#car-lobby").waitFor({ state: "visible", timeout: 60000 });
     await players[1].goto(target.href);
     if (forceWait) {
       await players[1].waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
@@ -59,6 +55,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
         };
       });
     }
+    await Promise.all(players.map(readyInLobby));
     const sample = (page) =>
       page.evaluate(() => ({
         status: document.querySelector("#status").textContent,

@@ -161,6 +161,38 @@ const { chromium } = require("playwright");
             { timeout: 10000 },
           );
           await client.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
+          await client.locator("#car-lobby").waitFor({ state: "visible", timeout: 120000 });
+        }),
+      );
+      assert.equal((await (await request("/api/status")).json()).phase, "lobby");
+      for (const client of clients)
+        assert.equal(await client.evaluate(() => globalThis.tm4Port?.netConfirmedTick ?? 0), 0);
+      // A pre-match reload releases the old selection/readiness rather than starting a match.
+      await clients[0].locator("#car-ready").click();
+      await clients[0].locator("#car-ready").filter({ hasText: "Not ready" }).waitFor();
+      await clients[0].reload();
+      await clients[0].waitForFunction(() => !document.getElementById("disc-folder").disabled);
+      await clients[0].locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
+      await clients[0].locator("#car-lobby").waitFor({ state: "visible", timeout: 60000 });
+      assert.equal(await clients[0].locator("#car-ready").innerText(), "Ready");
+      assert.equal((await (await request("/api/status")).json()).phase, "lobby");
+      const chosenCars = ["Calypso", "Quatro"];
+      for (const [index, client] of clients.entries()) {
+        await client.locator("#car-choice").selectOption(chosenCars[index]);
+        await client.waitForFunction(() => !document.getElementById("car-ready").disabled);
+      }
+      await clients[0].locator("#car-ready").click();
+      await clients[0].locator("#car-ready").filter({ hasText: "Not ready" }).waitFor();
+      assert.equal((await (await request("/api/status")).json()).phase, "lobby");
+      await clients[0].locator("#car-ready").click();
+      await clients[0]
+        .locator("#car-ready")
+        .filter({ hasText: /^Ready$/ })
+        .waitFor();
+      await clients[0].screenshot({ path: "build/server-car-lobby.png" });
+      await Promise.all(clients.map((client) => client.locator("#car-ready").click()));
+      await Promise.all(
+        clients.map(async (client) => {
           await client.waitForFunction(
             () =>
               globalThis.tm4Port?.netConfirmedTick > 30 ||
@@ -179,6 +211,34 @@ const { chromium } = require("playwright");
           );
         }),
       );
+      for (const client of clients) assert(await client.locator("#car-lobby").isHidden());
+      const roster = [];
+      for (const [index, client] of clients.entries())
+        roster[await client.evaluate(() => globalThis.tm4Port.netViewSlot)] = chosenCars[index];
+      const journalPath = /Match journal: (.+)/.exec(logs)?.[1];
+      assert(journalPath, "The server must journal the chosen roster");
+      const journal = Bun.spawnSync([executable, "--inspect-journal", journalPath]);
+      assert.equal(journal.exitCode, 0);
+      assert.deepEqual(
+        JSON.parse(new TextDecoder().decode(journal.stdout)).header.start.cars,
+        roster,
+      );
+      // A running match restores the player's existing car without another lobby confirmation.
+      await clients[0].reload();
+      await clients[0].waitForFunction(() => !document.getElementById("disc-folder").disabled);
+      await clients[0].locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
+      await clients[0].waitForFunction(
+        () =>
+          globalThis.tm4Port?.netConfirmedTick > 30 ||
+          document.getElementById("status")?.dataset.matchState === "error",
+        null,
+        { timeout: 60000 },
+      );
+      assert(
+        await clients[0].evaluate(() => globalThis.tm4Port?.netConfirmedTick > 30),
+        await clients[0].locator("#status").innerText(),
+      );
+      assert(await clients[0].locator("#car-lobby").isHidden());
       assert.deepEqual(uploads, [], "Players must not upload their disc resources");
       assert.equal((await (await request("/api/status")).json()).phase, "match");
       console.log(

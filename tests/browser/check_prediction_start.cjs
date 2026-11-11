@@ -1,5 +1,6 @@
 /* global tm4Port, Module */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium } = require("playwright");
 
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
@@ -29,9 +30,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
     const target = new URL(site);
     target.searchParams.set("match", endpoint);
     await first.goto(target.href);
-    await first.locator("#status").filter({ hasText: "Waiting for the other players" }).waitFor({
-      timeout: 60_000,
-    });
+    await first.locator("#car-lobby").waitFor({ state: "visible", timeout: 60000 });
     await second.bringToFront();
     await second.goto(target.href);
     await loaded(second);
@@ -59,6 +58,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
           return JSON.stringify(messages);
         };
       }, delay);
+      await Promise.all([first, second].map(readyInLobby));
       await second.waitForFunction(() => tm4Port.testClockOfferHeld !== undefined);
       const initial = await Promise.all(
         [first, second].map((page) => page.evaluate(() => tm4Port.netMatch?.tick)),
@@ -72,6 +72,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
         await lifecycle.send("Page.setWebLifecycleState", { state: "active" });
       }
     }
+    if (!delay) await Promise.all([first, second].map(readyInLobby));
     for (const page of [first, second])
       await page.waitForFunction(
         () =>

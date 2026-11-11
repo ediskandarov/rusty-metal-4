@@ -47,6 +47,17 @@
     <main id="stage">
       <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()"></canvas>
       <div id="status" role="status">Loading…</div>
+      <section id="car-lobby" hidden aria-labelledby="car-lobby-title">
+        <h2 id="car-lobby-title">Choose your car</h2>
+        <p id="car-lobby-player"></p>
+        <form id="car-lobby-form">
+          <label for="car-choice">Car</label>
+          <select id="car-choice" required></select>
+          <button id="car-ready" type="submit">Ready</button>
+        </form>
+        <ol id="car-lobby-roster" aria-live="polite"></ol>
+        <p>The match starts when everyone is ready.</p>
+      </section>
       <section id="fps-counter" hidden aria-label="Performance metrics"></section>
     </main>
     <div id="video-controls" hidden>

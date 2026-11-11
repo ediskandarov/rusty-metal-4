@@ -1,5 +1,6 @@
 /* Client admission diagnostics against the embedded Rust server. */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium } = require("playwright");
 (async () => {
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
@@ -42,6 +43,7 @@ NetworkClient.prototype.update = function() {
     const target = new URL(site);
     target.searchParams.set("match", endpoint);
     await Promise.all(clients.map((page) => page.goto(target.href)));
+    await Promise.all(clients.map(readyInLobby));
     const statuses = [];
     for (const page of clients) {
       const status = page.locator('#status[data-match-state="error"]');

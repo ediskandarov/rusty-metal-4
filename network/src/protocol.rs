@@ -85,6 +85,13 @@ pub struct Catalog {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct LobbyPlayer {
+    pub connected: bool,
+    pub car: Option<String>,
+    pub ready: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Score {
     pub wins: i32,
     pub losses: i32,
@@ -150,6 +157,10 @@ pub enum Request {
         attempt: u32,
         tick: u32,
     },
+    SelectCar {
+        car: String,
+        ready: bool,
+    },
     PredictionClock {
         epoch: u32,
         anchor: u32,
@@ -213,6 +224,10 @@ pub enum Message {
     },
     Error {
         message: String,
+    },
+    Lobby {
+        cars: Vec<String>,
+        players: Vec<LobbyPlayer>,
     },
     PredictionOffer {
         anchor: u32,

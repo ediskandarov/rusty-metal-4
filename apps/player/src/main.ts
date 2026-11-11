@@ -7,6 +7,7 @@ import type { DiscSources } from "@tm4/resources/loader/types";
 import { installCarMods } from "@tm4/resources/mods/install";
 
 import { prepareIsolation } from "./isolation.ts";
+import { carLobby } from "./ui/car-lobby.ts";
 import { element } from "./ui/dom.ts";
 import { matchStatus } from "./ui/match-status.ts";
 import { initializeMods } from "./ui/mods.ts";
@@ -68,7 +69,7 @@ async function launch(resolveSources: () => DiscSources) {
     if (endpoint) {
       if (!hasNetworkEngine(runtime))
         throw new Error("This build does not include the network runtime");
-      void joinMatch(runtime, endpoint, showMatchStatus).catch((error: unknown) => {
+      void joinMatch(runtime, endpoint, showMatchStatus, carLobby()).catch((error: unknown) => {
         showMatchStatus("error", error instanceof Error ? error.message : String(error));
       });
     } else {

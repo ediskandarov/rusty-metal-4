@@ -1,5 +1,6 @@
 /* global Module, tm4Port */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium } = require("playwright");
 const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.cjs");
 
@@ -58,6 +59,7 @@ const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.c
         });
       }),
     );
+    await Promise.all(clients.map(readyInLobby));
     await Promise.all(clients.map((page) => page.waitForFunction(() => tm4Port.netCameraAttached)));
     const slots = await Promise.all(
       clients.map((page) => page.evaluate(() => tm4Port.netViewSlot)),

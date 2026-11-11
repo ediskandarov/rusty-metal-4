@@ -1,5 +1,6 @@
 /* global tm4Port */
 const assert = require("node:assert/strict");
+const { readyInLobby } = require("./network_lobby.cjs");
 const { chromium } = require("playwright");
 const { execFileSync } = require("node:child_process");
 const { instrument, sample, waitTick, schedule, drive } = require("./network_session.cjs");
@@ -53,6 +54,7 @@ const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.c
       await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
       await instrument(page, { client: true, latency, jitter });
     }
+    await Promise.all(pages.map(readyInLobby));
     await Promise.all(pages.map((p) => waitTick(p, 35, 60000)));
     const first = await Promise.all(pages.map(sample));
     assert.deepEqual(

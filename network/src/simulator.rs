@@ -154,7 +154,7 @@ impl Simulator {
             "Browser simulation build manifest is stale"
         );
         let compatibility = Compatibility {
-            protocol: 8,
+            protocol: 9,
             build: build.sha256,
             content: resource_content(resources)?,
         };
@@ -642,7 +642,7 @@ mod tests {
     }
     fn compatibility() -> Compatibility {
         Compatibility {
-            protocol: 8,
+            protocol: 9,
             build: "local parity test".into(),
             content: "local stock resources".into(),
         }

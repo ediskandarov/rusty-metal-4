@@ -24,9 +24,9 @@ use tm4_network::protocol as game_protocol;
 use tm4_network::{
     input::{ControllerCommand, Input, InputHistory},
     protocol::{
-        CHECKSUM_SEED, Catalog, Compatibility, ControllerIdentity, JOURNAL_MAX_TICKS, MAX_PLAYERS,
-        Message, REPLAY_CHUNK_TICKS, Request, RoundState, SessionChannel, SessionStart, checksum,
-        protocol,
+        CHECKSUM_SEED, Catalog, Compatibility, ControllerIdentity, JOURNAL_MAX_TICKS, LobbyPlayer,
+        MAX_PLAYERS, Message, REPLAY_CHUNK_TICKS, Request, RoundState, SessionChannel,
+        SessionStart, checksum, protocol,
     },
 };
 
@@ -38,6 +38,8 @@ const SIMULATOR_LAG_LIMIT: Duration = Duration::from_millis(250);
 struct Player {
     entity: Option<Entity>,
     ready: bool,
+    car: Option<String>,
+    lobby_ready: bool,
     compatibility: Option<Compatibility>,
     initial_digest: Option<u32>,
     history: InputHistory,
@@ -50,6 +52,20 @@ struct Player {
 }
 
 impl Player {
+    fn select_car(
+        &mut self,
+        catalog: &Catalog,
+        car: String,
+        ready: bool,
+    ) -> Result<(), &'static str> {
+        if !catalog.cars.contains(&car) {
+            return Err("This car is not available on the server.");
+        }
+        self.car = Some(car);
+        self.lobby_ready = ready;
+        Ok(())
+    }
+
     fn receives_live(&self) -> bool {
         self.resume.is_none() && self.entity.is_some()
     }
@@ -459,6 +475,27 @@ impl Match {
         }
     }
 
+    fn broadcast_lobby(
+        &self,
+        links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+    ) {
+        self.broadcast(
+            links,
+            &Message::Lobby {
+                cars: self.catalog.as_ref().unwrap().cars.clone(),
+                players: self
+                    .players
+                    .iter()
+                    .map(|player| LobbyPlayer {
+                        connected: player.entity.is_some(),
+                        car: player.car.clone(),
+                        ready: player.lobby_ready,
+                    })
+                    .collect(),
+            },
+        );
+    }
+
     fn request(
         &mut self,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -471,6 +508,18 @@ impl Match {
             .position(|player| player.entity == Some(entity));
         match request {
             Request::Join { compatibility } if !self.started && !self.ended && slot.is_none() => {
+                if Some(&compatibility) != self.compatibility.as_ref() {
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message:
+                                "Gameplay build or local resources do not match the authority."
+                                    .into(),
+                        },
+                    );
+                    return;
+                }
                 if let Some(slot) = self
                     .players
                     .iter()
@@ -478,7 +527,9 @@ impl Match {
                 {
                     self.players[slot].entity = Some(entity);
                     self.players[slot].compatibility = Some(compatibility);
+                    self.players[slot].car = self.catalog.as_ref().unwrap().cars.get(slot).cloned();
                     send(links, entity, &Message::Welcome { slot });
+                    self.broadcast_lobby(links);
                 } else {
                     send(
                         links,
@@ -487,6 +538,22 @@ impl Match {
                             message: "The lobby is full.".into(),
                         },
                     );
+                }
+            }
+            Request::SelectCar { car, ready } if !self.started && !self.ended && slot.is_some() => {
+                match self.players[slot.unwrap()].select_car(
+                    self.catalog.as_ref().unwrap(),
+                    car,
+                    ready,
+                ) {
+                    Ok(()) => self.broadcast_lobby(links),
+                    Err(message) => send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: message.into(),
+                        },
+                    ),
                 }
             }
             Request::Join { .. } if self.ended || self.started => send(
@@ -682,6 +749,7 @@ fn update(
     mut commands: Commands,
 ) {
     let started = game.started;
+    let mut lobby_changed = false;
     for slot in 0..game.players.len() {
         let player = &mut game.players[slot];
         if player.entity.is_some_and(|entity| !links.contains(entity)) {
@@ -693,8 +761,13 @@ fn update(
                     commands.entity(controller).despawn();
                 }
                 *player = Player::default();
+                lobby_changed = true;
             }
         }
+    }
+
+    if lobby_changed {
+        game.broadcast_lobby(&mut links);
     }
 
     let mut requests = Vec::new();
@@ -789,7 +862,13 @@ fn update(
             game.lobby_since = None;
         }
     }
-    if game.ended || (!game.started && game.players.iter().any(|player| player.entity.is_none())) {
+    if game.ended
+        || (!game.started
+            && game
+                .players
+                .iter()
+                .any(|player| player.entity.is_none() || !player.lobby_ready))
+    {
         return;
     }
     if !game.started {
@@ -818,7 +897,11 @@ fn update(
                 .selected_world
                 .clone()
                 .unwrap_or_else(|| game.catalog.as_ref().unwrap().worlds[0].clone()),
-            cars: game.catalog.as_ref().unwrap().cars[..game.players.len()].to_vec(),
+            cars: game
+                .players
+                .iter()
+                .map(|player| player.car.clone().unwrap())
+                .collect(),
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,
@@ -1378,5 +1461,42 @@ mod prediction_start_tests {
             PredictionStart::Unavailable
         );
         assert!(timeline.anchor.is_none());
+    }
+}
+
+#[cfg(test)]
+mod lobby_tests {
+    use super::*;
+
+    #[test]
+    fn car_selection_requires_catalog_membership_and_explicit_readiness() {
+        let catalog = Catalog {
+            cars: vec!["Orbital".into(), "Pizza Boy".into()],
+            worlds: vec![],
+        };
+        let mut player = Player::default();
+        assert!(!player.lobby_ready);
+        assert!(
+            player
+                .select_car(&catalog, "Pizza Boy".into(), true)
+                .is_ok()
+        );
+        assert_eq!(player.car.as_deref(), Some("Pizza Boy"));
+        assert!(player.lobby_ready);
+        assert!(
+            player
+                .select_car(&catalog, "unknown".into(), false)
+                .is_err()
+        );
+        assert_eq!(player.car.as_deref(), Some("Pizza Boy"));
+        assert!(player.lobby_ready);
+        player
+            .select_car(&catalog, "Orbital".into(), false)
+            .unwrap();
+        assert!(!player.lobby_ready);
+        assert_eq!(player.car.as_deref(), Some("Orbital"));
+        let mut other = Player::default();
+        other.select_car(&catalog, "Orbital".into(), true).unwrap();
+        assert_eq!(other.car, player.car);
     }
 }
