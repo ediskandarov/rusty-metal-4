@@ -67,19 +67,10 @@ function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
   );
 }
 
-export function setMatchStatus(
-  status: HTMLElement,
-  state: "lobby" | "playing" | "error",
-  message: string,
-) {
-  if (status.dataset.matchState !== state) status.dataset.matchState = state;
-  if (status.textContent !== message) status.textContent = message;
-}
+export type MatchStatus = (state: "lobby" | "playing" | "error", message: string) => void;
 
-export async function joinMatch(engine: NetworkEngine, endpoint: string, status: HTMLElement) {
+export async function joinMatch(engine: NetworkEngine, endpoint: string, show: MatchStatus) {
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
-  const show = (state: "lobby" | "playing" | "error", message: string) =>
-    setMatchStatus(status, state, message);
   show("lobby", "Connecting to Deathmatch…");
 
   const socket = await connectNetwork(endpoint);

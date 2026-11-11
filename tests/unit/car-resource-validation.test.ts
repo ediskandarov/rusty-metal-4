@@ -1,7 +1,8 @@
 import { expect, test } from "bun:test";
 
+import type { MrDirectory } from "@tm4/resources/compatibility/mr";
+
 import { validateCarDisplay, validateCarMr } from "../../tools/resources/validate-car.ts";
-import type { MrDirectory } from "../../web/src/compatibility/mr.ts";
 
 const directory = (): MrDirectory => ({ files: new Map(), folders: new Map() });
 function put(directory: MrDirectory, name: string, bytes: Uint8Array<ArrayBuffer>, type = 3) {

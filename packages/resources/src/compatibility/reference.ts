@@ -1,5 +1,5 @@
-import disc from "../../../config/disc.json";
-import resources from "../../../config/resources.json";
+import disc from "../../../../config/disc.json";
+import resources from "../../../../config/resources.json";
 import type { ResourceReference } from "./resources.ts";
 
 export const resourceReference: ResourceReference[] = [

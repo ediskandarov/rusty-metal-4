@@ -1,15 +1,18 @@
-import { loadDisc } from "./loader/loader.ts";
-import { directorySources, remoteSources } from "./loader/sources.ts";
-import type { DiscSources } from "./loader/types.ts";
-import { installCarMods } from "./mods/install.ts";
-import { joinMatch, setMatchStatus } from "./network/match.ts";
-import { hasNetworkEngine } from "./network/protocol.ts";
-import { prepareIsolation } from "./runtime/isolation.ts";
-import { startGame } from "./runtime/start.ts";
+import { joinMatch } from "@tm4/game-client/network/match";
+import { hasNetworkEngine } from "@tm4/game-client/network/protocol";
+import { startGame } from "@tm4/game-client/runtime/start";
+import { loadDisc } from "@tm4/resources/loader/loader";
+import { directorySources, remoteSources } from "@tm4/resources/loader/sources";
+import type { DiscSources } from "@tm4/resources/loader/types";
+import { installCarMods } from "@tm4/resources/mods/install";
+
+import { prepareIsolation } from "./isolation.ts";
 import { element } from "./ui/dom.ts";
+import { matchStatus } from "./ui/match-status.ts";
 import { initializeMods } from "./ui/mods.ts";
 import { initializePopups } from "./ui/popups.ts";
 import { initializeResources } from "./ui/resources.ts";
+import { initializeSettings } from "./ui/settings.ts";
 
 const startup = element("startup", HTMLElement);
 const progress = element("startup-progress", HTMLElement);
@@ -51,19 +54,22 @@ async function launch(resolveSources: () => DiscSources) {
     runtimeStarted = true;
     const endpoint = new URLSearchParams(location.search).get("match");
     const status = element("status", HTMLElement);
+    const showMatchStatus = matchStatus(status);
     if (endpoint) {
-      setMatchStatus(status, "lobby", "Preparing Deathmatch…");
+      showMatchStatus("lobby", "Preparing Deathmatch…");
       element("resources", HTMLDetailsElement).open = false;
     }
     // Hide before starting SDL so its initial viewport uses the final page layout.
     startup.hidden = true;
-    await startGame(assets, canvas, selectedMods.length);
+    const runtime = await startGame(assets, canvas, {
+      resourceMods: selectedMods.length,
+      beforeMain: (module) => initializeSettings(module, canvas),
+    });
     if (endpoint) {
-      const runtime = globalThis.Module;
       if (!hasNetworkEngine(runtime))
         throw new Error("This build does not include the network runtime");
-      void joinMatch(runtime, endpoint, status).catch((error: unknown) => {
-        setMatchStatus(status, "error", error instanceof Error ? error.message : String(error));
+      void joinMatch(runtime, endpoint, showMatchStatus).catch((error: unknown) => {
+        showMatchStatus("error", error instanceof Error ? error.message : String(error));
       });
     } else {
       status.textContent = "";
@@ -105,7 +111,9 @@ try {
 if (TM4_DEV && crossOriginIsolated) {
   progress.textContent = "Connecting to local disc server…";
   try {
-    const { sources, warnings: messages } = await remoteSources("/__dev/disc.json");
+    const { sources, warnings: messages } = await remoteSources(
+      new URL("/__dev/disc.json", location.href),
+    );
     messages.forEach(warn);
     await launch(() => sources);
   } catch (error) {

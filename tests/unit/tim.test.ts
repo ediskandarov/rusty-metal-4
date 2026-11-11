@@ -9,8 +9,8 @@ import {
   resourceRows,
   sha256,
   validateTim,
-} from "../../web/src/compatibility/index.ts";
-import type { TimRectangle } from "../../web/src/compatibility/index.ts";
+} from "@tm4/resources/compatibility";
+import type { TimRectangle } from "@tm4/resources/compatibility";
 
 const image: TimRectangle = { x: 320, y: 0, widthWords: 6, height: 2 };
 const palette: TimRectangle = { x: 0, y: 480, widthWords: 256, height: 1 };

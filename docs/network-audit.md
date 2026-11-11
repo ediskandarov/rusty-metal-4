@@ -31,7 +31,7 @@ at startup before the server issues reconnect credentials. The diagnostic build
 includes a smaller native rollback probe.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
-[browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
+[browser runtime](../network/src/browser.rs), [JS ownership bridge](../packages/game-client/src/network/transport.ts),
 [embedded simulator](../network/src/simulator.rs), [C host boundary](../port/headless/api.c).
 
 ## Implemented changes and verification

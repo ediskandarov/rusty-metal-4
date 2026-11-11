@@ -11,15 +11,16 @@
     "dev:diagnostic": "bun tools/serve.js --site build/diagnostic/site",
     "match": "bun tools/network/run.ts",
     "test": "bun test tests/unit",
-    "fmt": "bun fmt --no-script tools web tests package.json config tsconfig.json bunfig.toml",
-    "fmt:check": "bun fmt --no-script --check tools web tests package.json config tsconfig.json bunfig.toml",
-    "lint": "bun lint --no-script tools web tests",
-    "typecheck": "tsc --noEmit && tsc --project web/tsconfig.json --noEmit",
+    "fmt": "bun fmt --no-script tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml",
+    "fmt:check": "bun fmt --no-script --check tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml",
+    "lint": "bun lint --no-script tools apps packages tests",
+    "typecheck": "tsc --noEmit && bun run --filter \"@tm4/*\" typecheck",
     "test:pages": "bun tests/browser/check_pages.cjs",
     "build:mod": "bun tools/mods/build.ts",
     "build:simulation": "bun tools/headless/build.ts",
     "test:simulation:record": "bun tools/headless/record-browser.cjs",
-    "test:simulation": "bun tools/headless/test.ts"
+    "test:simulation": "bun tools/headless/test.ts",
+    "build:player": "bun apps/player/build.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "^1.0.11",
@@ -27,5 +28,13 @@
     "coi-serviceworker": "0.1.7",
     "playwright": "1.56.1",
     "typescript": "^7.0.2"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "dependencies": {
+    "@tm4/game-client": "workspace:*",
+    "@tm4/resources": "workspace:*"
   }
 }

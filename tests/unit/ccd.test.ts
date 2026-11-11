@@ -1,9 +1,10 @@
 import { expect, test } from "bun:test";
 
+import { parseCcd } from "@tm4/resources/loader/ccd";
+import { directorySources, localSources } from "@tm4/resources/loader/sources";
+import { discTracks } from "@tm4/resources/loader/tracks";
+
 import reference from "../../config/disc.json";
-import { parseCcd } from "../../web/src/loader/ccd.ts";
-import { directorySources, localSources } from "../../web/src/loader/sources.ts";
-import { discTracks } from "../../web/src/loader/tracks.ts";
 
 const ccd = `[CloneCD]
 Version=3

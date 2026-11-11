@@ -1,4 +1,4 @@
-import reference from "../../../config/disc.json";
+import reference from "../../../../config/disc.json";
 import { checkResource, requireResources, resourceReference } from "../compatibility/index.ts";
 import { Disc } from "./disc.ts";
 import { discTracks } from "./tracks.ts";

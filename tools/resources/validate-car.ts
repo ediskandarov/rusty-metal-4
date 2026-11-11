@@ -1,8 +1,8 @@
 import { resolve } from "node:path";
 
-import { readMr } from "../../web/src/compatibility/mr.ts";
-import { type CarDisplayOptions, validateCarMr } from "../../web/src/mods/car-display.ts";
-export { validateCarDisplay, validateCarMr } from "../../web/src/mods/car-display.ts";
+import { readMr } from "@tm4/resources/compatibility/mr";
+import { type CarDisplayOptions, validateCarMr } from "@tm4/resources/mods/car-display";
+export { validateCarDisplay, validateCarMr } from "@tm4/resources/mods/car-display";
 
 function requireValue(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

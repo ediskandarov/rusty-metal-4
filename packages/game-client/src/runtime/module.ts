@@ -1,4 +1,5 @@
-import type { DiscAssets } from "../loader/types.ts";
+import type { DiscAssets } from "@tm4/resources/loader/types";
+
 import type { NetworkEngine } from "../network/protocol.ts";
 
 export interface GameExports extends NetworkEngine {
@@ -70,5 +71,4 @@ export function requireRuntime(
 declare global {
   var Module: PendingModule;
   var tm4Assets: Pick<DiscAssets, "readAudio" | "readMovie">;
-  const TM4_DEV: boolean;
 }

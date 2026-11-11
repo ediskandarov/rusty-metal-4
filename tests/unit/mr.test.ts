@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { deflateSync } from "node:zlib";
 
-import { checkResource, readMr } from "../../web/src/compatibility/index.ts";
+import { checkResource, readMr } from "@tm4/resources/compatibility";
 
 function join(...parts: Uint8Array<ArrayBuffer>[]) {
   const result = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));

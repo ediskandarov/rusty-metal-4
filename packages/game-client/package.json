@@ -1,0 +1,15 @@
+{
+  "name": "@tm4/game-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tm4/resources": "workspace:*"
+  },
+  "exports": {
+    "./runtime/*": "./src/runtime/*.ts",
+    "./network/*": "./src/network/*.ts"
+  }
+}

@@ -1,11 +1,17 @@
 import { expect, test } from "bun:test";
 
+import { parseCue } from "@tm4/resources/loader/cue";
+import { Disc } from "@tm4/resources/loader/disc";
+import {
+  checkRange,
+  directorySources,
+  localSources,
+  remoteSources,
+} from "@tm4/resources/loader/sources";
+import { discTracks } from "@tm4/resources/loader/tracks";
+
 import reference from "../../config/disc.json";
 import { byteRange, serveFile } from "../../tools/server/files.js";
-import { parseCue } from "../../web/src/loader/cue.ts";
-import { Disc } from "../../web/src/loader/disc.ts";
-import { checkRange, directorySources, localSources } from "../../web/src/loader/sources.ts";
-import { discTracks } from "../../web/src/loader/tracks.ts";
 
 const cue =
   'FILE "data.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\nFILE "audio.bin" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:02:00\n';
@@ -166,5 +172,45 @@ test("shared BIN rejects reversed, out-of-range and reopened track boundaries", 
       ),
     ]);
     await expect(discTracks(sources, reference, () => {})).rejects.toThrow();
+  }
+});
+
+test("remote disc sources work without browser globals and resolve manifest-relative ranges", async () => {
+  const requested: string[] = [];
+  const server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch(request) {
+      const path = new URL(request.url).pathname;
+      requested.push(path);
+      if (path === "/disc/manifest.json")
+        return Response.json({
+          files: [{ name: "DATA.BIN", size: 4, url: "files/data.bin" }],
+          warnings: ["Optional audio is missing"],
+        });
+      if (path === "/disc/files/data.bin") {
+        expect(request.headers.get("Range")).toBe("bytes=1-2");
+        return new Response(new Uint8Array([2, 3]), {
+          status: 206,
+          headers: { "Content-Range": "bytes 1-2/4" },
+        });
+      }
+      if (path === "/foreign.json")
+        return Response.json({
+          files: [{ name: "data.bin", size: 4, url: "https://example.com/data.bin" }],
+        });
+      return new Response(null, { status: 404 });
+    },
+  });
+  try {
+    const { sources, warnings } = await remoteSources(new URL("disc/manifest.json", server.url));
+    expect(warnings).toEqual(["Optional audio is missing"]);
+    expect([...(await sources.get("data.bin")!.read(1, 2))]).toEqual([2, 3]);
+    expect(requested).toEqual(["/disc/manifest.json", "/disc/files/data.bin"]);
+    await expect(remoteSources(new URL("foreign.json", server.url))).rejects.toThrow(
+      "local server",
+    );
+  } finally {
+    await server.stop(true);
   }
 });

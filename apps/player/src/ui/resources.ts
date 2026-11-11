@@ -4,10 +4,11 @@ import {
   executableSizeTolerancePercent,
   resourceReference,
   resourceRows,
-} from "../compatibility/index.ts";
-import type { ResourceCandidate, ResourceRow, ResourceStatus } from "../compatibility/index.ts";
-import { discoverResources } from "../loader/resources.ts";
-import type { DiscSources } from "../loader/types.ts";
+} from "@tm4/resources/compatibility";
+import type { ResourceCandidate, ResourceRow, ResourceStatus } from "@tm4/resources/compatibility";
+import { discoverResources } from "@tm4/resources/loader/resources";
+import type { DiscSources } from "@tm4/resources/loader/types";
+
 import { element } from "./dom.ts";
 
 const labels: Record<ResourceStatus, string> = {

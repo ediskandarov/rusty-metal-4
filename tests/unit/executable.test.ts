@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { checkResource, checkResources, resourceRows } from "../../web/src/compatibility/index.ts";
+import { checkResource, checkResources, resourceRows } from "@tm4/resources/compatibility";
 const id = "/SCUS_945.60";
 const reference = { id, size: 303104, sha256: "different-hash" };
 function executable(size: number) {

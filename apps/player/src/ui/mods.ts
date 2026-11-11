@@ -1,4 +1,5 @@
-import { type CarMod, maxCarMods, maxModBytes, readCarMod } from "../mods/package.ts";
+import { type CarMod, maxCarMods, maxModBytes, readCarMod } from "@tm4/resources/mods/package";
+
 import { savedPackages, savePackages } from "../mods/storage.ts";
 import { element } from "./dom.ts";
 

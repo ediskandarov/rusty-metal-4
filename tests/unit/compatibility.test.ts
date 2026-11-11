@@ -8,8 +8,8 @@ import {
   resourceRows,
   sha256,
   validateMainRegistry,
-} from "../../web/src/compatibility/index.ts";
-import type { ResourceCandidate, ResourceReference } from "../../web/src/compatibility/index.ts";
+} from "@tm4/resources/compatibility";
+import type { ResourceCandidate, ResourceReference } from "@tm4/resources/compatibility";
 
 const signal = () => new AbortController().signal;
 const payload = new Uint8Array([1, 2, 3, 4]);

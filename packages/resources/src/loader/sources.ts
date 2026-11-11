@@ -80,11 +80,11 @@ export function directorySources(files: Iterable<File>) {
   if (!tracks.length) throw new Error("No CUE, BIN, CCD or IMG files found in this folder");
   return localSources(tracks);
 }
-export async function remoteSources(url: string, { signal }: ReadOptions = {}) {
+export async function remoteSources(url: URL, { signal }: ReadOptions = {}) {
   const response = await fetch(url, { signal, cache: "no-store" });
   if (!response.ok) throw new Error(`Disc server: HTTP ${response.status}`);
   const manifest = parseManifest(await response.json());
-  const base = new URL(url, location.href);
+  const base = url;
   const sources = manifest.files.map((file) => {
     const sourceURL = new URL(file.url, base);
     if (sourceURL.origin !== base.origin)

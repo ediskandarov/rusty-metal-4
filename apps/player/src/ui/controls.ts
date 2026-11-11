@@ -1,4 +1,5 @@
-import type { GameModule } from "../runtime/module.ts";
+import type { GameModule } from "@tm4/game-client/runtime/module";
+
 import { element, item } from "./dom.ts";
 
 // PS1 packet bit order. Controller names describe positions across brands.

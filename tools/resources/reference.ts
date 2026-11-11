@@ -1,10 +1,11 @@
 import { readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import { readTimLayout, sha256 } from "@tm4/resources/compatibility";
+import { discoverResources } from "@tm4/resources/loader/resources";
+import { checkRange } from "@tm4/resources/loader/sources";
+
 import discReference from "../../config/disc.json";
-import { readTimLayout, sha256 } from "../../web/src/compatibility/index.ts";
-import { discoverResources } from "../../web/src/loader/resources.ts";
-import { checkRange } from "../../web/src/loader/sources.ts";
 
 const directory = process.argv[2];
 if (!directory)

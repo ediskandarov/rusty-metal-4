@@ -1,7 +1,7 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { dirname, relative, resolve } from "node:path";
 
-import { packCarMod, readCarMod } from "../../web/src/mods/package.ts";
+import { packCarMod, readCarMod } from "@tm4/resources/mods/package";
 
 const [input, output] = Bun.argv.slice(2);
 if (!input || !output)

@@ -1,8 +1,8 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { loadDisc } from "../../web/src/loader/loader.ts";
-import { localSources } from "../../web/src/loader/sources.ts";
+import { loadDisc } from "@tm4/resources/loader/loader";
+import { localSources } from "@tm4/resources/loader/sources";
 
 const [discDirectory, destination] = process.argv.slice(2);
 if (!discDirectory || !destination)

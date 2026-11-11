@@ -1,0 +1,14 @@
+{
+  "name": "@tm4/resources",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "exports": {
+    "./compatibility": "./src/compatibility/index.ts",
+    "./compatibility/*": "./src/compatibility/*.ts",
+    "./loader/*": "./src/loader/*.ts",
+    "./mods/*": "./src/mods/*.ts"
+  }
+}

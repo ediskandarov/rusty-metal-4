@@ -6,6 +6,9 @@ Rust/Wasmtime match host are documented in [the network workflow](docs/network-a
 Use `bun run test:simulation:record` and `bun run test:simulation` for browser/Rust
 canonical parity, local replay, portable transfer, and missing-host-capability checks.
 
+See [the development environment](docs/dev-environment.md) for TypeScript workspace
+layout and development commands.
+
 ## License
 
 Original code written for this port, including its web interface and tooling,

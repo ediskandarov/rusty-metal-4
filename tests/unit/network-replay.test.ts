@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-import type { NetworkEngine, NetworkPort } from "../../web/src/network/protocol.ts";
-import { SnapshotReplay } from "../../web/src/network/replay.ts";
+import type { NetworkEngine, NetworkPort } from "@tm4/game-client/network/protocol";
+import { SnapshotReplay } from "@tm4/game-client/network/replay";
 
 const snapshot = 420;
 const head = 487;

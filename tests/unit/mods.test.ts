@@ -1,16 +1,16 @@
 import { expect, test } from "bun:test";
 
-import { readMr } from "../../web/src/compatibility/mr.ts";
-import type { DiscAssets } from "../../web/src/loader/types.ts";
-import { createCarPreview, installCarMods } from "../../web/src/mods/install.ts";
+import { readMr } from "@tm4/resources/compatibility/mr";
+import type { DiscAssets } from "@tm4/resources/loader/types";
+import { createCarPreview, installCarMods } from "@tm4/resources/mods/install";
 import {
   binary,
   directory,
   stringEntry,
   stringValue,
   writeMr,
-} from "../../web/src/mods/mr-writer.ts";
-import { packCarMod, readCarMod } from "../../web/src/mods/package.ts";
+} from "@tm4/resources/mods/mr-writer";
+import { packCarMod, readCarMod } from "@tm4/resources/mods/package";
 
 const manifest = {
   format: "tm4-rewired-mod",

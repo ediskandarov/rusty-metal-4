@@ -1,0 +1,13 @@
+{
+  "name": "@tm4/player",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tm4/game-client": "workspace:*",
+    "@tm4/resources": "workspace:*"
+  }
+}

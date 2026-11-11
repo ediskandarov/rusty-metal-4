@@ -1,12 +1,18 @@
-import type { DiscAssets } from "../loader/types.ts";
-import { initializeSettings } from "../ui/settings.ts";
-import { requireRuntime } from "./module.ts";
+import type { DiscAssets } from "@tm4/resources/loader/types";
 
+import { type GameModule, requireRuntime } from "./module.ts";
+
+export interface StartOptions {
+  resourceMods?: number;
+  beforeMain?(this: void, module: GameModule): void;
+}
+
+// Startup transfers resource files to WasmFS and releases the loader's file map.
 export async function startGame(
   assets: DiscAssets,
   canvas: HTMLCanvasElement,
-  resourceMods = 0,
-): Promise<void> {
+  { resourceMods = 0, beforeMain }: StartOptions = {},
+): Promise<GameModule> {
   const digest = async (bytes: Uint8Array<ArrayBuffer>) =>
     Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (value) =>
       value.toString(16).padStart(2, "0"),
@@ -44,7 +50,7 @@ export async function startGame(
             module._WebMusicConfigureTrack(track.number, track.start, track.end, track.toc);
           }
           module._WebMusicConfigureDisc(assets.tracks.length, assets.leadout);
-          initializeSettings(module, canvas);
+          beforeMain?.(module);
           const diagnostic = "_WebTestRestartNetworkReplay" in module;
           module.tm4LocalCheckpoint = diagnostic && parameters.get("checkpoint") === "1";
           module.callMain(
@@ -64,7 +70,7 @@ export async function startGame(
               tm4Port: import("../network/protocol.ts").NetworkPort;
             }
           ).tm4Port.compatibility = { protocol: 8, build: build.sha256, content };
-          resolve();
+          resolve(module);
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));
         }

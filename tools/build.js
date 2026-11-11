@@ -1,7 +1,8 @@
-import { cp, mkdir, rm } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+import { buildPlayer } from "../apps/player/build.ts";
 import { root, run } from "./common.js";
 const { values } = parseArgs({
   options: {
@@ -12,7 +13,6 @@ const { values } = parseArgs({
 if (values.dev && values.diagnostic) throw new Error("Choose either --dev or --diagnostic");
 const mode = values.diagnostic ? "diagnostic" : values.dev ? "dev" : "release";
 const diagnostics = values.diagnostic;
-const localDisc = values.dev || diagnostics;
 const directory = join(root, "build", mode);
 const site = join(directory, "site");
 await mkdir(site, { recursive: true });
@@ -34,36 +34,7 @@ await run([
   "--parallel",
   String(Math.min(8, navigator.hardwareConcurrency)),
 ]);
-const result = await Bun.build({
-  entrypoints: [join(root, "web/src/main.ts")],
-  outdir: site,
-  naming: "web.js",
-  target: "browser",
-  minify: !diagnostics,
-  sourcemap: diagnostics ? "linked" : "none",
-  define: { TM4_DEV: JSON.stringify(localDisc) },
-});
-if (!result.success) throw new AggregateError(result.logs, "Browser bundle failed");
-if (!diagnostics) await rm(join(site, "web.js.map"), { force: true });
-if (diagnostics) {
-  const probe = await Bun.build({
-    entrypoints: [join(root, "web/src/network/rollbackProbe.ts")],
-    outdir: site,
-    naming: "rollback-probe.js",
-    target: "browser",
-  });
-  if (!probe.success) throw new AggregateError(probe.logs, "Rollback probe bundle failed");
-}
-await cp(
-  join(root, "node_modules/coi-serviceworker/coi-serviceworker.min.js"),
-  join(site, "coi-serviceworker.js"),
-);
-await cp(
-  join(root, "node_modules/coi-serviceworker/LICENSE"),
-  join(site, "coi-serviceworker.LICENSE.txt"),
-);
-await cp(join(root, "web/index.html"), join(site, "index.html"));
-await cp(join(root, "web/styles"), join(site, "styles"), { recursive: true });
+await buildPlayer({ mode, site });
 console.log(`Built ${mode}: ${site}`);
 
 await run(["bun", "tools/network/build.ts", "--mode", mode]);

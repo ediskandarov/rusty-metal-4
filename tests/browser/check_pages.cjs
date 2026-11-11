@@ -107,8 +107,9 @@ const { chromium } = require("playwright");
       performance.getEntriesByType("resource").some((entry) => entry.name.endsWith("tm4_web.wasm")),
     );
     const fingerprint = await (await fetch(new URL("simulation-build.json", url))).json();
-    assert.deepEqual(Object.keys(fingerprint), ["sha256"]);
+    assert.deepEqual(Object.keys(fingerprint).sort(), ["authoritySha256", "sha256"]);
     assert.match(fingerprint.sha256, /^[0-9a-f]{64}$/);
+    assert.match(fingerprint.authoritySha256, /^[0-9a-f]{64}$/);
     // Loading through the real bridge must resolve both generated modules beneath
     // the application path. No game files are needed to initialize networking.
     let probeOpened = false;

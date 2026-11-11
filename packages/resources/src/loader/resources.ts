@@ -1,4 +1,4 @@
-import discReference from "../../../config/disc.json";
+import discReference from "../../../../config/disc.json";
 import type { ResourceCandidate } from "../compatibility/index.ts";
 import { Disc } from "./disc.ts";
 import { checkRange } from "./sources.ts";

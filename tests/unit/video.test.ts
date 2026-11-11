@@ -6,7 +6,7 @@ import {
   compatibilityReport,
   requireResources,
   resourceRows,
-} from "../../web/src/compatibility/index.ts";
+} from "@tm4/resources/compatibility";
 
 function video() {
   const bytes = new Uint8Array(2352);
