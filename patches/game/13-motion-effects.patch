@@ -1,14 +1,14 @@
 diff --git a/src/modules/afc/afc.c b/src/modules/afc/afc.c
 --- a/src/modules/afc/afc.c
 +++ b/src/modules/afc/afc.c
-@@ -3,6 +3,7 @@
- #include "tm4/fixed.h"
+@@ -4,6 +4,7 @@
  #include "tm4_scalar.h"
  
  #include "tm4/main/card.h"
 +#include "tm4/main/math3d.h"
  #include "tm4/main/object.h"
  #include "tm4/main/registry.h"
+ #include "tm4/modules/light.h"
 @@ -50,6 +51,14 @@
          = object->vertices[3].vy = object->size / 2;
  }
