@@ -1,13 +1,12 @@
 /* global Module, tm4Port */
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
+const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.cjs");
 
 (async () => {
-  const { connectAuthority } = await import("../../tools/network/authority.ts");
   const endpoint = process.env.TM4_MATCH_ENDPOINT;
-  const token = process.env.TM4_AUTHORITY_TOKEN;
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:8120/";
-  if (!endpoint || !token) throw new Error("Set TM4_MATCH_ENDPOINT and TM4_AUTHORITY_TOKEN");
+  if (!endpoint) throw new Error("Set TM4_MATCH_ENDPOINT");
   const browser = await chromium.launch({
     executablePath: process.env.TM4_CHROME,
     channel: process.env.TM4_CHROME ? undefined : "chrome",
@@ -19,13 +18,16 @@ const { chromium } = require("playwright");
       "--mute-audio",
     ],
   });
-  let authorityError;
-  let finished;
+  let observation;
   try {
-    const [authority, ...clients] = await Promise.all(
+    const [reference, ...clients] = await Promise.all(
       Array.from({ length: 3 }, () => browser.newPage()),
     );
-    const pages = [authority, ...clients];
+    const pages = [reference, ...clients];
+    const fixture = await fixtureTape();
+    await fixture(60, "contact");
+    await fixture(110, "duel", 500);
+    observation = await observeAcceptedFrames(reference, clients);
     await Promise.all(
       pages.map(async (page, index) => {
         page.on("pageerror", (e) => console.error("PAGE", index, e));
@@ -34,7 +36,9 @@ const { chromium } = require("playwright");
             console.log("PAGE", index, m.text());
         });
         await page.goto(
-          index ? site + "?match=" + encodeURIComponent(endpoint) : site + "?authority=1",
+          index
+            ? site + "?match=" + encodeURIComponent(endpoint)
+            : site + "?simulation-reference=1",
         );
         await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
           timeout: 60000,
@@ -52,12 +56,6 @@ const { chromium } = require("playwright");
             return queue(tick);
           };
         });
-        if (index === 0) {
-          await page.waitForFunction(() => tm4Port.platformReady);
-          finished = connectAuthority(page, endpoint, token).catch((error) => {
-            authorityError = error;
-          });
-        }
       }),
     );
     await Promise.all(clients.map((page) => page.waitForFunction(() => tm4Port.netCameraAttached)));
@@ -113,8 +111,7 @@ const { chromium } = require("playwright");
       ),
     );
     await shooter.keyboard.up("x");
-    await finished;
-    assert.ifError(authorityError);
+    await observation.settled();
     for (const page of pages) await page.waitForFunction(() => !tm4Port.netMatch);
     // A completed session releases C state and can initialize again in this page.
     for (const page of pages) {
@@ -130,6 +127,7 @@ const { chromium } = require("playwright");
     }
     console.log("PASS car contact, weapon input, lethal hit, result and round completion");
   } catch (error) {
+    console.error("REFERENCE", observation?.error);
     for (const page of browser.contexts().flatMap((context) => context.pages())) {
       console.error(
         await page

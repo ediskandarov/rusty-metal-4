@@ -18,7 +18,7 @@ const { chromium } = require("playwright");
         await page.addInitScript(() => {
           globalThis.tm4TestShiftResourceHeap = true;
         });
-      await page.goto(new URL("?authority=1&checkpoint=1", site).href);
+      await page.goto(new URL("?simulation-reference=1&checkpoint=1", site).href);
       await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
         timeout: 60_000,
       });

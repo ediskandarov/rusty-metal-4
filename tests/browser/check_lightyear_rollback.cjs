@@ -13,8 +13,10 @@ const { chromium } = require("playwright");
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await page.goto(
-      new URL("?authority=1&checkpoint=1", process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/")
-        .href,
+      new URL(
+        "?simulation-reference=1&checkpoint=1",
+        process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/",
+      ).href,
     );
     await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
     const result = await page.evaluate(async (endpoint) => {
@@ -177,7 +179,7 @@ const { chromium } = require("playwright");
       let stepMs = 0;
       let published = 0;
       let active;
-      tm4Port.netMatchTick = () => {
+      tm4Port.testSimulationTick = () => {
         published++;
       };
       const probe = await attachRollbackProbe(Module, endpoint, {
@@ -309,7 +311,7 @@ const { chromium } = require("playwright");
           published,
         };
       } finally {
-        delete tm4Port.netMatchTick;
+        delete tm4Port.testSimulationTick;
         Module.FS.rename("/DATA/GAME.MR.rollback-probe", "/DATA/GAME.MR");
         probe.close();
         Module._WebNetCancelMatch();

@@ -83,7 +83,7 @@ const { chromium } = require("playwright");
         await page.addInitScript(() => {
           globalThis.tm4TestShiftResourceHeap = true;
         });
-      await page.goto(new URL("?authority=1&checkpoint=1", site).href);
+      await page.goto(new URL("?simulation-reference=1&checkpoint=1", site).href);
       await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
         timeout: 60_000,
       });
@@ -372,7 +372,7 @@ const { chromium } = require("playwright");
         }
         if (tm4Port.netMatch.tick !== 0) throw new Error("Failed restore advanced the game");
         let published = 0;
-        tm4Port.netMatchTick = () => published++;
+        tm4Port.testSimulationTick = () => published++;
         tm4Port.portableCheckpoint = bytes;
         const start = performance.now();
         if (!Module._WebNetBeginPortableReplay())

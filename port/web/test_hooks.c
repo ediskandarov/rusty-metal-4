@@ -36,7 +36,7 @@
 #include "tm4/modules/tele.h"
 #include "tm4/modules/weap.h"
 #include "tm4/vector.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1034,7 +1034,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestDestroyablePresent(void)
     if (test_destroyable_world) {
         test_destroyable_faces = test_destroyable_enabled_faces = 0;
         WorldObjectDisplayFacesApplyFaceFunction(test_destroyable_world, 0, test_count_face);
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.testDestroyable = ({
                     alive : $0,
@@ -1152,7 +1152,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAimAtDestroyable(void)
         test_destroyable_serial = ObjectGetHeader(object)->serial;
         test_destroyable_polygon = polygon;
         test_destroyable_world = object->world;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.testDestroyableSerial = $0;
                 tm4Port.testDestroyableName = UTF8ToString($1);
@@ -1444,7 +1444,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachNeonObject(s32 ufo_pickup)
                 location.t[0] = ufo->pickup_world_position->vx;
                 location.t[1] = ufo->pickup_world_position->vy;
                 location.t[2] = ufo->pickup_world_position->vz;
-                EM_ASM(
+                WEB_BROWSER_REPORT(
                     { tm4Port.testUfoPickup = ([ $0, $1, $2 ]); }, location.t[0], location.t[1],
                     location.t[2]);
             } else {

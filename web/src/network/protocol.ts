@@ -1,7 +1,6 @@
 export type Input = { buttons: number; axes: number; analog: boolean };
 export type Compatibility = { protocol: number; build: string; content: string };
 export type Start = {
-  type: "start";
   players: number;
   world: string;
   cars: string[];
@@ -10,7 +9,6 @@ export type Start = {
   compatibility: Compatibility;
   portable?: boolean;
 };
-export type Step = { type: "step"; tick: number; inputs: Input[] };
 export const stateSections = ["session", "cars", "objects", "world", "sound"] as const;
 export type Score = { wins: number; losses: number };
 export type RoundState = {
@@ -24,7 +22,9 @@ export type RoundState = {
   unsupported: string | null;
   scores: Score[];
 };
-export type Frame = Omit<Step, "type"> & {
+export type Frame = {
+  tick: number;
+  inputs: Input[];
   type: "frame";
   state: RoundState;
 };
@@ -67,7 +67,6 @@ export interface NetworkPort {
   netMatch?: { tick: number } & Partial<RoundState>;
   portableCheckpoint?: Uint8Array<ArrayBuffer>;
   portableCheckpointError?: string | null;
-  netMatchTick?: () => void;
   netMatchInput?: (buttons: number, axes: number, analog: boolean) => void;
   netMatchServerState?: RoundState;
   netConfirmedTick?: number;

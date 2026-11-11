@@ -110,7 +110,6 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (closed) return;
     closed = true;
-    delete port.netMatchTick;
     delete port.netMatchInput;
     prediction?.close();
     clearTimeout(recoveryDeadline);
@@ -212,7 +211,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             throw new Error("Invalid live prediction setup");
           prediction = attachLivePrediction(engine, port);
           socket.preparePrediction(message.players);
-          if (!configureMatch(engine, { ...message, type: "start" }, slot))
+          if (!configureMatch(engine, message, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");
           players = message.players;
           epoch = message.epoch;

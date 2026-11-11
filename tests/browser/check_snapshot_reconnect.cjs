@@ -1,23 +1,17 @@
 /* global tm4Port */
 const assert = require("node:assert/strict");
-const { join } = require("node:path");
 const { chromium } = require("playwright");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
-const token = process.env.TM4_AUTHORITY_TOKEN;
 const prelude = Number(process.env.TM4_RESUME_TEST_TICKS ?? 360);
 const exactWindow = process.env.TM4_RESUME_EXACT_WINDOW === "1";
-assert(endpoint && token && Number.isInteger(prelude) && prelude >= 120);
+assert(endpoint && Number.isInteger(prelude) && prelude >= 120);
 const credentialKey = "tm4.resume." + endpoint;
 const target = new URL(site);
 target.searchParams.set("match", endpoint);
 
 (async () => {
-  const authority = Bun.spawn(
-    [process.execPath, join(__dirname, "../../tools/network/authority.ts")],
-    { stdout: "inherit", stderr: "inherit", env: { ...process.env, TM4_AUTHORITY_TIMING: "1" } },
-  );
   const browser = await chromium.launch({
     executablePath: process.env.TM4_CHROME,
     channel: process.env.TM4_CHROME ? undefined : "chrome",
@@ -289,9 +283,7 @@ target.searchParams.set("match", endpoint);
       }),
     );
   } finally {
-    authority.kill();
     await browser.close();
-    await authority.exited;
   }
 })().catch((error) => {
   console.error(error);

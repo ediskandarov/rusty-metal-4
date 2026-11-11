@@ -1,21 +1,14 @@
 /* global tm4Port, Module */
 const assert = require("node:assert/strict");
-const { join } = require("node:path");
 const { chromium, webkit } = require("playwright");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
-const token = process.env.TM4_AUTHORITY_TOKEN;
 const useWebKit = process.env.TM4_MANUAL_BROWSER === "webkit";
 const forceWait = process.env.TM4_MANUAL_WINDOW_WAIT === "1";
-assert(endpoint && token, "A fresh prediction-enabled match server is required");
+assert(endpoint, "A fresh prediction-enabled match server is required");
 
 (async () => {
-  const authority = Bun.spawn(
-    [process.execPath, join(__dirname, "../../tools/network/authority.ts")],
-    { stdout: "inherit", stderr: "pipe", env: { ...process.env, TM4_AUTHORITY_TIMING: "1" } },
-  );
-  const authorityLog = new Response(authority.stderr).text();
   let results;
   const browser = useWebKit
     ? await webkit.launch()
@@ -149,15 +142,9 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
     });
     results = { initial, final, restored };
   } finally {
-    authority.kill();
     await browser.close();
-    await authority.exited;
-    const log = await authorityLog;
-    process.stderr.write(log);
     if (results) {
-      const ticks = [...log.matchAll(/Authority tick (\d+), step (\d+\.\d+) ms, frames (\d+)/g)];
-      assert(ticks.length >= 3 && ticks.every(([, , , frames]) => frames === "0"), log);
-      console.log("PASS actual manual authority and default rendering", JSON.stringify(results));
+      console.log("PASS embedded authority and default client rendering", JSON.stringify(results));
     }
   }
 })().catch((error) => {

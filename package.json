@@ -16,7 +16,10 @@
     "lint": "bun lint --no-script tools web tests",
     "typecheck": "tsc --noEmit && tsc --project web/tsconfig.json --noEmit",
     "test:pages": "bun tests/browser/check_pages.cjs",
-    "build:mod": "bun tools/mods/build.ts"
+    "build:mod": "bun tools/mods/build.ts",
+    "build:simulation": "bun tools/headless/build.ts",
+    "test:simulation:record": "bun tools/headless/record-browser.cjs",
+    "test:simulation": "bun tools/headless/test.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "^1.0.11",

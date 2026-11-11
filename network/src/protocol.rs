@@ -126,17 +126,6 @@ pub enum Request {
         token: String,
         compatibility: Compatibility,
     },
-    SnapshotUpload {
-        attempt: u32,
-        tick: u32,
-        total: u32,
-        offset: u32,
-        checksum: u32,
-        data: Vec<u8>,
-    },
-    SnapshotUnavailable {
-        attempt: u32,
-    },
     SnapshotReceived {
         attempt: u32,
         offset: u32,
@@ -149,17 +138,10 @@ pub enum Request {
         attempt: u32,
         head: u32,
     },
-    Authority {
-        token: String,
-        compatibility: Compatibility,
-        catalog: Catalog,
-    },
     Ready {
         epoch: u32,
         digest: u32,
         unsupported: Option<String>,
-        #[serde(default)]
-        portable: bool,
     },
     Progress {
         tick: u32,
@@ -167,10 +149,6 @@ pub enum Request {
     CatchupApplied {
         attempt: u32,
         tick: u32,
-    },
-    Completed {
-        tick: u32,
-        state: RoundState,
     },
     PredictionClock {
         epoch: u32,
@@ -183,16 +161,12 @@ pub enum Request {
 #[serde(rename_all = "snake_case")]
 pub enum Message {
     Welcome {
-        slot: Option<usize>,
+        slot: usize,
     },
     ResumeCredential {
         token: String,
     },
     ResumePrepare(SessionStart),
-    SnapshotRequest {
-        attempt: u32,
-        tick: u32,
-    },
     SnapshotBegin {
         attempt: u32,
         tick: u32,
@@ -218,17 +192,12 @@ pub enum Message {
         head: u32,
         sequence: u32,
     },
-    Start(SessionStart),
     PredictionPrepare(SessionStart),
     PredictionBegin {
         anchor: u32,
     },
     ResumeActive {
         head: u32,
-    },
-    Step {
-        tick: u32,
-        inputs: Vec<Input>,
     },
     Frame {
         tick: u32,
@@ -242,7 +211,6 @@ pub enum Message {
         data: Vec<u8>,
         checksum: u32,
     },
-    Finished,
     Error {
         message: String,
     },

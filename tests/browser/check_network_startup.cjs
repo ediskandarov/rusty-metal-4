@@ -13,7 +13,7 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
     await page.addInitScript(() => {
       window.requestAnimationFrame = () => 0;
     });
-    await page.goto(new URL("?authority=1", site).href);
+    await page.goto(new URL("?simulation-reference=1", site).href);
     await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
       timeout: 60000,
       polling: 100,

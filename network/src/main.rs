@@ -1,5 +1,6 @@
 mod journal;
 mod resume;
+mod simulator;
 
 use std::{
     collections::HashSet,
@@ -168,8 +169,6 @@ impl AcceptedTimeline {
 #[derive(Resource)]
 struct Match {
     players: Vec<Player>,
-    token: String,
-    authority: Option<Entity>,
     authority_ready: bool,
     compatibility: Option<Compatibility>,
     catalog: Option<Catalog>,
@@ -179,8 +178,7 @@ struct Match {
     tick: u32,
     lobby_since: Option<Instant>,
     loading_since: Instant,
-    in_flight: Option<(Vec<Input>, Instant)>,
-    last_step_round_trip: Option<Duration>,
+    last_step_duration: Option<Duration>,
     session: Option<SessionStart>,
     last_state: Option<RoundState>,
     journal_directory: PathBuf,
@@ -214,14 +212,12 @@ impl Match {
     fn pump_resume(
         &mut self,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+        simulator: &mut simulator::Simulator,
     ) {
         if self.ended {
             return;
         }
         let Some(anchor) = self.prediction.anchor else {
-            return;
-        };
-        let Some(authority) = self.authority else {
             return;
         };
         for player in &mut self.players {
@@ -231,10 +227,7 @@ impl Match {
             if attempt.failed {
                 continue;
             }
-            if attempt.requested.is_none()
-                && self.in_flight.is_none()
-                && self.tick >= attempt.retry_at
-            {
+            if attempt.requested.is_none() && self.tick >= attempt.retry_at {
                 if let Some(state) = self.last_state.clone() {
                     attempt.requested = Some(resume::Snapshot {
                         tick: self.tick,
@@ -245,14 +238,26 @@ impl Match {
                         sent: 0,
                         acknowledged: 0,
                     });
-                    send(
-                        links,
-                        authority,
-                        &Message::SnapshotRequest {
-                            attempt: attempt.id,
-                            tick: self.tick,
-                        },
-                    );
+                    match simulator.snapshot() {
+                        Ok(data) => {
+                            let snapshot = attempt.requested.as_mut().unwrap();
+                            snapshot.total = data.len();
+                            snapshot.checksum = checksum(CHECKSUM_SEED, &data);
+                            snapshot.data = data;
+                            attempt.progress = Instant::now();
+                        }
+                        Err(error) => {
+                            eprintln!("Portable capture unavailable: {error:#}");
+                            attempt.retries += 1;
+                            if attempt.retries >= 4 {
+                                attempt.failed = true;
+                            } else {
+                                attempt.requested = None;
+                                attempt.retry_at = self.tick + 12;
+                                attempt.progress = Instant::now();
+                            }
+                        }
+                    }
                 }
             }
             let Some(snapshot) = attempt
@@ -385,10 +390,83 @@ impl Match {
             message: message.into(),
         };
         self.broadcast(links, &error);
-        if let Some(authority) = self.authority {
-            send(links, authority, &error);
-        }
         eprintln!("{message}");
+    }
+
+    fn completed(
+        &mut self,
+        links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+        tick: u32,
+        inputs: Vec<Input>,
+        state: RoundState,
+        dispatched: Instant,
+    ) {
+        self.last_step_duration = Some(dispatched.elapsed());
+        let result = self
+            .journal
+            .as_mut()
+            .expect("stepping requires a journal")
+            .append(tick, &inputs, &state);
+        if let Err(error) = result {
+            eprintln!("Appending match journal failed: {error}");
+            self.journal_sealed = true;
+            self.fail(links, "The match journal could not be written.");
+            return;
+        }
+        self.tick += 1;
+        self.ended = state.next_mode != 0;
+        if self.ended && !self.finish_journal(journal::End::Finished) {
+            self.fail(links, "The match journal could not be finalized.");
+            return;
+        }
+        let message = Message::Frame {
+            tick,
+            inputs,
+            state: state.clone(),
+        };
+        for player in &mut self.players {
+            if let Some(attempt) = player.resume.as_mut() {
+                if attempt.target.is_some_and(|target| tick >= target) {
+                    if attempt.frames.len() == usize::from(game_protocol::PREDICTION_DEPTH) {
+                        attempt.failed = true;
+                    } else {
+                        attempt.frames.push_back(message.clone());
+                    }
+                }
+            } else if player.receives_live()
+                && let Some(entity) = player.entity
+            {
+                send(links, entity, &message);
+            }
+        }
+        self.last_state = Some(state);
+    }
+
+    fn simulator_ready(
+        &mut self,
+        links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+        digest: u32,
+        unsupported: Option<String>,
+        portable: bool,
+    ) {
+        if let Some(detail) = unsupported {
+            self.fail(links, &format!("Live rollback cannot start: {detail}"));
+            return;
+        }
+        self.authority_ready = true;
+        self.initial_digest = Some(digest);
+        if let Some(session) = &mut self.session {
+            session.portable &= portable;
+            if session.portable {
+                for player in &mut self.players {
+                    player.credential = resume::credential();
+                    if let (Some(entity), Some(token)) = (player.entity, player.credential.clone())
+                    {
+                        send(links, entity, &Message::ResumeCredential { token });
+                    }
+                }
+            }
+        }
     }
 
     fn request(
@@ -401,11 +479,8 @@ impl Match {
             .players
             .iter()
             .position(|player| player.entity == Some(entity));
-        let is_authority = self.authority == Some(entity);
         match request {
-            Request::Join { compatibility }
-                if !self.started && !self.ended && slot.is_none() && !is_authority =>
-            {
+            Request::Join { compatibility } if !self.started && !self.ended && slot.is_none() => {
                 if let Some(slot) = self
                     .players
                     .iter()
@@ -413,7 +488,7 @@ impl Match {
                 {
                     self.players[slot].entity = Some(entity);
                     self.players[slot].compatibility = Some(compatibility);
-                    send(links, entity, &Message::Welcome { slot: Some(slot) });
+                    send(links, entity, &Message::Welcome { slot });
                 } else {
                     send(
                         links,
@@ -442,7 +517,7 @@ impl Match {
             Request::Resume {
                 token,
                 compatibility,
-            } if !is_authority && slot.is_none() => {
+            } if slot.is_none() => {
                 let requested = self.players.iter().position(|player| {
                     player
                         .credential
@@ -465,54 +540,12 @@ impl Match {
                     player.history.disconnect();
                     player.resume = Some(resume::Attempt::new(self.next_resume));
                     player.reassign_controller = true;
-                    send(links, entity, &Message::Welcome { slot: Some(slot) });
+                    send(links, entity, &Message::Welcome { slot });
                     send(links, entity, &Message::ResumePrepare(session.clone()));
                 } else {
                     send(links, entity, &Message::Error {
                         message: "This participant cannot resume this match. If its previous connection is still closing, retry in a moment.".into(),
                     });
-                }
-            }
-            Request::SnapshotUpload {
-                attempt: id,
-                tick,
-                total,
-                offset,
-                checksum,
-                data,
-            } if is_authority => {
-                if let Some(attempt) = self
-                    .players
-                    .iter_mut()
-                    .filter_map(|player| player.resume.as_mut())
-                    .find(|attempt| attempt.id == id && !attempt.failed)
-                    && let Some(snapshot) = attempt.requested.as_mut()
-                {
-                    if snapshot.tick != tick
-                        || snapshot.ready()
-                        || !snapshot.upload(total as usize, offset as usize, checksum, data)
-                    {
-                        attempt.failed = true;
-                    } else {
-                        attempt.progress = Instant::now();
-                    }
-                }
-            }
-            Request::SnapshotUnavailable { attempt: id } if is_authority => {
-                if let Some(attempt) = self
-                    .players
-                    .iter_mut()
-                    .filter_map(|player| player.resume.as_mut())
-                    .find(|attempt| attempt.id == id && !attempt.failed && !attempt.announced)
-                {
-                    attempt.retries += 1;
-                    if attempt.retries >= 4 {
-                        attempt.failed = true;
-                    } else {
-                        attempt.requested = None;
-                        attempt.retry_at = self.tick + 12;
-                        attempt.progress = Instant::now();
-                    }
                 }
             }
             Request::SnapshotReceived {
@@ -587,59 +620,21 @@ impl Match {
                     }
                 }
             }
-            Request::Authority {
-                token,
-                compatibility,
-                catalog,
-            } if !self.started
-                && self.authority.is_none()
-                && slot.is_none()
-                && token == self.token =>
-            {
-                if catalog.cars.len() < self.players.len()
-                    || catalog.worlds.is_empty()
-                    || catalog.cars.len() > 64
-                    || catalog.worlds.len() > 64
-                {
-                    self.authority = Some(entity);
-                    self.fail(
-                        links,
-                        "The authority catalog cannot supply this map and roster.",
-                    );
-                    return;
-                }
-                self.authority = Some(entity);
-                self.compatibility = Some(compatibility);
-                self.catalog = Some(catalog);
-                send(links, entity, &Message::Welcome { slot: None });
-            }
             Request::Ready {
                 epoch,
                 digest,
                 unsupported,
-                portable,
-            } if self.started && !self.ended && epoch == 1 => {
-                if is_authority && !self.authority_ready {
-                    if let Some(detail) = unsupported {
-                        self.fail(links, &format!("Live rollback cannot start: {detail}"));
-                        return;
-                    }
-                    self.authority_ready = true;
-                    self.initial_digest = Some(digest);
-                    if let Some(session) = &mut self.session {
-                        session.portable &= portable;
-                        if session.portable {
-                            for player in &mut self.players {
-                                player.credential = resume::credential();
-                                if let (Some(entity), Some(token)) =
-                                    (player.entity, player.credential.clone())
-                                {
-                                    send(links, entity, &Message::ResumeCredential { token });
-                                }
-                            }
-                        }
-                    }
-                } else if let Some(slot) = slot {
+            } if self.started
+                && !self.ended
+                && epoch == 1
+                && slot.is_some()
+                && self.prediction.anchor.is_none() =>
+            {
+                if let Some(detail) = unsupported {
+                    self.fail(links, &format!("Client initialization rejected: {detail}"));
+                    return;
+                }
+                if let Some(slot) = slot {
                     self.players[slot].ready = true;
                     self.players[slot].initial_digest = Some(digest);
                 }
@@ -673,58 +668,6 @@ impl Match {
                     }
                 }
             }
-            Request::Completed { tick, state }
-                if is_authority
-                    && tick == self.tick
-                    && state.scores.len() == self.players.len() =>
-            {
-                if let Some((inputs, dispatched)) = self.in_flight.take() {
-                    self.last_step_round_trip = Some(dispatched.elapsed());
-                    let result = self
-                        .journal
-                        .as_mut()
-                        .expect("stepping requires a journal")
-                        .append(tick, &inputs, &state);
-                    if let Err(error) = result {
-                        eprintln!("Appending match journal failed: {error}");
-                        self.journal_sealed = true;
-                        self.fail(links, "The match journal could not be written.");
-                        return;
-                    }
-                    self.tick += 1;
-                    self.ended = state.next_mode != 0;
-                    if self.ended && !self.finish_journal(journal::End::Finished) {
-                        self.fail(links, "The match journal could not be finalized.");
-                        return;
-                    }
-                    let message = Message::Frame {
-                        tick,
-                        inputs,
-                        state: state.clone(),
-                    };
-                    for player in &mut self.players {
-                        if let Some(attempt) = player.resume.as_mut() {
-                            if attempt.target.is_some_and(|target| tick >= target) {
-                                if attempt.frames.len()
-                                    == usize::from(game_protocol::PREDICTION_DEPTH)
-                                {
-                                    attempt.failed = true;
-                                } else {
-                                    attempt.frames.push_back(message.clone());
-                                }
-                            }
-                        } else if player.receives_live()
-                            && let Some(entity) = player.entity
-                        {
-                            send(links, entity, &message);
-                        }
-                    }
-                    self.last_state = Some(state);
-                    if self.ended {
-                        send(links, entity, &Message::Finished);
-                    }
-                }
-            }
             _ => send(
                 links,
                 entity,
@@ -740,6 +683,7 @@ fn update(
     native_timeline: Res<LocalTimeline>,
     mut accepted_senders: Query<&mut MessageSender<game_protocol::AcceptedInputs>, With<Connected>>,
     mut game: ResMut<Match>,
+    mut simulator: NonSendMut<simulator::Simulator>,
     mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
     mut receivers: Query<(Entity, &mut MessageReceiver<Request>, &mut Admission)>,
     mut commands: Commands,
@@ -759,12 +703,6 @@ fn update(
             }
         }
     }
-    if game.authority.is_some_and(|entity| !links.contains(entity)) {
-        game.authority = None;
-        if game.started && !game.ended {
-            game.fail(&mut links, "The simulator disconnected.");
-        }
-    }
 
     let mut requests = Vec::new();
     let now = Instant::now();
@@ -773,8 +711,7 @@ fn update(
             admission.window = now;
             admission.messages = 0;
         }
-        let known =
-            game.authority == Some(entity) || game.players.iter().any(|p| p.entity == Some(entity));
+        let known = game.players.iter().any(|p| p.entity == Some(entity));
         let stalled = game
             .players
             .iter()
@@ -816,7 +753,7 @@ fn update(
     for (entity, request) in requests {
         game.request(&mut links, entity, request);
     }
-    game.pump_resume(&mut links);
+    game.pump_resume(&mut links, &mut simulator);
     for (slot, player) in game.players.iter_mut().enumerate() {
         if std::mem::take(&mut player.reassign_controller)
             && let (Some(controller), Some(owner)) = (player.controller, player.entity)
@@ -852,9 +789,6 @@ fn update(
             game.lobby_since = None;
         }
     }
-    let Some(authority) = game.authority else {
-        return;
-    };
     if game.ended || (!game.started && game.players.iter().any(|player| player.entity.is_none())) {
         return;
     }
@@ -870,6 +804,12 @@ fn update(
             );
             return;
         }
+        if let Err(error) = simulator.prepare_catalog() {
+            eprintln!("Diagnostic setup failed: {error:#}");
+            game.fail(&mut links, "Diagnostic match configuration rejected.");
+            return;
+        }
+        game.catalog = Some(simulator.catalog.clone());
         game.started = true;
         game.loading_since = Instant::now();
         let start = SessionStart {
@@ -882,7 +822,22 @@ fn update(
             portable: game.players.len() == 2,
         };
         game.session = Some(start.clone());
-        send(&mut links, authority, &Message::Start(start.clone()));
+        match simulator.start(&start) {
+            Ok((state, portable)) => {
+                game.simulator_ready(&mut links, state.digest, state.unsupported, portable)
+            }
+            Err(error) => {
+                eprintln!("Embedded simulator setup failed: {error:#}");
+                game.fail(
+                    &mut links,
+                    "The embedded simulator could not start this match.",
+                );
+                return;
+            }
+        }
+        if game.ended {
+            return;
+        }
         game.broadcast(&mut links, &Message::PredictionPrepare(start));
     }
 
@@ -966,25 +921,13 @@ fn update(
     let due = game.prediction.anchor.unwrap() + game.tick as i32 + 1;
     let lag_ticks = native_timeline.tick() - due;
     let lag = STEP * lag_ticks.max(0) as u32;
-    if let Some((_, since)) = game.in_flight {
-        if now.duration_since(since) > Duration::from_secs(3) {
-            game.fail(&mut links, "The simulator did not finish its tick.");
-            return;
-        }
-        if lag <= SIMULATOR_LAG_LIMIT {
-            return;
-        }
-    }
     if lag > SIMULATOR_LAG_LIMIT {
         eprintln!(
-            "Authority tick {} late by {} ms ({} Lightyear ticks, in-flight {:?}, last step round trip {:?})",
+            "Authority tick {} late by {} ms ({} Lightyear ticks, last C step {:?})",
             game.tick,
             lag.as_millis(),
             lag_ticks,
-            game.in_flight
-                .as_ref()
-                .map(|(_, since)| now.duration_since(*since)),
-            game.last_step_round_trip,
+            game.last_step_duration,
         );
         game.fail(
             &mut links,
@@ -1008,15 +951,23 @@ fn update(
                 sender.send::<lightyear::prelude::input::InputChannel>(packet.clone());
             }
         }
-        send(
-            &mut links,
-            authority,
-            &Message::Step {
-                tick: game.tick,
-                inputs: inputs.clone(),
-            },
-        );
-        game.in_flight = Some((inputs, now));
+        match simulator.step(tick, &inputs) {
+            Ok(state) => {
+                game.completed(&mut links, tick, inputs, state, now);
+                if game.ended
+                    && let Err(error) = simulator.finish()
+                {
+                    eprintln!("Simulation teardown failed: {error:#}");
+                }
+            }
+            Err(error) => {
+                eprintln!("Embedded simulator tick {tick} failed: {error:#}");
+                game.fail(
+                    &mut links,
+                    "The embedded simulator did not finish its tick.",
+                );
+            }
+        }
     }
 }
 
@@ -1061,7 +1012,7 @@ fn accept_native_inputs(
     if !game.started || game.ended || game.prediction.anchor.is_none() {
         return;
     }
-    let earliest = game.tick + u32::from(game.in_flight.is_some());
+    let earliest = game.tick;
     for (identity, buffer) in &controllers {
         let (Some(mut tick), Some((last, _))) = (buffer.start_tick, buffer.get_last_with_tick())
         else {
@@ -1106,10 +1057,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !(2..=MAX_PLAYERS).contains(&count) {
         return Err("Expected a player count from 2 to 8".into());
     }
-    let token = env::var("TM4_AUTHORITY_TOKEN")?;
-    if token.len() < 32 {
-        return Err("TM4_AUTHORITY_TOKEN must have at least 32 characters".into());
-    }
+    let simulator = simulator::Simulator::from_environment()?;
+    let compatibility = simulator.compatibility.clone();
+    let catalog = simulator.catalog.clone();
     let addr: SocketAddr = env::var("TM4_MATCH_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8122".into())
         .parse()?;
@@ -1178,19 +1128,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     app.world_mut().trigger(LinkStart { entity });
     app.insert_resource(Match {
         players: (0..count).map(|_| Player::default()).collect(),
-        token,
-        authority: None,
         authority_ready: false,
-        compatibility: None,
-        catalog: None,
+        compatibility: Some(compatibility),
+        catalog: Some(catalog),
         initial_digest: None,
         started: false,
         ended: false,
         tick: 0,
         lobby_since: None,
         loading_since: Instant::now(),
-        in_flight: None,
-        last_step_round_trip: None,
+        last_step_duration: None,
         session: None,
         last_state: None,
         journal_directory: env::var_os("TM4_JOURNAL_DIR")
@@ -1201,6 +1148,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         prediction: AcceptedTimeline::default(),
         next_resume: 0,
     });
+    app.insert_non_send(simulator);
     app.add_systems(Update, update);
     app.add_systems(
         PostUpdate,

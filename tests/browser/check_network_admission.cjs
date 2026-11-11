@@ -1,53 +1,70 @@
-/* global Module, tm4Port */
+/* Client admission diagnostics against the embedded Rust server. */
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
-
 (async () => {
-  const { connectAuthority } = await import("../../tools/network/authority.ts");
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
   const endpoint = process.env.TM4_MATCH_ENDPOINT;
-  const token = process.env.TM4_AUTHORITY_TOKEN;
   const scenario = process.env.TM4_ADMISSION_SCENARIO ?? "map";
-  assert(endpoint && token && ["map", "roster"].includes(scenario));
-
+  assert(endpoint && ["map", "roster"].includes(scenario));
   const browser = await chromium.launch({
     executablePath: process.env.TM4_CHROME,
     channel: process.env.TM4_CHROME ? undefined : "chrome",
     args: ["--enable-unsafe-swiftshader"],
   });
   try {
-    const authority = await browser.newPage();
-    await authority.goto(new URL("?authority=1", site).href);
-    await authority.waitForFunction(() => globalThis.tm4Port?.compatibility);
-    await authority.evaluate((scenario) => {
-      if (scenario === "map") tm4Port.catalog.worlds = ["Unavailable stock test map"];
-      else {
-        const start = Module._WebNetRequestMatch;
-        Module._WebNetRequestMatch = (...args) => {
-          const result = start(...args);
-          if (result && !Module._WebTestUnsupportedCarCallback())
-            throw new Error("Unable to install unregistered callback fixture");
-          return result;
-        };
-      }
-    }, scenario);
-    let authorityError;
-    void connectAuthority(authority, endpoint, token).catch((error) => (authorityError = error));
-    const url = new URL(site);
-    url.searchParams.set("match", endpoint);
     const clients = [await browser.newPage(), await browser.newPage()];
-    await Promise.all(clients.map((page) => page.goto(url.href)));
-    const message =
-      scenario === "map" ? /session resources are missing locally/i : /roster|car callback state/i;
+    for (const page of clients) {
+      await page.route("**/network/tm4_network.js", async (route) => {
+        const response = await route.fetch();
+        const hook = `\nconst admissionUpdate = NetworkClient.prototype.update;
+NetworkClient.prototype.update = function() {
+  const raw = admissionUpdate.call(this);
+  if (!globalThis.testAdmissionPatched && JSON.parse(raw).some(({type}) => type === "prediction_prepare")) {
+    globalThis.testAdmissionPatched = true;
+    const engine = globalThis.Module;
+    if (${JSON.stringify(scenario)} === "map") {
+      const ccall = engine.ccall;
+      engine.ccall = (name, ...args) => name === "WebNetWorldIndex" ? -1 : ccall(name, ...args);
+    } else {
+      const start = engine._WebNetRequestMatch;
+      engine._WebNetRequestMatch = (...args) => {
+        const result = start(...args);
+        if (result && !engine._WebTestUnsupportedCarCallback()) throw new Error("Callback fixture rejected");
+        return result;
+      };
+    }
+  }
+  return raw;
+};\n`;
+        await route.fulfill({ response, body: (await response.text()) + hook });
+      });
+    }
+    const target = new URL(site);
+    target.searchParams.set("match", endpoint);
+    await Promise.all(clients.map((page) => page.goto(target.href)));
+    const statuses = [];
     for (const page of clients) {
       const status = page.locator('#status[data-match-state="error"]');
       await status.waitFor();
-      assert.match(await status.textContent(), message);
-      assert.equal(await page.evaluate(() => tm4Port.netConfirmedTick ?? 0), 0);
+      statuses.push(await status.textContent());
+      assert.equal(await page.evaluate(() => globalThis.tm4Port.netConfirmedTick ?? 0), 0);
     }
-    assert.equal(await authority.evaluate(() => tm4Port.netMatch?.tick ?? 0), 0);
-    if (authorityError) assert.match(authorityError.message, message);
-    console.log("PASS unsupported network " + scenario + " rejected before prediction");
+    const expected =
+      scenario === "map" ? /session resources are missing locally/i : /roster|car callback state/i;
+    assert(
+      statuses.some((status) => expected.test(status)),
+      JSON.stringify(statuses),
+    );
+    assert(
+      statuses.every(
+        (status) => expected.test(status) || /disconnected before|connection|socket/i.test(status),
+      ),
+      JSON.stringify(statuses),
+    );
+    console.log(
+      "PASS unsupported client " + scenario + " rejected before prediction",
+      JSON.stringify(statuses),
+    );
   } finally {
     await browser.close();
   }

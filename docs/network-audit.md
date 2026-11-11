@@ -1,14 +1,15 @@
 # Network implementation audit
 
-Updated 2026-11-10 for the experimental networking implementation.
+Updated 2026-11-11 for the experimental networking implementation.
 The [v0.1 requirements](network-requirements-v0.1.md) remain the acceptance contract;
 this page records actual coverage and limitations, not revised requirements.
 
 ## Current boundary
 
-C owns gameplay, including physics, weapons and scoring. A server-owned Chromium
-instance runs that C/Wasm simulation. The native Rust server selects accepted inputs
-and advances it on Lightyear's 30 Hz timeline, with one outstanding step.
+C owns gameplay, including physics, weapons and scoring. The Rust server embeds
+Wasmtime 47.0.1 and runs that same wasm32 C simulation as a WASI reactor. Lightyear
+selects accepted inputs and advances it synchronously on its 30 Hz timeline. There
+is no server browser, JavaScript runtime, Python host, or simulation subprocess.
 Clients agree on a start tick before prediction begins. A delay over 250 ms
 fails the session explicitly. After initial readiness, clients cannot gate the
 authority.
@@ -31,7 +32,7 @@ includes a smaller native rollback probe.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
-[authority adapter](../tools/network/authority.ts).
+[embedded simulator](../network/src/simulator.rs), [C host boundary](../port/headless/api.c).
 
 ## Implemented changes and verification
 
@@ -44,7 +45,7 @@ Sources: [Rust protocol](../network/src/protocol.rs),
 - Authority has no viewport or audio device. A client maps its one camera, HUD,
   local-message queue and listener to its gameplay slot. No slot-zero car/camera
   substitution remains. Existing gameplay slots and rules remain intact.
-- Compatibility includes protocol version, both Wasm build hashes, and hashes of
+- Compatibility includes protocol version, the client C/Rust build and bound server Wasm hash, and hashes of
   locally supplied gameplay archives/images/sound banks. Optional music/movies and
   menu files are excluded. Fingerprints are compatibility checks only. Roster and
   map selection use names supplied by the authority; local exposed cheats are blocked.
@@ -128,7 +129,7 @@ the same allocator and world undo log. Bots, car packs, independent Wasm
 modules and sanitizer builds are outside the checkpoint scope.
 
 [The local checkpoint check](../tests/browser/check_local_checkpoint.cjs) uses
-Orbital and Pizza Boy in headless Chromium. It restores tick 80 with a live projectile
+Orbital and Pizza Boy in an offline diagnostic browser reference. It restores tick 80 with a live projectile
 and compares the canonical bytes and all five subsystem checksums on each of 180
 replayed ticks, three times. Combat exercises steering, contact, weapon damage and
 projectile creation, impact and removal. A second case destroys and restores scenery,
@@ -207,8 +208,7 @@ anchor and asks each browser for its current native tick. A late offer is
 replaced using the measured exchange and the furthest-ahead browser. Negotiation
 allows five offers within the loading deadline and all simulations stay at tick
 zero until the server commits. The authority dispatches at 30 Hz and checks
-overruns on that same native timeline. The authority browser has no render loop
-and skips per-tick texture and HUD work. The server keeps the existing slot
+overruns on that same native timeline. The embedded authority has no render loop and skips per-tick texture and HUD work. The server keeps the existing slot
 authorization, tick and epoch checks, and missing-input policy.
 Client intent and server-accepted controls use distinct native input types. Only the
 server publishes accepted input, and a short overlapping packet history covers
@@ -281,13 +281,13 @@ Open the printed match link in two browser windows. An empty lobby waits for
 the first player. After someone joins, the other players have five minutes to
 arrive. Start a new match server after the match has been played. The test
 `bun tests/browser/check_live_rollback.cjs` uses a fresh
-match server and launches its own Chromium authority. Supply its endpoint and
-authority token. It conditions client receive traffic
+embedded Rust match server. Supply its endpoint; the browser reference consumes
+accepted Frame records only and never sends simulation results to the server. It conditions client receive traffic
 at 72±12 ms by default and uses real keyboard input in both rendered clients.
 Run `bun tests/browser/check_prediction_start.cjs` with a fresh server to
 exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.cjs`
-with a fresh server to exercise the production authority command and both clients'
-default render settings. Set `TM4_MANUAL_BROWSER=webkit` for Playwright WebKit
+with a fresh server to exercise the embedded authority and both clients' default
+render settings. Set `TM4_MANUAL_BROWSER=webkit` for Playwright WebKit
 and `TM4_MANUAL_WINDOW_WAIT=1` to exercise pause and resume at the bound. Set `TM4_CLOCK_FREEZE_MS=700` to
 suspend the receiving tab during the first offer. The standalone rendered browser check
 `bun tests/browser/check_rollback_audio.cjs` uses the real mixer to check finite
@@ -303,14 +303,15 @@ Set `TM4_TEST_CAR` to a stock car name to select it in the combat fixture.
 For the helicopter test, set `TM4_TEST_WORLD='The Oil Rig'`, optionally with
 `TM4_PORTABLE_OIL_DESTROYED=1` to capture after the destruction and debris.
 Run `bun tests/browser/check_snapshot_reconnect.cjs` with a fresh two-player
-server's endpoint and authority token. Set `TM4_RESUME_TEST_TICKS=3600` for a
+embedded server's endpoint. Set `TM4_RESUME_TEST_TICKS=3600` for a
 two-minute live prelude or `TM4_RESUME_EXACT_WINDOW=1` to test handoff at the
 12-tick prediction limit.
 
-Start a fresh match server for each network test using
-`TM4_MATCH_LISTEN=127.0.0.1:18182` and a diagnostic `TM4_AUTHORITY_TOKEN`.
-Supply the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
-`TM4_WEB_URL=http://127.0.0.1:18180/` to the fixtures. Run
+Start a fresh match server for each network test with
+`TM4_MATCH_LISTEN=127.0.0.1:18182`, the matching `TM4_SITE_DIR`,
+`TM4_SIMULATION_WASM`, and private `TM4_RESOURCE_DIR`. Supply
+`TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
+`TM4_WEB_URL=http://127.0.0.1:18180/` to the browser fixtures. Run
 `bun tests/browser/check_network_admission.cjs` for unknown-map refusal, or set
 `TM4_ADMISSION_SCENARIO=roster` on a fresh server for the car callback refusal.
 `bun tests/browser/check_network_replay.cjs` runs direct replay diagnostics without
@@ -327,61 +328,61 @@ only local-disc autoload. `build:diagnostic` owns fixtures and Debug output in
 `build/diagnostic/site`. Public `build` also excludes hooks and local autoload.
 Generated logs stay under the checkout's ignored `build/` directory.
 
-## Browser-free simulation experiment
+## Embedded simulation and local checks
 
-The optional headless build keeps the authority's recovered C simulation and PsyZ
-CPU GTE/SPU state, replacing window, GPU output, host controllers and audio devices
-with a null backend. It is separate from the production Chromium authority.
-`TM4_HEADLESS=ON` builds the Node/Emscripten diagnostic stepping stone;
-adding `TM4_STANDALONE=ON` builds a pure WASI reactor with no JavaScript imports.
-Its only filesystem capability is a read-only host preopen named `/DATA`.
-Only explicitly annotated `WEB_BROWSER_REPORT` calls are omitted: UI/catalog/session
-publications and diagnostic counters/poses in the car and overlay wrappers. They
-read C state; they never deliver resources, write C memory or return host inputs.
-Unannotated JavaScript calls (including typed reads, snapshot transfers and device
-input callbacks) fail with an operation and source location. The standalone API
-uses synchronous `WebNetQueueTick` return and explicit C capture instead of the
-browser's `netMatchTick` transport callback. It has no JavaScript mod loader, resource-heap shift or browser-driven motion fixture;
-those browser-only probes are excluded explicitly, not answered with fake values.
-
-`emscripten_get_now`, sleep/main-loop/interval scheduling and PsyZ host time fail
-explicitly. The authority does not consume them: the level's initial timestamp is
-only for browser-paced frames, music polling is not installed in headless startup,
-and the retained kernel never reaches its host-time/interrupt-timer path in the
-verified fixture. Gameplay `GetCurrentTime()` still reads `MainFrameCount`, restored
-by the local checkpoint. Host performance measurements belong to the external host.
-A new code path requiring wall-clock or kernel interrupt timing remains unsupported.
-
-Prepare private resources using the existing disc loader, then build and compare:
+`bun run build:dev` also builds `build/dev/authority/site/tm4_standalone.wasm`.
+Its hash is bound to the browser build in `simulation-build.json`. Before opening
+the lobby, Rust checks that binding and verifies stock MR/IMG/VAB resources against
+the repository reference. It computes the same gameplay-content fingerprint as the
+browser. Original resources remain separately supplied and are never served by the
+match process. Its WASI capability is a read-only preopen named `/DATA`.
 
 ```sh
 bun tools/headless/prepare-resources.ts "$TM4_DISC_DIR" build/resources
-emcmake cmake -S . -B build/standalone -DCMAKE_BUILD_TYPE=Release \
-  -DTM4_HEADLESS=ON -DTM4_STANDALONE=ON -DTM4_WEB_TEST_HOOKS=ON
-cmake --build build/standalone --target tm4_web --parallel 8
-TM4_WEB_URL=http://127.0.0.1:18180 node tools/headless/record-browser.cjs build/browser-record.json
-uv venv build/wasmtime-venv
-uv pip install --python build/wasmtime-venv/bin/python wasmtime==50.0.1
-build/wasmtime-venv/bin/python tools/headless/check-wasmtime.py \
-  build/standalone/site/tm4_standalone.wasm build/resources build/browser-record.json
+bun run build:dev
+TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2
 ```
 
-The browser recording needs a current diagnostic site and local disc. It stores the
-exact inputs and diagnostic placements alongside complete canonical bytes. The
-standalone check then runs without a browser, comparing every tick and replaying
-three times from a same-instance checkpoint containing a live projectile. Generated
-records, resources and timing measurements remain in `build/`. The diagnostic
-`check-host-contract.py` takes the same Wasm path and checks that required host
-capabilities fail with a source location. Timings include the
-reported host overhead and are observations on a shared machine, not a capacity claim.
+The normal match command launches only the Rust server. `TM4_SITE_DIR`,
+`TM4_SIMULATION_WASM`, and `TM4_RESOURCE_DIR` override its default local paths.
+Existing `TM4_MATCH_CARS` and `TM4_MATCH_WORLD` choose stock roster/map identities.
+The standalone C API exposes catalog, match setup, per-slot commands, stepping,
+round/subsystem state, canonical bytes, local checkpoints, portable capture/restore,
+and teardown. Portable reconnect still uses the existing session format/capability
+limits; it is not a promise that every participant count can reconnect.
 
-The reactor API initializes with `_initialize` and `HeadlessInitialize`, selects stock
-cars/map through `WebNetSelectCar`/`WebNetWorldIndex`, creates with
-`WebNetRequestMatch(players, world, seed, -1)`, accepts each slot's `WebNetSetInput`
-and advances with `WebNetQueueTick`. `HeadlessCapture` fills `HeadlessCanonical`
-(length returned) and `HeadlessDigest` (five `u32` subsystem checksums).
-`HeadlessTick` reports the boundary. Existing local checkpoint capture/restore/replay
-and `WebNetCancelMatch` complete the interface; strings use exported `malloc`/`free`.
-One Wasm instance owns one world. Portable checkpoint transport and production
-server integration are outside this experiment. Current parity coverage is the
-300-tick two-player Construction Yard combat fixture, not every stock combination.
+Only explicitly annotated `WEB_BROWSER_REPORT` calls are omitted: outgoing UI/catalog/
+session publications and diagnostic poses/counters. Required JavaScript reads,
+resource delivery, C-memory transfers, presentation clocks and schedulers fail with
+an operation and source location. Gameplay time remains `MainFrameCount`; Rust owns
+host performance timing. A Wasmtime epoch deadline bounds initialization to the existing 45-second loading budget and live C calls to the
+previous three-second simulator deadline; the 250 ms timeline-overrun limit remains.
+
+The maintained checks use the production Rust adapter and Cargo.lock, with no Python
+or Node host dependency. A diagnostic browser reference remains only as an independent
+test oracle and is never connected as the server simulator:
+
+```sh
+bun run build:diagnostic
+TM4_WEB_URL=http://127.0.0.1:18180/ bun run test:simulation:record
+bun run test:simulation
+```
+
+The recording stores exact accepted commands/fixture actions and complete canonical
+bytes. Rust compares each tick, replays three times from a checkpoint containing a
+live projectile, and transfers a portable snapshot between distinct instances.
+Nine negative probes require missing host capabilities to fail explicitly. Private
+resources and generated recordings/results stay under ignored `build/` paths. Browser
+client, presentation, Lightyear rollback and reconnect tests retain their own coverage.
+
+For synchronized live combat fixtures, explicitly use the diagnostic server build:
+`TM4_TEST_ACTIONS=build/live-actions.json bun run match 2 --diagnostic`, with the same
+absolute or checkout-relative `TM4_TEST_ACTIONS` path passed to `check_network.cjs` or
+`check_live_rollback.cjs`. This local file contains only stock selections and scheduled
+fixture calls. The Rust `rollback_probe` feature and diagnostic C exports are both
+required; the ordinary server rejects the setting. It creates no debug socket or
+remote control protocol. The live fixture's independent browser C oracle replays
+accepted client Frame records and compares digests. It never acts as an authority,
+returns Ready/Completed messages, or gates server progress. Prediction timing checks
+compare local prediction with subsequent accepted-frame reference playback; server
+capacity is measured separately from this additional test-oracle workload.

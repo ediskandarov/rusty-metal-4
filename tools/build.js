@@ -67,10 +67,15 @@ await cp(join(root, "web/styles"), join(site, "styles"), { recursive: true });
 console.log(`Built ${mode}: ${site}`);
 
 await run(["bun", "tools/network/build.ts", "--mode", mode]);
+await run(["bun", "tools/headless/build.ts", "--mode", mode]);
+const authority = await Bun.file(
+  join(directory, "authority/site/tm4_standalone.wasm"),
+).arrayBuffer();
 const wasm = await Bun.file(join(site, "tm4_web.wasm")).arrayBuffer();
 await Bun.write(
   join(site, "simulation-build.json"),
   JSON.stringify({
+    authoritySha256: new Bun.CryptoHasher("sha256").update(authority).digest("hex"),
     sha256: new Bun.CryptoHasher("sha256")
       .update(wasm)
       .update(await Bun.file(join(site, "network/tm4_network_bg.wasm")).arrayBuffer())

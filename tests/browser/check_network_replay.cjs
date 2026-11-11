@@ -85,7 +85,7 @@ async function direct(browser) {
     await silent.addInitScript(() => {
       window.requestAnimationFrame = () => 0;
     });
-    await Promise.all([ready(silent, "?authority=1"), ready(rendered, "?session=1")]);
+    await Promise.all([ready(silent, "?simulation-reference=1"), ready(rendered, "?session=1")]);
     await rendered.locator("canvas").click();
     const init = (page, view) =>
       page.evaluate((view) => {

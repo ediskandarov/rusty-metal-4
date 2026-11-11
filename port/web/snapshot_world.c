@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #ifdef TM4_WEB_TEST_HOOKS
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #endif
 
 enum {
@@ -159,7 +159,7 @@ int WebSnapshotWorldOpen(void)
         return 0;
     world.layout = 2166136261u;
 #ifdef TM4_WEB_TEST_HOOKS
-    EM_ASM({ tm4Port.testPortableWorldAddress = $0; }, WorldCollisionPolygons);
+    WEB_BROWSER_REPORT({ tm4Port.testPortableWorldAddress = $0; }, WorldCollisionPolygons);
 #endif
     if (!remember_world()) {
         WebSnapshotWorldClose();

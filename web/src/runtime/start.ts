@@ -49,16 +49,21 @@ export async function startGame(
           module.tm4LocalCheckpoint = diagnostic && parameters.get("checkpoint") === "1";
           module.callMain(
             parameters.has("match") ||
-              parameters.has("authority") ||
+              (diagnostic && parameters.has("simulation-reference")) ||
               (diagnostic && parameters.has("session"))
-              ? ["--session", ...(parameters.has("authority") ? ["--authority"] : [])]
+              ? [
+                  "--session",
+                  ...(diagnostic && parameters.has("simulation-reference")
+                    ? ["--simulation-only"]
+                    : []),
+                ]
               : [],
           );
           (
             globalThis as typeof globalThis & {
               tm4Port: import("../network/protocol.ts").NetworkPort;
             }
-          ).tm4Port.compatibility = { protocol: 7, build: build.sha256, content };
+          ).tm4Port.compatibility = { protocol: 8, build: build.sha256, content };
           resolve();
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));

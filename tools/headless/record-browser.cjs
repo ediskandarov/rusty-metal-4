@@ -10,12 +10,14 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
     const page = await browser.newPage();
     page.on("pageerror", (error) => console.error(error));
     await page.goto(
-      new URL("?authority=1&checkpoint=1", process.env.TM4_WEB_URL || "http://127.0.0.1:18327")
-        .href,
+      new URL(
+        "?simulation-reference=1&checkpoint=1",
+        process.env.TM4_WEB_URL || "http://127.0.0.1:18180",
+      ).href,
     );
     await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
     const record = await page.evaluate(
-      ({ action, commands }) => {
+      ({ action, commands, worldName, firstCar }) => {
         const { Module, tm4Port } = globalThis;
         const fixtureAction = eval(`(${action})`);
         const fixtureCommands = eval(`(${commands})`);
@@ -32,15 +34,27 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
           assert(!unsupported, unsupported);
           return { tick, digest, sections, canonical: btoa(text) };
         };
+        const cars = firstCar
+          ? [firstCar, firstCar === "Pizza Boy" ? "Orbital" : "Pizza Boy"]
+          : ["Orbital", "Pizza Boy"];
+        cars.forEach((name, slot) =>
+          assert(
+            Module.ccall("WebNetSelectCar", "number", ["number", "string"], [slot, name]),
+            "car " + name,
+          ),
+        );
+        const world = Module.ccall("WebNetWorldIndex", "number", ["string"], [worldName]);
+        assert(world >= 0, "world " + worldName);
         const started = performance.now();
-        assert(Module._WebNetRequestMatch(2, 0, 12345, -1), "start");
+        assert(Module._WebNetRequestMatch(2, world, 12345, -1), "start");
         const startupMs = performance.now() - started;
         rows.push(read());
         const stepMs = [];
         const events = [];
         const tape = [];
         for (let tick = 0; tick < 300; tick++) {
-          const action = fixtureAction(tick);
+          const action =
+            tick === 220 && worldName !== "Construction Yard" ? null : fixtureAction(tick);
           if (action) assert(Module[action[0]](action[1]), `action ${tick}`);
           const inputs = fixtureCommands(tick);
           tape.push({ action, inputs });
@@ -60,6 +74,8 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
           });
         }
         const result = {
+          world: worldName,
+          seed: 12345,
           rows,
           events,
           tape,
@@ -73,9 +89,17 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
         Module._WebNetCancelMatch();
         return result;
       },
-      { action: fixtureAction.toString(), commands: fixtureCommands.toString() },
+      {
+        action: fixtureAction.toString(),
+        commands: fixtureCommands.toString(),
+        worldName: process.env.TM4_TEST_WORLD ?? "Construction Yard",
+        firstCar: process.env.TM4_TEST_CAR,
+      },
     );
-    writeFileSync(process.argv[2] || "build/browser-record.json", JSON.stringify(record));
+    writeFileSync(
+      process.argv[2] || process.env.TM4_TEST_RECORD || "build/browser-record.json",
+      JSON.stringify(record),
+    );
     console.log(
       JSON.stringify({
         rows: record.rows.length,

@@ -2,9 +2,7 @@ use std::{
     collections::VecDeque,
     time::{Duration, Instant},
 };
-use tm4_network::protocol::{
-    CHECKSUM_SEED, Message, RoundState, SNAPSHOT_CHUNK_BYTES, SNAPSHOT_MAX_BYTES, checksum,
-};
+use tm4_network::protocol::{Message, RoundState};
 
 pub const RESUME_IDLE: Duration = Duration::from_secs(5);
 pub const RESUME_DEADLINE: Duration = Duration::from_secs(12);
@@ -41,23 +39,6 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn upload(&mut self, total: usize, offset: usize, hash: u32, data: Vec<u8>) -> bool {
-        if total == 0
-            || total > SNAPSHOT_MAX_BYTES
-            || offset != self.data.len()
-            || data.is_empty()
-            || data.len() > SNAPSHOT_CHUNK_BYTES
-            || offset + data.len() > total
-            || (self.total != 0 && (self.total != total || self.checksum != hash))
-        {
-            return false;
-        }
-        self.total = total;
-        self.checksum = hash;
-        self.data.extend(data);
-        self.data.len() < self.total || checksum(CHECKSUM_SEED, &self.data) == self.checksum
-    }
-
     pub fn ready(&self) -> bool {
         self.total != 0 && self.data.len() == self.total
     }

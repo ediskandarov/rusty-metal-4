@@ -111,7 +111,7 @@ impl NetworkClient {
     }
 
     pub fn send(&mut self, json: &str) -> Result<(), JsValue> {
-        if json.len() > 36 * 1024 {
+        if json.len() > 8192 {
             return Err(JsValue::from_str("Message exceeds bridge limit"));
         }
         let mut value: serde_json::Value =
@@ -121,16 +121,8 @@ impl NetworkClient {
             .and_then(|v| v.remove("type"))
             .and_then(|v| v.as_str().map(str::to_owned))
             .ok_or_else(|| JsValue::from_str("Missing bridge request type"))?;
-        if json.len() > 8192 && kind != "snapshot_upload" {
-            return Err(JsValue::from_str("Message exceeds bridge limit"));
-        }
         let request: Request = serde_json::from_value(serde_json::json!({kind: value}))
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
-        if let Request::SnapshotUpload { data, .. } = &request
-            && data.len() > crate::protocol::SNAPSHOT_CHUNK_BYTES
-        {
-            return Err(JsValue::from_str("Snapshot block exceeds bridge limit"));
-        }
         if matches!(request, Request::Ready { .. })
             && self
                 .app

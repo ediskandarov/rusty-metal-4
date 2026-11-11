@@ -47,10 +47,10 @@ static unsigned int frame_count;
 static int menu_directory_saved;
 static int menu_initialized;
 static int direct_startup;
-static int authority_startup;
-int WebAuthorityStartup(void)
+static int simulation_only;
+int WebSimulationOnly(void)
 {
-    return authority_startup;
+    return simulation_only;
 }
 
 int WebDirectStartup(void)
@@ -353,18 +353,18 @@ static void initialize_platform(void)
     ResetGraph(0);
     Psyz_OverlayFrameCB(count_presented_frame);
     PadInitPad();
-    if (!authority_startup && Psyz_AudioInit() != 0) {
+    if (!simulation_only && Psyz_AudioInit() != 0) {
         fprintf(stderr, "Cannot initialize browser audio\n");
         exit(1);
     }
-#ifndef TM4_HEADLESS
+#ifndef TM4_STANDALONE
     WebMusicInitialize();
 #endif
     RedbookInitialize();
     SetVideoMode(MODE_NTSC);
     GameInitialize();
     SoundInitializeSpu();
-    if (!authority_startup)
+    if (!simulation_only)
         Psyz_VideoSetVsyncMode(PSYZ_VSYNC_ON);
     if (!direct_startup)
         WebMovieStart("N89STUDI", 0, startup_intro);
@@ -398,12 +398,12 @@ static void browser_frame(void)
 int main(int argc, char** argv)
 {
     direct_startup = argc > 1 && !strcmp(argv[1], "--session");
-    authority_startup = argc > 2 && !strcmp(argv[2], "--authority");
+    simulation_only = argc > 2 && !strcmp(argv[2], "--simulation-only");
     load_registry();
     initialize_platform();
     WebNetPublishCatalog();
     WEB_BROWSER_REPORT({ tm4Port.platformReady = true; });
-    if (authority_startup) {
+    if (simulation_only) {
 #ifdef TM4_STANDALONE
         return 0;
 #else

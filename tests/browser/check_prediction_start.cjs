@@ -3,11 +3,10 @@ const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
 
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
-const token = process.env.TM4_AUTHORITY_TOKEN;
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const delay = Number(process.env.TM4_CLOCK_OFFER_DELAY_MS ?? 900);
 const freeze = Number(process.env.TM4_CLOCK_FREEZE_MS ?? 0);
-assert(endpoint && token, "A fresh prediction-enabled match server is required");
+assert(endpoint, "A fresh prediction-enabled match server is required");
 
 (async () => {
   const browser = await chromium.launch({
@@ -16,27 +15,16 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
     args: ["--enable-unsafe-swiftshader"],
   });
   try {
-    const [authority, first, second] = await Promise.all(
-      Array.from({ length: 3 }, () => browser.newPage({ viewport: { width: 800, height: 600 } })),
+    const [first, second] = await Promise.all(
+      Array.from({ length: 2 }, () => browser.newPage({ viewport: { width: 800, height: 600 } })),
     );
     const errors = [];
-    for (const page of [authority, first, second])
-      page.on("pageerror", (error) => errors.push(error.message));
+    for (const page of [first, second]) page.on("pageerror", (error) => errors.push(error.message));
     const loaded = (page) =>
       page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
         polling: 100,
         timeout: 60_000,
       });
-    await authority.addInitScript(() => {
-      window.requestAnimationFrame = () => 0;
-    });
-    await authority.goto(new URL("?authority=1", site).href);
-    await loaded(authority);
-    const { connectAuthority } = await import("../../tools/network/authority.ts");
-    let authorityError;
-    void connectAuthority(authority, endpoint, token).catch((error) => {
-      authorityError = error;
-    });
 
     const target = new URL(site);
     target.searchParams.set("match", endpoint);
@@ -73,14 +61,14 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
       }, delay);
       await second.waitForFunction(() => tm4Port.testClockOfferHeld !== undefined);
       const initial = await Promise.all(
-        [authority, first, second].map((page) => page.evaluate(() => tm4Port.netMatch?.tick)),
+        [first, second].map((page) => page.evaluate(() => tm4Port.netMatch?.tick)),
       );
-      assert.deepEqual(initial, [0, 0, 0], "A world started before the anchor was agreed");
+      assert.deepEqual(initial, [0, 0], "A world started before the anchor was agreed");
       if (freeze) {
         const lifecycle = await second.context().newCDPSession(second);
         await lifecycle.send("Page.setWebLifecycleState", { state: "frozen" });
         await first.waitForTimeout(freeze);
-        assert.equal(await authority.evaluate(() => tm4Port.netMatch.tick), 0);
+        assert.equal(await first.evaluate(() => tm4Port.netMatch.tick), 0);
         await lifecycle.send("Page.setWebLifecycleState", { state: "active" });
       }
     }
@@ -118,7 +106,6 @@ assert(endpoint && token, "A fresh prediction-enabled match server is required")
           "Initial offer did not actually expire",
         );
     }
-    assert.ifError(authorityError);
     assert.deepEqual(errors, []);
     console.log("PASS native prediction startup", JSON.stringify({ delay, freeze, results }));
   } catch (error) {

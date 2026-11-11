@@ -1,10 +1,10 @@
 /* global Module, tm4Port */
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
+const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.cjs");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
-const token = process.env.TM4_AUTHORITY_TOKEN;
 const latency = Number(process.env.TM4_LIVE_DELAY_MS ?? 72);
 const jitter = Number(process.env.TM4_LIVE_JITTER_MS ?? 12);
 const sustain = Number(process.env.TM4_LIVE_SUSTAIN_TICKS ?? 45);
@@ -19,7 +19,7 @@ const specialUsesEffects = process.env.TM4_LIVE_SPECIAL_EFFECT === "1";
 const targetDistance = Number(process.env.TM4_TARGET_DISTANCE ?? 500);
 const testGrab = process.env.TM4_TEST_GRAB === "1";
 const projectileTarget = process.env.TM4_TEST_PROJECTILE_TARGET;
-assert(endpoint && token, "A fresh prediction-enabled match server is required");
+assert(endpoint, "A fresh prediction-enabled match server is required");
 
 async function load(page, url) {
   await page.goto(url.href);
@@ -128,8 +128,8 @@ async function instruments(page, client) {
         const frozenBefore = projectileTarget && Module._WebTestFrozenFaceTicks(1) > 0;
         if (projectileTarget && !frozenBefore)
           Module.ccall("WebTestPlaceProjectileTarget", "number", ["string"], [projectileTarget]);
-        const publishes = tm4Port.netMatchTick;
-        tm4Port.netMatchTick = () => {
+        const publishes = tm4Port.testSimulationTick;
+        tm4Port.testSimulationTick = () => {
           ++trace.publications;
           publishes?.();
         };
@@ -144,7 +144,7 @@ async function instruments(page, client) {
         try {
           result = step(tick);
         } finally {
-          tm4Port.netMatchTick = publishes;
+          tm4Port.testSimulationTick = publishes;
         }
         if (!result) return result;
         ++trace.steps;
@@ -295,39 +295,24 @@ const summary = (page) =>
       "--disable-frame-rate-limit",
     ],
   });
-  const [authority, ...players] = await Promise.all(
+  const [reference, ...players] = await Promise.all(
     Array.from({ length: 3 }, () => browser.newPage({ viewport: { width: 1280, height: 800 } })),
   );
   const errors = [];
-  for (const page of [authority, ...players])
+  for (const page of [reference, ...players])
     page.on("pageerror", (error) => errors.push(error.message));
   try {
-    await authority.addInitScript(() => {
+    await reference.addInitScript(() => {
       window.requestAnimationFrame = () => 0;
     });
-    await load(authority, new URL("?authority=1", site));
-    await instruments(authority, false);
-    if (testCar || testWorld) {
-      await authority.evaluate(
-        ({ car, world }) => {
-          if (car) {
-            if (!tm4Port.catalog.cars.includes(car)) throw new Error("Unknown stock car: " + car);
-            tm4Port.catalog.cars = [car, car === "Pizza Boy" ? "Orbital" : "Pizza Boy"];
-          }
-          if (world) {
-            if (!tm4Port.catalog.worlds.includes(world))
-              throw new Error("Unknown stock map: " + world);
-            tm4Port.catalog.worlds = [world];
-          }
-        },
-        { car: testCar, world: testWorld },
-      );
-    }
-    const { connectAuthority } = await import("../../tools/network/authority.ts");
-    let authorityError;
-    void connectAuthority(authority, endpoint, token).catch((error) => {
-      authorityError = error;
+    await load(reference, new URL("?simulation-reference=1", site));
+    await instruments(reference, false);
+    const schedule = await fixtureTape({
+      cars: testCar ? [testCar, testCar === "Pizza Boy" ? "Orbital" : "Pizza Boy"] : undefined,
+      world: testWorld,
+      projectileTarget,
     });
+    const observation = await observeAcceptedFrames(reference, players);
     const target = new URL(site);
     target.searchParams.set("match", endpoint);
     await load(players[0], target);
@@ -366,16 +351,19 @@ const summary = (page) =>
       const { firstDrive } = await summary(player);
       assert(firstDrive.latencyMs < 100, JSON.stringify(firstDrive));
       assert(firstDrive.tick > firstDrive.confirmed, JSON.stringify(firstDrive));
-      await authority.waitForFunction(
+      await reference.waitForFunction(
         (tick) => globalThis.tm4LiveTrace.captures.has(tick),
         firstDrive.tick,
         { polling: 100, timeout: 4000 },
       );
-      const committed = await authority.evaluate(
+      const committed = await reference.evaluate(
         (tick) => globalThis.tm4LiveTrace.captures.get(tick).time,
         firstDrive.tick,
       );
-      assert(firstDrive.time < committed, "The authority completed the predicted drive tick first");
+      assert(
+        firstDrive.time < committed,
+        "Prediction did not precede accepted-frame reference playback",
+      );
       await player.waitForTimeout(100);
       await player.keyboard.up("x");
     }
@@ -405,9 +393,10 @@ const summary = (page) =>
     });
 
     const fixture = async (action, lead = 15) => {
-      const tick = await authority.evaluate((lead) => tm4Port.netMatch.tick + lead, lead);
+      const tick = await reference.evaluate((lead) => tm4Port.netMatch.tick + lead, lead);
+      await schedule(tick, action, targetDistance);
       await Promise.all(
-        [authority, ...players].map((page) =>
+        [reference, ...players].map((page) =>
           page.evaluate(
             ([tick, action]) => {
               globalThis.tm4LiveTrace.fixtures[tick] = action;
@@ -420,7 +409,11 @@ const summary = (page) =>
     };
     const validate = async (page) => {
       const local = await summary(page);
-      const expected = await authority.evaluate(
+      await reference.waitForFunction(
+        (tick) => globalThis.tm4LiveTrace.captures.has(tick),
+        local.confirmed,
+      );
+      const expected = await reference.evaluate(
         (tick) => globalThis.tm4LiveTrace.captures.get(tick),
         local.confirmed,
       );
@@ -447,16 +440,16 @@ const summary = (page) =>
       await remoteDriver.keyboard.down("ArrowRight");
       await remoteDriver.waitForTimeout(180);
       await remoteDriver.keyboard.up("ArrowRight");
-      await authority.waitForFunction(() => tm4Port.helicopterRemoved === 1, null, {
+      await reference.waitForFunction(() => tm4Port.helicopterRemoved === 1, null, {
         timeout: 8000,
         polling: 25,
       });
-      const combat = await summary(authority);
+      const combat = await summary(reference);
       await Promise.all(players.map((page) => waitConfirmed(page, combat.head + 15)));
       const verified = await Promise.all(players.map(validate));
       assert(combat.impacts > 0);
       assert(verified.some((state) => state.replayHelicopters > 0));
-      assert.ifError(authorityError);
+      assert.ifError(observation.error);
       assert.deepEqual(errors, []);
       console.log(
         "PASS live Lightyear Oil Rig rollback",
@@ -472,24 +465,24 @@ const summary = (page) =>
       await remoteDriver.keyboard.down("ArrowRight");
       await remoteDriver.waitForTimeout(180);
       await remoteDriver.keyboard.up("ArrowRight");
-      await authority.waitForFunction(
+      await reference.waitForFunction(
         () => (tm4Port.trainPlayerHits ?? 0) + (tm4Port.coasterPlayerHits ?? 0) > 0,
         null,
         { timeout: 8000, polling: 25 },
       );
       if (neon) {
         await fixture("ufo", 20);
-        await authority.waitForFunction(() => tm4Port.ufoCapturedPlayer, null, {
+        await reference.waitForFunction(() => tm4Port.ufoCapturedPlayer, null, {
           timeout: 35_000,
           polling: 50,
         });
       }
-      const combat = await summary(authority);
+      const combat = await summary(reference);
       await Promise.all(players.map((page) => waitConfirmed(page, combat.head + 15)));
       const verified = await Promise.all(players.map(validate));
       assert(combat.pathHits > 0 && (!neon || combat.ufoCaptures > 0));
       assert(verified.some((state) => state.replayPathHits > 0));
-      assert.ifError(authorityError);
+      assert.ifError(observation.error);
       assert.deepEqual(errors, []);
       console.log(
         "PASS live Lightyear " + testWorld + " rollback",
@@ -526,19 +519,19 @@ const summary = (page) =>
     }
     if (testGrab) {
       const grab = await fixture("grab");
-      await authority.waitForFunction((tick) => tm4Port.netMatch.tick >= tick, grab - 2, {
+      await reference.waitForFunction((tick) => tm4Port.netMatch.tick >= tick, grab - 2, {
         timeout: 5000,
         polling: 15,
       });
       await remoteDriver.keyboard.down("x");
       await remoteDriver.waitForTimeout(170);
       await remoteDriver.keyboard.up("x");
-      await authority.waitForFunction(() => globalThis.tm4LiveTrace.grabDamage > 0, null, {
+      await reference.waitForFunction(() => globalThis.tm4LiveTrace.grabDamage > 0, null, {
         timeout: 8000,
         polling: 100,
       });
     } else {
-      await authority.waitForFunction(
+      await reference.waitForFunction(
         (effects) =>
           effects
             ? tm4Port.shockwaveRemoved ||
@@ -551,7 +544,7 @@ const summary = (page) =>
       );
     }
     if (testCar) {
-      const combat = await summary(authority);
+      const combat = await summary(reference);
       await Promise.all(players.map((page) => waitConfirmed(page, combat.head + 15)));
       const verified = await Promise.all(players.map(validate));
       assert(
@@ -572,7 +565,7 @@ const summary = (page) =>
         assert(combat.projectiles > 0 && combat.removed > 0);
         assert(combat.impacts > 0 || combat.effects > 0);
       }
-      assert.ifError(authorityError);
+      assert.ifError(observation.error);
       assert.deepEqual(errors, []);
       console.log(
         "PASS live Lightyear roster rollback",
@@ -583,12 +576,12 @@ const summary = (page) =>
     const world = await fixture("world");
     await Promise.all(players.map((page) => waitConfirmed(page, world + 2)));
     await shooter.keyboard.down("e");
-    await authority.waitForFunction(() => globalThis.tm4LiveTrace.destroyed, null, {
+    await reference.waitForFunction(() => globalThis.tm4LiveTrace.destroyed, null, {
       timeout: 12_000,
       polling: 100,
     });
     await shooter.keyboard.up("e");
-    const destroyed = await summary(authority);
+    const destroyed = await summary(reference);
     await Promise.all(players.map((page) => waitConfirmed(page, destroyed.head + sustain)));
 
     const verified = await Promise.all(players.map(validate));
@@ -652,7 +645,7 @@ const summary = (page) =>
     assert(destroyed.contact && destroyed.destroyed && destroyed.damage);
 
     const [stalled, survivor] = players;
-    const before = await summary(authority);
+    const before = await summary(reference);
     await stalled.evaluate(() => {
       globalThis.tm4LiveTrace.stallUntil = performance.now() + 1000;
     });
@@ -661,15 +654,15 @@ const summary = (page) =>
     assert.match(stalledState.status, /retained|resynchronized|simulation timeline|confirmation/);
     await waitConfirmed(survivor, before.head + 35);
     const after = await validate(survivor);
-    const now = await summary(authority);
-    const rate = await authority.evaluate(
+    const now = await summary(reference);
+    const rate = await reference.evaluate(
       ([from, through]) => {
         const rows = globalThis.tm4LiveTrace.captures;
         return (1000 * (through - from)) / (rows.get(through).time - rows.get(from).time);
       },
       [before.head, now.head],
     );
-    assert(rate > 27 && rate < 33, "Authority advanced at " + rate);
+    assert(rate > 27 && rate < 33, "Accepted stream advanced at " + rate);
     const late = await browser.newPage();
     try {
       await late.goto(target.href);
@@ -742,7 +735,7 @@ const summary = (page) =>
       restart.frame,
       "Network rendering must wait for a new simulation step",
     );
-    assert.ifError(authorityError);
+    assert.ifError(observation.error);
     assert.deepEqual(errors, []);
     console.log(
       "PASS live Lightyear rollback",
@@ -756,9 +749,9 @@ const summary = (page) =>
         noOpDigest: restart.noOpDigest,
         verified,
         survivor: after.confirmed,
-        authorityHz: rate,
+        acceptedHz: rate,
         stalled: stalledState.status,
-        authorityCombat: {
+        referenceCombat: {
           bullets: destroyed.bullets,
           projectiles: destroyed.projectiles,
           impacts: destroyed.impacts,
@@ -770,7 +763,7 @@ const summary = (page) =>
     console.error("LIVE ASSERTION", error);
     console.error(
       "LIVE STATES",
-      await Promise.all([authority, ...players].map((page) => summary(page).catch(String))),
+      await Promise.all([reference, ...players].map((page) => summary(page).catch(String))),
     );
     throw error;
   } finally {

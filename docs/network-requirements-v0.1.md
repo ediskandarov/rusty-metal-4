@@ -8,8 +8,8 @@ browser model. The first supported scenario remains 2–8-player Deathmatch.
 
 - One browser controls exactly one participant and has one viewport and one audio
   listener. Local multiplayer and mixed local/network parties are out of scope.
-- The authority has no local participant, viewport, or listener. The current
-  server-owned Chromium host may remain while the simulation interface is developed.
+- The authority has no local participant, viewport, or listener. The Rust server
+  runs the recovered C/Wasm simulation directly in embedded Wasmtime.
 - Reuse ordinary gameplay slots and existing physics, weapons, damage, scoring, and
   mode rules. Networking must not implement a competing version of these rules.
 - The server owns session configuration, slot assignments, simulation time, accepted
@@ -82,7 +82,7 @@ simulation startup introduces resource distribution by the game server.
 - Match journals contain gameplay commands, events and stable resource identities.
   Replaying them requires the original local resources and matching simulation build.
 - The existing diagnostic file server may read explicitly configured local files and
-  serve them on loopback for local development/authority startup. Its `/__dev/` routes
+  serve them on loopback for local development. Its `/__dev/` routes
   must not be exposed by the public service, proxy, tunnel, or multiplayer endpoint.
 - Resource fingerprints establish compatibility, not proof of ownership or permission
   to redistribute. Do not present the compatibility handshake as such proof.
@@ -292,7 +292,7 @@ reimplement scoring, victory, shared lives, or AI decisions.
 
 Validate incoming messages at runtime on both sides. Bound packet sizes, queues,
 connection counts, and message rates. A non-reading client must not exhaust server
-memory. Protect authority credentials and reconnect credentials. Public operation
+memory. Protect reconnect credentials. Public operation
 requires authenticated admission and encrypted connections; local diagnostics can
 retain an explicitly local configuration.
 

@@ -14,7 +14,7 @@ const { chromium } = require("playwright");
     const open = async (shift) => {
       const page = await browser.newPage();
       page.on("pageerror", (error) => errors.push(error.message));
-      await page.goto(new URL("?authority=1&checkpoint=1", site).href);
+      await page.goto(new URL("?simulation-reference=1&checkpoint=1", site).href);
       await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, {
         timeout: 60_000,
       });

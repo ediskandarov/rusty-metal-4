@@ -13,8 +13,10 @@ const { chromium } = require("playwright");
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await page.goto(
-      new URL("?authority=1&checkpoint=1", process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/")
-        .href,
+      new URL(
+        "?simulation-reference=1&checkpoint=1",
+        process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/",
+      ).href,
     );
     await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
     const metrics = await page.evaluate(() => {
@@ -114,7 +116,7 @@ const { chromium } = require("playwright");
       delete Module.tm4CodeMods;
       const checkpoint = capture();
       let published = 0;
-      tm4Port.netMatchTick = () => {
+      tm4Port.testSimulationTick = () => {
         published++;
       };
       const expected = [];

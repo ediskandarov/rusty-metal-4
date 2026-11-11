@@ -215,7 +215,7 @@ static const char* checkpoint_resource_blocker(void)
 
 EMSCRIPTEN_KEEPALIVE int WebNetEnableRenderedPrediction(void)
 {
-    if (match.players || WebLevelActive() || WebAuthorityStartup()
+    if (match.players || WebLevelActive() || WebSimulationOnly()
         || EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
         return 0;
     rendered_prediction = 1;
@@ -229,9 +229,12 @@ int WebNetRenderedPrediction(void)
 
 EMSCRIPTEN_KEEPALIVE int WebNetEnablePortableCheckpoint(void)
 {
-    if (match.players || WebLevelActive()
-        || EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
+    if (match.players || WebLevelActive())
         return 0;
+#ifndef TM4_STANDALONE
+    if (EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
+        return 0;
+#endif
     portable_checkpoint = 1;
     return 1;
 }
@@ -250,7 +253,7 @@ int WebNetLocalCheckpointSupported(void)
         = EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; });
 #endif
     return match.players && !checkpoint_resource_blocker()
-        && (WebNetRenderedPrediction() || (match.view_slot < 0 && WebAuthorityStartup()
+        && (WebNetRenderedPrediction() || (match.view_slot < 0 && WebSimulationOnly()
             && (portable_checkpoint || host_checkpoint)));
 }
 
@@ -353,6 +356,29 @@ EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
     return length;
 }
 
+const char* WebNetCapturePortableInto(u8* output, u32 capacity, u32* length)
+{
+    *length = 0;
+    if (!portable_checkpoint || !local_checkpoint_boundary() || match.local_replaying)
+        return "portable capture requires a supported live tick boundary";
+    const char* blocker = NULL;
+    *length = WebSnapshotCapture(output, capacity, &blocker);
+    return *length ? NULL : blocker ? blocker : "portable capture rejected";
+}
+
+const char* WebNetRestorePortableFrom(const u8* input, u32 length)
+{
+    if (!portable_checkpoint || !local_checkpoint_boundary() || match.tick || match.local_replaying)
+        return "portable restore requires a fresh supported match";
+    const char* blocker = NULL;
+    if (!WebSnapshotRestore(input, length, &blocker))
+        return blocker ? blocker : "portable restore rejected";
+    match.tick = MainFrameCount;
+    match.replaying = 1;
+    WebNetMatchPublishTick();
+    return NULL;
+}
+
 EMSCRIPTEN_KEEPALIVE u32 WebNetCapturePortableCheckpoint(void)
 {
     if (!portable_checkpoint || !local_checkpoint_boundary() || match.local_replaying)
@@ -361,7 +387,8 @@ EMSCRIPTEN_KEEPALIVE u32 WebNetCapturePortableCheckpoint(void)
     if (!bytes)
         return 0;
     const char* blocker = NULL;
-    const u32 length = WebSnapshotCapture(bytes, WebSnapshotMaxBytes, &blocker);
+    u32 length = 0;
+    blocker = WebNetCapturePortableInto(bytes, WebSnapshotMaxBytes, &length);
     EM_ASM({
         tm4Port.portableCheckpointError = $2 ? UTF8ToString($2) : null;
         if ($1)
@@ -386,16 +413,10 @@ EMSCRIPTEN_KEEPALIVE int WebNetBeginPortableReplay(void)
     if (!bytes)
         return 0;
     EM_ASM({ HEAPU8.set(tm4Port.portableCheckpoint, $0); }, bytes);
-    const char* blocker = NULL;
-    const int restored = WebSnapshotRestore(bytes, length, &blocker);
+    const char* blocker = WebNetRestorePortableFrom(bytes, length);
     free(bytes);
     EM_ASM({ tm4Port.portableCheckpointError = $0 ? UTF8ToString($0) : null; }, blocker);
-    if (restored) {
-        match.tick = MainFrameCount;
-        match.replaying = 1;
-        WebNetMatchPublishTick();
-    }
-    return restored;
+    return blocker == NULL;
 }
 
 int WebNetReplaying(void)
@@ -590,11 +611,11 @@ void WebNetMatchPublishTick(void)
             { tm4Port.netMatch.scores.push({ wins : $0, losses : $1 }); }, player->wins,
             player->losses);
     }
-#ifndef TM4_STANDALONE
-    /* The standalone host reads the C boundary after WebNetQueueTick returns. */
+#if defined(TM4_WEB_TEST_HOOKS) && !defined(TM4_STANDALONE)
     if (match.tick && !WebNetReplaying())
-        EM_ASM({ tm4Port.netMatchTick ?.(); });
+        EM_ASM({ tm4Port.testSimulationTick ?.(); });
 #endif
+
 }
 
 void WebNetMatchEnd(void)

@@ -133,7 +133,7 @@ void WebLevelStart(void)
     ObjectStartupInstance();
     WebCheckpointArenaSelect(0);
     SoundSetMusicVolume(GameInfo.music_volume);
-    if (!WebAuthorityStartup())
+    if (!WebSimulationOnly())
         RedbookMusic(1, restore_music_volume, *(s32*)RegGetFileDataPS(metadata, "musicTrackNum"));
     SoundStopSounds();
     RenderConstructor();
@@ -255,7 +255,7 @@ static void process_level_step(void)
 #endif
     WebCarStep();
     ++simulation_steps;
-    if (WebAuthorityStartup())
+    if (WebSimulationOnly())
         return;
     if (checkpoint_arena && WebNetRenderedPrediction()) {
         u8 gte[256];
