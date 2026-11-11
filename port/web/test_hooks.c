@@ -694,10 +694,14 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceWeaponTarget(s32 distance)
     return test_weapon_target->health;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebTestPlaceProjectileTarget(const char* name)
+EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerProjectileTarget(
+    s32 source, s32 destination, const char* name)
 {
-    const Car* shooter = GameInfo.players[0].car;
-    Car* target = GameInfo.players[1].car;
+    if ((u32)source >= GameInfo.player_car_count || (u32)destination >= GameInfo.player_car_count
+        || source == destination)
+        return 0;
+    const Car* shooter = GameInfo.players[source].car;
+    Car* target = GameInfo.players[destination].car;
     if (!shooter || !target || target->freeze_ticks)
         return 0;
     for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
@@ -713,11 +717,90 @@ EMSCRIPTEN_KEEPALIVE int WebTestPlaceProjectileTarget(const char* name)
             placement.t[1] = projectile->bullet.current_world.vy - target->collision_box.center.vy;
             placement.t[2] = projectile->bullet.current_world.vz - target->collision_box.center.vz;
             CarOrientWithMatrix(target, &placement);
-            ObjectSetPosition(target, target->position.vx, target->position.vy, target->position.vz);
+            ObjectSetPosition(
+                target, target->position.vx, target->position.vy, target->position.vz);
             return 1;
         }
     }
     return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPlaceProjectileTarget(const char* name)
+{
+    return WebTestPlacePlayerProjectileTarget(0, 1, name);
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerTarget(
+    s32 source, s32 destination, s32 distance, s32 grab)
+{
+    if ((u32)source >= GameInfo.player_car_count || (u32)destination >= GameInfo.player_car_count
+        || source == destination)
+        return 0;
+    Car* shooter = GameInfo.players[source].car;
+    Car* target = GameInfo.players[destination].car;
+    if (!shooter || !target)
+        return 0;
+    s32 offset[3] = { 0, 0, distance };
+    if (grab) {
+        offset[0] = shooter->collision_box.center.vx - target->collision_box.center.vx;
+        offset[1] = shooter->collision_box.center.vy - target->collision_box.center.vy;
+        offset[2] = shooter->collision_box.maximum.vz - target->collision_box.minimum.vz - 32;
+    }
+    MATRIX placement = shooter->transform;
+    for (s32 axis = 0; axis < 3; ++axis)
+        placement.t[axis] += (shooter->transform.m[axis][0] * offset[0]
+                                 + shooter->transform.m[axis][1] * offset[1]
+                                 + shooter->transform.m[axis][2] * offset[2])
+            >> 12;
+    CarOrientWithMatrix(target, &placement);
+    ObjectSetPosition(target, target->position.vx, target->position.vy, target->position.vz);
+    target->shield_ticks = 0;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestPreparePlayerDuel(s32 source, s32 destination, s32 distance)
+{
+    if (!WebTestPlacePlayerTarget(source, destination, distance, 0))
+        return 0;
+    GameInfo.players[destination].car->health = 1;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE void WebTestReadNetworkCombat(void)
+{
+    u32 objects = 0, projectiles = 0;
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
+        for (const Tm4ObjectHeader* object = ObjectLists[list].first; object;
+             object = object->next) {
+            ++objects;
+            projectiles += !strcmp(object->name, "weaponProjectile");
+        }
+    }
+    EM_ASM(
+        { tm4Port.testCombatObjects = ({ serial : $0, count : $1, projectiles : $2 }); },
+        ObjectNextSerial, objects, projectiles);
+
+    EM_ASM({
+        tm4Port.testCombatPlayers = [];
+        tm4Port.testWasmBytes = HEAPU8.buffer.byteLength;
+    });
+    for (s32 i = 0; i < GameInfo.player_car_count; ++i) {
+        const Car* car = GameInfo.players[i].car;
+        const Car* held = NULL;
+        if (car && car->callback_context) {
+            if (!strcasecmp(car->filename, "auger"))
+                held = ((const AugerDrill*)car->callback_context)->target;
+            else if (!strcasecmp(car->filename, "crusher"))
+                held = ((const CrusherPinchers*)car->callback_context)->target;
+            else if (!strcasecmp(car->filename, "slam") || !strcasecmp(car->filename, "trash"))
+                held = ((const CarShovelState*)car->callback_context)->target;
+        }
+        EM_ASM(
+            { tm4Port.testCombatPlayers.push({ health : $0, freeze : $1, held : $2, fire : $3 }); },
+            car ? car->health : 0, car ? car->freeze_ticks : 0,
+            held && GameIsCarRegistered((Car*)held) ? held->controller_index + 1 : 0,
+            car ? car->fire_ticks : 0);
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE s32 WebTestFrozenFaceTicks(s32 slot)
@@ -1498,7 +1581,8 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachPathObject(s32 helicopter_kind)
             car->shield_ticks = 0;
             CarOrientWithMatrix(car, &location);
             for (s32 i = 0; i < GameInfo.car_count; ++i)
-                if (GameInfo.cars[i] != car) {
+                if (GameInfo.cars[i] != car
+                    && GameInfo.cars[i]->control_kind == CAR_CONTROL_ENEMY) {
                     CarAiProcessFunctionDisable(GameInfo.cars[i]);
                     memset(&GameInfo.cars[i]->controls, 0, sizeof(GameInfo.cars[i]->controls));
                 }

@@ -26,7 +26,7 @@ reads every newly received buffer record before fixed-step trimming, then applie
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
 live. Network play uses native prediction and rollback for supported stock
-Deathmatch rosters. For two-player matches, the authority tests portable capture
+Deathmatch rosters. The authority tests portable capture
 at startup before the server issues reconnect credentials. The diagnostic build
 includes a smaller native rollback probe.
 
@@ -147,9 +147,18 @@ Assets, device voices and heap addresses stay local. Restore validates structure
 and resets the destination on failure. Interaction extenders must share their
 owner's root. Only that root may own the collision `seen` list.
 
-Portable reconnect covers active two-player human Deathmatch without mods or
-eliminated players. All 22 stock cars, including the nine locked cars, were
-verified individually on Construction Yard. All 16 original maps were verified
+Portable session roots support 2–8 active human participants without mods or
+eliminated players. Capture records the actual count; restore checks distinct
+player/car/camera bindings and the car-order permutation before committing.
+Fresh-instance and in-place replay checks cover 3, 4 and 8 participants on
+Construction Yard. With the previous Chromium host, live reconnect covered the
+fourth slot with three survivors; eight-player capture and catch-up matched, but
+returning control failed the unchanged 12-tick handoff window. Embedded-host
+default two-player reconnect passed, while conditioned combat reconnect refused
+over-window handoffs with two and four players. Returning control under those
+conditions remains unverified.
+All 22 stock cars, including the nine locked cars, were verified individually on
+Construction Yard. All 16 original maps were verified
 with Orbital and Pizza Boy. The checks include live weapon and grab state,
 Minion's freeze and thaw, the Oil Rig helicopter and its pickup drops, Neon City's
 train and UFO, The Carnival's coaster, and shared destructibles, jump pads,
@@ -163,6 +172,10 @@ and player cameras must retain their startup identities. Unrecognized types and
 unbound state fail capture. Live mesh fragments and shield or invisibility model
 copies can delay capture. After bounded retries the player can reconnect again.
 Frozen faces are rebuilt from the locally loaded car model.
+
+Closed transport links are reclaimed after their control marker is removed;
+the persistent controller entity and resume identity remain. Native replay reads
+the applied-input history, including reconnect warmup before local commands exist.
 
 The authority captures one completed tick and continues stepping while the server
 forwards the checkpoint in acknowledged 8 KiB chunks. An attempt allows up to
@@ -237,12 +250,21 @@ return. This covers temporary gaps and startup clock lead. A whole-tick clock
 resync, excess confirmation backlog, or unsupported gameplay state closes that
 client session. The authority and other clients keep running.
 The two-player cases verified for portable reconnect also passed rendered
-rollback. Eight-slot direct startup covers all controller assignments. Eight-slot
-live rollback remains unverified. Two-player Chromium checks passed at 72±12 and
+rollback. With the previous Chromium authority, eight rendered clients passed baseline and 30-second combat native
+rollback at 72±12 ms, followed by seven-player disconnect survival on
+Construction Yard. A two-minute four-player combat run also covers projectile
+impacts, freeze, damage and object lifecycles. Eight-player sustained capacity is
+still unverified; earlier debug networking Wasm runs exceeded the unchanged
+250 ms authority scheduling limit. These capacity results have not yet been
+repeated against the embedded host.
+Two-player Chromium checks passed at 72±12 and
 100±30 ms receive conditioning. With the clock pause enabled, a foreground
 Playwright WebKit client reached the boundary at 170±65 ms and resumed after the
 artificial delay was removed. Safari itself remains unverified. Smooth high-rate
-network presentation is deferred. Other roster combinations remain unverified.
+network presentation is deferred. Mixed Minion/Super Auger combat on Oil Rig
+checks freeze interrupting a grab, helicopter destruction and a car death.
+Minion/Crusher on Carnival also covers grab interruption, coaster collision and
+a death. Other mixed roster/map combinations remain unverified.
 
 ### Session identity and modes — R1/R2/R7
 
@@ -295,23 +317,41 @@ sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` a
 `TM4_LIVE_SCREENSHOT_DIR` to save compositor screenshots.
 
 Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
-site. Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
+site. Set `TM4_PORTABLE_PLAYERS` to 2–8 for participant-root coverage.
+Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
 `TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry.
 On Road Rage, use `TM4_PORTABLE_SCENERY=1` with
 `TM4_PORTABLE_TRIGGERS=jumppad,teleporter` to replay both map interactions.
 Set `TM4_TEST_CAR` to a stock car name to select it in the combat fixture.
 For the helicopter test, set `TM4_TEST_WORLD='The Oil Rig'`, optionally with
 `TM4_PORTABLE_OIL_DESTROYED=1` to capture after the destruction and debris.
-Run `bun tests/browser/check_snapshot_reconnect.cjs` with a fresh two-player
-embedded server's endpoint. Set `TM4_RESUME_TEST_TICKS=3600` for a
+Run `node tests/browser/check_snapshot_reconnect.cjs` with a fresh embedded
+server's endpoint. Set `TM4_MATCH_PLAYERS` to match its roster size and
+`TM4_RESUME_SLOT` to the zero-based participant to reconnect. Set
+`TM4_RESUME_COMBAT=1` to exercise a second native rollback through the imported
+warmup interval while other players fire. Set `TM4_RESUME_TEST_TICKS=3600` for a
 two-minute live prelude or `TM4_RESUME_EXACT_WINDOW=1` to test handoff at the
 12-tick prediction limit.
+
+`node tests/browser/check_network_rosters.cjs` exercises rendered rosters with
+`TM4_MATCH_PLAYERS`, `TM4_LIVE_DELAY_MS`, `TM4_LIVE_JITTER_MS` and
+`TM4_ROSTER_TICKS`. Set `TM4_ROSTER_COMBAT=1` for sustained firing and
+`TM4_MIXED_COMBAT=1` with `TM4_MATCH_CARS='Minion,Super Auger'` and
+`TM4_MATCH_WORLD='The Oil Rig'` for the grab interruption fixture, or
+`TM4_MATCH_CARS='Minion,Crusher'` and `TM4_MATCH_WORLD='The Carnival'`.
+Start its diagnostic server with `TM4_TEST_ACTIONS` pointing to the same local
+file as the fixture. Placement actions are applied at the same ticks in the
+embedded authority, independent browser reference and clients; real keyboard
+commands still travel through native input acceptance and rollback. Browser RSS
+includes GPU/renderer processes, separate from checkpoint bytes and Wasm memory.
+The reported accepted-tick rate measures the received authority frontier.
 
 Start a fresh match server for each network test with
 `TM4_MATCH_LISTEN=127.0.0.1:18182`, the matching `TM4_SITE_DIR`,
 `TM4_SIMULATION_WASM`, and private `TM4_RESOURCE_DIR`. Supply
 `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` to the browser fixtures. Run
+
 `bun tests/browser/check_network_admission.cjs` for unknown-map refusal, or set
 `TM4_ADMISSION_SCENARIO=roster` on a fresh server for the car callback refusal.
 `bun tests/browser/check_network_replay.cjs` runs direct replay diagnostics without
@@ -325,7 +365,13 @@ syncs a finalized file. Retained files are managed by the operator.
 
 Ordinary `build:dev` uses release optimization and excludes test hooks, retaining
 only local-disc autoload. `build:diagnostic` owns fixtures and Debug output in
-`build/diagnostic/site`. Public `build` also excludes hooks and local autoload.
+`build/diagnostic/site`. For multi-browser load measurements, reconfigure that
+same cache with `-DCMAKE_BUILD_TYPE=RelWithDebInfo` and
+`-DCMAKE_C_FLAGS_RELWITHDEBINFO="-O2 -g"` (and the same CXX flags), retaining
+assertions, and use the release Rust/Wasm client from the existing network cache.
+Debug networking and rendering can overload the local host even when individual
+C steps remain fast.
+Public `build` also excludes hooks and local autoload.
 Generated logs stay under the checkout's ignored `build/` directory.
 
 ## Embedded simulation and local checks

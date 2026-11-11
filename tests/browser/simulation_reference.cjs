@@ -15,8 +15,8 @@ async function fixtureTape(configuration = {}) {
     await rename(resolve(path) + ".pending", resolve(path));
   };
   await write();
-  return async (tick, name, distance) => {
-    data.actions.push({ tick, name, distance });
+  return async (tick, name, distance, details = {}) => {
+    data.actions.push({ tick, name, distance, ...details });
     await write();
   };
 }

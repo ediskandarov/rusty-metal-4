@@ -118,6 +118,10 @@ struct FixtureAction {
     tick: u32,
     name: String,
     distance: Option<i32>,
+    #[serde(default)]
+    args: Vec<i32>,
+    until: Option<u32>,
+    projectile: Option<String>,
 }
 
 impl Simulator {
@@ -421,7 +425,39 @@ impl Simulator {
             "Diagnostic action arrived after its scheduled tick {tick}"
         );
         self.loaded_actions = fixture.actions.clone();
-        for action in fixture.actions.iter().filter(|action| action.tick == tick) {
+        for action in fixture.actions.iter().filter(|action| {
+            action.tick <= tick && tick < action.until.unwrap_or(action.tick.saturating_add(1))
+        }) {
+            if matches!(action.name.as_str(), "pair" | "death" | "projectile") {
+                let args = &action.args;
+                let accepted = match action.name.as_str() {
+                    "pair" if args.len() == 4 => self.call::<(i32, i32, i32, i32), i32>(
+                        "WebTestPlacePlayerTarget",
+                        (args[0], args[1], args[2], args[3]),
+                    )?,
+                    "death" if args.len() == 3 => self.call::<(i32, i32, i32), i32>(
+                        "WebTestPreparePlayerDuel",
+                        (args[0], args[1], args[2]),
+                    )?,
+                    "projectile" if args.len() == 2 && action.projectile.is_some() => {
+                        self.with_string(action.projectile.as_ref().unwrap(), |world, address| {
+                            world.call::<(i32, i32, u32), i32>(
+                                "WebTestPlacePlayerProjectileTarget",
+                                (args[0], args[1], address),
+                            )
+                        })?;
+                        // This placement is repeated across a range, including ticks without a projectile.
+                        continue;
+                    }
+                    _ => anyhow::bail!("Invalid diagnostic action arguments: {}", action.name),
+                };
+                ensure!(
+                    accepted > 0,
+                    "Diagnostic action {} rejected at tick {tick}",
+                    action.name
+                );
+                continue;
+            }
             let (name, argument) = match action.name.as_str() {
                 "contact" => ("WebTestPlaceWeaponTarget", 128),
                 "target" => ("WebTestPlaceWeaponTarget", action.distance.unwrap_or(500)),

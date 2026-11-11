@@ -686,6 +686,7 @@ fn update(
     mut simulator: NonSendMut<simulator::Simulator>,
     mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
     mut receivers: Query<(Entity, &mut MessageReceiver<Request>, &mut Admission)>,
+    link_states: Query<Option<&Unlinked>, With<LinkOf>>,
     mut commands: Commands,
 ) {
     let started = game.started;
@@ -705,6 +706,10 @@ fn update(
     }
 
     let mut requests = Vec::new();
+    let active_links = link_states
+        .iter()
+        .filter(|closed| closed.is_none_or(|state| matches!(&state.reason, UnlinkReason::Initial)))
+        .count();
     let now = Instant::now();
     for (entity, mut receiver, mut admission) in &mut receivers {
         if now.duration_since(admission.window) >= Duration::from_secs(1) {
@@ -726,8 +731,11 @@ fn update(
                     .then_some("Client session progress timed out.")
             });
         let unidentified = !known && now.duration_since(admission.opened) > Duration::from_secs(10);
-        if let Some(reason) =
-            stalled.or(unidentified.then_some("Unidentified connection timed out."))
+        let full = !known && active_links > MAX_PLAYERS + 5 && links.contains(entity);
+        if let Some(reason) = full
+            .then_some("Connection capacity reached.")
+            .or(stalled)
+            .or(unidentified.then_some("Unidentified connection timed out."))
         {
             eprintln!("{reason}");
             commands.trigger(Unlink {
@@ -819,7 +827,7 @@ fn update(
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,
-            portable: game.players.len() == 2,
+            portable: (2..=8).contains(&game.players.len()),
         };
         game.session = Some(start.clone());
         match simulator.start(&start) {
@@ -971,6 +979,26 @@ fn update(
     }
 }
 
+fn reap_closed_links(
+    mut commands: Commands,
+    links: Query<(Entity, &Unlinked), With<LinkOf>>,
+    controllers: Query<(Entity, &ControlledBy)>,
+) {
+    for (entity, closed) in &links {
+        if !matches!(&closed.reason, UnlinkReason::Initial) {
+            for (controller, owner) in &controllers {
+                if owner.owner == entity && matches!(owner.lifetime, Lifetime::Persistent) {
+                    // Required components outlive their filter unless explicitly removed.
+                    commands
+                        .entity(controller)
+                        .remove::<(ControlledBy, ControlledSend)>();
+                }
+            }
+            commands.entity(entity).try_despawn();
+        }
+    }
+}
+
 // Use actual Lightyear acknowledgements as well as reported game progress: a peer
 // that sends progress while never acknowledging our reliable messages must not
 // retain an unbounded resend history.
@@ -1086,30 +1114,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             lightyear::prelude::input::native::NativeStateSequence<ControllerCommand>,
         >,
     );
-    app.add_observer(
-        |event: On<Add, LinkOf>, mut commands: Commands, links: Query<Entity, With<LinkOf>>| {
-            if links.iter().count() > MAX_PLAYERS + 5 {
-                commands.trigger(Unlink {
-                    entity: event.entity,
-                    reason: UnlinkReason::UserRequested(Some("Connection capacity reached".into())),
-                });
-                return;
-            }
-            commands.entity(event.entity).insert((
-                Admission {
-                    opened: Instant::now(),
-                    window: Instant::now(),
-                    messages: 0,
-                    unacknowledged: HashSet::new(),
-                },
-                ReplicationSender,
-                Transport::new(PriorityConfig::new(128 * 1024)),
-                MessageSender::<Message>::default(),
-                MessageSender::<game_protocol::AcceptedInputs>::default(),
-                MessageReceiver::<Request>::default(),
-            ));
-        },
-    );
+    app.add_observer(|event: On<Add, LinkOf>, mut commands: Commands| {
+        commands.entity(event.entity).insert((
+            Admission {
+                opened: Instant::now(),
+                window: Instant::now(),
+                messages: 0,
+                unacknowledged: HashSet::new(),
+            },
+            ReplicationSender,
+            Transport::new(PriorityConfig::new(128 * 1024)),
+            MessageSender::<Message>::default(),
+            MessageSender::<game_protocol::AcceptedInputs>::default(),
+            MessageReceiver::<Request>::default(),
+        ));
+    });
     let entity = app
         .world_mut()
         .spawn((
@@ -1152,7 +1171,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     app.add_systems(Update, update);
     app.add_systems(
         PostUpdate,
-        bound_reliable_history.after(lightyear::transport::plugin::TransportSystems::Send),
+        (bound_reliable_history, reap_closed_links)
+            .chain()
+            .after(lightyear::transport::plugin::TransportSystems::Send),
     );
     app.add_systems(
         PreUpdate,
@@ -1178,6 +1199,49 @@ fn main() -> Result<(), Box<dyn Error>> {
 #[cfg(test)]
 mod prediction_start_tests {
     use super::*;
+
+    #[test]
+    fn closed_links_are_reaped_without_deleting_persistent_controllers() {
+        let mut app = App::new();
+        app.add_systems(PostUpdate, reap_closed_links);
+        let server = app.world_mut().spawn_empty().id();
+        let closed = app
+            .world_mut()
+            .spawn((
+                LinkOf { server },
+                Unlinked {
+                    reason: UnlinkReason::ByPeer("test close".into()),
+                },
+            ))
+            .id();
+        let child = app.world_mut().spawn(ChildOf(closed)).id();
+        let controller = app
+            .world_mut()
+            .spawn(ControlledBy {
+                owner: closed,
+                lifetime: Lifetime::Persistent,
+            })
+            .id();
+        let pending = app
+            .world_mut()
+            .spawn((
+                LinkOf { server },
+                Unlinked {
+                    reason: UnlinkReason::Initial,
+                },
+            ))
+            .id();
+        let connected = app.world_mut().spawn((LinkOf { server }, Linked)).id();
+        assert!(app.world().get::<ControlledSend>(controller).is_some());
+        app.update();
+        assert!(app.world().get_entity(closed).is_err());
+        assert!(app.world().get_entity(child).is_err());
+        for entity in [server, controller, pending, connected] {
+            assert!(app.world().get_entity(entity).is_ok());
+        }
+        assert!(app.world().get::<ControlledBy>(controller).is_none());
+        assert!(app.world().get::<ControlledSend>(controller).is_none());
+    }
 
     #[test]
     fn a_late_vote_reoffers_before_commit_and_ignores_old_votes() {

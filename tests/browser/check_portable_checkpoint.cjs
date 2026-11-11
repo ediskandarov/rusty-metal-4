@@ -11,6 +11,8 @@ const { chromium } = require("playwright");
   });
   try {
     const errors = [];
+    const players = Number(process.env.TM4_PORTABLE_PLAYERS ?? 2);
+    assert(Number.isInteger(players) && players >= 2 && players <= 8);
     const scenery = process.env.TM4_PORTABLE_SCENERY === "1";
     const fall = process.env.TM4_PORTABLE_FALL === "1";
     const sceneryDamage = process.env.TM4_PORTABLE_SCENERY_DAMAGE === "1";
@@ -90,6 +92,7 @@ const { chromium } = require("playwright");
       await page.evaluate(
         ({
           shift,
+          players,
           scenery,
           fall,
           sceneryDamage,
@@ -117,7 +120,7 @@ const { chromium } = require("playwright");
             throw new Error("Simulation arena shift refused");
           if (
             !Module._WebNetEnablePortableCheckpoint() ||
-            !Module._WebNetRequestMatch(2, worldIndex, 12345, -1)
+            !Module._WebNetRequestMatch(players, worldIndex, 12345, -1)
           )
             throw new Error("Match refused");
           tm4Port.step = (tick) => {
@@ -190,6 +193,12 @@ const { chromium } = require("playwright");
                 if (tick >= 150) second = 0x40 | steering | 0x2;
               }
             }
+            for (let slot = 2; slot < players; slot++) {
+              const input =
+                tick < 48 ? 0x40 | (slot % 2 ? 0x8000 : 0x2000) : tick % 30 === slot ? 0x4000 : 0;
+              if (!Module._WebNetSetInput(tick, slot, input, 0, 0))
+                throw new Error("Extra player input refused");
+            }
             if (
               !Module._WebNetSetInput(tick, 0, first, 0, 0) ||
               !Module._WebNetSetInput(tick, 1, second, 0, 0) ||
@@ -212,6 +221,7 @@ const { chromium } = require("playwright");
         },
         {
           shift,
+          players,
           scenery,
           fall,
           sceneryDamage,
@@ -237,6 +247,7 @@ const { chromium } = require("playwright");
 
     const captured = await source.evaluate(
       ({
+        players,
         scenery,
         extenders,
         checkpointTick,
@@ -278,7 +289,14 @@ const { chromium } = require("playwright");
         const size = Module._WebNetCapturePortableCheckpoint();
         if (!size) throw new Error("Capture refused: " + tm4Port.portableCheckpointError);
         if (
-          (car || oil || neon || carnival || triggers.length || fall || sceneryDamage) &&
+          (players > 2 ||
+            car ||
+            oil ||
+            neon ||
+            carnival ||
+            triggers.length ||
+            fall ||
+            sceneryDamage) &&
           !Module._WebNetCaptureLocalCheckpoint()
         )
           throw new Error("Local capture refused: " + tm4Port.localCheckpointError);
@@ -307,6 +325,7 @@ const { chromium } = require("playwright");
         };
       },
       {
+        players,
         scenery,
         extenders,
         checkpointTick,
@@ -332,7 +351,7 @@ const { chromium } = require("playwright");
         assert(serials.length, "No active " + classes[index] + " at tick " + checkpointTick);
     }
     const restored = await destination.evaluate(
-      ({ checkpoint, extenders, grab }) => {
+      ({ checkpoint, extenders, grab, players }) => {
         const initial = tm4Port.canonical();
         const bytes = Uint8Array.from(atob(checkpoint), (c) => c.charCodeAt(0));
         tm4Port.portableCheckpoint = bytes.slice(0, -1);
@@ -344,6 +363,13 @@ const { chromium } = require("playwright");
           throw new Error(
             "Corrupt checksum changed initial state: " + tm4Port.portableCheckpointError,
           );
+        for (const count of [0, 1, 9, players === 2 ? 3 : 2]) {
+          const damaged = bytes.slice();
+          new DataView(damaged.buffer).setUint32(36 + 4, count, true);
+          tm4Port.portableCheckpoint = damaged;
+          if (Module._WebNetBeginPortableReplay() || tm4Port.canonical() !== initial)
+            throw new Error("Invalid participant count was accepted or changed state");
+        }
         if (extenders) {
           const [sibling, foreignRoot] = extenders;
           const damaged = bytes.slice();
@@ -393,7 +419,7 @@ const { chromium } = require("playwright");
           frozen: Module._WebTestFrozenFaceTicks(1),
         };
       },
-      { checkpoint: captured.checkpoint, extenders: captured.extenders, grab },
+      { checkpoint: captured.checkpoint, extenders: captured.extenders, grab, players },
     );
     assert.equal(restored.tick, checkpointTick);
     assert.equal(restored.published, 0);
@@ -537,7 +563,7 @@ const { chromium } = require("playwright");
     if (triggers.includes("jumppad")) assert(expected.launches > 0);
     assert.equal(actual.teleports, expected.teleports);
     assert.equal(actual.launches, expected.launches);
-    if (car || oil || neon || carnival || triggers.length || fall || sceneryDamage) {
+    if (players > 2 || car || oil || neon || carnival || triggers.length || fall || sceneryDamage) {
       const local = await source.evaluate(() => {
         if (!Module._WebNetRestoreLocalCheckpoint())
           throw new Error("Local restore refused: " + tm4Port.localCheckpointError);
@@ -558,13 +584,17 @@ const { chromium } = require("playwright");
       assert(await source.evaluate(() => Module._WebNetFinishLocalReplay()));
     }
     for (const page of [source, destination]) {
-      await page.evaluate((world) => {
-        Module._WebTestPortableWorldClose();
-        Module._WebNetCancelMatch();
-        const index = Module.ccall("WebNetWorldIndex", "number", ["string"], [world]);
-        if (!Module._WebNetRequestMatch(2, index, 12345, -1)) throw new Error("Restart refused");
-        Module._WebNetCancelMatch();
-      }, world);
+      await page.evaluate(
+        ({ world, players }) => {
+          Module._WebTestPortableWorldClose();
+          Module._WebNetCancelMatch();
+          const index = Module.ccall("WebNetWorldIndex", "number", ["string"], [world]);
+          if (!Module._WebNetRequestMatch(players, index, 12345, -1))
+            throw new Error("Restart refused");
+          Module._WebNetCancelMatch();
+        },
+        { world, players },
+      );
     }
     assert.deepEqual(errors, []);
     console.log("PASS independent portable checkpoint", {
@@ -584,6 +614,7 @@ const { chromium } = require("playwright");
       tick: restored.tick,
       captureMs: captured.captureMs,
       restoreMs: restored.restoreMs,
+      players,
       replayTicks: actual.frames.length,
       replayMs: actual.replayMs,
     });

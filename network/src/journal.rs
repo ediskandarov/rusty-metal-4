@@ -308,7 +308,10 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tm4_network::protocol::Compatibility;
+
+    static NEXT_TEST_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
     struct TestDirectory(PathBuf);
     impl TestDirectory {
@@ -317,10 +320,11 @@ mod tests {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos();
-            Self(
-                std::env::temp_dir()
-                    .join(format!("tm4-journal-test-{stamp}-{}", std::process::id())),
-            )
+            Self(std::env::temp_dir().join(format!(
+                "tm4-journal-test-{stamp}-{}-{}",
+                std::process::id(),
+                NEXT_TEST_DIRECTORY.fetch_add(1, Ordering::Relaxed)
+            )))
         }
     }
     impl Drop for TestDirectory {

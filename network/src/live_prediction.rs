@@ -503,6 +503,17 @@ fn step_world(
             input.0
         } else if slot != session.local_slot || state.resume_warmup {
             accepted.0
+        } else if state.restoring {
+            // A reconnect warmup predicted C inputs before local commands existed.
+            // Subsequent rollback reads that native prediction history as well.
+            let Some(input) = buffer.get(native_tick) else {
+                state.error = Some(format!(
+                    "The native local prediction history has a missing tick ({native_tick:?}, start {:?}, frontier {frontier:?})",
+                    buffer.start_tick
+                ));
+                return;
+            };
+            input.0
         } else {
             if local.0.tick != tick || local.0.epoch != session.epoch {
                 state.error =
@@ -631,10 +642,14 @@ fn restore_world(
     ) else {
         return;
     };
-    if tick != session.anchor + checkpoint.0 as i32
-        || checkpoint.0 < state.confirmed
-        || !restore_live_tick(checkpoint.0)
-    {
+    if tick != session.anchor + checkpoint.0 as i32 || checkpoint.0 < state.confirmed {
+        state.error = Some(format!(
+            "Lightyear selected an invalid C rollback boundary (native {tick:?}, C {}, confirmed {}, anchor {:?})",
+            checkpoint.0, state.confirmed, session.anchor
+        ));
+        return;
+    }
+    if !restore_live_tick(checkpoint.0) {
         state.error = Some("The game refused Lightyear's restored checkpoint".into());
         return;
     }

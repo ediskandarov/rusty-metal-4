@@ -12,8 +12,8 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 1,
-    Players = 2,
+    SessionVersion = 2,
+    MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
     MaxDevices = 64,
@@ -42,15 +42,15 @@ typedef struct {
 } SquareRecord;
 
 typedef struct {
-    u32 version, tick, serial, random, effect_random;
+    u32 version, player_count, tick, serial, random, effect_random;
     u16 path_generation, random_generation, health_generation;
     u8 registry_depth, device_count, health_count;
     u16 registry_path[RegistryDepth];
     u32 lists[OBJECT_LIST_COUNT], active_cells;
     u32 squares, gte_length;
     u8 gte[256];
-    u32 car_order[Players];
-    PlayerRecord players[Players];
+    u32 car_order[MaxPlayers];
+    PlayerRecord players[MaxPlayers];
     s32 games_completed, deathmatch_winner, deathmatch_finished;
     s32 deathmatch_next_mode, deathmatch_accept_input, deathmatch_rounds;
     DeviceRecord devices[MaxDevices];
@@ -63,11 +63,18 @@ void WebCheckpointSetRandomState(u32 random, u32 effects);
 
 static int supported_session(void)
 {
-    return GameInfo.active && GameInfo.mode == GAME_MODE_PLAY && !GameInfo.next_mode
-        && !GameInfo.pause_player && GameInfo.game_type == GAME_TYPE_DEATHMATCH
-        && GameInfo.player_car_count == Players && !GameInfo.computer_count
-        && GameInfo.active_player_count == Players && GameInfo.car_count == Players
-        && GameInfo.players[0].car && GameInfo.players[1].car && WorldSquares;
+    const s32 count = GameInfo.player_car_count;
+    if (!GameInfo.active || GameInfo.mode != GAME_MODE_PLAY || GameInfo.next_mode
+        || GameInfo.pause_player || GameInfo.game_type != GAME_TYPE_DEATHMATCH || count < 2
+        || count > MaxPlayers || GameInfo.computer_count || GameInfo.active_player_count != count
+        || GameInfo.car_count != count || !WorldSquares)
+        return 0;
+    for (s32 i = 0; i < count; ++i) {
+        if (!GameInfo.cars[i] || !GameInfo.players[i].car || !GameInfo.players[i].camera
+            || GameInfo.players[i].eliminated)
+            return 0;
+    }
+    return 1;
 }
 
 static s32 square_count(void)
@@ -114,7 +121,7 @@ static u32 object_handle(const Tm4ObjectHeader* object)
 
 static int device_weapon(DeviceRecord* record, const CarWeaponInstance* weapon)
 {
-    for (s32 i = 0; i < Players; ++i) {
+    for (s32 i = 0; i < GameInfo.car_count; ++i) {
         for (s32 j = 0; j < CarWeaponCount; ++j) {
             if (weapon == &GameInfo.cars[i]->weapons[j]) {
                 record->car_index = i;
@@ -146,6 +153,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     SessionRecord record;
     memset(&record, 0, sizeof(record));
     record.version = SessionVersion;
+    record.player_count = GameInfo.player_car_count;
     record.squares = square_count();
     const u32 length = sizeof(record) + record.squares * sizeof(SquareRecord);
     if (!record.squares || length > capacity || !save_devices(&record) || CarHealthPickupCount < 0
@@ -171,7 +179,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     record.deathmatch_accept_input = GameInfo.deathmatch_accept_input;
     record.deathmatch_rounds = GameInfo.deathmatch_rounds;
     record.active_cells = square_handle(ObjectActiveInteractionCells, record.squares);
-    for (u32 i = 0; i < Players; ++i) {
+    for (u32 i = 0; i < record.player_count; ++i) {
         const Tm4GamePlayer* player = &GameInfo.players[i];
         record.car_order[i] = WebSnapshotLiveHandle(GameInfo.cars[i]);
         record.players[i] = (PlayerRecord) {
@@ -282,10 +290,11 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         return 0;
     memcpy(&record, input, sizeof(record));
     u8 current_gte[sizeof(record.gte)];
-    if (record.version != SessionVersion || !record.serial || record.tick >= INT32_MAX
-        || record.registry_depth > RegistryDepth || record.device_count > MaxDevices
-        || record.health_count > ArrayCount(record.health) || !record.squares
-        || record.squares != square_count()
+    if (record.version != SessionVersion || record.player_count != GameInfo.player_car_count
+        || record.player_count < 2 || record.player_count > MaxPlayers || !record.serial
+        || record.tick >= INT32_MAX || record.registry_depth > RegistryDepth
+        || record.device_count > MaxDevices || record.health_count > ArrayCount(record.health)
+        || !record.squares || record.squares != square_count()
         || length != sizeof(record) + record.squares * sizeof(SquareRecord) || !record.gte_length
         || record.gte_length != WebCheckpointGteCapture(current_gte, sizeof(current_gte)))
         return 0;
@@ -297,10 +306,10 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     }
     if (!directory)
         return 0;
-    Car* cars[Players];
-    Car* player_cars[Players];
-    Camera* cameras[Players];
-    for (u32 i = 0; i < Players; ++i) {
+    Car* cars[MaxPlayers];
+    Car* player_cars[MaxPlayers];
+    Camera* cameras[MaxPlayers];
+    for (u32 i = 0; i < record.player_count; ++i) {
         cars[i] = find_class(find_object, record.car_order[i], "car");
         player_cars[i] = find_class(find_object, record.players[i].car, "car");
         cameras[i] = find_class(find_object, record.players[i].camera, "camera");
@@ -309,10 +318,23 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
             || (u32)record.players[i].camera_distance_preset >= 3)
             return 0;
     }
-    if (cars[0] == cars[1] || cameras[0] == cameras[1]
-        || (cars[0] != player_cars[0] && cars[0] != player_cars[1])
-        || (cars[1] != player_cars[0] && cars[1] != player_cars[1]))
-        return 0;
+    for (u32 i = 0; i < record.player_count; ++i) {
+        int member = 0;
+        for (u32 j = 0; j < record.player_count; ++j) {
+            member |= cars[i] == player_cars[j];
+            if (i != j
+                && (cars[i] == cars[j] || player_cars[i] == player_cars[j]
+                    || cameras[i] == cameras[j]))
+                return 0;
+        }
+        if (!member)
+            return 0;
+    }
+    for (u32 i = record.player_count; i < MaxPlayers; ++i) {
+        const PlayerRecord empty = { 0 };
+        if (record.car_order[i] || memcmp(&record.players[i], &empty, sizeof(empty)))
+            return 0;
+    }
     Tm4ObjectHeader* lists[OBJECT_LIST_COUNT];
     u32 objects = 0;
     for (u32 i = 0; i < OBJECT_LIST_COUNT; ++i) {
@@ -356,7 +378,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     for (u32 i = 0; i < record.device_count; ++i) {
         const DeviceRecord* saved = &record.devices[i];
         void* object = saved->object ? find_object(saved->object) : NULL;
-        if (!object || saved->car_index < 0 || saved->car_index >= Players
+        if (!object || saved->car_index < 0 || saved->car_index >= record.player_count
             || saved->weapon_index < 0 || saved->weapon_index >= CarWeaponCount) {
             free_devices(devices);
             return 0;
@@ -389,7 +411,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     }
     ObjectActiveInteractionCells
         = record.active_cells ? &WorldSquares[record.active_cells - 1] : NULL;
-    for (u32 i = 0; i < Players; ++i) {
+    for (u32 i = 0; i < record.player_count; ++i) {
         const PlayerRecord* player = &record.players[i];
         GameInfo.cars[i] = cars[i];
         GameInfo.players[i].car = player_cars[i];

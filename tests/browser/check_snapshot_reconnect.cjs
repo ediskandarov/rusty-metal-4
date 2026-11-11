@@ -5,6 +5,13 @@ const { chromium } = require("playwright");
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
 const prelude = Number(process.env.TM4_RESUME_TEST_TICKS ?? 360);
+const players = Number(process.env.TM4_MATCH_PLAYERS ?? 2);
+const resumeSlot = Number(process.env.TM4_RESUME_SLOT ?? 0);
+const width = Number(process.env.TM4_ROSTER_WIDTH ?? 1280);
+const height = Number(process.env.TM4_ROSTER_HEIGHT ?? 800);
+assert(Number.isInteger(players) && players >= 2 && players <= 8);
+assert(Number.isInteger(resumeSlot) && resumeSlot >= 0 && resumeSlot < players);
+const combat = process.env.TM4_RESUME_COMBAT === "1";
 const exactWindow = process.env.TM4_RESUME_EXACT_WINDOW === "1";
 assert(endpoint && Number.isInteger(prelude) && prelude >= 120);
 const credentialKey = "tm4.resume." + endpoint;
@@ -20,15 +27,18 @@ target.searchParams.set("match", endpoint);
   try {
     const errors = [];
     const open = async (resume, mode) => {
-      const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+      const page = await browser.newPage({ viewport: { width, height } });
       page.on("pageerror", (error) => {
         errors.push(error.message);
         console.log("PAGE ERROR", mode ?? "normal", error.message);
       });
       page.on("console", (msg) => {
+        if (msg.text().startsWith("RECONNECT PHASE")) console.log(msg.text());
         if (
           msg.type() === "error" &&
-          /Match clock at disconnect|Lightyear runtime failure/.test(msg.text())
+          /Match clock at disconnect|Lightyear runtime failure|C CHECKPOINT REFUSAL/.test(
+            msg.text(),
+          )
         ) {
           console.log("DISCONNECT", mode ?? "normal", msg.text());
           void Promise.all(msg.args().map((arg) => arg.jsonValue())).then(
@@ -64,6 +74,15 @@ target.searchParams.set("match", endpoint);
             if (bridge && bridge !== observedBridge) {
               observedBridge = bridge;
               local.clear();
+              const restore = bridge.restore_live_tick;
+              globalThis.testRestoreTicks = [];
+              bridge.restore_live_tick = (tick) => {
+                if (globalThis.testRestoreTicks.length === 128) globalThis.testRestoreTicks.shift();
+                globalThis.testRestoreTicks.push(tick);
+                const result = restore(tick);
+                if (!result) console.error("C CHECKPOINT REFUSAL", tick, globalThis.tm4Port.localCheckpointError);
+                return result;
+              };
               const step = bridge.step_live_tick;
               bridge.step_live_tick = (tick) => {
                 const result = step(tick);
@@ -93,13 +112,25 @@ target.searchParams.set("match", endpoint);
               }
             }
             for (const message of messages) {
-              if (message.type === "resume_live")
+              if (message.type === "resume_live") {
+                globalThis.testHandoffHead = message.head;
                 globalThis.testReconnectDepth =
                   (this.prediction_clock() - message.anchor - message.head) | 0;
+              }
+              if (["resume_prepare", "snapshot_begin", "resume_live", "resume_active", "error"].includes(message.type)) console.log("RECONNECT PHASE", ${JSON.stringify(mode)}, message.type, message.tick ?? message.head ?? message.message ?? "");
               if (message.type === "snapshot_begin") {
                 const port = globalThis.tm4Port;
                 const game = globalThis.Module;
                 port.testMixerStarts = [];
+                const restore = game._WebNetBeginPortableReplay;
+                game._WebNetBeginPortableReplay = () => {
+                  const result = restore();
+                  if (result) {
+                    game.ccall("WebTestSnapshotObjects", null, ["string"], ["weaponProjectile"]);
+                    globalThis.testRestoredProjectiles = port.testSnapshotObjects.length;
+                  }
+                  return result;
+                };
                 globalThis.testPresentationTicks = [];
                 const confirm = game._WebNetConfirmPresentationTick;
                 game._WebNetConfirmPresentationTick = (tick) => {
@@ -133,6 +164,7 @@ target.searchParams.set("match", endpoint);
         });
       });
       await page.goto(target.href);
+      await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
       return page;
     };
     const status = (page) => page.locator("#status").textContent();
@@ -147,8 +179,8 @@ target.searchParams.set("match", endpoint);
       );
       assert((await confirmed(page)) >= tick, await status(page));
     };
-    const first = await open();
-    await first.waitForFunction(
+    const initial = [await open()];
+    await initial[0].waitForFunction(
       () => {
         const status = document.querySelector("#status");
         return (
@@ -159,9 +191,28 @@ target.searchParams.set("match", endpoint);
       null,
       { timeout: 35_000 },
     );
-    assert((await status(first)).includes("Waiting for the other players"), await status(first));
-    const survivor = await open();
-    await Promise.all([waitTick(first, 60), waitTick(survivor, 60)]);
+    assert(
+      (await status(initial[0])).includes("Waiting for the other players"),
+      await status(initial[0]),
+    );
+    for (let i = 1; i < players; i++) initial.push(await open());
+    await Promise.all(initial.map((page) => waitTick(page, 60)));
+    if (combat)
+      for (const page of initial) {
+        await page.keyboard.down("e");
+        await page.keyboard.down("w");
+      }
+    const slots = await Promise.all(
+      initial.map((page) => page.evaluate(() => tm4Port.netViewSlot)),
+    );
+    assert.deepEqual(
+      [...slots].sort((a, b) => a - b),
+      Array.from({ length: players }, (_, i) => i),
+    );
+    const first = initial[slots.indexOf(resumeSlot)];
+    const survivors = initial.filter((page) => page !== first);
+    const survivor = survivors[0];
+    assert.equal(await first.evaluate(() => tm4Port.netViewSlot), resumeSlot);
     const credential = await first.evaluate((key) => sessionStorage.getItem(key), credentialKey);
     assert.match(credential, /^[a-f0-9]{64}$/);
 
@@ -195,16 +246,30 @@ target.searchParams.set("match", endpoint);
     const beforeResume = await confirmed(survivor);
     await waitTick(survivor, beforeResume + 20);
     const recovered = await open(credential, "delay");
-    await recovered.waitForFunction(
-      () => {
-        const status = document.querySelector("#status");
-        return (
-          status?.textContent.includes("Live prediction") || status?.dataset.matchState === "error"
+    await recovered
+      .waitForFunction(
+        () => {
+          const status = document.querySelector("#status");
+          return (
+            status?.textContent.includes("Live prediction") ||
+            status?.dataset.matchState === "error"
+          );
+        },
+        null,
+        { timeout: 30_000 },
+      )
+      .catch(async (error) => {
+        console.error(
+          "RECONNECT TIMEOUT",
+          await recovered.evaluate(() => ({
+            status: document.querySelector("#status")?.textContent,
+            phase: document.querySelector("#status")?.dataset.matchState,
+            diagnostics: tm4Port.netDiagnostics,
+            match: tm4Port.netMatch,
+          })),
         );
-      },
-      null,
-      { timeout: 30_000 },
-    );
+        throw error;
+      });
     const result = await status(recovered);
     if (!result.includes("Live prediction"))
       console.log(
@@ -226,6 +291,7 @@ target.searchParams.set("match", endpoint);
     assert(reconnected.diagnostics.recoveredTick >= reconnected.diagnostics.snapshotTick);
     assert(reconnected.diagnostics.recoveredTick - reconnected.diagnostics.snapshotTick < 240);
     assert.equal(reconnected.render, 30);
+    assert.equal(reconnected.slot, resumeSlot);
     if (exactWindow) {
       assert.equal(reconnected.handoffDepth, 12);
       assert.equal(reconnected.diagnostics.transport.prediction.maxDepth, 12);
@@ -236,19 +302,30 @@ target.searchParams.set("match", endpoint);
     await recovered.keyboard.down("x");
     await recovered.keyboard.down("w");
     await recovered.waitForFunction(
-      () =>
-        (tm4Port.netViewSlot === 0 && tm4Port.cars?.[0]?.throttle > 0) ||
+      (slot) =>
+        (tm4Port.netViewSlot === slot && tm4Port.cars?.[slot]?.throttle > 0) ||
         document.querySelector("#status")?.dataset.matchState === "error",
-      null,
+      resumeSlot,
       { timeout: 5_000 },
     );
     assert((await status(recovered)).includes("Live prediction"), await status(recovered));
     await Promise.all([
-      waitTick(survivor, reconnected.confirmed + 45),
+      ...survivors.map((page) => waitTick(page, reconnected.confirmed + 45)),
       waitTick(recovered, reconnected.confirmed + 45),
     ]);
     await recovered.keyboard.up("w");
     await recovered.keyboard.up("x");
+    const replay = await recovered.evaluate(() => ({
+      restores: globalThis.testRestoreTicks,
+      head: globalThis.testHandoffHead,
+      depth: globalThis.testReconnectDepth,
+    }));
+    if (combat)
+      assert(
+        replay.restores.filter((tick) => tick >= replay.head && tick <= replay.head + replay.depth)
+          .length >= 2,
+        JSON.stringify(replay),
+      );
     const presentation = await recovered.evaluate(() => ({
       ticks: globalThis.testPresentationTicks,
       sounds: tm4Port.testMixerStarts,
@@ -271,6 +348,12 @@ target.searchParams.set("match", endpoint);
     console.log(
       "PASS live snapshot reconnect",
       JSON.stringify({
+        players,
+        combat,
+        replay,
+        restoredProjectiles: await recovered.evaluate(() => globalThis.testRestoredProjectiles),
+        resumeSlot,
+        survivors: await Promise.all(survivors.map(confirmed)),
         dropTick,
         snapshotTick: reconnected.diagnostics.snapshotTick,
         snapshotBytes: reconnected.diagnostics.snapshotBytes,
@@ -282,6 +365,9 @@ target.searchParams.set("match", endpoint);
         survivor: await confirmed(survivor),
       }),
     );
+  } catch (error) {
+    console.error("RECONNECT FAILURE", error);
+    throw error;
   } finally {
     await browser.close();
   }
