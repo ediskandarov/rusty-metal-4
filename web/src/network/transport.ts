@@ -8,7 +8,7 @@ interface RustClient {
   send(json: string): void;
   update(): string;
   diagnostics(): string;
-  prepare_prediction(players: number): void;
+  prepare_prediction(players: number, resuming: boolean): void;
   prediction_clock(): number;
   begin_prediction(
     anchor: number,
@@ -82,7 +82,8 @@ export async function connectNetwork(endpoint: string) {
       }),
       pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
     }),
-    preparePrediction: (players: number) => client.prepare_prediction(players),
+    preparePrediction: (players: number, resuming: boolean) =>
+      client.prepare_prediction(players, resuming),
     predictionClock: () => client.prediction_clock(),
     beginPrediction: (
       anchor: number,

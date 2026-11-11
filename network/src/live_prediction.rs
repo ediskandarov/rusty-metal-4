@@ -58,6 +58,7 @@ struct Session {
 pub struct LivePrediction {
     pub expected_slots: Option<u8>,
     session: Option<Session>,
+    resume_preparing: bool,
     resume_warmup: bool,
     pending_resume_rollback: Option<Tick>,
     held: Input,
@@ -87,6 +88,8 @@ impl LivePrediction {
             "windowWaits": self.window_waits,
             "waitingForInput": wait.is_waiting(),
             "acceptedDepth": wait.prediction_depth(),
+            "confirmedNativeTick": wait.confirmed_tick().map(|tick| tick.0),
+            "resumePreparing": self.resume_preparing,
             "replayed": self.replayed,
             "maxDepth": self.depth,
             "historyBytes": self.bytes,
@@ -230,8 +233,23 @@ fn reject_clock_shift(shift: On<LocalTimelineShift>, mut state: ResMut<LivePredi
     }
 }
 
-pub fn prepare(world: &mut World, slots: u8) {
-    world.resource_mut::<LivePrediction>().expected_slots = Some(slots);
+pub fn prepare(world: &mut World, slots: u8, resuming: bool) {
+    {
+        let mut state = world.resource_mut::<LivePrediction>();
+        state.expected_slots = Some(slots);
+        state.resume_preparing = resuming;
+    }
+    if resuming {
+        // Lightyear drains rebroadcast input without a manager. Receive real
+        // history during transfer, but do not enable rollback before C exists.
+        let mut manager = PredictionManager::default();
+        manager.rollback_policy = RollbackPolicy {
+            state: RollbackMode::Disabled,
+            input: RollbackMode::Disabled,
+            max_rollback_ticks: PREDICTION_DEPTH,
+        };
+        world.insert_resource(manager);
+    }
     world.insert_resource(InputTimelineConfig::new(
         SyncConfig {
             // A whole-tick jump would move already accepted input out of the C epoch.
@@ -407,6 +425,7 @@ fn start_at(
     ));
     let mut state = world.resource_mut::<LivePrediction>();
     state.session = Some(session);
+    state.resume_preparing = false;
     state.sequence = sequence;
     state.head = head;
     state.confirmed = head;
@@ -566,30 +585,44 @@ fn step_world(
 fn update_prediction_wait(
     mut state: ResMut<LivePrediction>,
     timeline: Res<LocalTimeline>,
-    slots: Query<(&ControllerIdentity, &NativeBuffer<Input>)>,
+    slots_query: Query<(&ControllerIdentity, &NativeBuffer<Input>)>,
     mut wait: ResMut<PredictionWindowWait>,
 ) {
     let tick = timeline.tick();
-    let Some(session) = state.session else {
+    let (slots, anchor) = if let Some(session) = state.session {
+        if tick <= session.anchor {
+            return;
+        }
+        (session.slots, Some(session.anchor))
+    } else if state.resume_preparing {
+        let Some(slots) = state.expected_slots else {
+            return;
+        };
+        (slots, None)
+    } else {
         return;
     };
-    if tick <= session.anchor || state.restoring || state.error.is_some() {
+    if state.restoring || state.error.is_some() {
         return;
     }
     let mut count = 0;
-    let frontier = slots
+    let mut complete = true;
+    let mut frontier = None;
+    for (_, buffer) in slots_query
         .iter()
-        .filter(|(identity, _)| identity.slot < session.slots)
-        .map(|(_, buffer)| {
-            count += 1;
-            buffer.last_remote_tick.unwrap_or(session.anchor)
-        })
-        .reduce(|a, b| if a - b <= 0 { a } else { b });
-    let frontier = if count == session.slots {
-        frontier
-    } else {
-        Some(session.anchor)
-    };
+        .filter(|(identity, _)| identity.slot < slots)
+    {
+        count += 1;
+        if let Some(last) = buffer.last_remote_tick.or(anchor) {
+            frontier =
+                Some(frontier.map_or(last, |old: Tick| if old - last <= 0 { old } else { last }));
+        } else {
+            complete = false;
+        }
+    }
+    if count != slots || !complete {
+        frontier = anchor;
+    }
     if wait.update(tick, frontier, PREDICTION_DEPTH) && wait.is_waiting() {
         state.window_waits += 1;
     }

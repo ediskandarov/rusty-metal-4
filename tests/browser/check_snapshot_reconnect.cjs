@@ -12,6 +12,15 @@ const height = Number(process.env.TM4_ROSTER_HEIGHT ?? 800);
 assert(Number.isInteger(players) && players >= 2 && players <= 8);
 assert(Number.isInteger(resumeSlot) && resumeSlot >= 0 && resumeSlot < players);
 const combat = process.env.TM4_RESUME_COMBAT === "1";
+const allConditioned = process.env.TM4_RESUME_ALL_CONDITIONED === "1";
+const retryCycles = Number(process.env.TM4_RESUME_RETRY_CYCLES ?? 1);
+assert(Number.isInteger(retryCycles) && retryCycles >= 1 && retryCycles <= 3);
+const offerHoldMs = Number(process.env.TM4_RESUME_OFFER_HOLD_MS ?? 0);
+assert(Number.isInteger(offerHoldMs) && offerHoldMs >= 0 && offerHoldMs <= 2000);
+const holdOffers = Number(process.env.TM4_RESUME_HOLD_OFFERS ?? 1);
+assert(Number.isInteger(holdOffers) && holdOffers >= 1 && holdOffers <= 3);
+const expectExhaustion = process.env.TM4_RESUME_EXPECT_EXHAUSTION === "1";
+assert(!expectExhaustion || (offerHoldMs >= 400 && holdOffers === 3));
 const exactWindow = process.env.TM4_RESUME_EXACT_WINDOW === "1";
 assert(endpoint && Number.isInteger(prelude) && prelude >= 120);
 const credentialKey = "tm4.resume." + endpoint;
@@ -57,17 +66,24 @@ target.searchParams.set("match", endpoint);
         const response = await route.fetch();
         const hook = `
           const savedSend = NetworkClient.prototype.send;
-          if (${JSON.stringify(mode)} === "incompatible") {
-            NetworkClient.prototype.send = function(raw) {
-              const request = JSON.parse(raw);
-              if (request.type === "resume") request.compatibility.build = "0".repeat(64);
-              return savedSend.call(this, JSON.stringify(request));
-            };
-          }
+          NetworkClient.prototype.send = function(raw) {
+            const request = JSON.parse(raw);
+            if (${JSON.stringify(mode)} === "incompatible" && request.type === "resume")
+              request.compatibility.build = "0".repeat(64);
+            if (request.type === "resume_clock") {
+              const clocks = globalThis.testResumeClocks ||= [];
+              if (clocks.length < 4) clocks.push({ ...request, native: this.prediction_clock(),
+                applied: globalThis.tm4Port.netMatch.tick, time: performance.now() });
+            }
+            return savedSend.call(this, JSON.stringify(request));
+          };
           const savedUpdate = NetworkClient.prototype.update;
           let conditioned = false;
           let observedBridge;
           let handoff;
+          let heldOffer;
+          let heldUntil;
+          let heldOffers = 0;
           const local = new Map();
           NetworkClient.prototype.update = function() {
             const bridge = globalThis.tm4LivePrediction;
@@ -94,7 +110,7 @@ target.searchParams.set("match", endpoint);
                 return result;
               };
             }
-            if (${JSON.stringify(mode)} && !conditioned && this.connected()) {
+            if ((${JSON.stringify(mode)} || ${JSON.stringify(allConditioned)}) && !conditioned && this.connected()) {
               this.condition(72, 12);
               conditioned = true;
             }
@@ -111,8 +127,26 @@ target.searchParams.set("match", endpoint);
                 }
               }
             }
+            if (${JSON.stringify(offerHoldMs)} > 0 && ${JSON.stringify(mode)} === "delay") {
+              const index = messages.findIndex(({type}) => type === "resume_live");
+              if (heldOffers < ${JSON.stringify(holdOffers)} && index >= 0) {
+                [heldOffer] = messages.splice(index, 1);
+                heldUntil = performance.now() + ${JSON.stringify(offerHoldMs)};
+                heldOffers++;
+              }
+              if (heldOffer && performance.now() >= heldUntil) {
+                messages.push(heldOffer);
+                heldOffer = undefined;
+              }
+            }
             for (const message of messages) {
               if (message.type === "resume_live") {
+                const offers = globalThis.testResumeOffers ||= [];
+                if (offers.length < 4) offers.push({ head: message.head,
+                  native: this.prediction_clock(), applied: globalThis.tm4Port.netMatch.tick,
+                  depth: (this.prediction_clock() - message.anchor - message.head) | 0,
+                  link: JSON.parse(this.diagnostics()),
+                  time: performance.now() });
                 globalThis.testHandoffHead = message.head;
                 globalThis.testReconnectDepth =
                   (this.prediction_clock() - message.anchor - message.head) | 0;
@@ -122,8 +156,16 @@ target.searchParams.set("match", endpoint);
                 const port = globalThis.tm4Port;
                 const game = globalThis.Module;
                 port.testMixerStarts = [];
+                const endReplay = game._WebNetEndReplay;
+                globalThis.testReplayEnds = 0;
+                game._WebNetEndReplay = () => {
+                  ++globalThis.testReplayEnds;
+                  return endReplay();
+                };
                 const restore = game._WebNetBeginPortableReplay;
+                globalThis.testPortableRestores = 0;
                 game._WebNetBeginPortableReplay = () => {
+                  ++globalThis.testPortableRestores;
                   const result = restore();
                   if (result) {
                     game.ccall("WebTestSnapshotObjects", null, ["string"], ["weaponProjectile"]);
@@ -228,24 +270,63 @@ target.searchParams.set("match", endpoint);
     await first.close();
     await waitTick(survivor, dropTick + 30);
 
+    const progressStart = await survivor.evaluate(() => ({
+      tick: tm4Port.netConfirmedTick,
+      time: performance.now(),
+    }));
     const incompatible = await open(credential, "incompatible");
     await incompatible.locator("#status").filter({ hasText: "cannot resume" }).waitFor();
     await incompatible.close();
 
-    const interrupted = await open(credential, "delay");
-    await interrupted.locator("html[data-snapshot]").waitFor();
-    await interrupted.close();
-    await waitTick(survivor, dropTick + 70);
+    for (let cycle = 0; cycle < retryCycles; cycle++) {
+      const interrupted = await open(credential, "delay");
+      await interrupted.locator("html[data-snapshot]").waitFor();
+      await interrupted.close();
+      await waitTick(survivor, (await confirmed(survivor)) + 20);
 
-    const malformed = await open(credential, "corrupt");
-    await malformed
-      .locator("#status")
-      .filter({ hasText: "Corrupt reconnect snapshot" })
-      .waitFor({ timeout: 20_000 });
-    await malformed.close();
-    const beforeResume = await confirmed(survivor);
-    await waitTick(survivor, beforeResume + 20);
-    const recovered = await open(credential, "delay");
+      const malformed = await open(credential, "corrupt");
+      await malformed
+        .locator("#status")
+        .filter({ hasText: "Corrupt reconnect snapshot" })
+        .waitFor({ timeout: 20_000 });
+      await malformed.close();
+      await waitTick(survivor, (await confirmed(survivor)) + 20);
+    }
+    let steering = combat;
+    const steer = combat
+      ? (async () => {
+          let previous;
+          let left = false;
+          while (steering) {
+            if (previous) await survivor.keyboard.up(previous);
+            previous = left ? "ArrowLeft" : "ArrowRight";
+            left = !left;
+            await survivor.keyboard.down(previous);
+            await new Promise((resolve) => setTimeout(resolve, 40));
+          }
+          if (previous) await survivor.keyboard.up(previous);
+        })()
+      : undefined;
+    void steer?.catch((error) => errors.push(error.message));
+    let exhausted;
+    if (expectExhaustion) {
+      const late = await open(credential, "delay");
+      await late
+        .locator('#status[data-match-state="error"]')
+        .filter({ hasText: "could not keep up" })
+        .waitFor({ timeout: 30000 });
+      exhausted = await late.evaluate(() => ({
+        retargets: tm4Port.netDiagnostics.resumeRetargets,
+        offers: globalThis.testResumeOffers,
+        ends: globalThis.testReplayEnds,
+      }));
+      assert.equal(exhausted.retargets, 2);
+      assert.equal(exhausted.offers.length, 3);
+      assert.equal(exhausted.ends, 1);
+      await late.close();
+      await waitTick(survivor, (await confirmed(survivor)) + 60);
+    }
+    const recovered = await open(credential, expectExhaustion ? "retry" : "delay");
     await recovered
       .waitForFunction(
         () => {
@@ -276,6 +357,8 @@ target.searchParams.set("match", endpoint);
         "HANDOFF FAILURE",
         await recovered.evaluate(() => ({
           depth: globalThis.testReconnectDepth,
+          clocks: globalThis.testResumeClocks,
+          offers: globalThis.testResumeOffers,
           diagnostics: tm4Port.netDiagnostics,
         })),
       );
@@ -299,6 +382,7 @@ target.searchParams.set("match", endpoint);
     }
     console.log("HANDOFF", JSON.stringify(reconnected));
     await recovered.locator("canvas").focus();
+    const pressedAt = await recovered.evaluate(() => performance.now());
     await recovered.keyboard.down("x");
     await recovered.keyboard.down("w");
     await recovered.waitForFunction(
@@ -309,17 +393,40 @@ target.searchParams.set("match", endpoint);
       { timeout: 5_000 },
     );
     assert((await status(recovered)).includes("Live prediction"), await status(recovered));
+    const responseMs = await recovered.evaluate(
+      (pressedAt) => performance.now() - pressedAt,
+      pressedAt,
+    );
+    assert(responseMs < 100, "Resumed local input response: " + responseMs);
     await Promise.all([
       ...survivors.map((page) => waitTick(page, reconnected.confirmed + 45)),
       waitTick(recovered, reconnected.confirmed + 45),
     ]);
     await recovered.keyboard.up("w");
     await recovered.keyboard.up("x");
+    steering = false;
+    await steer;
     const replay = await recovered.evaluate(() => ({
       restores: globalThis.testRestoreTicks,
       head: globalThis.testHandoffHead,
       depth: globalThis.testReconnectDepth,
+      ends: globalThis.testReplayEnds,
+      portableRestores: globalThis.testPortableRestores,
+      offers: globalThis.testResumeOffers,
+      clocks: globalThis.testResumeClocks,
     }));
+    assert.equal(replay.ends, 1);
+    assert.equal(replay.portableRestores, 1);
+    for (const offer of replay.offers) {
+      assert.equal(offer.link.prediction.resumePreparing, true);
+      assert.notEqual(offer.link.prediction.confirmedNativeTick, null);
+      assert(offer.link.prediction.acceptedDepth <= 12);
+      assert.equal(offer.link.prediction.historyBytes, 0);
+      assert.equal(offer.link.prediction.rollbacks, 0);
+    }
+    assert((reconnected.diagnostics.resumeRetargets ?? 0) <= 2);
+    if (offerHoldMs >= 400 && !expectExhaustion)
+      assert((reconnected.diagnostics.resumeRetargets ?? 0) > 0);
     if (combat)
       assert(
         replay.restores.filter((tick) => tick >= replay.head && tick <= replay.head + replay.depth)
@@ -344,12 +451,37 @@ target.searchParams.set("match", endpoint);
     );
     assert(common.length >= 20);
     for (const [tick, sections] of common) assert.deepEqual(sections, source.get(tick));
+    const progressEnd = await survivor.evaluate(() => ({
+      tick: tm4Port.netConfirmedTick,
+      time: performance.now(),
+    }));
+    const receivedAuthorityHz =
+      ((progressEnd.tick - progressStart.tick) * 1000) / (progressEnd.time - progressStart.time);
+    assert(receivedAuthorityHz >= 28 && receivedAuthorityHz <= 32, receivedAuthorityHz);
+    const survivorHistories = await Promise.all(
+      survivors.map((page) =>
+        page.evaluate(() => ({
+          confirmed: tm4Port.netConfirmedTick,
+          prediction: tm4Port.netDiagnostics.transport.prediction,
+        })),
+      ),
+    );
+    for (const state of [reconnected.diagnostics.transport, ...survivorHistories]) {
+      assert(state.prediction.maxDepth <= 12);
+      assert(state.prediction.peakBytes <= 8 * 1024 * 1024);
+    }
     assert.deepEqual(errors, []);
     console.log(
       "PASS live snapshot reconnect",
       JSON.stringify({
         players,
         combat,
+        retryCycles,
+        allConditioned,
+        responseMs,
+        receivedAuthorityHz,
+        survivorHistories,
+        exhausted,
         replay,
         restoredProjectiles: await recovered.evaluate(() => globalThis.testRestoredProjectiles),
         resumeSlot,

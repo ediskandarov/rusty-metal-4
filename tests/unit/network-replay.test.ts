@@ -38,7 +38,7 @@ function setup() {
   return { abort, counts, open };
 }
 
-function chunk(start: number, ticks: number) {
+function chunk(start: number, ticks: number, target = head) {
   const rowBytes = 43;
   const bytes = new Uint8Array(ticks * rowBytes);
   const data = new DataView(bytes.buffer);
@@ -49,7 +49,7 @@ function chunk(start: number, ticks: number) {
     type: "catchup_frames" as const,
     attempt: 1,
     start,
-    head,
+    head: target,
     data: Array.from(bytes),
     checksum: checksum >>> 0,
   };
@@ -97,4 +97,20 @@ test("a checkpoint already at the agreed head requires no replay", () => {
   const { open, counts } = setup();
   open(snapshot, snapshot).finish(snapshot);
   expect(counts).toEqual({ steps: 0, ends: 1 });
+});
+
+test("retarget extends verified replay without ending or resetting its original tick budget", async () => {
+  const { open, counts } = setup();
+  const replay = open();
+  expect(() => replay.extend(head, head + 13, head)).toThrow("Invalid");
+  await replay.accept(chunk(snapshot, 64));
+  await replay.accept(chunk(snapshot + 64, 3));
+  expect(() => replay.extend(head, head + 13, 0)).toThrow("disagrees");
+  expect(() => replay.extend(head, snapshot + 241, head)).toThrow("Invalid");
+  replay.extend(head, head + 13, head);
+  expect(counts.ends).toBe(0);
+  expect(() => replay.finish(head)).toThrow("Incomplete");
+  await replay.accept(chunk(head, 13, head + 13));
+  replay.finish(head + 13);
+  expect(counts).toEqual({ steps: 80, ends: 1 });
 });

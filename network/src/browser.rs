@@ -142,8 +142,8 @@ impl NetworkClient {
         Ok(())
     }
 
-    pub fn prepare_prediction(&mut self, slots: u8) {
-        live_prediction::prepare(self.app.world_mut(), slots);
+    pub fn prepare_prediction(&mut self, slots: u8, resuming: bool) {
+        live_prediction::prepare(self.app.world_mut(), slots, resuming);
     }
 
     pub fn prediction_clock(&self) -> u32 {

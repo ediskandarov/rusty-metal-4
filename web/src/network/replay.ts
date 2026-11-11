@@ -33,7 +33,8 @@ export class SnapshotReplay {
   readonly #signal: AbortSignal;
   readonly #players: number;
   readonly #width: number;
-  readonly #head: number;
+  readonly #start: number;
+  #head: number;
   #applied: number;
   #ended = false;
   #applying = false;
@@ -63,6 +64,7 @@ export class SnapshotReplay {
     this.#signal = signal;
     this.#players = players;
     this.#width = framePrefix + inputBytes * players;
+    this.#start = start;
     this.#head = head;
     this.#applied = start;
     this.#verify(start, digest);
@@ -93,6 +95,21 @@ export class SnapshotReplay {
     return this.#apply(data).finally(() => {
       this.#applying = false;
     });
+  }
+
+  extend(start: number, head: number, digest: number) {
+    if (
+      this.#ended ||
+      this.#applying ||
+      start !== this.#applied ||
+      start !== this.#head ||
+      !integer(head, 0xffffffff) ||
+      head <= start ||
+      head - this.#start > maxResumeTicks
+    )
+      throw new Error("Invalid reconnect retarget boundary");
+    this.#verify(start, digest);
+    this.#head = head;
   }
 
   finish(tick: number) {

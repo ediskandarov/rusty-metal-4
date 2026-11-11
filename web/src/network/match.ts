@@ -210,7 +210,7 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           if (prediction || slot < 0 || slot >= message.players)
             throw new Error("Invalid live prediction setup");
           prediction = attachLivePrediction(engine, port);
-          socket.preparePrediction(message.players);
+          socket.preparePrediction(message.players, message.type === "resume_prepare");
           if (!configureMatch(engine, message, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");
           players = message.players;
@@ -317,23 +317,26 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
         case "resume_catchup":
           if (
             !recovery ||
-            recovery.replay ||
             !resume ||
             message.attempt !== resume.header.attempt ||
-            message.start !== resume.header.tick ||
             message.head !== resume.target ||
-            message.digest !== resume.header.state.digest
+            message.start !== (recovery.replay ? port.netMatch?.tick : resume.header.tick) ||
+            message.digest !==
+              (recovery.replay ? port.netMatch?.digest : resume.header.state.digest)
           )
             throw new Error("Invalid reconnect catch-up boundary");
-          recovery.replay = new SnapshotReplay(
-            message.start,
-            message.head,
-            message.digest,
-            players,
-            engine,
-            port,
-            recovery.abort.signal,
-          );
+          if (recovery.replay) recovery.replay.extend(message.start, message.head, message.digest);
+          else {
+            recovery.replay = new SnapshotReplay(
+              message.start,
+              message.head,
+              message.digest,
+              players,
+              engine,
+              port,
+              recovery.abort.signal,
+            );
+          }
           armResumeTimeout();
           break;
         case "resume_live": {
@@ -361,6 +364,16 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
             }
             active.abort.signal.throwIfAborted();
             if (head !== port.netMatch?.tick) throw new Error("Incomplete reconnect replay");
+            const depth = (socket.predictionClock() - anchor - head) | 0;
+            if (depth > controller.depth) {
+              const retargets = diagnostics.resumeRetargets ?? 0;
+              if (retargets >= 2)
+                throw new Error("Reconnect handoff could not keep up with the native clock");
+              diagnostics.resumeRetargets = retargets + 1;
+              active.offered = false;
+              await targetResumeClock(resume!, active);
+              return;
+            }
             replay.finish(head);
             socket.beginResumedPrediction(
               anchor,

@@ -301,22 +301,11 @@ impl Match {
             if attempt.pending_frame.is_some() || attempt.offered {
                 continue;
             }
-            if self.tick.saturating_sub(target) > u32::from(game_protocol::PREDICTION_DEPTH) {
-                attempt.failed = true;
-                send(
-                    links,
-                    entity,
-                    &Message::Error {
-                        message: "The reconnect handoff expired. Retry this match.".into(),
-                    },
-                );
-                continue;
-            }
             if attempt.sent_frames < target {
-                let end = (attempt.sent_frames + REPLAY_CHUNK_TICKS)
-                    .min(target)
-                    .min(self.tick);
-                if end <= attempt.sent_frames {
+                let end = (attempt.sent_frames + REPLAY_CHUNK_TICKS).min(target);
+                // The last block waits for its actual frontier instead of turning
+                // a future target into several serial one-tick exchanges.
+                if end > self.tick || end <= attempt.sent_frames {
                     continue;
                 }
                 let Some(data) = self
@@ -428,10 +417,9 @@ impl Match {
             if let Some(attempt) = player.resume.as_mut() {
                 if attempt.target.is_some_and(|target| tick >= target) {
                     if attempt.frames.len() == usize::from(game_protocol::PREDICTION_DEPTH) {
-                        attempt.failed = true;
-                    } else {
-                        attempt.frames.push_back(message.clone());
+                        attempt.frames.pop_front();
                     }
+                    attempt.frames.push_back(message.clone());
                 }
             } else if player.receives_live()
                 && let Some(entity) = player.entity
@@ -573,33 +561,32 @@ impl Match {
                 if let Some(attempt) = self.players[slot.unwrap()].resume.as_mut()
                     && attempt.id == id
                     && !attempt.failed
-                    && attempt.target.is_none()
-                    && let Some(snapshot) = attempt
-                        .requested
-                        .as_ref()
-                        .filter(|snapshot| snapshot.ready())
                 {
-                    if snapshot.acknowledged != snapshot.total
-                        || target < snapshot.tick
-                        || target - snapshot.tick > game_protocol::SNAPSHOT_MAX_CATCHUP
-                        || target > self.tick + 60
-                        || self.tick.saturating_sub(target) > 12
-                    {
-                        attempt.failed = true;
+                    if let Some(start) = attempt.set_target(target, self.tick) {
+                        let digest = if start == attempt.requested.as_ref().unwrap().tick {
+                            Some(attempt.requested.as_ref().unwrap().state.digest)
+                        } else {
+                            self.journal
+                                .as_mut()
+                                .and_then(|journal| journal.range(start - 1, start).ok())
+                                .map(|row| u32::from_le_bytes(row[..4].try_into().unwrap()))
+                        };
+                        if let Some(digest) = digest {
+                            send(
+                                links,
+                                entity,
+                                &Message::ResumeCatchup {
+                                    attempt: id,
+                                    start,
+                                    head: target,
+                                    digest,
+                                },
+                            );
+                        } else {
+                            attempt.failed = true;
+                        }
                     } else {
-                        attempt.target = Some(target);
-                        attempt.sent_frames = snapshot.tick;
-                        attempt.progress = Instant::now();
-                        send(
-                            links,
-                            entity,
-                            &Message::ResumeCatchup {
-                                attempt: id,
-                                start: snapshot.tick,
-                                head: target,
-                                digest: snapshot.state.digest,
-                            },
-                        );
+                        attempt.failed = true;
                     }
                 }
             }
@@ -607,11 +594,14 @@ impl Match {
                 let player = &mut self.players[slot.unwrap()];
                 if let Some(attempt) = &player.resume
                     && attempt.id == id
-                    && attempt.offered
-                    && attempt.target == Some(head)
-                    && attempt.pending_frame.is_none()
-                    && !attempt.failed
                 {
+                    if !attempt.can_activate(head, self.tick) {
+                        player.resume.as_mut().unwrap().failed = true;
+                        send(links, entity, &Message::Error {
+                            message: "The reconnect acknowledgement exceeded its live input history. Retry this match.".into(),
+                        });
+                        return;
+                    }
                     let attempt = player.resume.take().unwrap();
                     player.progress_tick = head;
                     send(links, entity, &Message::ResumeActive { head });

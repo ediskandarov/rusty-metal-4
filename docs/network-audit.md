@@ -151,12 +151,10 @@ Portable session roots support 2–8 active human participants without mods or
 eliminated players. Capture records the actual count; restore checks distinct
 player/car/camera bindings and the car-order permutation before committing.
 Fresh-instance and in-place replay checks cover 3, 4 and 8 participants on
-Construction Yard. With the previous Chromium host, live reconnect covered the
-fourth slot with three survivors; eight-player capture and catch-up matched, but
-returning control failed the unchanged 12-tick handoff window. Embedded-host
-default two-player reconnect passed, while conditioned combat reconnect refused
-over-window handoffs with two and four players. Returning control under those
-conditions remains unverified.
+Construction Yard. Rendered Wasmtime reconnect covers two, four and eight active
+players with combat, native warmup corrections and independent same-tick checks.
+The eight-player case conditions every client at 72±12 ms, repeats interrupted
+and corrupt transfers, and keeps seven survivors advancing during recovery.
 All 22 stock cars, including the nine locked cars, were verified individually on
 Construction Yard. All 16 original maps were verified
 with Orbital and Pizza Boy. The checks include live weapon and grab state,
@@ -179,7 +177,20 @@ the applied-input history, including reconnect warmup before local commands exis
 
 The authority captures one completed tick and continues stepping while the server
 forwards the checkpoint in acknowledged 8 KiB chunks. An attempt allows up to
-256 KiB of snapshot data, 240 accepted catch-up ticks and 12 seconds. At handoff
+256 KiB of snapshot data, 240 accepted catch-up ticks and 12 seconds. The final
+bounded block waits until its frontier exists, avoiding serial partial-block
+round trips. Resume preparation installs Lightyear's prediction manager with
+rollback disabled so accepted native input is retained instead of drained.
+The existing `PredictionWindowWait` also bounds this phase against the actual
+input frontier; C prediction and checkpoint history remain inactive.
+
+If an offer arrives beyond the 12-tick rollback window, the client may retarget
+at most twice using the current native timeline. Catch-up extends from the
+already verified C head without restoring again or ending replay. Retargeting
+preserves the original tick and time budgets. The server retains only the latest
+12 complete confirmation frames and requires contiguous coverage before granting
+live control. An exhausted attempt closes; a fresh retry preserves the participant
+identity and leaves survivors running. At handoff,
 Lightyear's `StateRollbackMetadata` requests a bounded rewind of its synchronized
 timeline to the imported checkpoint. Its fixed schedule brings the C world to
 the predicted head, then input mismatches use ordinary Lightyear rollback.
@@ -329,7 +340,12 @@ Run `node tests/browser/check_snapshot_reconnect.cjs` with a fresh embedded
 server's endpoint. Set `TM4_MATCH_PLAYERS` to match its roster size and
 `TM4_RESUME_SLOT` to the zero-based participant to reconnect. Set
 `TM4_RESUME_COMBAT=1` to exercise a second native rollback through the imported
-warmup interval while other players fire. Set `TM4_RESUME_TEST_TICKS=3600` for a
+warmup interval while other players fire and a survivor changes real steering
+input. `TM4_RESUME_ALL_CONDITIONED=1` applies 72±12 ms receive conditioning to every
+client. `TM4_RESUME_RETRY_CYCLES=2` repeats interrupted/corrupt attempts.
+`TM4_RESUME_OFFER_HOLD_MS=400` deliberately ages the first handoff offer;
+combine `TM4_RESUME_HOLD_OFFERS=3 TM4_RESUME_EXPECT_EXHAUSTION=1` to exhaust its
+retarget budget, then verify a fresh retry. Set `TM4_RESUME_TEST_TICKS=3600` for a
 two-minute live prelude or `TM4_RESUME_EXACT_WINDOW=1` to test handoff at the
 12-tick prediction limit.
 

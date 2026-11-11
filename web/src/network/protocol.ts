@@ -90,6 +90,7 @@ export interface NetworkPort {
     replayBytes?: number;
     replayChunks?: number;
     replayMs?: number;
+    resumeRetargets?: number;
     transport: {
       rttMs: number;
       jitterMs: number;
