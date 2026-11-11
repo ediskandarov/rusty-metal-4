@@ -9,6 +9,8 @@ function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
 const form = element("provision", HTMLFormElement);
 const secret = element("secret", HTMLInputElement);
 const disc = element("disc", HTMLInputElement);
+const playerCount = element("player-count", HTMLSelectElement);
+let playerCountInitialized = false;
 const prepare = element("prepare", HTMLButtonElement);
 const progress = element("progress", HTMLParagraphElement);
 const status = element("status", HTMLParagraphElement);
@@ -48,6 +50,12 @@ async function refresh() {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = (await response.json()) as Status;
+    const editable = state.phase === "setup" || state.phase === "failed";
+    if (!playerCountInitialized || !editable) {
+      playerCount.value = String(state.players);
+      playerCountInitialized = true;
+    }
+    playerCount.disabled = busy || !editable;
     status.textContent = state.message;
     players.textContent =
       state.phase === "setup" || state.phase === "failed"
@@ -64,6 +72,7 @@ async function refresh() {
     status.textContent = `Cannot reach the native server. ${String(error)}`;
     join.hidden = true;
     prepare.disabled = true;
+    playerCount.disabled = true;
   }
 }
 
@@ -74,7 +83,9 @@ form.addEventListener("submit", (event) => {
 });
 
 async function provision() {
+  const selectedPlayers = Number(playerCount.value);
   busy = true;
+  playerCount.disabled = true;
   prepare.disabled = true;
   disc.disabled = true;
   secret.disabled = true;
@@ -92,7 +103,11 @@ async function provision() {
       progress.textContent = `Uploading validated server resources (${i + 1}/${required.length})…`;
       await api(`/api/resources${id}`, { method: "PUT", body: bytes });
     }
-    await api("/api/start", { method: "POST" });
+    await api("/api/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ players: selectedPlayers }),
+    });
     progress.textContent =
       "Upload complete. The native server is validating and preparing the match.";
     secret.value = "";

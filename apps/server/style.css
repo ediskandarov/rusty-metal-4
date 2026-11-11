@@ -48,7 +48,8 @@ label {
   display: block;
   margin: 20px 0;
 }
-input {
+input,
+select {
   display: block;
   box-sizing: border-box;
   max-width: 100%;

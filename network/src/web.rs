@@ -32,6 +32,17 @@ use tokio::{
 use tower::{ServiceExt, limit::ConcurrencyLimitLayer};
 use tower_http::services::ServeDir;
 
+use tm4_network::protocol::MAX_PLAYERS;
+#[derive(Debug, PartialEq)]
+pub struct MatchSetup {
+    pub resources: PathBuf,
+    pub players: usize,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StartOptions {
+    players: usize,
+}
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Serialize)]
@@ -69,7 +80,7 @@ pub struct Launcher {
     pub wasm: PathBuf,
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
-    requests: Receiver<PathBuf>,
+    requests: Receiver<MatchSetup>,
     _private: PrivateDirectory,
     http: Option<thread::JoinHandle<()>>,
 }
@@ -168,7 +179,7 @@ impl Launcher {
             http: Some(http),
         })
     }
-    pub fn wait_for_resources(&self) -> Option<PathBuf> {
+    pub fn wait_for_setup(&self) -> Option<MatchSetup> {
         while !self.stopped.load(Ordering::Relaxed) {
             match self.requests.recv_timeout(Duration::from_millis(100)) {
                 Ok(path) => return Some(path),
@@ -235,7 +246,7 @@ struct Service {
     secret: String,
     resources: BTreeMap<String, Resource>,
     status: Arc<Mutex<Status>>,
-    sender: Sender<PathBuf>,
+    sender: Sender<MatchSetup>,
     mutation: Arc<AsyncMutex<()>>,
 }
 
@@ -371,20 +382,35 @@ async fn upload(State(service): State<Arc<Service>>, request: Request) -> ApiRes
 async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
     let _guard = service.mutation.lock().await;
     require_setup(&service)?;
-    let bytes = to_bytes(request.into_body(), 0).await.map_err(invalid)?;
-    if !bytes.is_empty() {
-        return Err(invalid("Start request must be empty"));
+    let bytes = to_bytes(request.into_body(), 256).await.map_err(invalid)?;
+    let players = if bytes.is_empty() {
+        service.status.lock().unwrap().players
+    } else {
+        serde_json::from_slice::<StartOptions>(&bytes)
+            .map_err(invalid)?
+            .players
+    };
+    if !(2..=MAX_PLAYERS).contains(&players) {
+        return Err(invalid("Expected a player count from 2 to 8"));
     }
     {
         let mut status = service.status.lock().unwrap();
         if status.uploaded != service.resources.len() + 1 {
             return Err(invalid("Upload all server resources before starting"));
         }
+        status.players = players;
         status.phase = "loading".into();
         status.message = "Validating resources and preparing the native simulator…".into();
     }
     // The existing main thread owns Wasmtime/Lightyear; HTTP only requests initialization.
-    if service.sender.send(service.private.clone()).is_err() {
+    if service
+        .sender
+        .send(MatchSetup {
+            resources: service.private.clone(),
+            players,
+        })
+        .is_err()
+    {
         let mut status = service.status.lock().unwrap();
         status.phase = "closed".into();
         status.message = "Native server is unavailable. Restart the server to try again.".into();
@@ -525,7 +551,7 @@ mod tests {
     struct Fixture {
         _directory: PrivateDirectory,
         service: Arc<Service>,
-        requests: Receiver<PathBuf>,
+        requests: Receiver<MatchSetup>,
     }
     impl Fixture {
         fn new() -> Self {
@@ -650,6 +676,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn browser_player_count_is_validated_and_carried_to_native_start() {
+        let fixture = Fixture::new();
+        fixture.provision().await;
+        for body in [
+            r#"{"players":1}"#,
+            r#"{"players":9}"#,
+            r#"{"players":2.5}"#,
+            r#"{"players":"4"}"#,
+            "{}",
+        ] {
+            assert_eq!(
+                fixture.request("POST", "/api/start", body).await.status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert_eq!(fixture.service.status.lock().unwrap().players, 2);
+            assert_eq!(fixture.service.status.lock().unwrap().phase, "setup");
+            assert!(fixture.requests.try_recv().is_err());
+        }
+        assert_eq!(
+            fixture
+                .request("POST", "/api/start", r#"{"players":8}"#)
+                .await
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(fixture.service.status.lock().unwrap().players, 8);
+        assert_eq!(fixture.requests.try_recv().unwrap().players, 8);
+        assert_eq!(
+            fixture
+                .request("POST", "/api/start", r#"{"players":3}"#)
+                .await
+                .status(),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(fixture.service.status.lock().unwrap().players, 8);
+    }
+    #[tokio::test]
     async fn invalid_and_partial_uploads_publish_nothing_and_can_retry() {
         let fixture = Fixture::new();
         let path = "/api/resources/DATA/MAIN.MR";
@@ -742,7 +805,10 @@ mod tests {
         assert_eq!(start.await.status(), StatusCode::ACCEPTED);
         assert_eq!(
             fixture.requests.try_recv().unwrap(),
-            fixture.service.private
+            MatchSetup {
+                resources: fixture.service.private.clone(),
+                players: 2
+            }
         );
         assert_eq!(
             fixture

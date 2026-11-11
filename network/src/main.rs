@@ -1092,20 +1092,21 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let simulator = if let Some(launcher) = &launcher {
+    let (count, simulator) = if let Some(launcher) = &launcher {
         loop {
-            let Some(resources) = launcher.wait_for_resources() else {
+            let Some(setup) = launcher.wait_for_setup() else {
                 return Ok(());
             };
-            match simulator::Simulator::from_paths(&launcher.wasm, &resources, &launcher.site) {
-                Ok(simulator) => break simulator,
+            match simulator::Simulator::from_paths(&launcher.wasm, &setup.resources, &launcher.site)
+            {
+                Ok(simulator) => break (setup.players, simulator),
                 Err(error) => {
                     launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
                 }
             }
         }
     } else {
-        simulator::Simulator::from_environment()?
+        (count, simulator::Simulator::from_environment()?)
     };
     if let Err(error) = run_match(count, addr, simulator, launcher.as_ref()) {
         if let Some(launcher) = &launcher {

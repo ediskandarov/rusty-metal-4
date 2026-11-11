@@ -18,7 +18,7 @@ const { chromium } = require("playwright");
     `build/network-native/${profile}/tm4-deathmatch-server${process.platform === "win32" ? ".exe" : ""}`,
   );
   let logs = "";
-  const server = Bun.spawn([executable, "--serve", "2"], {
+  const server = Bun.spawn([executable, "--serve", "4"], {
     env: {
       ...process.env,
       TM4_ADMIN_SECRET: secret,
@@ -95,6 +95,14 @@ const { chromium } = require("playwright");
     assert(await page.locator("#setup").evaluate((node) => node.open));
     assert(await page.locator("#join").isHidden());
     assert(await page.evaluate(() => crossOriginIsolated));
+    assert.equal(await page.locator("#player-count").inputValue(), "4");
+    await page.locator("#player-count").selectOption("2");
+    await page.waitForTimeout(1700);
+    assert.equal(
+      await page.locator("#player-count").inputValue(),
+      "2",
+      "Polling must preserve an unsent selection",
+    );
     if (process.env.TM4_DISC_DIR) {
       await page.locator("#secret").fill(secret);
       await page.locator("#disc").setInputFiles(process.env.TM4_DISC_DIR);
@@ -112,6 +120,8 @@ const { chromium } = require("playwright");
         409,
       );
       assert.equal((await request("/DATA/MAIN.MR")).status, 404);
+      assert.equal((await (await request("/api/status")).json()).players, 2);
+      assert(await page.locator("#player-count").isDisabled());
       const join = await page.locator("#join").getAttribute("href");
       const clients = await Promise.all([browser.newPage(), browser.newPage()]);
       const uploads = [];

@@ -25,7 +25,8 @@ rebuilds just the player against existing runtime artifacts in `build/<mode>/sit
 For the native web launcher, run `bun run build:server --mode dev` after a matching
 full build, then set `TM4_ADMIN_SECRET` to a private startup secret of at least 24
 characters and run `bun run server 2`. Open `http://127.0.0.1:8120/`, enter that
-secret in administrator setup, and select your disc folder. The browser extracts
+secret in administrator setup, select your disc folder and choose 2–8 players.
+The command-line count supplies the initial selection; preparing a match locks it. The browser extracts
 the required files; Rust checks exact stock sizes/hashes, validates the sector
 index and matching Wasm build, then opens the existing Lightyear match listener.
 Players open the player link and select their own local disc; their files are
