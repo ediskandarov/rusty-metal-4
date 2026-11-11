@@ -1,0 +1,11 @@
+diff --git a/src/modules/firing/fire_ring.c b/src/modules/firing/fire_ring.c
+--- a/src/modules/firing/fire_ring.c
++++ b/src/modules/firing/fire_ring.c
+@@ -171,7 +171,6 @@ void FireRingProcess(FireRing* ring)
+     SVECTOR* animation;
+     ring->radius += ring->radius_step_per_frame;
+     if (!ring->polygon && ring->radius > ring->maximum_radius) {
+-        MemFree(ring->particles);
+         ObjectDestroy(ring);
+         return;
+     }

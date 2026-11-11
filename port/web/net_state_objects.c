@@ -1,4 +1,5 @@
 #include "net_state_fields.h"
+#include "snapshot.h"
 #include "snapshot_types.h"
 #include "src/modules/anim/private.h"
 #include "src/modules/carprt/private.h"
@@ -68,7 +69,9 @@ static void bullet_state(NetStateOutput* hash, const Bullet* bullet)
 
 static int described_state(NetStateOutput* hash, const SnapshotType* type, const void* payload)
 {
-    u8 bytes[4096];
+    /* Owned arrays can grow beyond a small fixed stack buffer. Use the same
+     * capacity as portable snapshots so canonical hashing accepts their state. */
+    static u8 bytes[WebSnapshotMaxBytes];
     const u32 length = WebSnapshotFieldsCapture(type, payload, bytes, sizeof(bytes));
     if (!length)
         return 0;

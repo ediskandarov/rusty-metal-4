@@ -11,6 +11,7 @@
 #include "src/main/object/private.h"
 #include "src/modules/menu/private.h"
 #include "src/modules/car/private.h"
+#include "src/modules/firing/private.h"
 #include "src/modules/cars/c_crush/private.h"
 #include "src/modules/cars/shovel.h"
 #include "src/modules/levels/w_carni/private.h"
@@ -984,6 +985,69 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestIgniteGround(void)
     CopyVectorToShortVectorRoundedQ12(&point, &hit.position);
     InteractWithFlammableTerrainPoly(hit.polygon, &point);
     return 1;
+}
+
+/* Use the simulation allocator even though the diagnostic call is between ticks. */
+EMSCRIPTEN_KEEPALIVE int WebTestCreateFireRing(s32 terrain)
+{
+    Car* player = GameInfo.players[0].car;
+    if (!player || !WebNetMatchActive())
+        return 0;
+    WebCheckpointArenaSelect(1);
+    int result;
+    if (terrain)
+        result = WebTestIgniteGround();
+    else {
+        SVECTOR axis = { 0, ONE, 0, 0 };
+        result
+            = ObjectCreate("fireRing", 0, "fire", &player->position, 1536, 192, NULL, &axis, 4096)
+            != NULL;
+    }
+    WebCheckpointArenaSelect(0);
+    return result;
+}
+
+EMSCRIPTEN_KEEPALIVE void WebTestReadFireRings(void)
+{
+    EM_ASM({ tm4Port.testFireRings = []; });
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
+        for (Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next) {
+            if (strcmp(header->name, "fireRing"))
+                continue;
+            const FireRing* ring = ObjectGetPayload(header);
+            EM_ASM(
+                {
+                    tm4Port.testFireRings.push({
+                        serial : $0,
+                        address : $1,
+                        nameAddress : $2,
+                        particlesAddress : $3,
+                        polygonAddress : $4,
+                        particleCount : $5,
+                        divisions : $6,
+                        radius : $7,
+                        polygonIndex : $8,
+                        animations : []
+                    });
+                },
+                header->serial, ring, ring->animation_name, ring->particles, ring->polygon,
+                ring->particle_count, ring->angular_divisions, ring->radius,
+                ring->polygon ? ring->polygon - WorldCollisionPolygons + 1 : 0);
+            for (s32 i = 0; i < ring->particle_count; ++i) {
+                const Anim* animation = ring->particles[i].animation;
+                const Tm4ObjectHeader* child = animation && ObjectValidObject((void*)animation)
+                    ? ObjectGetHeader(animation)
+                    : NULL;
+                EM_ASM(
+                    {
+                        tm4Port.testFireRings.at(-1).animations.push(
+                            { serial : $0, address : $1, owned : !!$2 });
+                    },
+                    child ? child->serial : -1, animation,
+                    child && child->owner == ring && (child->flags & OBJECT_DESTROY_WITH_OWNER));
+            }
+        }
+    }
 }
 
 EMSCRIPTEN_KEEPALIVE s32 WebTestFlameEmitterCount(void)

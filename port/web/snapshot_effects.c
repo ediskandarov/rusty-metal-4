@@ -7,6 +7,7 @@
 #include "src/modules/car/private.h"
 #include "src/modules/expl/private.h"
 #include "src/modules/fire/private.h"
+#include "src/modules/firing/private.h"
 #include "src/modules/lightn/private.h"
 #include "src/modules/ray/private.h"
 #include "src/modules/timer/private.h"
@@ -93,6 +94,58 @@ static int restore_anim_sound(
     if (length != 1 || *input > 1 || (*input && (!anim->type || !anim->type->sound)))
         return 0;
     anim->sound = *input ? anim->type->sound : NULL;
+    return 1;
+}
+
+static u32 fire_ring_particles(const void* payload)
+{
+    return ((const FireRing*)payload)->particle_count;
+}
+
+static const SnapshotField fire_ring_particle_fields[] = {
+    SNAP_REF(FireRingParticle, animation, "anim"),
+    SNAP_POD(FireRingParticle, position),
+    SNAP_POD(FireRingParticle, position_q12),
+    SNAP_POD(FireRingParticle, step_q12),
+    { 0 },
+};
+
+static const SnapshotArray fire_ring_particle_array = {
+    fire_ring_particle_fields,
+    sizeof(FireRingParticle),
+    fire_ring_particles,
+    UINT16_MAX,
+};
+
+static const SnapshotField fire_ring_fields[] = {
+    SNAP_STRING(FireRing, animation_name),
+    SNAP_POD(FireRing, origin_q12),
+    SNAP_INDEX(FireRing, polygon, &WebSnapshotCollisionPolygons),
+    SNAP_POD(FireRing, axis),
+    SNAP_POD(FireRing, radius),
+    SNAP_POD(FireRing, angular_divisions),
+    SNAP_POD(FireRing, radius_step_per_frame),
+    SNAP_POD(FireRing, split_spacing),
+    SNAP_POD(FireRing, maximum_radius),
+    SNAP_POD(FireRing, particle_count),
+    SNAP_OWNED_ARRAY(FireRing, particles, &fire_ring_particle_array),
+    { 0 },
+};
+
+static int fire_ring_valid(const void* payload)
+{
+    const FireRing* ring = payload;
+    if (!ring->animation_name || !AnimFindClass(ring->animation_name) || !ring->particles
+        || ring->particle_count <= 0 || ring->particle_count > UINT16_MAX
+        || ring->angular_divisions < ring->particle_count)
+        return 0;
+    for (s32 i = 0; i < ring->particle_count; ++i) {
+        const Anim* animation = ring->particles[i].animation;
+        if (animation
+            && (ObjectGetHeader(animation)->owner != ring
+                || !(ObjectGetHeader(animation)->flags & OBJECT_DESTROY_WITH_OWNER)))
+            return 0;
+    }
     return 1;
 }
 
@@ -483,6 +536,7 @@ static int restore_timer_binding(
 }
 
 const SnapshotType WebSnapshotEffectTypes[] = {
+    { "fireRing", sizeof(FireRing), fire_ring_fields, fire_ring_valid, .hash_fields = 1 },
     { "anim", sizeof(Anim), anim_fields, anim_valid, capture_anim_sound, restore_anim_sound },
     { "afc", sizeof(Afc), flare_fields, flare_valid, NULL, restore_flare_quad,
         .baseline_removable = 1, .alternate_process = WebAfcAdvanceFlareRotation },

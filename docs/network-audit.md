@@ -164,6 +164,9 @@ teleporters and fall hazards. The
 [independent browser check](../tests/browser/check_portable_checkpoint.cjs)
 relocates both resource and simulation allocations and compares canonical bytes
 and all five checksums on each replayed tick.
+[Ground-fire coverage](../tests/browser/check_fire_ring_checkpoint.cjs) checks eight-player
+Oil Rig ignition, particle subdivision and expiry through repeated local replay and
+fresh-instance portable restoration, including terrain and child-animation links.
 
 Admission resolves stock resource names and checks the active object graph. Cars
 and player cameras must retain their startup identities. Unrecognized types and
@@ -328,7 +331,9 @@ sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` a
 `TM4_LIVE_SCREENSHOT_DIR` to save compositor screenshots.
 
 Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
-site. Set `TM4_PORTABLE_PLAYERS` to 2–8 for participant-root coverage.
+site. Run `bun tests/browser/check_fire_ring_checkpoint.cjs` on the same site for
+terrain-bound and radius-limited fire rings. Set `TM4_PORTABLE_PLAYERS` to 2–8
+for participant-root coverage.
 Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
 `TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry.
 On Road Rage, use `TM4_PORTABLE_SCENERY=1` with
