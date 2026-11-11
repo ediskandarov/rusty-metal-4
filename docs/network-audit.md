@@ -25,8 +25,9 @@ reads every newly received buffer record before fixed-step trimming, then applie
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
 live. Network play uses native prediction and rollback for supported stock
-Construction Yard Deathmatch rosters. The Orbital and Pizza Boy pair also supports
-portable reconnect. The diagnostic build includes a smaller native rollback probe.
+Deathmatch rosters. For two-player matches, the authority tests portable capture
+at startup before the server issues reconnect credentials. The diagnostic build
+includes a smaller native rollback probe.
 
 Sources: [Rust protocol](../network/src/protocol.rs),
 [browser runtime](../network/src/browser.rs), [JS ownership bridge](../web/src/network/transport.ts),
@@ -123,8 +124,8 @@ that arena. A resource allocation or free, unsupported object state or an exhaus
 world undo log also invalidates restoration. The experiment
 uses a 4 MiB simulation arena and up to 2,048 world edits. Stopping the match
 releases the history. The headless checkpoint test and the rendered live mode use
-the same allocator and world undo log. Bots, other maps, car packs, independent
-Wasm modules and sanitizer builds are outside the checkpoint scope.
+the same allocator and world undo log. Bots, car packs, independent Wasm
+modules and sanitizer builds are outside the checkpoint scope.
 
 [The local checkpoint check](../tests/browser/check_local_checkpoint.cjs) uses
 Orbital and Pizza Boy in headless Chromium. It restores tick 80 with a live projectile
@@ -145,15 +146,22 @@ Assets, device voices and heap addresses stay local. Restore validates structure
 and resets the destination on failure. Interaction extenders must share their
 owner's root. Only that root may own the collision `seen` list.
 
-This path is scoped to an active human Orbital/Pizza Boy Deathmatch in
-Construction Yard without mods or eliminated players. Cars and player camera
-objects must retain their startup identities. Unrecognized types and unbound
-state fail capture. Temporary debris such as live scenery fragments can
-delay capture. After bounded retries, the player can reconnect again. The
+Portable reconnect covers active two-player human Deathmatch without mods or
+eliminated players. All 22 stock cars, including the nine locked cars, were
+verified individually on Construction Yard. All 16 original maps were verified
+with Orbital and Pizza Boy. The checks include live weapon and grab state,
+Minion's freeze and thaw, the Oil Rig helicopter and its pickup drops, Neon City's
+train and UFO, The Carnival's coaster, and shared destructibles, jump pads,
+teleporters and fall hazards. The
 [independent browser check](../tests/browser/check_portable_checkpoint.cjs)
-relocates both resource and simulation allocations, then compares canonical bytes
-and all five checksums on each subsequent tick. It exercises a live projectile
-and a separate post-destruction checkpoint.
+relocates both resource and simulation allocations and compares canonical bytes
+and all five checksums on each replayed tick.
+
+Admission resolves stock resource names and checks the active object graph. Cars
+and player cameras must retain their startup identities. Unrecognized types and
+unbound state fail capture. Live mesh fragments and shield or invisibility model
+copies can delay capture. After bounded retries the player can reconnect again.
+Frozen faces are rebuilt from the locally loaded car model.
 
 The authority captures one completed tick and continues stepping while the server
 forwards the checkpoint in acknowledged 8 KiB chunks. An attempt allows up to
@@ -162,7 +170,7 @@ Lightyear's `StateRollbackMetadata` requests a bounded rewind of its synchronize
 timeline to the imported checkpoint. Its fixed schedule brings the C world to
 the predicted head, then input mismatches use ordinary Lightyear rollback.
 Each catch-up and confirmed tick is checked against the authoritative digests.
-The journal remains available for diagnostics and for the ordinary recovery path.
+The journal remains available for recording and diagnostics.
 
 ### Native Lightyear rollback probe
 
@@ -193,7 +201,7 @@ exercises native receipt and rollback with a controlled clock and input script.
 
 ### Latency and presentation — R6/R8
 
-The optional live mode waits for native clock synchronization and replicated slot
+Live play waits for native clock synchronization and replicated slot
 ownership before reporting readiness. The server offers a common Lightyear tick
 anchor and asks each browser for its current native tick. A late offer is
 replaced using the measured exchange and the furthest-ahead browser. Negotiation
@@ -228,13 +236,13 @@ boundary it pauses the fixed clock and resumes when two ticks of headroom
 return. This covers temporary gaps and startup clock lead. A whole-tick clock
 resync, excess confirmation backlog, or unsupported gameplay state closes that
 client session. The authority and other clients keep running.
-Rendered play was verified with Orbital and Pizza Boy. An eight-slot attempt
-reached all slot assignments, but the default larger roster used car callbacks
-outside checkpoint coverage. Two-player Chromium checks passed at 72±12 and
+The two-player cases verified for portable reconnect also passed rendered
+rollback. Eight-slot direct startup covers all controller assignments. Eight-slot
+live rollback remains unverified. Two-player Chromium checks passed at 72±12 and
 100±30 ms receive conditioning. With the clock pause enabled, a foreground
 Playwright WebKit client reached the boundary at 170±65 ms and resumed after the
 artificial delay was removed. Safari itself remains unverified. Smooth high-rate
-network presentation is deferred. Covering more maps and rosters remains open.
+network presentation is deferred. Other roster combinations remain unverified.
 
 ### Session identity and modes — R1/R2/R7
 
@@ -267,6 +275,8 @@ native probe, run `cargo run --manifest-path network/Cargo.toml --features rollb
 Set `TM4_ROLLBACK_ENDPOINT` if using a different loopback port.
 To play a rendered match, start the site with your local disc and run
 `TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2`.
+Set `TM4_MATCH_CARS='Microblast,Pizza Boy'` to choose stock cars by name or
+`TM4_MATCH_WORLD='The Oil Rig'` to select a verified map.
 Open the printed match link in two browser windows. An empty lobby waits for
 the first player. After someone joins, the other players have five minutes to
 arrive. Start a new match server after the match has been played. The test
@@ -287,14 +297,21 @@ sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` a
 Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
 site. Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
 `TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry.
+On Road Rage, use `TM4_PORTABLE_SCENERY=1` with
+`TM4_PORTABLE_TRIGGERS=jumppad,teleporter` to replay both map interactions.
+Set `TM4_TEST_CAR` to a stock car name to select it in the combat fixture.
+For the helicopter test, set `TM4_TEST_WORLD='The Oil Rig'`, optionally with
+`TM4_PORTABLE_OIL_DESTROYED=1` to capture after the destruction and debris.
 Run `bun tests/browser/check_snapshot_reconnect.cjs` with a fresh two-player
-server's endpoint and authority token. Set `TM4_RESUME_TEST_TICKS=3600` for a two-minute live prelude.
+server's endpoint and authority token. Set `TM4_RESUME_TEST_TICKS=3600` for a
+two-minute live prelude or `TM4_RESUME_EXACT_WINDOW=1` to test handoff at the
+12-tick prediction limit.
 
 Start a fresh match server for each network test using
 `TM4_MATCH_LISTEN=127.0.0.1:18182` and a diagnostic `TM4_AUTHORITY_TOKEN`.
 Supply the same token, `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` to the fixtures. Run
-`bun tests/browser/check_network_admission.cjs` for the map refusal, or set
+`bun tests/browser/check_network_admission.cjs` for unknown-map refusal, or set
 `TM4_ADMISSION_SCENARIO=roster` on a fresh server for the car callback refusal.
 `bun tests/browser/check_network_replay.cjs` runs direct replay diagnostics without
 a match server.

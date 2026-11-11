@@ -87,9 +87,9 @@ static int transfer_key(Cursor* io, const SnapshotField* field, void* member)
         }
     } else {
         resource = read_pointer(member);
-        if (field->kind == SnapshotKey)
+        if (field->kind == SnapshotKey || field->kind == SnapshotResourceString)
             binding = field->binding;
-        if (!binding)
+        if (!binding || field->kind == SnapshotResourceString)
             name = resource;
         else if (!io->input && resource)
             name = read_pointer((const u8*)resource + binding->name_offset);
@@ -132,10 +132,11 @@ static int transfer_key(Cursor* io, const SnapshotField* field, void* member)
     return 1;
 }
 
-static int transfer_index(Cursor* io, const SnapshotIndexBinding* table, void* member)
+static int transfer_index(
+    Cursor* io, const SnapshotIndexBinding* table, const void* payload, void* member)
 {
-    const u32 count = table->count();
-    void* base = table->base();
+    const u32 count = table->count(payload);
+    void* base = table->base(payload);
     u32 handle = 0;
     if (!io->input) {
         void* address = read_pointer(member);
@@ -238,12 +239,14 @@ static int transfer_fields(Cursor* io, const SnapshotField* fields, void* payloa
                 return 0;
             break;
         case SnapshotObjectRef:
+        case SnapshotWeakObjectRef:
         case SnapshotRequiredRef:
         case SnapshotHeaderRef:
             if (!transfer_refs(io, field, member))
                 return 0;
             break;
         case SnapshotKey:
+        case SnapshotResourceString:
         case SnapshotTemplateKey:
         case SnapshotNumericKey:
         case SnapshotOwnedString:
@@ -260,7 +263,7 @@ static int transfer_fields(Cursor* io, const SnapshotField* fields, void* payloa
             break;
         }
         case SnapshotResourceIndex:
-            if (!transfer_index(io, field->binding, member))
+            if (!transfer_index(io, field->binding, payload, member))
                 return 0;
             break;
         case SnapshotOwnedList:
@@ -334,4 +337,28 @@ static void release_fields(const SnapshotField* fields, void* object)
 void WebSnapshotFieldsRelease(const SnapshotType* type, void* object)
 {
     release_fields(type->fields, object);
+    if (type->release)
+        type->release(object);
+}
+
+static void forget_weak_references(const SnapshotField* fields, void* object, const void* target)
+{
+    for (const SnapshotField* field = fields; field && field->kind; ++field) {
+        u8* member = (u8*)object + field->offset;
+        if (field->kind == SnapshotWeakObjectRef) {
+            for (size_t i = 0; i < field->size; i += sizeof(void*))
+                if (read_pointer(member + i) == target)
+                    write_pointer(member + i, NULL);
+        } else if (field->kind == SnapshotGroup) {
+            const SnapshotGroupFields* group = field->binding;
+            if (!group->active || group->active(object))
+                forget_weak_references(group->fields, member, target);
+        }
+    }
+}
+
+void WebSnapshotForgetWeakReferences(const SnapshotType* type, void* object, const void* target)
+{
+    if (type && object)
+        forget_weak_references(type->fields, object, target);
 }

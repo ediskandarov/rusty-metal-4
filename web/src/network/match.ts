@@ -44,6 +44,8 @@ type Recovery = {
   abort: AbortController;
   requestedAt: number;
   replay?: SnapshotReplay;
+  applied?: Promise<void>;
+  offered?: boolean;
 };
 
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
@@ -206,13 +208,8 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
         case "resume_prepare":
         case "prediction_prepare": {
           show("lobby", "Loading Deathmatch…");
-          if (
-            prediction ||
-            slot < 0 ||
-            slot >= message.players ||
-            message.world !== "Construction Yard"
-          )
-            throw new Error("Live rollback requires a stock Construction Yard match");
+          if (prediction || slot < 0 || slot >= message.players)
+            throw new Error("Invalid live prediction setup");
           prediction = attachLivePrediction(engine, port);
           socket.preparePrediction(message.players);
           if (!configureMatch(engine, { ...message, type: "start" }, slot))
@@ -340,35 +337,53 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           );
           armResumeTimeout();
           break;
-        case "resume_live":
+        case "resume_live": {
+          const active = recovery;
+          const replay = active?.replay;
+          const controller = prediction;
           if (
-            !prediction ||
+            !controller ||
             predictionStarted ||
-            !recovery?.replay ||
+            !active ||
+            !replay ||
+            active.offered ||
             !resume ||
             message.attempt !== resume.header.attempt ||
             message.anchor !== resume.header.anchor ||
-            message.head !== resume.target ||
-            message.head !== port.netMatch?.tick
+            message.head !== resume.target
           )
             throw new Error("Invalid reconnect prediction boundary");
-          recovery.replay.finish(message.head);
-          socket.beginResumedPrediction(
-            message.anchor,
-            epoch,
-            players,
-            slot,
-            prediction.depth,
-            message.head,
-            message.sequence,
-          );
-          predictionStarted = true;
-          port.netConfirmedTick = message.head;
-          diagnostics.recoveredTick = message.head;
-          diagnostics.replayMs = performance.now() - recovery.requestedAt;
-          send({ type: "resume_live_ack", attempt: message.attempt, head: message.head });
-          armResumeTimeout();
+          active.offered = true;
+          const start = async () => {
+            const { anchor, head, sequence, attempt } = message;
+            while (((socket.predictionClock() - anchor - head) | 0) < 0) {
+              await new Promise<void>((resolve) => setTimeout(resolve, 5));
+              active.abort.signal.throwIfAborted();
+            }
+            active.abort.signal.throwIfAborted();
+            if (head !== port.netMatch?.tick) throw new Error("Incomplete reconnect replay");
+            replay.finish(head);
+            socket.beginResumedPrediction(
+              anchor,
+              epoch,
+              players,
+              slot,
+              controller.depth,
+              head,
+              sequence,
+            );
+            predictionStarted = true;
+            port.netConfirmedTick = head;
+            diagnostics.recoveredTick = head;
+            diagnostics.replayMs = performance.now() - active.requestedAt;
+            send({ type: "resume_live_ack", attempt, head });
+            armResumeTimeout();
+          };
+          void (active.applied ?? Promise.resolve()).then(start).catch((error) => {
+            if (!active.abort.signal.aborted) fail(error);
+          });
           break;
+        }
         case "resume_active":
           if (!resumePending || !predictionStarted || !resume || message.head !== resume.target)
             throw new Error("Unexpected reconnect acknowledgement");
@@ -382,18 +397,16 @@ export async function joinMatch(engine: NetworkEngine, endpoint: string, status:
           const active = recovery;
           if (!active?.replay || !resume || message.attempt !== resume.header.attempt)
             throw new Error("Unexpected reconnect replay block");
-          const applied = active.replay.accept(message);
           diagnostics.replayBytes = (diagnostics.replayBytes ?? 0) + message.data.length;
           diagnostics.replayChunks = (diagnostics.replayChunks ?? 0) + 1;
-          void applied
-            .then((tick) => {
-              if (active.abort.signal.aborted) return;
-              send({ type: "catchup_applied", attempt: message.attempt, tick });
-              armResumeTimeout();
-            })
-            .catch((error) => {
-              if (!active.abort.signal.aborted) fail(error);
-            });
+          active.applied = active.replay.accept(message).then((tick) => {
+            if (active.abort.signal.aborted) return;
+            send({ type: "catchup_applied", attempt: message.attempt, tick });
+            armResumeTimeout();
+          });
+          void active.applied.catch((error) => {
+            if (!active.abort.signal.aborted) fail(error);
+          });
           break;
         }
         case "frame":

@@ -11,6 +11,7 @@ const SnapshotType* WebSnapshotTypeByName(const char* name)
     const SnapshotType* groups[] = {
         WebSnapshotSceneTypes,
         WebSnapshotYardTypes,
+        WebSnapshotMovingWorldTypes,
         WebSnapshotEffectTypes,
         WebSnapshotProjectileTypes,
         WebSnapshotCarTypes,

@@ -65,13 +65,9 @@ static int supported_session(void)
 {
     return GameInfo.active && GameInfo.mode == GAME_MODE_PLAY && !GameInfo.next_mode
         && !GameInfo.pause_player && GameInfo.game_type == GAME_TYPE_DEATHMATCH
-        && GameInfo.world_name && !strcmp(GameInfo.world_name, "Construction Yard")
         && GameInfo.player_car_count == Players && !GameInfo.computer_count
         && GameInfo.active_player_count == Players && GameInfo.car_count == Players
-        && GameInfo.players[0].car && GameInfo.players[1].car && WorldSquares
-        && GameInfo.players[0].car->character_name && GameInfo.players[1].car->character_name
-        && !strcmp(GameInfo.players[0].car->character_name, "Orbital")
-        && !strcmp(GameInfo.players[1].car->character_name, "Pizza Boy");
+        && GameInfo.players[0].car && GameInfo.players[1].car && WorldSquares;
 }
 
 static s32 square_count(void)

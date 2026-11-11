@@ -1,10 +1,12 @@
 #include "snapshot_types.h"
 
 #include "src/main/object/private.h"
+#include "src/modules/power/private.h"
 #include "tm4/modules/camera.h"
 #include "tm4/modules/car.h"
 #include "tm4/modules/conveyer.h"
 #include "tm4/modules/destry.h"
+#include "tm4/modules/jumbo.h"
 #include "tm4/modules/jumppad.h"
 #include "tm4/modules/powerup.h"
 #include "tm4/modules/tele.h"
@@ -45,8 +47,19 @@ static const SnapshotList seen = {
     64,
 };
 
+RegistryDirectory* WebPowerupBindType(PowerupState* power, char* type);
+
+static void* find_powerup_name(char* key)
+{
+    RegistryDirectory* directory = PowerDirectory ? RegGetDirectoryPtrPS(PowerDirectory, key)
+                                                  : NULL;
+    return directory ? RegGetDirectoryNameP(directory) : NULL;
+}
+
+static const SnapshotKeyBinding powerup_names = { .resolve = find_powerup_name };
+
 static const SnapshotField powerup_fields[] = {
-    SNAP_LOCAL_KEY(PowerupState, name),
+    SNAP_RESOURCE_STRING(PowerupState, name, &powerup_names),
     SNAP_POD(PowerupState, units),
     SNAP_POD(PowerupState, inactive_ticks),
     SNAP_POD(PowerupState, angle),
@@ -54,16 +67,24 @@ static const SnapshotField powerup_fields[] = {
     SNAP_POD(PowerupState, base_height),
     SNAP_POD(PowerupState, bob_phase_angle),
     SNAP_POD(PowerupState, position),
-    SNAP_LOCAL(PowerupState, interact),
-    SNAP_LOCAL(PowerupState, sound),
-    SNAP_LOCAL(PowerupState, part),
+    SNAP_DERIVED(PowerupState, interact),
+    SNAP_DERIVED(PowerupState, sound),
+    SNAP_DERIVED(PowerupState, part),
     { 0 },
 };
 
 static int powerup_valid(const void* payload)
 {
     const PowerupState* powerup = payload;
-    return powerup->name && powerup->position.fields.active <= POWERUP_AVAILABLE;
+    return powerup->name && powerup->interact && powerup->part
+        && powerup->position.fields.active <= POWERUP_AVAILABLE;
+}
+
+static int restore_powerup_type(
+    void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
+{
+    PowerupState* powerup = payload;
+    return !length && powerup->name && WebPowerupBindType(powerup, powerup->name);
 }
 
 static const SnapshotField teleporter_fields[] = {
@@ -138,6 +159,15 @@ static int restore_camera(void* payload, const u8* input, u32 length, WebSnapsho
     return 1;
 }
 
+void CarJumpProcess(CarJump* jump);
+void CarJumpDisplay(
+    CarJump* jump, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* world_to_camera);
+
+static const SnapshotCustomClass car_jump_class = {
+    .process = (Tm4ObjectCallback)CarJumpProcess,
+    .display = (Tm4ObjectDisplayCallback)CarJumpDisplay,
+};
+
 static const SnapshotField car_jump_fields[] = {
     SNAP_REQUIRED(CarJump, car, "car"),
     SNAP_POD(CarJump, world_position),
@@ -182,16 +212,31 @@ static const SnapshotField conveyer_fields[] = {
     { 0 },
 };
 
+static const SnapshotField jumbotron_fields[] = {
+    SNAP_LOCAL(Jumbotron, world),
+    SNAP_POD(Jumbotron, side),
+    { 0 },
+};
+
+static int jumbotron_valid(const void* payload)
+{
+    const Jumbotron* board = payload;
+    return board->world && (u32)board->side <= 1;
+}
+
 const SnapshotType WebSnapshotSceneTypes[] = {
-    { "powerup", sizeof(PowerupState), powerup_fields, powerup_valid, .needs_template = 1 },
+    { "powerup", sizeof(PowerupState), powerup_fields, powerup_valid, NULL,
+        restore_powerup_type, .baseline_removable = 1 },
     { "teleporter", sizeof(Teleporter), teleporter_fields, .needs_template = 1 },
     { "camera", sizeof(Camera), camera_fields, NULL, capture_camera, restore_camera },
-    { "carJump", sizeof(CarJump), car_jump_fields },
+    { "carJump", sizeof(CarJump), car_jump_fields, .custom = &car_jump_class },
     { OBJECT_INTERACTION_EXTENDER_NAME, sizeof(Tm4InteractionExtender), extender_fields,
-        .custom = &extender_class },
+        .baseline_removable = 1, .custom = &extender_class },
     { "destroyable", sizeof(Destroyable), destroyable_fields, destroyable_valid,
         .needs_template = 1, .baseline_removable = 1 },
     { "jumppad", sizeof(Jumppad), jumppad_fields, .needs_template = 1 },
     { "conveyer", sizeof(Conveyer), conveyer_fields, .needs_template = 1 },
+    { "jumbotron", sizeof(Jumbotron), jumbotron_fields, jumbotron_valid, .needs_template = 1,
+        .hash_fields = 1 },
     { 0 },
 };

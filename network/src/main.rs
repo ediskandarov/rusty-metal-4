@@ -296,18 +296,49 @@ impl Match {
             if attempt.pending_frame.is_some() || attempt.offered {
                 continue;
             }
-            if attempt.sent_frames == target {
-                if self.tick.saturating_sub(target) > u32::from(game_protocol::PREDICTION_DEPTH) {
-                    attempt.failed = true;
-                    send(
-                        links,
-                        entity,
-                        &Message::Error {
-                            message: "The reconnect handoff expired. Retry this match.".into(),
-                        },
-                    );
+            if self.tick.saturating_sub(target) > u32::from(game_protocol::PREDICTION_DEPTH) {
+                attempt.failed = true;
+                send(
+                    links,
+                    entity,
+                    &Message::Error {
+                        message: "The reconnect handoff expired. Retry this match.".into(),
+                    },
+                );
+                continue;
+            }
+            if attempt.sent_frames < target {
+                let end = (attempt.sent_frames + REPLAY_CHUNK_TICKS)
+                    .min(target)
+                    .min(self.tick);
+                if end <= attempt.sent_frames {
                     continue;
                 }
+                let Some(data) = self
+                    .journal
+                    .as_mut()
+                    .and_then(|journal| journal.range(attempt.sent_frames, end).ok())
+                else {
+                    attempt.failed = true;
+                    continue;
+                };
+                send(
+                    links,
+                    entity,
+                    &Message::CatchupFrames {
+                        attempt: attempt.id,
+                        start: attempt.sent_frames,
+                        head: target,
+                        checksum: checksum(CHECKSUM_SEED, &data),
+                        data,
+                    },
+                );
+                attempt.sent_frames = end;
+                attempt.pending_frame = Some(end);
+            }
+            // The ordered channel can carry the offer with the last block. Slot
+            // control still requires both the applied-block and live acknowledgments.
+            if attempt.sent_frames == target {
                 send(
                     links,
                     entity,
@@ -319,35 +350,7 @@ impl Match {
                     },
                 );
                 attempt.offered = true;
-                continue;
             }
-            let end = (attempt.sent_frames + REPLAY_CHUNK_TICKS)
-                .min(target)
-                .min(self.tick);
-            if end <= attempt.sent_frames {
-                continue;
-            }
-            let Some(data) = self
-                .journal
-                .as_mut()
-                .and_then(|journal| journal.range(attempt.sent_frames, end).ok())
-            else {
-                attempt.failed = true;
-                continue;
-            };
-            send(
-                links,
-                entity,
-                &Message::CatchupFrames {
-                    attempt: attempt.id,
-                    start: attempt.sent_frames,
-                    head: target,
-                    checksum: checksum(CHECKSUM_SEED, &data),
-                    data,
-                },
-            );
-            attempt.sent_frames = end;
-            attempt.pending_frame = Some(end);
         }
     }
 
@@ -573,6 +576,7 @@ impl Match {
                     && attempt.id == id
                     && attempt.offered
                     && attempt.target == Some(head)
+                    && attempt.pending_frame.is_none()
                     && !attempt.failed
                 {
                     let attempt = player.resume.take().unwrap();
@@ -613,17 +617,28 @@ impl Match {
                 epoch,
                 digest,
                 unsupported,
+                portable,
             } if self.started && !self.ended && epoch == 1 => {
                 if is_authority && !self.authority_ready {
                     if let Some(detail) = unsupported {
-                        self.fail(
-                            links,
-                            &format!("Live rollback cannot restore this roster: {detail}"),
-                        );
+                        self.fail(links, &format!("Live rollback cannot start: {detail}"));
                         return;
                     }
                     self.authority_ready = true;
                     self.initial_digest = Some(digest);
+                    if let Some(session) = &mut self.session {
+                        session.portable &= portable;
+                        if session.portable {
+                            for player in &mut self.players {
+                                player.credential = resume::credential();
+                                if let (Some(entity), Some(token)) =
+                                    (player.entity, player.credential.clone())
+                                {
+                                    send(links, entity, &Message::ResumeCredential { token });
+                                }
+                            }
+                        }
+                    }
                 } else if let Some(slot) = slot {
                     self.players[slot].ready = true;
                     self.players[slot].initial_digest = Some(digest);
@@ -864,24 +879,8 @@ fn update(
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,
-            portable: game.catalog.as_ref().unwrap().cars[..game.players.len()]
-                == ["Orbital", "Pizza Boy"],
+            portable: game.players.len() == 2,
         };
-        if start.world != "Construction Yard" {
-            game.fail(
-                &mut links,
-                "Live rollback requires stock Construction Yard.",
-            );
-            return;
-        }
-        if start.portable {
-            for player in &mut game.players {
-                player.credential = resume::credential();
-                if let (Some(entity), Some(token)) = (player.entity, player.credential.clone()) {
-                    send(&mut links, entity, &Message::ResumeCredential { token });
-                }
-            }
-        }
         game.session = Some(start.clone());
         send(&mut links, authority, &Message::Start(start.clone()));
         game.broadcast(&mut links, &Message::PredictionPrepare(start));

@@ -58,7 +58,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetSelectCar(s32 slot, const char* name)
     const s32 count = RegGetNumberOfDirectoriesS("/objects/car/characters");
     for (s32 i = 0; i < count; ++i) {
         char* candidate = RegGetDirectoryNameSN("/objects/car/characters", i);
-        if (candidate && !strcmp(candidate, name) && !GameIsBossCar(candidate)) {
+        if (candidate && !strcmp(candidate, name)) {
             configured_cars[slot] = candidate;
             return 1;
         }
@@ -82,7 +82,7 @@ void WebNetPublishCatalog(void)
     const s32 count = RegGetNumberOfDirectoriesS("/objects/car/characters");
     for (s32 i = 0; i < count; ++i) {
         char* name = RegGetDirectoryNameSN("/objects/car/characters", i);
-        if (name && !GameIsBossCar(name))
+        if (name)
             EM_ASM({ tm4Port.catalog.cars.push(UTF8ToString($0)); }, name);
     }
 }
@@ -146,7 +146,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s3
 
     match.world = GameGetWorldName(world);
     if (!match.world)
-        return 0;
+        return reject_start("Invalid match map");
     if (!session_resources_present(players))
         return 0;
     match.seed = seed;
@@ -207,8 +207,6 @@ static const char* checkpoint_resource_blocker(void)
         return "independent module state";
     if (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count != 0)
         return "game mode state";
-    if (strcmp(match.world, "Construction Yard"))
-        return "map state";
     return NULL;
 }
 

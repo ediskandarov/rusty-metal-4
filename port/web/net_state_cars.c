@@ -1,4 +1,5 @@
 #include "net_state_fields.h"
+#include "snapshot_types.h"
 #include "src/modules/car/private.h"
 #include "tm4/main/game.h"
 
@@ -140,10 +141,20 @@ const char* WebNetWriteCars(NetStateOutput* hash)
     for (s32 i = 0; i < GameInfo.car_count; ++i) {
         const Car* car = GameInfo.cars[i];
         car_state(hash, car);
-        if (car
-            && (car->callback_context || car->process_callback || car->collision_callback
-                || car->destructor_callback))
+        if (!car)
+            continue;
+        const SnapshotType* type = WebSnapshotCarCallbackType(car);
+        u8 state[256];
+        const u32 length = type ? WebSnapshotFieldsCapture(type, car->callback_context,
+                                      state, sizeof(state))
+                                : 0;
+        if (!length) {
             unsupported = "car callback state";
+            continue;
+        }
+        key(hash, type->name);
+        for (u32 offset = 0; offset < length; ++offset)
+            state_byte(hash, state[offset]);
     }
     for (const CarDetonationNode* node = CarDetonationDevices; node; node = node->next) {
         s32 slot = -1;

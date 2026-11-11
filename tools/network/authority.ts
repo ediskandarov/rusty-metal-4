@@ -88,15 +88,26 @@ export async function connectAuthority(
                 console.log("Server simulator connected");
                 break;
               case "start": {
-                if (!(globalThis as AuthorityPage).tm4Network.configure(engine, message, -1))
-                  throw new Error("The game refused the match setup");
+                if (!(globalThis as AuthorityPage).tm4Network.configure(engine, message, -1)) {
+                  send({
+                    type: "ready",
+                    epoch: message.epoch,
+                    digest: 0,
+                    unsupported: port.netSession?.message ?? "The game refused the match setup",
+                  });
+                  break;
+                }
                 if (!port.netMatch)
                   throw new Error("The simulator did not become ready at tick zero");
+                const portable =
+                  !!message.portable && !!engine._WebNetCapturePortableCheckpoint?.();
+                delete port.portableCheckpoint;
                 send({
                   type: "ready",
                   epoch: message.epoch,
                   digest: port.netMatch.digest,
                   unsupported: port.netMatch.unsupported,
+                  portable,
                 });
                 break;
               }
@@ -175,6 +186,8 @@ if (import.meta.main) {
   if (!token) throw new Error("Set TM4_AUTHORITY_TOKEN to the server's authority token");
   const endpoint = process.env.TM4_MATCH_ENDPOINT ?? "ws://127.0.0.1:8122";
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:8120";
+  const cars = process.env.TM4_MATCH_CARS?.split(",").map((name) => name.trim());
+  const world = process.env.TM4_MATCH_WORLD;
 
   const browser = await chromium.launch({
     executablePath: process.env.TM4_CHROME,
@@ -200,6 +213,25 @@ if (import.meta.main) {
     await page.goto(url.href);
     await page.waitForFunction(() => (globalThis as AuthorityPage).tm4Port?.compatibility);
 
+    if (cars || world) {
+      await page.evaluate(
+        ({ cars, world }) => {
+          const { catalog } = (globalThis as AuthorityPage).tm4Port;
+          if (!catalog) throw new Error("The local game catalog is unavailable");
+          if (cars) {
+            if (cars.length > 8 || cars.some((car) => !catalog.cars.includes(car)))
+              throw new Error("TM4_MATCH_CARS must contain local stock car names");
+            catalog.cars = [...cars, ...catalog.cars.filter((car) => !cars.includes(car))];
+          }
+          if (world) {
+            if (!catalog.worlds.includes(world))
+              throw new Error("TM4_MATCH_WORLD must name a local stock map");
+            catalog.worlds = [world, ...catalog.worlds.filter((name) => name !== world)];
+          }
+        },
+        { cars, world },
+      );
+    }
     await connectAuthority(page, endpoint, token, process.env.TM4_AUTHORITY_TIMING === "1");
   } finally {
     await browser.close();

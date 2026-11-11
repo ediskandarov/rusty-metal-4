@@ -206,6 +206,8 @@ add_executable(tm4_web
     "${TM4_WEB}/snapshot_effects.c"
     "${TM4_WEB}/snapshot_scene.c"
     "${TM4_WEB}/snapshot_yard.c"
+    "${TM4_WEB}/snapshot_moving_world.c"
+    "${TM4_WEB}/snapshot_pathing.c"
     "${TM4_WEB}/snapshot_world.c"
     "${TM4_WEB}/snapshot_projectile.c"
     "${TM4_WEB}/snapshot_sound.c"

@@ -12,7 +12,7 @@ static void construct_class(RegistryDirectory* directory)
     CarAugerClassConstructor(directory);
 }
 
-static s32 process(Car* car, void* context)
+s32 WebAugerProcess(Car* car, void* context)
 {
     AugerDrill* drill = context;
     s32 result = CarAugerProcess(car, drill);
@@ -44,7 +44,7 @@ OSWord WebAugerExport(const char* name)
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(value)
     EXPORT("CarAugerClassConstructor", construct_class);
-    EXPORT("CarAugerProcess", process);
+    EXPORT("CarAugerProcess", WebAugerProcess);
 #undef EXPORT
     return 0;
 }

@@ -2,7 +2,7 @@ use crate::input::{ControllerCommand, Input};
 use crate::protocol::{ControllerIdentity, Message, PREDICTION_DEPTH};
 use bevy_app::{App, FixedPostUpdate, FixedPreUpdate, FixedUpdate, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
-use bevy_time::{Fixed, Time};
+use bevy_time::{Fixed, Time, Virtual};
 use lightyear::input::client::InputSystems;
 use lightyear::prelude::client::InputDelayConfig;
 use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
@@ -326,7 +326,20 @@ pub fn begin_resume(
         sequence,
     )?;
     if depth != 0 {
+        // Handoff runs between updates. At the limit the forced rollback may
+        // use all history before Lightyear's normal Last system applies its wait.
+        let waiting = world.resource_mut::<PredictionWindowWait>().update(
+            clock,
+            Some(boundary),
+            PREDICTION_DEPTH,
+        );
+        if waiting {
+            world
+                .resource_mut::<Time<Virtual>>()
+                .set_relative_speed(0.0);
+        }
         let mut state = world.resource_mut::<LivePrediction>();
+        state.window_waits += u32::from(waiting);
         state.resume_warmup = true;
         state.pending_resume_rollback = Some(boundary);
     }

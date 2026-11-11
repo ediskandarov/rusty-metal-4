@@ -4,6 +4,9 @@
 
 #include "src/modules/afc/private.h"
 #include "src/modules/anim/private.h"
+#include "src/modules/car/private.h"
+#include "src/modules/expl/private.h"
+#include "src/modules/fire/private.h"
 #include "src/modules/lightn/private.h"
 #include "src/modules/ray/private.h"
 #include "src/modules/timer/private.h"
@@ -63,8 +66,13 @@ static int anim_valid(const void* payload)
     for (u32 i = 0; i < anim->type->part_count; ++i) {
         const AnimPart* part = &anim->parts[i];
         const AnimInfo* image = anim->type->parts[i].animation;
-        if (!image || part->texture_frame < 0 || part->texture_frame >= image->count
+        if (!image || part->texture_frame < 0
             || !part->billboard_offset.fields.texture_period_frames)
+            return 0;
+        if (part->texture_elapsed_frames == ANIM_TEXTURE_FINISHED) {
+            if (anim->duration_frames || part->texture_frame != image->count)
+                return 0;
+        } else if (part->texture_frame >= image->count)
             return 0;
     }
     return 1;
@@ -139,6 +147,29 @@ static const SnapshotField bomb_fields[] = {
 
 static int bomb_valid(const void* payload) { return ((const WeaponBomb*)payload)->type != NULL; }
 
+static const SnapshotField target_fields[] = {
+    SNAP_DERIVED(WeaponTarget, geometry),
+    SNAP_POD(WeaponTarget, transform.m),
+    SNAP_POD(WeaponTarget, transform.t),
+    SNAP_TRANSIENT(WeaponTarget, unknown24),
+    { 0 },
+};
+
+static int target_valid(const void* payload)
+{
+    const WeaponTarget* target = payload;
+    return target->geometry && target->geometry == WeapTargetGeometry;
+}
+
+static int restore_target_geometry(
+    void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
+{
+    if (length)
+        return 0;
+    ((WeaponTarget*)payload)->geometry = WeapTargetGeometry;
+    return 1;
+}
+
 static void* find_ray(char* key) { return RayFindClass(key); }
 
 static const SnapshotKeyBinding ray_keys = { offsetof(RayClass, name), find_ray };
@@ -204,7 +235,7 @@ static int lightning_emitter_valid(const void* payload)
 
 static const SnapshotField lightning_fields[] = {
     SNAP_POD(Lightning, matrix),
-    SNAP_REF(Lightning, target, "car"),
+    SNAP_WEAK_REF(Lightning, target, "car"),
     SNAP_POD(Lightning, start),
     SNAP_POD(Lightning, end),
     SNAP_POD(Lightning, point_count),
@@ -222,10 +253,158 @@ static int lightning_valid(const void* payload)
     return bolt->type && bolt->point_count <= LIGHTNING_POINT_CAPACITY;
 }
 
-enum TimerKind { TimerDestroyObject = 1, TimerNextMode, TimerContinueMatch };
+static void* find_flame_animation(char* key)
+{
+    for (s32 i = 0; i < FlameClassCount; ++i) {
+        char* name = FlameClasses[i].animation_name;
+        if (name && !strcmp(name, key))
+            return name;
+    }
+    return NULL;
+}
+
+static const SnapshotKeyBinding flame_animation = { .resolve = find_flame_animation };
+
+static void* flame_weapon_base(const void* payload)
+{
+    const Car* owner = ObjectGetHeader(payload)->owner;
+    return owner && ObjectValidObject((void*)owner) && !strcmp(ObjectGetHeader(owner)->name, "car")
+        ? owner->weapons
+        : NULL;
+}
+
+static u32 flame_weapon_count(const void* payload) { return CarWeaponCount; }
+
+static const SnapshotIndexBinding flame_weapons = {
+    flame_weapon_base,
+    flame_weapon_count,
+    sizeof(CarWeaponInstance),
+};
+
+static const SnapshotField flame_fields[] = {
+    SNAP_POD(FlameEmitter, world_direction),
+    SNAP_POD(FlameEmitter, world_velocity),
+    SNAP_POD(FlameEmitter, period_frames),
+    SNAP_POD(FlameEmitter, emit_period_frames),
+    SNAP_POD(FlameEmitter, emit_elapsed_frames),
+    SNAP_POD(FlameEmitter, jitter_range),
+    SNAP_POD(FlameEmitter, phase_frames),
+    SNAP_POD(FlameEmitter, periodic),
+    SNAP_POD(FlameEmitter, active),
+    SNAP_POD(FlameEmitter, launch_speed),
+    SNAP_POD(FlameEmitter, launcher_index),
+    SNAP_INDEX(FlameEmitter, weapon, &flame_weapons),
+    SNAP_RESOURCE_STRING(FlameEmitter, animation_name, &flame_animation),
+    { 0 },
+};
+
+static int flame_valid(const void* payload)
+{
+    const FlameEmitter* emitter = payload;
+    if (!emitter->animation_name || !find_flame_animation(emitter->animation_name)
+        || !emitter->period_frames || !emitter->emit_period_frames || !emitter->jitter_range
+        || (u32)emitter->active > 1)
+        return 0;
+    if (!emitter->weapon)
+        return 1;
+    const void* base = flame_weapon_base(payload);
+    const uintptr_t offset = (uintptr_t)emitter->weapon - (uintptr_t)base;
+    return base && !(offset % sizeof(CarWeaponInstance))
+        && offset / sizeof(CarWeaponInstance) < (u32)CarWeaponCount && emitter->weapon->launchers
+        && emitter->weapon->count > 0 && (u32)emitter->launcher_index < (u32)emitter->weapon->count;
+}
+
+static void* find_wave(char* key) { return FindExplosionDefinition(key); }
+
+static const SnapshotKeyBinding wave_keys = { offsetof(ExplosionDefinition, name), find_wave };
+
+static u32 wave_points(const void* payload)
+{
+    const ExplosionWave* wave = payload;
+    return wave->definition ? wave->definition->sides : 0;
+}
+
+static const SnapshotField wave_point_fields[] = {
+    SNAP_POD(ExplosionPoint, cosine_q12),
+    SNAP_POD(ExplosionPoint, sine_q12),
+    { 0 },
+};
+
+static const SnapshotArray wave_point_array = {
+    wave_point_fields,
+    sizeof(ExplosionPoint),
+    wave_points,
+    EXPLOSION_MAX_SIDE_COUNT,
+};
+
+static const SnapshotField wave_fields[] = {
+    SNAP_KEY(ExplosionWave, definition, &wave_keys),
+    SNAP_OWNED_ARRAY(ExplosionWave, points, &wave_point_array),
+    SNAP_POD(ExplosionWave, height),
+    SNAP_POD(ExplosionWave, damage),
+    SNAP_POD(ExplosionWave, color),
+    SNAP_POD(ExplosionWave, duration_frames),
+    SNAP_POD(ExplosionWave, inner_radial_speed),
+    SNAP_POD(ExplosionWave, outer_radial_speed),
+    SNAP_POD(ExplosionWave, drag_q12),
+    SNAP_POD(ExplosionWave, inner_radius),
+    SNAP_POD(ExplosionWave, outer_radius),
+    SNAP_POD(ExplosionWave, hit_once),
+    SNAP_POD(ExplosionWave, elapsed_frames),
+    SNAP_POD(ExplosionWave, force),
+    SNAP_LIST(ExplosionWave, interactions, &WebSnapshotInteractionHistory),
+    SNAP_POD(ExplosionWave, motion),
+    SNAP_TRANSIENT(ExplosionWave, ray_result),
+    SNAP_DERIVED(ExplosionWave, sound),
+    SNAP_DERIVED(ExplosionWave, texture),
+    { 0 },
+};
+
+static int wave_valid(const void* payload)
+{
+    const ExplosionWave* wave = payload;
+    return wave->definition && wave->points && wave->definition->sides >= EXPLOSION_MIN_SIDE_COUNT
+        && wave->definition->sides <= EXPLOSION_MAX_SIDE_COUNT
+        && wave->sound == wave->definition->sound && wave->texture == wave->definition->texture
+        && wave->duration_frames > 0 && wave->elapsed_frames <= (u32)wave->duration_frames;
+}
+
+static int restore_wave_resources(
+    void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
+{
+    ExplosionWave* wave = payload;
+    if (length || !wave->definition)
+        return 0;
+    wave->ray_result = NULL;
+    wave->sound = wave->definition->sound;
+    wave->texture = wave->definition->texture;
+    return 1;
+}
+
+void WeaponSpawnImpactObject(s32 x, s32 y, s32 z);
+void WeaponSpawnMovingExplosion(s32 x, s32 y, s32 z, s32 scale, s32 speed);
+
+enum TimerKind {
+    TimerDestroyObject,
+    TimerNextMode,
+    TimerContinueMatch,
+    TimerImpactWave,
+    TimerMovingExplosion,
+};
+
+static const struct {
+    TimerCallback function;
+    u32 count;
+} timer_bindings[] = {
+    [TimerDestroyObject] = { (TimerCallback)ObjectDestroy, 1 },
+    [TimerNextMode] = { (TimerCallback)GameSetNextMode, 1 },
+    [TimerContinueMatch] = { (TimerCallback)GameSetDeferredValue, 2 },
+    [TimerImpactWave] = { (TimerCallback)WeaponSpawnImpactObject, 3 },
+    [TimerMovingExplosion] = { (TimerCallback)WeaponSpawnMovingExplosion, 5 },
+};
 
 typedef struct {
-    u32 kind, argument;
+    u32 kind, arguments[5];
 } TimerBinding;
 
 static const SnapshotField timer_fields[] = {
@@ -239,23 +418,27 @@ static const SnapshotField timer_fields[] = {
 static u32 capture_timer_binding(const void* payload, u8* output, u32 capacity)
 {
     const Timer* timer = payload;
-    TimerBinding binding;
+    TimerBinding binding = { 0 };
     if (capacity < sizeof(binding))
         return 0;
-    if (timer->callback == (TimerCallback)ObjectDestroy && timer->argument_count == 1) {
-        binding.kind = TimerDestroyObject;
-        binding.argument = WebSnapshotLiveHandle((void*)timer->arguments[0]);
-        if (!binding.argument || binding.argument == UINT32_MAX)
-            return 0;
-    } else if (timer->callback == (TimerCallback)GameSetNextMode && timer->argument_count == 1) {
-        binding.kind = TimerNextMode;
-        binding.argument = timer->arguments[0];
-    } else if (timer->callback == (TimerCallback)GameSetDeferredValue && timer->argument_count == 2
-        && timer->arguments[0] == (uintptr_t)&GameInfo.deathmatch_accept_input) {
-        binding.kind = TimerContinueMatch;
-        binding.argument = timer->arguments[1];
-    } else {
+    while (binding.kind < ArrayCount(timer_bindings)) {
+        if (timer_bindings[binding.kind].function == timer->callback
+            && timer_bindings[binding.kind].count == (u32)timer->argument_count)
+            break;
+        ++binding.kind;
+    }
+    if (binding.kind == ArrayCount(timer_bindings))
         return 0;
+
+    memcpy(binding.arguments, timer->arguments, timer->argument_count * sizeof(u32));
+    if (binding.kind == TimerDestroyObject) {
+        binding.arguments[0] = WebSnapshotLiveHandle((void*)(uintptr_t)timer->arguments[0]);
+        if (!binding.arguments[0] || binding.arguments[0] == UINT32_MAX)
+            return 0;
+    } else if (binding.kind == TimerContinueMatch) {
+        if (timer->arguments[0] != (uintptr_t)&GameInfo.deathmatch_accept_input)
+            return 0;
+        binding.arguments[0] = 0;
     }
     memcpy(output, &binding, sizeof(binding));
     return sizeof(binding);
@@ -269,28 +452,33 @@ static int restore_timer_binding(
     if (length != sizeof(binding))
         return 0;
     memcpy(&binding, input, sizeof(binding));
-    timer->argument_count = 1;
-    if (binding.kind == TimerDestroyObject) {
-        void* target = binding.argument ? find(binding.argument) : NULL;
+    if (binding.kind >= ArrayCount(timer_bindings))
+        return 0;
+    switch (binding.kind) {
+    case TimerDestroyObject: {
+        void* target = binding.arguments[0] ? find(binding.arguments[0]) : NULL;
         if (!target)
             return 0;
-        timer->callback = (TimerCallback)ObjectDestroy;
-        timer->arguments[0] = (uintptr_t)target;
-    } else if (binding.kind == TimerNextMode) {
-        if (binding.argument > GAME_MODE_MENU)
-            return 0;
-        timer->callback = (TimerCallback)GameSetNextMode;
-        timer->arguments[0] = binding.argument;
-    } else if (binding.kind == TimerContinueMatch) {
-        if (binding.argument > 1)
-            return 0;
-        timer->callback = (TimerCallback)GameSetDeferredValue;
-        timer->argument_count = 2;
-        timer->arguments[0] = (uintptr_t)&GameInfo.deathmatch_accept_input;
-        timer->arguments[1] = binding.argument;
-    } else {
-        return 0;
+        binding.arguments[0] = (uintptr_t)target;
+        break;
     }
+    case TimerNextMode:
+        if (binding.arguments[0] > GAME_MODE_MENU)
+            return 0;
+        break;
+    case TimerContinueMatch:
+        if (binding.arguments[0] || binding.arguments[1] > 1)
+            return 0;
+        binding.arguments[0] = (uintptr_t)&GameInfo.deathmatch_accept_input;
+        break;
+    case TimerMovingExplosion:
+        if (!binding.arguments[3] || binding.arguments[3] > 4096 || binding.arguments[4] > 32767)
+            return 0;
+        break;
+    }
+    timer->callback = timer_bindings[binding.kind].function;
+    timer->argument_count = timer_bindings[binding.kind].count;
+    memcpy(timer->arguments, binding.arguments, timer->argument_count * sizeof(u32));
     return 1;
 }
 
@@ -300,11 +488,17 @@ const SnapshotType WebSnapshotEffectTypes[] = {
         .baseline_removable = 1, .alternate_process = WebAfcAdvanceFlareRotation },
     { "lightEmitter", sizeof(LightEmitter), light_fields, .baseline_removable = 1 },
     { "weaponBomb", sizeof(WeaponBomb), bomb_fields, bomb_valid, .baseline_removable = 1 },
+    { "weaponTarget", sizeof(WeaponTarget), target_fields, target_valid, NULL,
+        restore_target_geometry, .hash_fields = 1 },
     { "weaponRayBeam", sizeof(RayBeam), ray_fields, ray_valid, NULL, restore_ray_animation,
         .baseline_removable = 1 },
     { "weaponLightningEmitter", sizeof(LightningEmitter), lightning_emitter_fields,
         lightning_emitter_valid },
     { "weaponLightning", sizeof(Lightning), lightning_fields, lightning_valid },
-    { "timer", sizeof(Timer), timer_fields, NULL, capture_timer_binding, restore_timer_binding },
+    { "flameEmitter", sizeof(FlameEmitter), flame_fields, flame_valid, .hash_fields = 1 },
+    { "explosionShockWave", sizeof(ExplosionWave), wave_fields, wave_valid, NULL,
+        restore_wave_resources },
+    { "timer", sizeof(Timer), timer_fields, NULL, capture_timer_binding, restore_timer_binding,
+        .baseline_removable = 1, .hash_fields = 1 },
     { 0 },
 };

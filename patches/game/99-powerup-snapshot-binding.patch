@@ -1,0 +1,74 @@
+diff --git a/src/modules/power/resources.c b/src/modules/power/resources.c
+--- a/src/modules/power/resources.c
++++ b/src/modules/power/resources.c
+@@ -77,29 +77,22 @@
+     PowerWorldAmbientColor.b = WorldGlobalLightColor->b * 200 / 256;
+ }
+ 
+-s32 PowerupConstructFromDirectory(PowerupState* power, char* type, s32 regeneration_seconds,
+-    s32 initial_units, s32 x, s32 y, s32 z, s32 sparkle)
+-{
+-    register s32 units TM4_BIND_REGISTER("$23") = initial_units;
++RegistryDirectory* WebPowerupBindType(PowerupState* power, char* type)
++{
+     RegistryDirectory* directory;
+     char* interaction;
+-    s32* value;
+-    char* choices[4];
+     char* interaction_format;
+-    s32 count;
+-    SVECTOR* position;
+-    if (EasterEggAccessible(20))
+-        return 0;
++    s32* value;
+     directory = RegGetDirectoryPtrPS(PowerDirectory, type);
+     if (!directory)
+-        return 0;
++        return NULL;
+     power->name = RegGetDirectoryNameP(directory);
+     interaction_format = PowerInteractionNameFormat;
+     interaction = RegGetFileDataPS(directory, PowerInteractionKey);
+     if (!interaction) {
+         interaction = RegGetFileDataPS(PowerDirectory, PowerInteractionKey);
+         if (!interaction)
+-            return 0;
++            return NULL;
+     }
+     {
+         char name[strlen(interaction_format) + strlen(interaction) + 1];
+@@ -110,15 +103,32 @@
+         interaction[0] = old;
+         power->interact = (PowerupInteraction)OSSymbolGetAddress(name);
+         if (!power->interact)
+-            return 0;
++            return NULL;
+     }
+     value = RegGetFileDataPS(directory, PowerGeometryIndexKey);
+-    if (!value)
+-        return 0;
++    if (!PowerModel || !value || (u32)*value >= ArrayCount(PowerModel->parts))
++        return NULL;
+     power->part = &PowerModel->parts[*value];
+     power->sound = RegGetFileDataPS(directory, PowerSoundKey);
+     if (!power->sound)
+         power->sound = PowerDefaultSound;
++    return directory;
++}
++
++s32 PowerupConstructFromDirectory(PowerupState* power, char* type, s32 regeneration_seconds,
++    s32 initial_units, s32 x, s32 y, s32 z, s32 sparkle)
++{
++    register s32 units TM4_BIND_REGISTER("$23") = initial_units;
++    RegistryDirectory* directory;
++    s32* value;
++    char* choices[4];
++    s32 count;
++    SVECTOR* position;
++    if (EasterEggAccessible(20))
++        return 0;
++    directory = WebPowerupBindType(power, type);
++    if (!directory)
++        return 0;
+     if (units <= 0) {
+         value = RegGetFileDataPS(directory, PowerUnitsKey);
+         if (!value)

@@ -1,9 +1,124 @@
 #include "snapshot_types.h"
 
+#include "net_match.h"
+#include "src/main/object/private.h"
 #include "src/modules/car/private.h"
+#include "src/modules/cars/c_crush/private.h"
+#include "src/modules/cars/c_toy/private.h"
+#include "src/modules/cars/shovel.h"
+#include "tm4/main/game.h"
+#include "tm4/modules/auger.h"
 
 #include <stdint.h>
 #include <string.h>
+
+s32 CarToyProcess(Car* car, void* state);
+s32 CarPirateProcess(Car* car, void* state);
+s32 CarTankProcess(Car* car, void* state);
+void CarTankDestructor(Car* car, void* state);
+s32 CarMinionProcess(Car* car, void* state);
+void CarMinionDestructor(Car* car, void* state);
+s32 CarTrashProcess(Car* car, void* state);
+u32 InteractCarTrashWithCar(Car* car, void* state, Car* other);
+s32 CarSlamProcess(Car* car, void* state);
+u32 InteractCarSlamWithCar(Car* car, void* state, Car* other);
+s32 CarCrusherProcess(Car* car, void* state);
+void CarCrusherDestructor(Car* car, void* state);
+u32 InteractCarCrusherWithCar(Car* car, void* state, Car* other);
+void Web_cars_c_crush_TreadPolysProcess(Car* car);
+s32 WebAugerProcess(Car* car, void* state);
+
+static const SnapshotField windup_fields[] = {
+    SNAP_POD(ToyWindup, angle),
+    { 0 },
+};
+static const SnapshotType windup = { "toyWindup", sizeof(ToyWindup), windup_fields };
+/* The pirate allocates a word that none of its callbacks reads or writes. */
+static const SnapshotType pirate = { "pirate", sizeof(s32) };
+static const SnapshotType treads = { "treads" };
+static const SnapshotField shovel_fields[] = {
+    SNAP_POD(CarShovelState, angle),
+    SNAP_POD(CarShovelState, angular_speed),
+    SNAP_POD(CarShovelState, angular_acceleration),
+    SNAP_POD(CarShovelState, target_transform.m),
+    SNAP_POD(CarShovelState, target_transform.t),
+    SNAP_POD(CarShovelState, has_caught_target),
+    SNAP_POD(CarShovelState, remaining_slams),
+    SNAP_WEAK_REF(CarShovelState, target, "car"),
+    SNAP_REF(CarShovelState, loop_sound, "soundEmitter"),
+    { 0 },
+};
+
+static const SnapshotType shovel = { "shovel", sizeof(CarShovelState), shovel_fields };
+static const SnapshotField pinchers_fields[] = {
+    SNAP_POD(CrusherPinchers, upper_angle),
+    SNAP_POD(CrusherPinchers, lower_angle),
+    SNAP_POD(CrusherPinchers, angular_speed),
+    SNAP_POD(CrusherPinchers, angular_acceleration),
+    SNAP_POD(CrusherPinchers, target_transform.m),
+    SNAP_POD(CrusherPinchers, target_transform.t),
+    SNAP_POD(CrusherPinchers, has_caught_target),
+    SNAP_POD(CrusherPinchers, remaining_crushes),
+    SNAP_WEAK_REF(CrusherPinchers, target, "car"),
+    SNAP_REF(CrusherPinchers, loop_sound, "soundEmitter"),
+    { 0 },
+};
+static const SnapshotType pinchers = { "pinchers", sizeof(CrusherPinchers), pinchers_fields };
+static const SnapshotField drill_fields[] = {
+    SNAP_POD(AugerDrill, angle),
+    SNAP_POD(AugerDrill, angular_speed),
+    SNAP_POD(AugerDrill, active_ticks),
+    SNAP_WEAK_REF(AugerDrill, target, "car"),
+    SNAP_REF(AugerDrill, loop_sound, "soundEmitter"),
+    { 0 },
+};
+static const SnapshotType drill = { "drill", sizeof(AugerDrill), drill_fields };
+static const SnapshotType no_callbacks = { "none" };
+
+static s32 refresh_crusher_treads(Car* car, void* state)
+{
+    Web_cars_c_crush_TreadPolysProcess(car);
+    return 1;
+}
+
+typedef struct {
+    const SnapshotType* type;
+    s32 (*process)(Car*, void*);
+    CarCollisionCallback collision;
+    void (*destroy)(Car*, void*);
+    s32 (*refresh)(Car*, void*);
+} CarCallbackBinding;
+
+static const CarCallbackBinding callback_types[] = {
+    { &no_callbacks },
+    { &windup, CarToyProcess },
+    { &pirate, CarPirateProcess },
+    { &treads, CarTankProcess, .destroy = CarTankDestructor, .refresh = CarTankProcess },
+    { &treads, CarMinionProcess, .destroy = CarMinionDestructor, .refresh = CarMinionProcess },
+    { &shovel, CarTrashProcess, InteractCarTrashWithCar },
+    { &shovel, CarSlamProcess, InteractCarSlamWithCar },
+    { &pinchers, CarCrusherProcess, InteractCarCrusherWithCar, CarCrusherDestructor,
+        refresh_crusher_treads },
+    { &drill, WebAugerProcess, InteractCarAugerWithCar },
+};
+
+static const CarCallbackBinding* find_callbacks(const Car* car)
+{
+    for (u32 i = 0; i < ArrayCount(callback_types); ++i) {
+        const CarCallbackBinding* binding = &callback_types[i];
+        if (car->process_callback == binding->process && car->collision_callback == binding->collision
+            && car->destructor_callback == binding->destroy
+            && (car->callback_context != NULL) == (binding->type->size != 0))
+            return binding;
+    }
+    return NULL;
+}
+
+const SnapshotType* WebSnapshotCarCallbackType(const Car* car)
+{
+    const CarCallbackBinding* binding = find_callbacks(car);
+    return binding ? binding->type : NULL;
+}
 
 static u32 wheel_count(const void* payload)
 {
@@ -131,7 +246,7 @@ static const SnapshotField driver_location_fields[] = {
     SNAP_POD(CarAiRuntime, probe_length),
     SNAP_DERIVED(CarAiRuntime, area),
     SNAP_DERIVED(CarAiRuntime, spatial_node),
-    SNAP_REF(CarAiRuntime, target, "car"),
+    SNAP_WEAK_REF(CarAiRuntime, target, "car"),
     { 0 },
 };
 static const SnapshotGroupFields driver_location = { driver_location_fields, NULL };
@@ -262,12 +377,17 @@ static const SnapshotField car_fields[] = {
     SNAP_POD(Car, special_regeneration_interval),
     SNAP_LOCAL_ARRAY(Car, weapons, &weapons),
     SNAP_POD(Car, controls),
-    SNAP_TRANSIENT(Car, callback_context),
-    SNAP_TRANSIENT(Car, process_callback),
-    SNAP_TRANSIENT(Car, collision_callback),
-    SNAP_TRANSIENT(Car, destructor_callback),
+    SNAP_DERIVED(Car, callback_context),
+    SNAP_LOCAL(Car, process_callback),
+    SNAP_LOCAL(Car, collision_callback),
+    SNAP_LOCAL(Car, destructor_callback),
     { 0 },
 };
+
+static int has_freeze_display(const Car* car)
+{
+    return car->freeze_ticks > 0 && !car->shield_ticks && !car->invisibility_ticks;
+}
 
 static int car_valid(const void* payload)
 {
@@ -276,9 +396,10 @@ static int car_valid(const void* payload)
         || !((car->ai_input_callback == CarPlayerInput && !car->ai_saved_input_callback)
             || (!car->ai_input_callback && car->ai_saved_input_callback == CarPlayerInput))
         || car->ai_state_callback != CarAiApproachTarget || car->ai_saved_state_callback
-        || car->callback_context || car->process_callback || car->collision_callback
-        || car->destructor_callback || car->active_collision_particle || car->active_collision_hit
-        || car->original_faces || car->original_colors || car->invisibility_hidden
+        || !WebSnapshotCarCallbackType(car) || car->active_collision_particle
+        || car->active_collision_hit
+        || (car->original_faces && !has_freeze_display(car))
+        || car->original_colors || car->invisibility_hidden
         || car->ai.target_entry || car->ai.nearby_list || car->ai.targeting_count
         || car->health <= 0 || car->health > car->maximum_health
         || car->controls.gear < CAR_GEAR_REVERSE || car->controls.gear > CAR_GEAR_FOURTH
@@ -314,7 +435,7 @@ static int car_valid(const void* payload)
 
 typedef struct {
     u16 area, node;
-    u8 suspended;
+    u8 suspended, freeze_faces;
 } DriverBinding;
 
 static u32 capture_driver(const void* payload, u8* output, u32 capacity)
@@ -325,6 +446,7 @@ static u32 capture_driver(const void* payload, u8* output, u32 capacity)
     DriverBinding binding;
     memset(&binding, 0, sizeof(binding));
     binding.suspended = !car->ai_input_callback;
+    binding.freeze_faces = car->original_faces != NULL;
     for (u32 i = 0; i < ArrayCount(aiWorldInfo.areas); ++i)
         if (car->ai.area == &aiWorldInfo.areas[i])
             binding.area = i + 1;
@@ -337,18 +459,25 @@ static u32 capture_driver(const void* payload, u8* output, u32 capacity)
             return 0;
         binding.node = offset / sizeof(CarAiSpatialNode) + 1;
     }
+    const SnapshotType* type = WebSnapshotCarCallbackType(car);
+    const u32 length = type ? WebSnapshotFieldsCapture(type, car->callback_context,
+                                  output + sizeof(binding), capacity - sizeof(binding))
+                            : 0;
+    if (!length)
+        return 0;
     memcpy(output, &binding, sizeof(binding));
-    return sizeof(binding);
+    return sizeof(binding) + length;
 }
 
 static int restore_driver(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
 {
     Car* car = payload;
     DriverBinding binding;
-    if (length != sizeof(binding))
+    if (length <= sizeof(binding))
         return 0;
     memcpy(&binding, input, sizeof(binding));
-    if (!binding.area || binding.area > ArrayCount(aiWorldInfo.areas) || binding.suspended > 1)
+    if (!binding.area || binding.area > ArrayCount(aiWorldInfo.areas) || binding.suspended > 1
+        || binding.freeze_faces > 1 || (binding.freeze_faces && !has_freeze_display(car)))
         return 0;
     CarAiArea* area = &aiWorldInfo.areas[binding.area - 1];
     if (binding.node > area->node_count || (binding.node && !area->nodes)
@@ -359,7 +488,12 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
     car->ai.spatial_node = binding.node ? &area->nodes[binding.node - 1] : NULL;
     car->ai_input_callback = binding.suspended ? NULL : CarPlayerInput;
     car->ai_saved_input_callback = binding.suspended ? CarPlayerInput : NULL;
-    return 1;
+    const CarCallbackBinding* callbacks = find_callbacks(car);
+    return callbacks
+        && WebSnapshotFieldsRestore(callbacks->type, car->callback_context, input + sizeof(binding),
+            length - sizeof(binding), find)
+        && (!callbacks->refresh || callbacks->refresh(car, car->callback_context))
+        && (!binding.freeze_faces || CarDisplayFreezeConstructor(car));
 }
 
 const SnapshotType WebSnapshotCarTypes[] = {
@@ -367,3 +501,20 @@ const SnapshotType WebSnapshotCarTypes[] = {
         .needs_template = 1 },
     { 0 },
 };
+
+void WebNetForgetCarReferences(const Car* car)
+{
+    for (s32 i = 0; i < GameInfo.car_count; ++i) {
+        Car* other = GameInfo.cars[i];
+        if (other != car)
+            WebSnapshotForgetWeakReferences(WebSnapshotCarCallbackType(other),
+                other->callback_context, car);
+    }
+    for (s32 i = 0; i < OBJECT_LIST_COUNT; ++i) {
+        for (Tm4ObjectHeader* object = ObjectLists[i].first; object; object = object->next) {
+            void* payload = ObjectGetPayload(object);
+            if (payload != car)
+                WebSnapshotForgetWeakReferences(WebSnapshotObjectType(object), payload, car);
+        }
+    }
+}

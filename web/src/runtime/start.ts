@@ -58,7 +58,7 @@ export async function startGame(
             globalThis as typeof globalThis & {
               tm4Port: import("../network/protocol.ts").NetworkPort;
             }
-          ).tm4Port.compatibility = { protocol: 6, build: build.sha256, content };
+          ).tm4Port.compatibility = { protocol: 7, build: build.sha256, content };
           resolve();
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));

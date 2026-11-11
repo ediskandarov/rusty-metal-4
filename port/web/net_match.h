@@ -8,6 +8,8 @@ int WebDirectStartup(void);
 int WebAuthorityStartup(void);
 void WebNetPublishCatalog(void);
 int WebNetMatchActive(void);
+struct Car;
+void WebNetForgetCarReferences(const struct Car* car);
 int WebNetReplaying(void);
 int WebNetRenderedPrediction(void);
 int WebNetPortableCheckpointEnabled(void);

@@ -7,6 +7,7 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
 const token = process.env.TM4_AUTHORITY_TOKEN;
 const prelude = Number(process.env.TM4_RESUME_TEST_TICKS ?? 360);
+const exactWindow = process.env.TM4_RESUME_EXACT_WINDOW === "1";
 assert(endpoint && token && Number.isInteger(prelude) && prelude >= 120);
 const credentialKey = "tm4.resume." + endpoint;
 const target = new URL(site);
@@ -62,6 +63,7 @@ target.searchParams.set("match", endpoint);
           const savedUpdate = NetworkClient.prototype.update;
           let conditioned = false;
           let observedBridge;
+          let handoff;
           const local = new Map();
           NetworkClient.prototype.update = function() {
             const bridge = globalThis.tm4LivePrediction;
@@ -84,7 +86,22 @@ target.searchParams.set("match", endpoint);
               conditioned = true;
             }
             const messages = JSON.parse(savedUpdate.call(this));
+            if (${JSON.stringify(exactWindow && mode === "delay")}) {
+              const index = messages.findIndex(({type}) => type === "resume_live");
+              if (index >= 0) [handoff] = messages.splice(index, 1);
+              if (handoff) {
+                const depth = (this.prediction_clock() - handoff.anchor - handoff.head) | 0;
+                if (depth >= 12) {
+                  globalThis.testReconnectDepth = depth;
+                  messages.push(handoff);
+                  handoff = undefined;
+                }
+              }
+            }
             for (const message of messages) {
+              if (message.type === "resume_live")
+                globalThis.testReconnectDepth =
+                  (this.prediction_clock() - message.anchor - message.head) | 0;
               if (message.type === "snapshot_begin") {
                 const port = globalThis.tm4Port;
                 const game = globalThis.Module;
@@ -195,17 +212,31 @@ target.searchParams.set("match", endpoint);
       { timeout: 30_000 },
     );
     const result = await status(recovered);
+    if (!result.includes("Live prediction"))
+      console.log(
+        "HANDOFF FAILURE",
+        await recovered.evaluate(() => ({
+          depth: globalThis.testReconnectDepth,
+          diagnostics: tm4Port.netDiagnostics,
+        })),
+      );
     assert(result.includes("Live prediction"), result);
     const reconnected = await recovered.evaluate(() => ({
       slot: tm4Port.netViewSlot,
       render: tm4Port.renderLimit,
       diagnostics: tm4Port.netDiagnostics,
       confirmed: tm4Port.netConfirmedTick,
+      handoffDepth: globalThis.testReconnectDepth,
     }));
     assert(reconnected.diagnostics.snapshotTick >= dropTick, JSON.stringify(reconnected));
     assert(reconnected.diagnostics.recoveredTick >= reconnected.diagnostics.snapshotTick);
     assert(reconnected.diagnostics.recoveredTick - reconnected.diagnostics.snapshotTick < 240);
     assert.equal(reconnected.render, 30);
+    if (exactWindow) {
+      assert.equal(reconnected.handoffDepth, 12);
+      assert.equal(reconnected.diagnostics.transport.prediction.maxDepth, 12);
+      assert(reconnected.diagnostics.transport.prediction.windowWaits > 0);
+    }
     console.log("HANDOFF", JSON.stringify(reconnected));
     await recovered.locator("canvas").focus();
     await recovered.keyboard.down("x");

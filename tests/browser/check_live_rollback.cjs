@@ -9,6 +9,16 @@ const latency = Number(process.env.TM4_LIVE_DELAY_MS ?? 72);
 const jitter = Number(process.env.TM4_LIVE_JITTER_MS ?? 12);
 const sustain = Number(process.env.TM4_LIVE_SUSTAIN_TICKS ?? 45);
 const screenshots = process.env.TM4_LIVE_SCREENSHOT_DIR;
+const testCar = process.env.TM4_TEST_CAR;
+const testWorld = process.env.TM4_TEST_WORLD;
+const oil = testWorld === "The Oil Rig";
+const neon = testWorld === "Neon City";
+const carnival = testWorld === "The Carnival";
+const detonateAfter = Number(process.env.TM4_LIVE_DETONATE_MS ?? 0);
+const specialUsesEffects = process.env.TM4_LIVE_SPECIAL_EFFECT === "1";
+const targetDistance = Number(process.env.TM4_TARGET_DISTANCE ?? 500);
+const testGrab = process.env.TM4_TEST_GRAB === "1";
+const projectileTarget = process.env.TM4_TEST_PROJECTILE_TARGET;
 assert(endpoint && token, "A fresh prediction-enabled match server is required");
 
 async function load(page, url) {
@@ -21,7 +31,7 @@ async function load(page, url) {
 
 async function instruments(page, client) {
   await page.evaluate(
-    async ({ client, latency, jitter }) => {
+    async ({ client, latency, jitter, targetDistance, testGrab, projectileTarget }) => {
       const trace = (globalThis.tm4LiveTrace = {
         captures: new Map(),
         fixtures: {},
@@ -37,6 +47,15 @@ async function instruments(page, client) {
         destroyed: false,
         replayDestruction: false,
         replayImpacts: 0,
+        replayProjectiles: 0,
+        effects: 0,
+        replayEffects: 0,
+        replayGrabs: 0,
+        replayHelicopters: 0,
+        replayPathHits: 0,
+        grabDamage: 0,
+        frozen: false,
+        replayFreeze: false,
         damage: false,
       });
       if (client) {
@@ -81,8 +100,19 @@ async function instruments(page, client) {
         const action = trace.fixtures[tick];
         if (action === "contact" && !Module._WebTestPlaceWeaponTarget(128))
           throw new Error("Contact fixture failed");
-        if (action === "target" && !Module._WebTestPlaceWeaponTarget(500))
+        if (action === "target" && !Module._WebTestPlaceWeaponTarget(targetDistance))
           throw new Error("Projectile fixture failed");
+        if (action === "helicopter" && !Module._WebTestLaunchAtHelicopter())
+          throw new Error("Helicopter fixture failed");
+        if (
+          (action === "train" || action === "ufo") &&
+          !Module._WebTestApproachNeonObject(action === "ufo" ? 1 : 0)
+        )
+          throw new Error("Neon City fixture failed");
+        if (action === "coaster" && !Module._WebTestApproachPathObject(0))
+          throw new Error("Coaster fixture failed");
+        if (action === "grab" && Module._WebTestPlaceAugerTarget() <= 0)
+          throw new Error("Grab fixture failed");
         if (action === "world" && !Module._WebTestAimAtWeakDestroyable())
           throw new Error("World fixture failed");
         if (action === "wall" && !Module._WebTestAimAtDestroyable())
@@ -95,12 +125,20 @@ async function instruments(page, client) {
           Module._WebTestNetworkHudMessages(1, trace.replay ? 1 : 2);
           if (trace.replay) trace.replayedHud.add(tick + 1);
         }
+        const frozenBefore = projectileTarget && Module._WebTestFrozenFaceTicks(1) > 0;
+        if (projectileTarget && !frozenBefore)
+          Module.ccall("WebTestPlaceProjectileTarget", "number", ["string"], [projectileTarget]);
         const publishes = tm4Port.netMatchTick;
         tm4Port.netMatchTick = () => {
           ++trace.publications;
           publishes?.();
         };
         const previousImpacts = tm4Port.projectileImpacts ?? 0;
+        const previousProjectiles = tm4Port.projectileSpawns ?? 0;
+        const previousHelicopters = tm4Port.helicopterRemoved ?? 0;
+        const pathHits = () => (tm4Port.trainPlayerHits ?? 0) + (tm4Port.coasterPlayerHits ?? 0);
+        const previousPathHits = pathHits();
+        const previousEffects = trace.effects;
         const previousHealth = tm4Port.cars?.map(({ health }) => health);
         let result;
         try {
@@ -110,9 +148,28 @@ async function instruments(page, client) {
         }
         if (!result) return result;
         ++trace.steps;
+        if (projectileTarget && !frozenBefore && Module._WebTestFrozenFaceTicks(1) > 0) {
+          trace.frozen = true;
+          trace.replayFreeze ||= trace.replay;
+        }
+        trace.effects =
+          (tm4Port.shockwaveSpawns ?? 0) +
+          (tm4Port.raySpawns ?? 0) +
+          (tm4Port.lightningEmitters ?? 0) +
+          (tm4Port.flameSpawns ?? 0);
         if (trace.replay) {
           ++trace.repeated;
           trace.replayImpacts += (tm4Port.projectileImpacts ?? 0) - previousImpacts;
+          trace.replayProjectiles += (tm4Port.projectileSpawns ?? 0) - previousProjectiles;
+          trace.replayEffects += trace.effects - previousEffects;
+          trace.replayHelicopters += (tm4Port.helicopterRemoved ?? 0) - previousHelicopters;
+          trace.replayPathHits += pathHits() - previousPathHits;
+        }
+        if (testGrab && Module._WebTestReadCarGrab() && tm4Port.carGrab.holding) {
+          const health = tm4Port.carGrab.health;
+          trace.grabInitialHealth ??= health;
+          trace.grabDamage = Math.max(trace.grabDamage, trace.grabInitialHealth - health);
+          if (trace.replay) ++trace.replayGrabs;
         }
         trace.damage ||=
           !!previousHealth &&
@@ -151,7 +208,7 @@ async function instruments(page, client) {
         return result;
       };
     },
-    { client, latency, jitter },
+    { client, latency, jitter, targetDistance, testGrab, projectileTarget },
   );
 }
 
@@ -205,6 +262,18 @@ const summary = (page) =>
     damage: globalThis.tm4LiveTrace.damage,
     replayDestruction: globalThis.tm4LiveTrace.replayDestruction,
     replayImpacts: globalThis.tm4LiveTrace.replayImpacts,
+    replayProjectiles: globalThis.tm4LiveTrace.replayProjectiles,
+    effects: globalThis.tm4LiveTrace.effects,
+    replayEffects: globalThis.tm4LiveTrace.replayEffects,
+    replayGrabs: globalThis.tm4LiveTrace.replayGrabs,
+    replayHelicopters: globalThis.tm4LiveTrace.replayHelicopters,
+    helicopters: tm4Port.helicopterRemoved ?? 0,
+    replayPathHits: globalThis.tm4LiveTrace.replayPathHits,
+    pathHits: (tm4Port.trainPlayerHits ?? 0) + (tm4Port.coasterPlayerHits ?? 0),
+    ufoCaptures: tm4Port.ufoCaptures ?? 0,
+    grabDamage: globalThis.tm4LiveTrace.grabDamage,
+    frozen: globalThis.tm4LiveTrace.frozen,
+    replayFreeze: globalThis.tm4LiveTrace.replayFreeze,
     steps: globalThis.tm4LiveTrace.steps,
     repeated: globalThis.tm4LiveTrace.repeated,
     publications: globalThis.tm4LiveTrace.publications,
@@ -238,6 +307,22 @@ const summary = (page) =>
     });
     await load(authority, new URL("?authority=1", site));
     await instruments(authority, false);
+    if (testCar || testWorld) {
+      await authority.evaluate(
+        ({ car, world }) => {
+          if (car) {
+            if (!tm4Port.catalog.cars.includes(car)) throw new Error("Unknown stock car: " + car);
+            tm4Port.catalog.cars = [car, car === "Pizza Boy" ? "Orbital" : "Pizza Boy"];
+          }
+          if (world) {
+            if (!tm4Port.catalog.worlds.includes(world))
+              throw new Error("Unknown stock map: " + world);
+            tm4Port.catalog.worlds = [world];
+          }
+        },
+        { car: testCar, world: testWorld },
+      );
+    }
     const { connectAuthority } = await import("../../tools/network/authority.ts");
     let authorityError;
     void connectAuthority(authority, endpoint, token).catch((error) => {
@@ -333,6 +418,85 @@ const summary = (page) =>
       );
       return tick;
     };
+    const validate = async (page) => {
+      const local = await summary(page);
+      const expected = await authority.evaluate(
+        (tick) => globalThis.tm4LiveTrace.captures.get(tick),
+        local.confirmed,
+      );
+      assert.deepEqual(local.server.sections, expected.sections);
+      assert.equal(local.server.digest, expected.digest);
+      assert(local.frames > 0);
+      if (!testWorld) assert(local.contact);
+      if (!testCar && !testWorld) assert(local.destroyed);
+      assert(local.transport.prediction.rollbacks > 0 && local.repeated > 0);
+      assert(
+        local.transport.prediction.maxDepth <= 12 &&
+          local.transport.prediction.peakBytes < 9 * 1024 * 1024,
+      );
+      assert.equal(local.publications, local.steps - local.repeated);
+      assert.equal(local.audio.duringReplay, 0);
+      assert(local.audio.starts > 0);
+      return local;
+    };
+    if (oil) {
+      const fire = await fixture("helicopter", 20);
+      await remoteDriver.bringToFront();
+      await remoteDriver.locator("canvas").focus();
+      await remoteDriver.waitForFunction((tick) => tm4Port.netMatch.tick >= tick, fire - 3);
+      await remoteDriver.keyboard.down("ArrowRight");
+      await remoteDriver.waitForTimeout(180);
+      await remoteDriver.keyboard.up("ArrowRight");
+      await authority.waitForFunction(() => tm4Port.helicopterRemoved === 1, null, {
+        timeout: 8000,
+        polling: 25,
+      });
+      const combat = await summary(authority);
+      await Promise.all(players.map((page) => waitConfirmed(page, combat.head + 15)));
+      const verified = await Promise.all(players.map(validate));
+      assert(combat.impacts > 0);
+      assert(verified.some((state) => state.replayHelicopters > 0));
+      assert.ifError(authorityError);
+      assert.deepEqual(errors, []);
+      console.log(
+        "PASS live Lightyear Oil Rig rollback",
+        JSON.stringify({ latency, jitter, combat, verified }),
+      );
+      return;
+    }
+    if (neon || carnival) {
+      const approach = await fixture(neon ? "train" : "coaster", 20);
+      await remoteDriver.bringToFront();
+      await remoteDriver.locator("canvas").focus();
+      await remoteDriver.waitForFunction((tick) => tm4Port.netMatch.tick >= tick, approach - 3);
+      await remoteDriver.keyboard.down("ArrowRight");
+      await remoteDriver.waitForTimeout(180);
+      await remoteDriver.keyboard.up("ArrowRight");
+      await authority.waitForFunction(
+        () => (tm4Port.trainPlayerHits ?? 0) + (tm4Port.coasterPlayerHits ?? 0) > 0,
+        null,
+        { timeout: 8000, polling: 25 },
+      );
+      if (neon) {
+        await fixture("ufo", 20);
+        await authority.waitForFunction(() => tm4Port.ufoCapturedPlayer, null, {
+          timeout: 35_000,
+          polling: 50,
+        });
+      }
+      const combat = await summary(authority);
+      await Promise.all(players.map((page) => waitConfirmed(page, combat.head + 15)));
+      const verified = await Promise.all(players.map(validate));
+      assert(combat.pathHits > 0 && (!neon || combat.ufoCaptures > 0));
+      assert(verified.some((state) => state.replayPathHits > 0));
+      assert.ifError(authorityError);
+      assert.deepEqual(errors, []);
+      console.log(
+        "PASS live Lightyear " + testWorld + " rollback",
+        JSON.stringify({ latency, jitter, combat, verified }),
+      );
+      return;
+    }
     const tracking = await fixture("target");
     await Promise.all(players.map((page) => waitConfirmed(page, tracking + 2)));
     await remoteDriver.bringToFront();
@@ -350,12 +514,72 @@ const summary = (page) =>
     await shooter.bringToFront();
     await shooter.locator("canvas").focus();
     await shooter.keyboard.down("w");
+    if (testCar) await remoteDriver.keyboard.down("ArrowRight");
     await shooter.waitForTimeout(180);
     await shooter.keyboard.up("w");
-    await authority.waitForFunction(() => tm4Port.projectileRemoved > 0, null, {
-      timeout: 8000,
-      polling: 100,
-    });
+    if (testCar) await remoteDriver.keyboard.up("ArrowRight");
+    if (detonateAfter) {
+      await shooter.waitForTimeout(detonateAfter);
+      await Promise.all([shooter.keyboard.down("w"), remoteDriver.keyboard.down("ArrowRight")]);
+      await shooter.waitForTimeout(140);
+      await Promise.all([shooter.keyboard.up("w"), remoteDriver.keyboard.up("ArrowRight")]);
+    }
+    if (testGrab) {
+      const grab = await fixture("grab");
+      await authority.waitForFunction((tick) => tm4Port.netMatch.tick >= tick, grab - 2, {
+        timeout: 5000,
+        polling: 15,
+      });
+      await remoteDriver.keyboard.down("x");
+      await remoteDriver.waitForTimeout(170);
+      await remoteDriver.keyboard.up("x");
+      await authority.waitForFunction(() => globalThis.tm4LiveTrace.grabDamage > 0, null, {
+        timeout: 8000,
+        polling: 100,
+      });
+    } else {
+      await authority.waitForFunction(
+        (effects) =>
+          effects
+            ? tm4Port.shockwaveRemoved ||
+              tm4Port.rayRemoved ||
+              tm4Port.lightningRemoved ||
+              (tm4Port.flameSpawns && !Module._WebTestFlameEmitterCount())
+            : tm4Port.projectileRemoved > 0,
+        specialUsesEffects,
+        { timeout: 8000, polling: 100 },
+      );
+    }
+    if (testCar) {
+      const combat = await summary(authority);
+      await Promise.all(players.map((page) => waitConfirmed(page, combat.head + 15)));
+      const verified = await Promise.all(players.map(validate));
+      assert(
+        verified.some(
+          (state) =>
+            state.replayProjectiles > 0 ||
+            state.replayImpacts > 0 ||
+            state.replayEffects > 0 ||
+            state.replayGrabs > 0,
+        ),
+        "No rendered rollback replayed a projectile impact or special",
+      );
+      assert(combat.contact && combat.damage);
+      if (projectileTarget) assert(combat.frozen && verified.some((state) => state.replayFreeze));
+      if (testGrab) assert(combat.grabDamage > 0);
+      else if (specialUsesEffects) assert(combat.effects > 0);
+      else {
+        assert(combat.projectiles > 0 && combat.removed > 0);
+        assert(combat.impacts > 0 || combat.effects > 0);
+      }
+      assert.ifError(authorityError);
+      assert.deepEqual(errors, []);
+      console.log(
+        "PASS live Lightyear roster rollback",
+        JSON.stringify({ car: testCar, latency, jitter, combat, verified }),
+      );
+      return;
+    }
     const world = await fixture("world");
     await Promise.all(players.map((page) => waitConfirmed(page, world + 2)));
     await shooter.keyboard.down("e");
@@ -367,25 +591,6 @@ const summary = (page) =>
     const destroyed = await summary(authority);
     await Promise.all(players.map((page) => waitConfirmed(page, destroyed.head + sustain)));
 
-    const validate = async (page) => {
-      const local = await summary(page);
-      const expected = await authority.evaluate(
-        (tick) => globalThis.tm4LiveTrace.captures.get(tick),
-        local.confirmed,
-      );
-      assert.deepEqual(local.server.sections, expected.sections);
-      assert.equal(local.server.digest, expected.digest);
-      assert(local.frames > 0 && local.contact && local.destroyed);
-      assert(local.transport.prediction.rollbacks > 0 && local.repeated > 0);
-      assert(
-        local.transport.prediction.maxDepth <= 12 &&
-          local.transport.prediction.peakBytes < 9 * 1024 * 1024,
-      );
-      assert.equal(local.publications, local.steps - local.repeated);
-      assert.equal(local.audio.duringReplay, 0);
-      assert(local.audio.starts > 0);
-      return local;
-    };
     const verified = await Promise.all(players.map(validate));
     const hud = await Promise.all(
       players.map((player) =>

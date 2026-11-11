@@ -25,6 +25,7 @@
 #include "tm4/main/pad.h"
 #include "tm4/main/system.h"
 #include "tm4/main/tournament.h"
+#include "tm4/modules/auger.h"
 #include "tm4/modules/camera.h"
 #include "tm4/modules/conveyer.h"
 #include "tm4/modules/destry.h"
@@ -156,11 +157,35 @@ EMSCRIPTEN_KEEPALIVE void WebTestLocalCheckpointProjectiles(void)
                 EM_ASM({ tm4Port.testLiveProjectiles.push($0); }, header->serial);
 }
 
+EMSCRIPTEN_KEEPALIVE void WebTestSnapshotObjects(const char* name)
+{
+    EM_ASM({ tm4Port.testSnapshotObjects = []; });
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list)
+        for (const Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next)
+            if (!strcmp(header->name, name))
+                EM_ASM({ tm4Port.testSnapshotObjects.push($0); }, header->serial);
+}
+
 EMSCRIPTEN_KEEPALIVE int WebTestPerturbNetworkCar(s32 slot)
 {
     if (slot < 0 || slot >= ArrayCount(GameInfo.players) || !GameInfo.players[slot].car)
         return 0;
     GameInfo.players[slot].car->energy -= 128;
+    return 1;
+}
+
+static s32 test_unknown_car_process(Car* car, void* context)
+{
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestUnsupportedCarCallback(void)
+{
+    Car* car = GameInfo.players[0].car;
+    if (!WebNetMatchActive() || !car || car->process_callback)
+        return 0;
+    car->process_callback = test_unknown_car_process;
+    WebNetMatchPublishTick();
     return 1;
 }
 
@@ -669,6 +694,38 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceWeaponTarget(s32 distance)
     return test_weapon_target->health;
 }
 
+EMSCRIPTEN_KEEPALIVE int WebTestPlaceProjectileTarget(const char* name)
+{
+    const Car* shooter = GameInfo.players[0].car;
+    Car* target = GameInfo.players[1].car;
+    if (!shooter || !target || target->freeze_ticks)
+        return 0;
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
+        for (Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next) {
+            if (strcmp(header->name, "weaponProjectile"))
+                continue;
+            const WeaponProjectile* projectile = ObjectGetPayload(header);
+            if (projectile->owner != shooter || strcasecmp(projectile->type->name, name))
+                continue;
+            MATRIX placement;
+            IdentifyMatrix(&placement);
+            placement.t[0] = projectile->bullet.current_world.vx - target->collision_box.center.vx;
+            placement.t[1] = projectile->bullet.current_world.vy - target->collision_box.center.vy;
+            placement.t[2] = projectile->bullet.current_world.vz - target->collision_box.center.vz;
+            CarOrientWithMatrix(target, &placement);
+            ObjectSetPosition(target, target->position.vx, target->position.vy, target->position.vz);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestFrozenFaceTicks(s32 slot)
+{
+    const Car* car = (u32)slot < ArrayCount(GameInfo.players) ? GameInfo.players[slot].car : NULL;
+    return car && car->original_faces ? (car->freeze_ticks ? car->freeze_ticks : -1) : 0;
+}
+
 /* Use ordinary weapon impacts to finish a network test round. */
 EMSCRIPTEN_KEEPALIVE s32 WebTestPrepareNetworkDuel(s32 distance)
 {
@@ -989,11 +1046,44 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestDestroyablePresent(void)
                 });
             },
             present, test_destroyable_faces, test_destroyable_enabled_faces,
-            CollisionPolygonEnabled(test_destroyable_polygon),
-            test_destroyable_polygon->owner != NULL, fragments);
+            test_destroyable_polygon ? CollisionPolygonEnabled(test_destroyable_polygon) : 0,
+            test_destroyable_polygon && test_destroyable_polygon->owner != NULL, fragments);
     }
     return present;
 }
+static int test_destroy_map_pending;
+
+EMSCRIPTEN_KEEPALIVE void WebTestDestroyMapScenery(void)
+{
+    test_destroy_map_pending = 1;
+}
+
+static int test_destroy_map_scenery(void)
+{
+    const s32* count = RegGetFileDataS("/world/collisionPolys/numCollideInList");
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
+        for (Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next) {
+            if (strcmp(header->name, "destroyable"))
+                continue;
+            Destroyable* object = ObjectGetPayload(header);
+            test_destroyable = object;
+            test_destroyable_serial = header->serial;
+            test_destroyable_world = object->world;
+            test_destroyable_polygon = NULL;
+            for (s32 i = 0; count && i < *count; ++i)
+                if (WorldCollisionPolygons[i].owner == object) {
+                    test_destroyable_polygon = &WorldCollisionPolygons[i];
+                    break;
+                }
+            SVECTOR position;
+            ObjectCopyPosition(&position, object);
+            return !DestroyableApplyDamage(object, object->hit_points, position.vx, position.vy,
+                       position.vz) && !WebTestDestroyablePresent();
+        }
+    }
+    return 0;
+}
+
 EMSCRIPTEN_KEEPALIVE int WebTestPerturbLocalCheckpoint(void)
 {
     rand();
@@ -1249,6 +1339,11 @@ void WebTestApplyPendingActions(void)
     test_hud_count = 0;
     test_rollback_audio();
     test_approach_scenery();
+    if (test_destroy_map_pending) {
+        test_destroy_map_pending = 0;
+        const int destroyed = test_destroy_map_scenery();
+        EM_ASM({ tm4Port.testSceneryDamaged = !!$0; }, destroyed);
+    }
     test_coop_actions();
     test_launch_at_helicopter();
     if (deathmatch_rules_pending) {
@@ -1507,6 +1602,12 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestReadCarGrab(void)
         angle = shovel->angle;
         remaining = shovel->remaining_slams;
         sound = shovel->loop_sound;
+    } else if (!strcasecmp(car->filename, "auger")) {
+        AugerDrill* drill = car->callback_context;
+        target = drill->target;
+        angle = drill->angle;
+        remaining = drill->active_ticks;
+        sound = drill->loop_sound;
     } else {
         return 0;
     }

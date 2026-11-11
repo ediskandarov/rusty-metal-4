@@ -39,9 +39,9 @@ static struct {
 
 s32 WebNetWorldPolygonCount(void);
 
-static void* polygon_base(void) { return WorldCollisionPolygons; }
+static void* polygon_base(const void* payload) { return WorldCollisionPolygons; }
 
-static u32 polygon_count(void)
+static u32 polygon_count(const void* payload)
 {
     const s32 count = WebNetWorldPolygonCount();
     return count > 0 ? count : 0;

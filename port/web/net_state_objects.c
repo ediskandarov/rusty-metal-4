@@ -1,11 +1,11 @@
 #include "net_state_fields.h"
+#include "snapshot_types.h"
 #include "src/modules/anim/private.h"
 #include "src/modules/carprt/private.h"
 #include "src/modules/frag/private.h"
 #include "src/modules/levels/w_yard/private.h"
 #include "src/modules/lightn/private.h"
 #include "src/modules/ray/private.h"
-#include "src/modules/timer/private.h"
 #include "src/modules/weap/private.h"
 #include "tm4/modules/conveyer.h"
 
@@ -66,22 +66,14 @@ static void bullet_state(NetStateOutput* hash, const Bullet* bullet)
     }
 }
 
-static int timer_state(NetStateOutput* hash, const Timer* timer)
+static int described_state(NetStateOutput* hash, const SnapshotType* type, const void* payload)
 {
-    VALUE(timer->remaining_ticks);
-    if (timer->callback == (TimerCallback)ObjectDestroy && timer->argument_count == 1) {
-        VALUE(1);
-        VALUE(handle((void*)timer->arguments[0]));
-    } else if (timer->callback == (TimerCallback)GameSetNextMode && timer->argument_count == 1) {
-        VALUE(2);
-        VALUE(timer->arguments[0]);
-    } else if (timer->callback == (TimerCallback)GameSetDeferredValue && timer->argument_count == 2
-        && timer->arguments[0] == (uintptr_t)&GameInfo.deathmatch_accept_input) {
-        VALUE(3);
-        VALUE(timer->arguments[1]);
-    } else {
+    u8 bytes[4096];
+    const u32 length = WebSnapshotFieldsCapture(type, payload, bytes, sizeof(bytes));
+    if (!length)
         return 0;
-    }
+    for (u32 i = 0; i < length; ++i)
+        state_byte(hash, bytes[i]);
     return 1;
 }
 
@@ -123,6 +115,9 @@ int WebNetWriteObject(NetStateOutput* hash, const Tm4ObjectHeader* object, int i
         return 1;
     const char* name = object->name;
     const void* payload = ObjectGetPayload(object);
+    const SnapshotType* description = WebSnapshotObjectType(object);
+    if (description && description->hash_fields)
+        return described_state(hash, description, payload);
     if (!strcmp(name, "car")) {
         return 1;
     } else if (!strcmp(name, "carJump")) {
@@ -138,8 +133,6 @@ int WebNetWriteObject(NetStateOutput* hash, const Tm4ObjectHeader* object, int i
         emitter_state(hash, payload);
     } else if (!strcmp(name, "bullet")) {
         bullet_state(hash, payload);
-    } else if (!strcmp(name, "timer")) {
-        return timer_state(hash, payload);
     } else if (!strcmp(name, "weaponProjectile")) {
         const WeaponProjectile* projectile = payload;
         const WeaponProjectileType* type = stock_projectile_type(projectile);
@@ -222,6 +215,7 @@ int WebNetWriteObject(NetStateOutput* hash, const Tm4ObjectHeader* object, int i
             VALUE(anim->parts[i].height);
             VALUE(anim->parts[i].width_step);
             VALUE(anim->parts[i].height_step);
+            VALUE(anim->parts[i].billboard_offset.fields.texture_period_frames);
         }
     } else if (!strcmp(name, "powerup")) {
         const PowerupState* powerup = payload;
@@ -256,6 +250,8 @@ int WebNetWriteObject(NetStateOutput* hash, const Tm4ObjectHeader* object, int i
     } else if (!strcmp(name, "explosionShockWave")) {
         const ExplosionWave* wave = payload;
         key(hash, wave->definition->name);
+        VALUE(wave->height);
+        VALUE(wave->color.packed);
         VALUE(wave->damage);
         VALUE(wave->duration_frames);
         VALUE(wave->inner_radial_speed);

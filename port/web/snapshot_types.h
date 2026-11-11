@@ -9,8 +9,11 @@ const SnapshotType* WebSnapshotTypeByName(const char* name);
 
 extern const SnapshotType WebSnapshotSceneTypes[];
 extern const SnapshotType WebSnapshotYardTypes[];
+extern const SnapshotType WebSnapshotMovingWorldTypes[];
 extern const SnapshotType WebSnapshotEffectTypes[];
 extern const SnapshotType WebSnapshotProjectileTypes[];
+struct Car;
+const SnapshotType* WebSnapshotCarCallbackType(const struct Car* car);
 extern const SnapshotType WebSnapshotCarTypes[];
 extern const SnapshotType WebSnapshotSoundTypes[];
 

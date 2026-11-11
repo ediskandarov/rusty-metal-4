@@ -9,9 +9,11 @@ typedef enum {
     SnapshotFieldEnd,
     SnapshotPod,
     SnapshotObjectRef,
+    SnapshotWeakObjectRef,
     SnapshotRequiredRef,
     SnapshotHeaderRef,
     SnapshotKey,
+    SnapshotResourceString,
     SnapshotTemplateKey,
     SnapshotNumericKey,
     SnapshotOwnedString,
@@ -62,8 +64,8 @@ typedef struct {
 } SnapshotNumericBinding;
 
 typedef struct {
-    void* (*base)(void);
-    u32 (*count)(void);
+    void* (*base)(const void* payload);
+    u32 (*count)(const void* payload);
     size_t stride;
 } SnapshotIndexBinding;
 
@@ -81,19 +83,24 @@ typedef struct {
     int (*validate)(const void* payload);
     u32 (*capture)(const void* payload, u8* output, u32 capacity);
     int (*restore)(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find);
-    u8 needs_template, baseline_removable;
+    u8 needs_template, baseline_removable, hash_fields;
     const SnapshotCustomClass* custom;
     Tm4ObjectCallback alternate_process;
+    void (*release)(void* object);
 } SnapshotType;
 
 #define SNAP_FIELD(kind, type, field, binding)                                                     \
     { kind, offsetof(type, field), sizeof(((type*)0)->field), binding }
 #define SNAP_POD(type, field) SNAP_FIELD(SnapshotPod, type, field, NULL)
 #define SNAP_REF(type, field, class_name) SNAP_FIELD(SnapshotObjectRef, type, field, class_name)
+#define SNAP_WEAK_REF(type, field, class_name) \
+    SNAP_FIELD(SnapshotWeakObjectRef, type, field, class_name)
 #define SNAP_REQUIRED(type, field, class_name)                                                     \
     SNAP_FIELD(SnapshotRequiredRef, type, field, class_name)
 #define SNAP_HEADER(type, field) SNAP_FIELD(SnapshotHeaderRef, type, field, NULL)
 #define SNAP_KEY(type, field, keys) SNAP_FIELD(SnapshotKey, type, field, keys)
+#define SNAP_RESOURCE_STRING(type, field, keys) \
+    SNAP_FIELD(SnapshotResourceString, type, field, keys)
 #define SNAP_LOCAL_KEY(type, field) SNAP_FIELD(SnapshotTemplateKey, type, field, NULL)
 #define SNAP_NUMERIC_KEY(type, field, keys) SNAP_FIELD(SnapshotNumericKey, type, field, keys)
 #define SNAP_STRING(type, field) SNAP_FIELD(SnapshotOwnedString, type, field, NULL)
@@ -112,5 +119,6 @@ u32 WebSnapshotFieldsCapture(
 int WebSnapshotFieldsRestore(const SnapshotType* type, void* object, const u8* input, u32 length,
     WebSnapshotFindObject* find);
 void WebSnapshotFieldsRelease(const SnapshotType* type, void* object);
+void WebSnapshotForgetWeakReferences(const SnapshotType* type, void* object, const void* target);
 
 #endif

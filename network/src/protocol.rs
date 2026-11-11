@@ -158,6 +158,8 @@ pub enum Request {
         epoch: u32,
         digest: u32,
         unsupported: Option<String>,
+        #[serde(default)]
+        portable: bool,
     },
     Progress {
         tick: u32,

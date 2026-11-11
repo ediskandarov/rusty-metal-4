@@ -41,7 +41,7 @@ const authority = Bun.spawn([process.execPath, join(root, "tools/network/authori
 const joinUrl = new URL(site);
 joinUrl.searchParams.set("match", endpoint);
 console.log("Join the match from " + joinUrl.href);
-console.log("Construction Yard starts when every player is ready and the match clocks agree.");
+console.log("The match starts when every player is ready and the match clocks agree.");
 
 const stop = () => {
   authority.kill();

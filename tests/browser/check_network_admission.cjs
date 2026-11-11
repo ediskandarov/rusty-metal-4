@@ -1,4 +1,4 @@
-/* global tm4Port */
+/* global Module, tm4Port */
 const assert = require("node:assert/strict");
 const { chromium } = require("playwright");
 
@@ -20,11 +20,15 @@ const { chromium } = require("playwright");
     await authority.goto(new URL("?authority=1", site).href);
     await authority.waitForFunction(() => globalThis.tm4Port?.compatibility);
     await authority.evaluate((scenario) => {
-      if (scenario === "map") tm4Port.catalog.worlds = ["Oil Rig"];
+      if (scenario === "map") tm4Port.catalog.worlds = ["Unavailable stock test map"];
       else {
-        if (!tm4Port.catalog.cars.includes("Microblast"))
-          throw new Error("Missing Microblast fixture");
-        tm4Port.catalog.cars = ["Orbital", "Microblast"];
+        const start = Module._WebNetRequestMatch;
+        Module._WebNetRequestMatch = (...args) => {
+          const result = start(...args);
+          if (result && !Module._WebTestUnsupportedCarCallback())
+            throw new Error("Unable to install unregistered callback fixture");
+          return result;
+        };
       }
     }, scenario);
     let authorityError;
@@ -34,7 +38,7 @@ const { chromium } = require("playwright");
     const clients = [await browser.newPage(), await browser.newPage()];
     await Promise.all(clients.map((page) => page.goto(url.href)));
     const message =
-      scenario === "map" ? /requires stock Construction Yard/ : /roster|car callback state/i;
+      scenario === "map" ? /session resources are missing locally/i : /roster|car callback state/i;
     for (const page of clients) {
       const status = page.locator('#status[data-match-state="error"]');
       await status.waitFor();

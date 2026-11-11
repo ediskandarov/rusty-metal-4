@@ -1,3 +1,15 @@
+diff --git a/src/main/game.c b/src/main/game.c
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -565,6 +565,8 @@
+     }
+     if (GameInfo.cars[index] != car)
+         return;
++    if (WebNetMatchActive())
++        WebNetForgetCarReferences(car);
+     for (player = 0; player < ArrayCount(GameInfo.players); ++player) {
+         Camera* camera = GameInfo.players[player].camera;
+         if (camera && car == camera->object) {
 diff --git a/src/main/object/object.c b/src/main/object/object.c
 --- a/src/main/object/object.c
 +++ b/src/main/object/object.c
