@@ -89,10 +89,12 @@ jobs:
           path: build/release/server
           if-no-files-found: error
           retention-days: 7
-      - name: Install browser
-        run: bun x playwright install --with-deps chromium
       - name: Check static hosting without disc files
-        run: bun run test:pages
+        # The runner already includes Chrome and its system dependencies.
+        run: |
+          chrome="$(command -v google-chrome)"
+          "$chrome" --version
+          TM4_CHROME="$chrome" bun run test:pages
       - name: Configure Pages
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
