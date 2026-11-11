@@ -34,14 +34,20 @@ use tower_http::services::ServeDir;
 
 use tm4_network::protocol::MAX_PLAYERS;
 #[derive(Debug, PartialEq)]
+pub enum SetupRequest {
+    Prepare,
+    Start(MatchSetup),
+}
+#[derive(Debug, PartialEq)]
 pub struct MatchSetup {
-    pub resources: PathBuf,
     pub players: usize,
+    pub world: String,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StartOptions {
     players: usize,
+    world: String,
 }
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -51,6 +57,8 @@ pub struct Status {
     pub phase: String,
     pub message: String,
     pub players: usize,
+    pub worlds: Vec<String>,
+    pub world: Option<String>,
     pub connected: usize,
     pub tick: u32,
     pub endpoint: String,
@@ -80,7 +88,7 @@ pub struct Launcher {
     pub wasm: PathBuf,
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
-    requests: Receiver<MatchSetup>,
+    requests: Receiver<SetupRequest>,
     _private: PrivateDirectory,
     http: Option<thread::JoinHandle<()>>,
 }
@@ -151,6 +159,8 @@ impl Launcher {
             phase: "setup".into(),
             message: "Administrator: supply your disc resources to prepare a match.".into(),
             players,
+            worlds: Vec::new(),
+            world: None,
             connected: 0,
             tick: 0,
             endpoint: format!("ws://{endpoint}"),
@@ -179,7 +189,7 @@ impl Launcher {
             http: Some(http),
         })
     }
-    pub fn wait_for_setup(&self) -> Option<MatchSetup> {
+    pub fn wait_for_setup(&self) -> Option<SetupRequest> {
         while !self.stopped.load(Ordering::Relaxed) {
             match self.requests.recv_timeout(Duration::from_millis(100)) {
                 Ok(path) => return Some(path),
@@ -188,6 +198,17 @@ impl Launcher {
             }
         }
         None
+    }
+    pub fn resource_directory(&self) -> &Path {
+        &self._private.0
+    }
+    pub fn ready(&self, worlds: Vec<String>) {
+        let mut status = self.status.lock().unwrap();
+        status.world = worlds.first().cloned();
+        status.worlds = worlds;
+        status.phase = "ready".into();
+        status.message =
+            "Resources ready. Choose a map and player count, then open the match.".into();
     }
     pub fn phase(&self, phase: &str, message: &str) {
         let mut status = self.status.lock().unwrap();
@@ -246,7 +267,7 @@ struct Service {
     secret: String,
     resources: BTreeMap<String, Resource>,
     status: Arc<Mutex<Status>>,
-    sender: Sender<MatchSetup>,
+    sender: Sender<SetupRequest>,
     mutation: Arc<AsyncMutex<()>>,
 }
 
@@ -282,6 +303,7 @@ fn router(service: Arc<Service>) -> Router {
     let admin = Router::new()
         .route("/api/resources", get(manifest))
         .route("/api/resources/{*path}", put(upload))
+        .route("/api/prepare", post(prepare))
         .route("/api/start", post(start))
         .route_layer(middleware::from_fn_with_state(
             service.clone(),
@@ -379,46 +401,60 @@ async fn upload(State(service): State<Arc<Service>>, request: Request) -> ApiRes
         )
     })?
 }
-async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
+async fn prepare(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
     let _guard = service.mutation.lock().await;
     require_setup(&service)?;
-    let bytes = to_bytes(request.into_body(), 256).await.map_err(invalid)?;
-    let players = if bytes.is_empty() {
-        service.status.lock().unwrap().players
-    } else {
-        serde_json::from_slice::<StartOptions>(&bytes)
-            .map_err(invalid)?
-            .players
-    };
-    if !(2..=MAX_PLAYERS).contains(&players) {
+    to_bytes(request.into_body(), 0).await.map_err(invalid)?;
+    {
+        let mut status = service.status.lock().unwrap();
+        if status.uploaded != service.resources.len() + 1 {
+            return Err(invalid("Upload all server resources before preparing"));
+        }
+        status.phase = "loading".into();
+        status.message = "Validating resources and preparing the native simulator…".into();
+    }
+    service.send(SetupRequest::Prepare)?;
+    Ok((StatusCode::ACCEPTED, "Preparing resources").into_response())
+}
+async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
+    let _guard = service.mutation.lock().await;
+    if service.status.lock().unwrap().phase != "ready" {
+        return Err((
+            StatusCode::CONFLICT,
+            "Prepare resources before opening the match".into(),
+        ));
+    }
+    let bytes = to_bytes(request.into_body(), 1024).await.map_err(invalid)?;
+    let options: StartOptions = serde_json::from_slice(&bytes).map_err(invalid)?;
+    if !(2..=MAX_PLAYERS).contains(&options.players) {
         return Err(invalid("Expected a player count from 2 to 8"));
     }
     {
         let mut status = service.status.lock().unwrap();
-        if status.uploaded != service.resources.len() + 1 {
-            return Err(invalid("Upload all server resources before starting"));
+        if !status.worlds.contains(&options.world) {
+            return Err(invalid("Choose a map from the server catalog"));
         }
-        status.players = players;
-        status.phase = "loading".into();
-        status.message = "Validating resources and preparing the native simulator…".into();
+        status.players = options.players;
+        status.world = Some(options.world.clone());
+        status.phase = "starting".into();
+        status.message = "Opening match…".into();
     }
-    // The existing main thread owns Wasmtime/Lightyear; HTTP only requests initialization.
-    if service
-        .sender
-        .send(MatchSetup {
-            resources: service.private.clone(),
-            players,
-        })
-        .is_err()
-    {
-        let mut status = service.status.lock().unwrap();
-        status.phase = "closed".into();
-        status.message = "Native server is unavailable. Restart the server to try again.".into();
-        return Err((StatusCode::SERVICE_UNAVAILABLE, status.message.clone()));
-    }
-    Ok((StatusCode::ACCEPTED, "Preparing match").into_response())
+    service.send(SetupRequest::Start(MatchSetup {
+        players: options.players,
+        world: options.world,
+    }))?;
+    Ok((StatusCode::ACCEPTED, "Opening match").into_response())
 }
 impl Service {
+    fn send(&self, request: SetupRequest) -> std::result::Result<(), (StatusCode, String)> {
+        self.sender.send(request).map_err(|_| {
+            let mut status = self.status.lock().unwrap();
+            status.phase = "closed".into();
+            status.message =
+                "Native server is unavailable. Restart the server to try again.".into();
+            (StatusCode::SERVICE_UNAVAILABLE, status.message.clone())
+        })
+    }
     fn publish(&self, id: &str, data: &[u8]) -> Result<()> {
         if let Some(file) = self.resources.get(id) {
             ensure!(
@@ -551,7 +587,7 @@ mod tests {
     struct Fixture {
         _directory: PrivateDirectory,
         service: Arc<Service>,
-        requests: Receiver<MatchSetup>,
+        requests: Receiver<SetupRequest>,
     }
     impl Fixture {
         fn new() -> Self {
@@ -575,6 +611,8 @@ mod tests {
                 phase: "setup".into(),
                 message: String::new(),
                 players: 2,
+                worlds: Vec::new(),
+                world: None,
                 connected: 0,
                 tick: 0,
                 endpoint: String::new(),
@@ -633,6 +671,7 @@ mod tests {
         for (method, path) in [
             ("GET", "/api/resources"),
             ("POST", "/api/start"),
+            ("POST", "/api/prepare"),
             ("PUT", "/api/resources/DATA/MAIN.MR"),
         ] {
             let response = router(fixture.service.clone())
@@ -667,7 +706,7 @@ mod tests {
         );
         assert_eq!(
             fixture
-                .request("POST", "/api/start", Body::empty())
+                .request("POST", "/api/prepare", Body::empty())
                 .await
                 .status(),
             StatusCode::BAD_REQUEST
@@ -676,14 +715,38 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn browser_player_count_is_validated_and_carried_to_native_start() {
+    async fn browser_options_require_ready_catalog_and_lock_after_start() {
         let fixture = Fixture::new();
+        let valid = r#"{"players":8,"world":"The Oil Rig"}"#;
+        assert_eq!(
+            fixture.request("POST", "/api/start", valid).await.status(),
+            StatusCode::CONFLICT
+        );
         fixture.provision().await;
+        assert_eq!(
+            fixture
+                .request("POST", "/api/prepare", Body::empty())
+                .await
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        assert_eq!(fixture.requests.try_recv().unwrap(), SetupRequest::Prepare);
+        assert_eq!(
+            fixture.request("POST", "/api/start", valid).await.status(),
+            StatusCode::CONFLICT
+        );
+        {
+            let mut status = fixture.service.status.lock().unwrap();
+            status.worlds = vec!["Construction Yard".into(), "The Oil Rig".into()];
+            status.world = Some("Construction Yard".into());
+            status.phase = "ready".into();
+        }
         for body in [
-            r#"{"players":1}"#,
-            r#"{"players":9}"#,
-            r#"{"players":2.5}"#,
-            r#"{"players":"4"}"#,
+            r#"{"players":1,"world":"The Oil Rig"}"#,
+            r#"{"players":9,"world":"The Oil Rig"}"#,
+            r#"{"players":2.5,"world":"The Oil Rig"}"#,
+            r#"{"players":"4","world":"The Oil Rig"}"#,
+            r#"{"players":4,"world":"Invalid map"}"#,
             "{}",
         ] {
             assert_eq!(
@@ -691,26 +754,37 @@ mod tests {
                 StatusCode::BAD_REQUEST
             );
             assert_eq!(fixture.service.status.lock().unwrap().players, 2);
-            assert_eq!(fixture.service.status.lock().unwrap().phase, "setup");
+            assert_eq!(fixture.service.status.lock().unwrap().phase, "ready");
             assert!(fixture.requests.try_recv().is_err());
         }
         assert_eq!(
-            fixture
-                .request("POST", "/api/start", r#"{"players":8}"#)
-                .await
-                .status(),
+            fixture.request("POST", "/api/start", valid).await.status(),
             StatusCode::ACCEPTED
         );
         assert_eq!(fixture.service.status.lock().unwrap().players, 8);
-        assert_eq!(fixture.requests.try_recv().unwrap().players, 8);
+        assert_eq!(
+            fixture.service.status.lock().unwrap().world.as_deref(),
+            Some("The Oil Rig")
+        );
+        assert_eq!(
+            fixture.requests.try_recv().unwrap(),
+            SetupRequest::Start(MatchSetup {
+                players: 8,
+                world: "The Oil Rig".into()
+            })
+        );
+        assert_eq!(
+            fixture.request("POST", "/api/start", valid).await.status(),
+            StatusCode::CONFLICT
+        );
         assert_eq!(
             fixture
-                .request("POST", "/api/start", r#"{"players":3}"#)
+                .request("PUT", "/api/resources/DATA/MAIN.MR", STOCK)
                 .await
                 .status(),
             StatusCode::CONFLICT
         );
-        assert_eq!(fixture.service.status.lock().unwrap().players, 8);
+        assert!(fixture.requests.try_recv().is_err());
     }
     #[tokio::test]
     async fn invalid_and_partial_uploads_publish_nothing_and_can_retry() {
@@ -791,7 +865,7 @@ mod tests {
             }
             tokio::task::yield_now().await;
         }
-        let start = fixture.request("POST", "/api/start", Body::empty());
+        let start = fixture.request("POST", "/api/prepare", Body::empty());
         let mut start = std::pin::pin!(start);
         assert!(matches!(
             start
@@ -803,16 +877,10 @@ mod tests {
         sender.send(Bytes::from_static(STOCK)).unwrap();
         assert_eq!(upload.await.unwrap().unwrap().status(), StatusCode::OK);
         assert_eq!(start.await.status(), StatusCode::ACCEPTED);
-        assert_eq!(
-            fixture.requests.try_recv().unwrap(),
-            MatchSetup {
-                resources: fixture.service.private.clone(),
-                players: 2
-            }
-        );
+        assert_eq!(fixture.requests.try_recv().unwrap(), SetupRequest::Prepare);
         assert_eq!(
             fixture
-                .request("POST", "/api/start", Body::empty())
+                .request("POST", "/api/prepare", Body::empty())
                 .await
                 .status(),
             StatusCode::CONFLICT

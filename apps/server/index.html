@@ -34,21 +34,25 @@
           resources are uploaded to private temporary storage. They are never offered for download
           and are removed when the server shuts down.
         </p>
+        <label
+          >Startup secret
+          <input
+            id="secret"
+            type="password"
+            autocomplete="off"
+            minlength="24"
+            maxlength="256"
+            required
+          />
+        </label>
         <form id="provision">
           <label
-            >Startup secret
-            <input
-              id="secret"
-              type="password"
-              autocomplete="off"
-              minlength="24"
-              maxlength="256"
-              required
-          /></label>
-          <label
             >Disc folder (CUE + BIN or CCD + IMG)
-            <input id="disc" type="file" webkitdirectory multiple required
-          /></label>
+            <input id="disc" type="file" webkitdirectory multiple required />
+          </label>
+          <button id="prepare" type="submit">Prepare resources</button>
+        </form>
+        <form id="match-options">
           <label
             >Players
             <select id="player-count" disabled>
@@ -61,7 +65,13 @@
               <option value="8">8</option>
             </select>
           </label>
-          <button id="prepare" type="submit">Prepare match</button>
+          <label
+            >Map
+            <select id="world" disabled required>
+              <option value="">Prepare resources to load maps</option>
+            </select>
+          </label>
+          <button id="start" type="submit" disabled>Open match</button>
         </form>
         <p id="progress" role="status"></p>
       </details>

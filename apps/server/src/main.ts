@@ -6,6 +6,10 @@ function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
   if (!(node instanceof type)) throw new Error(`Missing ${id}`);
   return node;
 }
+const matchOptions = element("match-options", HTMLFormElement);
+const world = element("world", HTMLSelectElement);
+const start = element("start", HTMLButtonElement);
+let catalogKey = "";
 const form = element("provision", HTMLFormElement);
 const secret = element("secret", HTMLInputElement);
 const disc = element("disc", HTMLInputElement);
@@ -23,6 +27,8 @@ interface Status {
   phase: string;
   message: string;
   players: number;
+  worlds: string[];
+  world: string | null;
   connected: number;
   tick: number;
   endpoint: string;
@@ -50,17 +56,29 @@ async function refresh() {
     const response = await fetch("/api/status", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = (await response.json()) as Status;
-    const editable = state.phase === "setup" || state.phase === "failed";
-    if (!playerCountInitialized || !editable) {
+    const canUpload = state.phase === "setup" || state.phase === "failed";
+    const editable = canUpload || state.phase === "ready";
+    const locked = ["starting", "lobby", "match", "results", "closed"].includes(state.phase);
+    if (!playerCountInitialized || locked) {
       playerCount.value = String(state.players);
       playerCountInitialized = true;
     }
     playerCount.disabled = busy || !editable;
+    const key = JSON.stringify(state.worlds);
+    if (state.worlds.length && key !== catalogKey) {
+      world.replaceChildren(...state.worlds.map((name) => new Option(name, name)));
+      world.value = state.world ?? state.worlds[0]!;
+      catalogKey = key;
+    }
+    if (!editable && state.world) world.value = state.world;
+    world.disabled = busy || state.phase !== "ready";
+    start.disabled = busy || state.phase !== "ready";
+    disc.disabled = busy || !canUpload;
     status.textContent = state.message;
     players.textContent =
       state.phase === "setup" || state.phase === "failed"
         ? `${state.uploaded}/${state.required} server resources prepared · ${state.players} player slots`
-        : `${state.connected}/${state.players} players connected${state.tick ? ` · Tick ${state.tick}` : ""}`;
+        : `${state.connected}/${state.players} players connected${state.world ? ` · ${state.world}` : ""}${state.tick ? ` · Tick ${state.tick}` : ""}`;
     join.hidden = state.phase !== "lobby" && state.phase !== "match";
     const url = new URL("play/", location.href);
     url.searchParams.set("match", state.endpoint);
@@ -73,6 +91,8 @@ async function refresh() {
     join.hidden = true;
     prepare.disabled = true;
     playerCount.disabled = true;
+    world.disabled = true;
+    start.disabled = true;
   }
 }
 
@@ -83,7 +103,6 @@ form.addEventListener("submit", (event) => {
 });
 
 async function provision() {
-  const selectedPlayers = Number(playerCount.value);
   busy = true;
   playerCount.disabled = true;
   prepare.disabled = true;
@@ -103,20 +122,44 @@ async function provision() {
       progress.textContent = `Uploading validated server resources (${i + 1}/${required.length})…`;
       await api(`/api/resources${id}`, { method: "PUT", body: bytes });
     }
-    await api("/api/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ players: selectedPlayers }),
-    });
+    await api("/api/prepare", { method: "POST" });
     progress.textContent =
       "Upload complete. The native server is validating and preparing the match.";
-    secret.value = "";
     disc.value = "";
   } catch (error) {
     progress.textContent = error instanceof Error ? error.message : String(error);
   } finally {
     busy = false;
     disc.disabled = false;
+    secret.disabled = false;
+    await refresh();
+  }
+}
+
+matchOptions.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (!busy) void openMatch();
+});
+
+async function openMatch() {
+  const options = { players: Number(playerCount.value), world: world.value };
+  busy = true;
+  start.disabled = true;
+  playerCount.disabled = true;
+  world.disabled = true;
+  secret.disabled = true;
+  try {
+    await api("/api/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(options),
+    });
+    progress.textContent = "Opening the selected match…";
+    secret.value = "";
+  } catch (error) {
+    progress.textContent = error instanceof Error ? error.message : String(error);
+  } finally {
+    busy = false;
     secret.disabled = false;
     await refresh();
   }

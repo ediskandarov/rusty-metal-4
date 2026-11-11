@@ -67,7 +67,8 @@ const { chromium } = require("playwright");
     assert.equal((await head.arrayBuffer()).byteLength, 0);
     assert.equal((await (await request("/api/status")).json()).phase, "setup");
     assert.equal((await request("/api/start", { method: "POST" })).status, 401);
-    assert.equal((await request("/api/start", admin("POST"))).status, 400);
+    assert.equal((await request("/api/start", admin("POST"))).status, 409);
+    assert.equal((await request("/api/prepare", admin("POST"))).status, 400);
     assert.equal(
       (await request("/api/resources/DATA/MAIN.MR", admin("PUT", new Uint8Array([0])))).status,
       400,
@@ -109,11 +110,22 @@ const { chromium } = require("playwright");
       await page.locator("#prepare").click();
       await page.waitForFunction(
         () =>
-          !document.getElementById("join").hidden || !document.getElementById("prepare").disabled,
+          !document.getElementById("start").disabled ||
+          !document.getElementById("prepare").disabled,
         null,
         { timeout: 120000 },
       );
-      assert(await page.locator("#join").isVisible(), await page.locator("#progress").innerText());
+      assert(await page.locator("#start").isEnabled(), await page.locator("#progress").innerText());
+      const prepared = await (await request("/api/status")).json();
+      assert.equal(prepared.phase, "ready");
+      assert(prepared.worlds.includes("The Oil Rig"));
+      await page.locator("#world").selectOption("The Oil Rig");
+      await page.waitForTimeout(1700);
+      assert.equal(await page.locator("#world").inputValue(), "The Oil Rig");
+      await page.locator("#start").click();
+      await page.locator("#join").waitFor({ state: "visible", timeout: 15000 });
+      assert.equal((await (await request("/api/status")).json()).world, "The Oil Rig");
+      assert(await page.locator("#world").isDisabled());
       assert.equal((await (await request("/api/status")).json()).phase, "lobby");
       assert.equal(
         (await request("/api/resources/DATA/MAIN.MR", admin("PUT", new Uint8Array([0])))).status,

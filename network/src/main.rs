@@ -173,6 +173,7 @@ struct Match {
     authority_ready: bool,
     compatibility: Option<Compatibility>,
     catalog: Option<Catalog>,
+    selected_world: Option<String>,
     initial_digest: Option<u32>,
     started: bool,
     ended: bool,
@@ -813,7 +814,10 @@ fn update(
         game.loading_since = Instant::now();
         let start = SessionStart {
             players: game.players.len(),
-            world: game.catalog.as_ref().unwrap().worlds[0].clone(),
+            world: game
+                .selected_world
+                .clone()
+                .unwrap_or_else(|| game.catalog.as_ref().unwrap().worlds[0].clone()),
             cars: game.catalog.as_ref().unwrap().cars[..game.players.len()].to_vec(),
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
@@ -1092,23 +1096,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let (count, simulator) = if let Some(launcher) = &launcher {
+    let (count, selected_world, simulator) = if let Some(launcher) = &launcher {
         loop {
-            let Some(setup) = launcher.wait_for_setup() else {
+            let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
                 return Ok(());
             };
-            match simulator::Simulator::from_paths(&launcher.wasm, &setup.resources, &launcher.site)
-            {
-                Ok(simulator) => break (setup.players, simulator),
+            match simulator::Simulator::from_paths(
+                &launcher.wasm,
+                launcher.resource_directory(),
+                &launcher.site,
+            ) {
+                Ok(simulator) => {
+                    launcher.ready(simulator.catalog.worlds.clone());
+                    let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup() else {
+                        return Ok(());
+                    };
+                    break (setup.players, Some(setup.world), simulator);
+                }
                 Err(error) => {
                     launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
                 }
             }
         }
     } else {
-        (count, simulator::Simulator::from_environment()?)
+        (count, None, simulator::Simulator::from_environment()?)
     };
-    if let Err(error) = run_match(count, addr, simulator, launcher.as_ref()) {
+    if let Err(error) = run_match(count, selected_world, addr, simulator, launcher.as_ref()) {
         if let Some(launcher) = &launcher {
             launcher.phase(
                 "closed",
@@ -1126,6 +1139,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 fn run_match(
     count: usize,
+    selected_world: Option<String>,
     addr: SocketAddr,
     simulator: simulator::Simulator,
     launcher: Option<&web::Launcher>,
@@ -1187,6 +1201,7 @@ fn run_match(
         authority_ready: false,
         compatibility: Some(compatibility),
         catalog: Some(catalog),
+        selected_world,
         initial_digest: None,
         started: false,
         ended: false,
