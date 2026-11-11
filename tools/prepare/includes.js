@@ -1,13 +1,13 @@
-import { readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
+
+import { Glob } from "bun";
 
 import { buildPath, options, write } from "../common.js";
 const { sdk, output: requested } = options(["sdk", "output"]);
 const output = await buildPath(requested);
 const aliases = {};
-for (const name of await readdir(sdk)) {
-  if (name.endsWith(".h"))
-    aliases[name.toUpperCase()] = `#include ${JSON.stringify(resolve(sdk, name))}\n`;
+for await (const name of new Glob("*.h").scan({ cwd: sdk, dot: true })) {
+  aliases[name.toUpperCase()] = `#include ${JSON.stringify(resolve(sdk, name))}\n`;
 }
 if (!aliases["LIBGTE.H"]) throw new Error("SDK must contain libgte.h");
 for (const name of [

@@ -1,4 +1,4 @@
-import { readFile, utimes } from "node:fs/promises";
+import { utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 import { $ } from "bun";
@@ -19,7 +19,7 @@ async function plan({ gameRoot, sourcesFile, output }) {
       modules[info.source ?? name] = Object.values(info.unit_sources ?? {});
     }
   }
-  const sources = (await readFile(sourcesFile, "utf8")).split("\n").filter(Boolean);
+  const sources = (await Bun.file(sourcesFile).text()).split("\n").filter(Boolean);
   const contracts = await json(join(root, "config/exports.json"));
   const manifest = planExports(gameRoot, sources, modules, contracts);
   const rules = manifest.units.map(

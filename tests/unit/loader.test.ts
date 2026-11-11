@@ -11,7 +11,6 @@ import {
 import { discTracks } from "@tm4/resources/loader/tracks";
 
 import reference from "../../config/disc.json";
-import { byteRange, serveFile } from "../../tools/server/files.js";
 
 const cue =
   'FILE "data.bin" BINARY\n TRACK 01 MODE2/2352\n INDEX 01 00:00:00\nFILE "audio.bin" BINARY\n TRACK 02 AUDIO\n INDEX 01 00:02:00\n';
@@ -73,21 +72,6 @@ test("MODE2 extraction checks sync, subheader and form", async () => {
   bytes[18] = 32;
   bytes[22] = 32;
   await expect(new Disc(source(bytes)).read(0, 1)).rejects.toThrow("Form 1");
-});
-
-test("HTTP ranges support bounded reads and HEAD; invalid ranges fail", async () => {
-  expect(byteRange("bytes=2-99", 10)).toEqual({ start: 2, end: 9 });
-  expect(byteRange("bytes=-3", 10)).toEqual({ start: 7, end: 9 });
-  expect(byteRange("bytes=10-", 10)).toBeNull();
-  expect(byteRange("bytes=3-1", 10)).toBeNull();
-  const file = Bun.file(import.meta.path);
-  const request = new Request("http://localhost/test", { headers: { Range: "bytes=0-3" } });
-  const response = serveFile(request, file);
-  expect(response.status).toBe(206);
-  expect(response.headers.get("Content-Range")).toBe(`bytes 0-3/${file.size}`);
-  expect((await response.arrayBuffer()).byteLength).toBe(4);
-  const head = serveFile(new Request(request, { method: "HEAD" }), file);
-  expect((await head.arrayBuffer()).byteLength).toBe(0);
 });
 
 function sectors(...values: number[]) {

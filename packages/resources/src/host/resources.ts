@@ -1,5 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { readTimLayout, sha256 } from "../compatibility/index.ts";
 import type { ResourceReference } from "../compatibility/index.ts";
@@ -57,8 +56,7 @@ export async function writeResourceFiles(
     const child = relative(root, output);
     if (!child || child === ".." || child.startsWith(`..${sep}`) || isAbsolute(child))
       throw new Error(`Resource path escapes its destination: ${path}`);
-    await mkdir(dirname(output), { recursive: true });
-    await writeFile(output, bytes);
+    await Bun.write(output, bytes);
   }
 }
 

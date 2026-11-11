@@ -1,5 +1,4 @@
 const { chromium } = require("playwright");
-const { writeFileSync } = require("node:fs");
 const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
 (async () => {
   const browser = await chromium.launch({
@@ -96,7 +95,7 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
         firstCar: process.env.TM4_TEST_CAR,
       },
     );
-    writeFileSync(
+    await Bun.write(
       process.argv[2] || process.env.TM4_TEST_RECORD || "build/browser-record.json",
       JSON.stringify(record),
     );

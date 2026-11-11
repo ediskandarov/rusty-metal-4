@@ -1,4 +1,4 @@
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, realpath } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -10,10 +10,14 @@ export function options(names, args = process.argv.slice(2)) {
   }).values;
 }
 export async function write(path, text) {
-  await mkdir(dirname(path), { recursive: true });
-  if ((await readFile(path, "utf8").catch(() => null)) !== text) await writeFile(path, text);
+  if (
+    (await Bun.file(path)
+      .text()
+      .catch(() => null)) !== text
+  )
+    await Bun.write(path, text);
 }
-export const json = async (path) => JSON.parse(await readFile(path, "utf8"));
+export const json = async (path) => Bun.file(path).json();
 export async function buildPath(path) {
   if (!path) throw new Error("An output directory is required");
   const output = resolve(path);

@@ -54,7 +54,7 @@ const server = Bun.serve({
     if (url.pathname.startsWith("/__dev/")) {
       const match = /^\/__dev\/files\/(\d+)$/.exec(url.pathname);
       const source = match && disc?.files[Number(match[1])];
-      return source ? serveFile(request, source.file) : respond("Not found", 404);
+      return source ? serveFile(source.file) : respond("Not found", 404);
     }
     let path;
     try {
@@ -66,7 +66,7 @@ const server = Bun.serve({
     if (path.endsWith("/")) path += "index.html";
     const file = await staticFile(site, path);
     if (!file || !(await file.exists())) return respond("Not found", 404);
-    return serveFile(request, file);
+    return serveFile(file);
   },
 });
 console.log(`Open ${server.url}`);

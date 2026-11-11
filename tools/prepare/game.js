@@ -1,7 +1,7 @@
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
-import { $ } from "bun";
+import { $, Glob } from "bun";
 
 import { buildPath, options, root } from "../common.js";
 const { output: requested } = options(["output"]);
@@ -12,9 +12,10 @@ const archive = `${output}.tar`;
 try {
   await $`git -C ${join(root, "game")} archive -o ${archive} HEAD src include config`.cwd(root);
   await $`tar -xf ${archive} -C ${output}`.cwd(root);
-  for (const name of (await readdir(join(root, "patches/game")))
-    .filter((n) => n.endsWith(".patch"))
-    .sort()) {
+  const patches = await Array.fromAsync(
+    new Glob("*.patch").scan({ cwd: join(root, "patches/game"), dot: true }),
+  );
+  for (const name of patches.sort()) {
     const patch = join(root, "patches/game", name);
     await $`patch --batch --fuzz=0 -E -p1 -i ${patch}`.cwd(output);
   }
