@@ -5,7 +5,7 @@
 #include "tm4/modules/camera.h"
 #include "tm4/modules/car.h"
 #include "tm4/modules/ray.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 void InteractCarWithBullet(Car* car, Bullet* bullet);
 void InteractCarWithAnim(Car*, Anim*);
@@ -23,7 +23,7 @@ void WebInteractCarWithPowerup(void* car, void* object)
     Import_PowerupSparkleConstructor = PowerupSparkleConstructor;
     InteractCarWithPowerup(car, power);
     if (was_active && !power->position.fields.active)
-        EM_ASM({ tm4Port.pickupCollections = (tm4Port.pickupCollections || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.pickupCollections = (tm4Port.pickupCollections || 0) + 1; });
 }
 
 void InteractCarWithWeaponProjectile(Car*, WeaponProjectile*);
@@ -38,7 +38,7 @@ static void car_shockwave(Car* car, ExplosionWave* wave)
     s32 health = car->health;
     InteractCarWithExplosionShockWave(car, wave);
     if (car->health < health)
-        EM_ASM({ tm4Port.shockwaveCarHits = (tm4Port.shockwaveCarHits || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.shockwaveCarHits = (tm4Port.shockwaveCarHits || 0) + 1; });
 }
 static void car_teleporter(void* object, void* portal)
 {
@@ -48,7 +48,7 @@ static void car_teleporter(void* object, void* portal)
     Camera* camera = car->controller_index < GameInfo.player_count
         ? GameInfo.players[car->controller_index].camera
         : NULL;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.teleports = (tm4Port.teleports || 0) + 1;
             tm4Port.lastTeleport = ({
@@ -73,7 +73,7 @@ static void car_jumppad(void* object, void* pad)
         s32 dot = (s16)(car->position.vx - car->previous_position.vx) * trigger->direction.vx
             + (s16)(car->position.vy - car->previous_position.vy) * trigger->direction.vy
             + (s16)(car->position.vz - car->previous_position.vz) * trigger->direction.vz;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.playerJumppadContacts = (tm4Port.playerJumppadContacts || 0) + 1;
                 tm4Port.lastJumppadTravelDot = $0;
@@ -84,8 +84,8 @@ static void car_jumppad(void* object, void* pad)
     Tm4VectorXYZ* after = &car->particles[0].external_force;
     if (before.vx != after->vx || before.vy != after->vy || before.vz != after->vz) {
         if (car == GameInfo.players[0].car)
-            EM_ASM({ tm4Port.playerJumppadLaunches = (tm4Port.playerJumppadLaunches || 0) + 1; });
-        EM_ASM(
+            WEB_BROWSER_REPORT({ tm4Port.playerJumppadLaunches = (tm4Port.playerJumppadLaunches || 0) + 1; });
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.jumppadLaunches = (tm4Port.jumppadLaunches || 0) + 1;
                 tm4Port.lastJumppadForce = ([ $0, $1, $2 ]);

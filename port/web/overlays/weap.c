@@ -2,7 +2,7 @@
 #include "../overlays.h"
 #include "tm4/gpu.h"
 #include "tm4/main/game.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 #include <strings.h>
 void WeaponBombClassConstructor(RegistryDirectory* directory);
@@ -81,7 +81,7 @@ static s32 construct(void* object, va_list args)
     s32 result = WeaponProjectileConstructor(object, args);
     if (result) {
         WeaponProjectile* projectile = object;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.projectileSpawns = (tm4Port.projectileSpawns || 0) + 1;
                 tm4Port.lastProjectile = UTF8ToString($0);
@@ -101,7 +101,7 @@ static void process(void* object)
 {
     WeaponProjectile* projectile = object;
     if (projectile->bullet.hit_object || projectile->bullet.motion.fields.world_impact)
-        EM_ASM({ tm4Port.projectileImpacts = (tm4Port.projectileImpacts || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.projectileImpacts = (tm4Port.projectileImpacts || 0) + 1; });
     WeaponProjectileProcess(object);
 }
 static void destroy(void* object)
@@ -110,7 +110,7 @@ static void destroy(void* object)
     const char* name = projectile->type->name;
     int player_owned = projectile->owner == GameInfo.players[0].car;
     WeaponProjectileDestructor(object);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.projectileRemoved = (tm4Port.projectileRemoved || 0) + 1;
             if ($1) {
@@ -128,7 +128,7 @@ static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end
     u8* start = *output;
     WeaponProjectileDisplay(object, ordering, output, end, view);
     if (start != *output)
-        EM_ASM({ tm4Port.projectileDraws = (tm4Port.projectileDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.projectileDraws = (tm4Port.projectileDraws || 0) + 1; });
 }
 static void display_blade(
     void* object, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* view)
@@ -136,7 +136,7 @@ static void display_blade(
     u8* start = *output;
     BladeProjectileDisplay(object, ordering, output, end, view);
     if (*output != start)
-        EM_ASM({ tm4Port.bladeDraws = (tm4Port.bladeDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.bladeDraws = (tm4Port.bladeDraws || 0) + 1; });
 }
 static void destroy_class(RegistryDirectory* directory)
 {
@@ -148,7 +148,7 @@ static s32 construct_bomb(void* object, va_list args)
     s32 result = WeaponBombConstructor(object, args);
     if (result) {
         WeaponBomb* bomb = object;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.bombSpawns = (tm4Port.bombSpawns || 0) + 1;
                 tm4Port.lastBomb = UTF8ToString($0);
@@ -162,12 +162,12 @@ static void display_bomb(void* object, Tm4OrderingTag* ordering, u8** output, u8
     u8* start = *output;
     WeaponBombDisplay(object, ordering, output, end, view);
     if (start != *output)
-        EM_ASM({ tm4Port.bombDraws = (tm4Port.bombDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.bombDraws = (tm4Port.bombDraws || 0) + 1; });
 }
 static void destroy_bomb(void* object)
 {
     WeaponBombDestructor(object);
-    EM_ASM({ tm4Port.bombRemoved = (tm4Port.bombRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.bombRemoved = (tm4Port.bombRemoved || 0) + 1; });
 }
 static void destroy_bomb_class(RegistryDirectory* directory)
 {
@@ -185,13 +185,13 @@ static s32 construct_fireball(void* object, va_list arguments)
 {
     s32 result = WeaponFireballConstructor(object, arguments);
     if (result)
-        EM_ASM({ tm4Port.fireballSpawns = (tm4Port.fireballSpawns || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.fireballSpawns = (tm4Port.fireballSpawns || 0) + 1; });
     return result;
 }
 static void destroy_fireball(void* object)
 {
     WeaponFireballDestructor(object);
-    EM_ASM({ tm4Port.fireballRemoved = (tm4Port.fireballRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.fireballRemoved = (tm4Port.fireballRemoved || 0) + 1; });
 }
 static void display_fireball(
     void* object, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* view)
@@ -199,7 +199,7 @@ static void display_fireball(
     u8* start = *output;
     WeaponFireballDisplay(object, ordering, output, end, view);
     if (start != *output)
-        EM_ASM({ tm4Port.fireballDraws = (tm4Port.fireballDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.fireballDraws = (tm4Port.fireballDraws || 0) + 1; });
 }
 extern CVECTOR worldWeaponColor;
 OSWord WebWeaponExport(const char* name)

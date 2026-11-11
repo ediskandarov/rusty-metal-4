@@ -1,7 +1,7 @@
 #include "src/modules/lightn/private.h"
 #include "../overlays.h"
 #include "tm4/main/screen.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 void WeaponLightningEmitterClassConstructor(RegistryDirectory*);
@@ -25,7 +25,7 @@ static s32 construct_emitter(void* object, va_list arguments)
 {
     s32 result = WeaponLightningEmitterConstructor(object, arguments);
     if (result)
-        EM_ASM({ tm4Port.lightningEmitters = (tm4Port.lightningEmitters || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.lightningEmitters = (tm4Port.lightningEmitters || 0) + 1; });
     return result;
 }
 static s32 instance_emitter(void* object, RegistryDirectory* directory)
@@ -35,14 +35,14 @@ static s32 instance_emitter(void* object, RegistryDirectory* directory)
 static void process_emitter(void* object)
 {
     WeaponLightningEmitterProcess(object);
-    EM_ASM({ tm4Port.lightningFlashActive = !!$0; }, g_specialEffect);
+    WEB_BROWSER_REPORT({ tm4Port.lightningFlashActive = !!$0; }, g_specialEffect);
     if (g_specialEffect)
-        EM_ASM({ tm4Port.lightningFlashes = (tm4Port.lightningFlashes || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.lightningFlashes = (tm4Port.lightningFlashes || 0) + 1; });
 }
 static void destroy_emitter(void* object)
 {
     WeaponLightningEmitterDestructor(object);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.lightningRemoved = (tm4Port.lightningRemoved || 0) + 1;
             tm4Port.lightningFlashActive = !!$0;
@@ -53,7 +53,7 @@ static s32 construct_bolt(void* object, va_list arguments)
 {
     s32 result = WeaponLightningConstructor(object, arguments);
     if (result)
-        EM_ASM({ tm4Port.lightningBolts = (tm4Port.lightningBolts || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.lightningBolts = (tm4Port.lightningBolts || 0) + 1; });
     return result;
 }
 static void process_bolt(void* object)
@@ -63,7 +63,7 @@ static void process_bolt(void* object)
     s32 health = target && GameIsCarRegistered(target) ? target->health : 0;
     WeaponLightningProcess(bolt);
     if (target && GameIsCarRegistered(target) && target->health < health)
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             { tm4Port.lightningDamage = (tm4Port.lightningDamage || 0) + $0; },
             health - target->health);
 }
@@ -72,7 +72,7 @@ static void display_bolt(void* object, Tm4OrderingTag* ordering, u8** output, u8
     u8* start = *output;
     WeaponLightningDisplay(object, ordering, output, end, view);
     if (*output != start)
-        EM_ASM({ tm4Port.lightningDraws = (tm4Port.lightningDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.lightningDraws = (tm4Port.lightningDraws || 0) + 1; });
 }
 OSWord WebLightningExport(const char* name)
 {

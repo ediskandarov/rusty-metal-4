@@ -17,7 +17,7 @@
 #include "tm4/modules/sound.h"
 #include "tm4/vector.h"
 #include <assert.h>
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <libetc.h>
 #include <math.h>
 #include <stdarg.h>
@@ -50,7 +50,7 @@ static void display_car(void* object, Tm4OrderingTag* ordering, u8** cursor, u8*
     Car* render_car = WebInterpolationCar(object, &pose);
     CarDisplay(render_car, ordering, cursor, end, view);
     WebInterpolationEndCarDraw();
-    EM_ASM({ globalThis.tm4Port.carPacketBytes = $0; }, *cursor - start);
+    WEB_BROWSER_REPORT({ globalThis.tm4Port.carPacketBytes = $0; }, *cursor - start);
 }
 
 /* PS1 reloads these counters with o_car; constructors only replace the world data. */
@@ -64,7 +64,7 @@ void WebCarResetSearchState(void)
 void WebCarEnable(void)
 {
 #ifdef TM4_WEB_TEST_HOOKS
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.carSearchGenerationsAtLoad = tm4Port.carSearchGenerationsAtLoad || [];
             tm4Port.carSearchGenerationsAtLoad.push([ $0, $1, $2 ]);
@@ -124,7 +124,7 @@ void WebCarStart(void)
     assert(player);
     printf("Match cars: %d (%d opponents), player %s\n", GameInfo.car_count,
         GameInfo.active_computer_count, player->character_name);
-    EM_ASM({ tm4Port.car = UTF8ToString($0); }, player->character_name);
+    WEB_BROWSER_REPORT({ tm4Port.car = UTF8ToString($0); }, player->character_name);
 }
 
 void WebCarStep(void)
@@ -132,10 +132,10 @@ void WebCarStep(void)
     ObjectProcess();
     player = GameInfo.players[0].car;
     simulation_ticks++;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         { tm4Port.controlBindings = Array.from(HEAPU16.subarray($0 >> 1, ($0 >> 1) + $1)); },
         GameInfo.players[0].bindings[0].actions, GameControlCount);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.cars = [];
             tm4Port.opponents = $0;
@@ -144,7 +144,7 @@ void WebCarStep(void)
         GameInfo.active_computer_count, aiWorldInfo.enabled);
     for (s32 i = 0; i < GameInfo.car_count; ++i) {
         Car* other = GameInfo.cars[i];
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.cars.push({
                     name : UTF8ToString($0),
@@ -165,10 +165,10 @@ void WebCarStep(void)
             other->controller_index, other->controls.steering_input);
     }
     Car* car = player;
-    EM_ASM({ tm4Port.carAlive = $0; }, car != NULL);
+    WEB_BROWSER_REPORT({ tm4Port.carAlive = $0; }, car != NULL);
     if (!car)
         return;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             Object.assign(globalThis.tm4Port, {
                 carX : $0,
@@ -196,13 +196,13 @@ void WebCarStep(void)
         car->controls.gear, car->controls.brake_input, car->controls.ebrake_active,
         GameInfo.players[0].bindings[0].actions[GameControlGas]);
     CarWeaponInstance* selected = &car->weapons[car->controls.selected_weapon];
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.weaponName = UTF8ToString($0);
             tm4Port.weaponAmmo = $1;
         },
         selected->descriptor->name, selected->amount);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             Object.assign(globalThis.tm4Port, {
                 carHealth : $0,

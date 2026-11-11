@@ -326,3 +326,62 @@ Ordinary `build:dev` uses release optimization and excludes test hooks, retainin
 only local-disc autoload. `build:diagnostic` owns fixtures and Debug output in
 `build/diagnostic/site`. Public `build` also excludes hooks and local autoload.
 Generated logs stay under the checkout's ignored `build/` directory.
+
+## Browser-free simulation experiment
+
+The optional headless build keeps the authority's recovered C simulation and PsyZ
+CPU GTE/SPU state, replacing window, GPU output, host controllers and audio devices
+with a null backend. It is separate from the production Chromium authority.
+`TM4_HEADLESS=ON` builds the Node/Emscripten diagnostic stepping stone;
+adding `TM4_STANDALONE=ON` builds a pure WASI reactor with no JavaScript imports.
+Its only filesystem capability is a read-only host preopen named `/DATA`.
+Only explicitly annotated `WEB_BROWSER_REPORT` calls are omitted: UI/catalog/session
+publications and diagnostic counters/poses in the car and overlay wrappers. They
+read C state; they never deliver resources, write C memory or return host inputs.
+Unannotated JavaScript calls (including typed reads, snapshot transfers and device
+input callbacks) fail with an operation and source location. The standalone API
+uses synchronous `WebNetQueueTick` return and explicit C capture instead of the
+browser's `netMatchTick` transport callback. It has no JavaScript mod loader, resource-heap shift or browser-driven motion fixture;
+those browser-only probes are excluded explicitly, not answered with fake values.
+
+`emscripten_get_now`, sleep/main-loop/interval scheduling and PsyZ host time fail
+explicitly. The authority does not consume them: the level's initial timestamp is
+only for browser-paced frames, music polling is not installed in headless startup,
+and the retained kernel never reaches its host-time/interrupt-timer path in the
+verified fixture. Gameplay `GetCurrentTime()` still reads `MainFrameCount`, restored
+by the local checkpoint. Host performance measurements belong to the external host.
+A new code path requiring wall-clock or kernel interrupt timing remains unsupported.
+
+Prepare private resources using the existing disc loader, then build and compare:
+
+```sh
+bun tools/headless/prepare-resources.ts "$TM4_DISC_DIR" build/resources
+emcmake cmake -S . -B build/standalone -DCMAKE_BUILD_TYPE=Release \
+  -DTM4_HEADLESS=ON -DTM4_STANDALONE=ON -DTM4_WEB_TEST_HOOKS=ON
+cmake --build build/standalone --target tm4_web --parallel 8
+TM4_WEB_URL=http://127.0.0.1:18180 node tools/headless/record-browser.cjs build/browser-record.json
+uv venv build/wasmtime-venv
+uv pip install --python build/wasmtime-venv/bin/python wasmtime==50.0.1
+build/wasmtime-venv/bin/python tools/headless/check-wasmtime.py \
+  build/standalone/site/tm4_standalone.wasm build/resources build/browser-record.json
+```
+
+The browser recording needs a current diagnostic site and local disc. It stores the
+exact inputs and diagnostic placements alongside complete canonical bytes. The
+standalone check then runs without a browser, comparing every tick and replaying
+three times from a same-instance checkpoint containing a live projectile. Generated
+records, resources and timing measurements remain in `build/`. The diagnostic
+`check-host-contract.py` takes the same Wasm path and checks that required host
+capabilities fail with a source location. Timings include the
+reported host overhead and are observations on a shared machine, not a capacity claim.
+
+The reactor API initializes with `_initialize` and `HeadlessInitialize`, selects stock
+cars/map through `WebNetSelectCar`/`WebNetWorldIndex`, creates with
+`WebNetRequestMatch(players, world, seed, -1)`, accepts each slot's `WebNetSetInput`
+and advances with `WebNetQueueTick`. `HeadlessCapture` fills `HeadlessCanonical`
+(length returned) and `HeadlessDigest` (five `u32` subsystem checksums).
+`HeadlessTick` reports the boundary. Existing local checkpoint capture/restore/replay
+and `WebNetCancelMatch` complete the interface; strings use exported `malloc`/`free`.
+One Wasm instance owns one world. Portable checkpoint transport and production
+server integration are outside this experiment. Current parity coverage is the
+300-tick two-player Construction Yard combat fixture, not every stock combination.

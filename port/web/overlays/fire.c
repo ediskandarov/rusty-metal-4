@@ -1,6 +1,6 @@
 #include "src/modules/fire/private.h"
 #include "../overlays.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 void FlameEmitterClassConstructor(RegistryDirectory*);
@@ -19,7 +19,7 @@ static s32 construct(void* object, va_list arguments)
 {
     s32 result = FlameEmitterConstructor(object, arguments);
     if (result)
-        EM_ASM({ tm4Port.flameSpawns = (tm4Port.flameSpawns || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.flameSpawns = (tm4Port.flameSpawns || 0) + 1; });
     return result;
 }
 static void process(void* object)

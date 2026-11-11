@@ -16,7 +16,7 @@
 
 #include "tm4/main/loadfiles.h"
 #include <ctype.h>
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <libetc.h>
 #include <psyz/input.h>
 #include <stdio.h>
@@ -76,20 +76,20 @@ EMSCRIPTEN_KEEPALIVE int WebNetWorldIndex(const char* name)
 
 void WebNetPublishCatalog(void)
 {
-    EM_ASM({ tm4Port.catalog = ({ worlds : [], cars : [] }); });
+    WEB_BROWSER_REPORT({ tm4Port.catalog = ({ worlds : [], cars : [] }); });
     for (s32 i = 0; i < GameGetNumberOfWorlds(); ++i)
-        EM_ASM({ tm4Port.catalog.worlds.push(UTF8ToString($0)); }, GameGetWorldName(i));
+        WEB_BROWSER_REPORT({ tm4Port.catalog.worlds.push(UTF8ToString($0)); }, GameGetWorldName(i));
     const s32 count = RegGetNumberOfDirectoriesS("/objects/car/characters");
     for (s32 i = 0; i < count; ++i) {
         char* name = RegGetDirectoryNameSN("/objects/car/characters", i);
         if (name)
-            EM_ASM({ tm4Port.catalog.cars.push(UTF8ToString($0)); }, name);
+            WEB_BROWSER_REPORT({ tm4Port.catalog.cars.push(UTF8ToString($0)); }, name);
     }
 }
 
 static int reject_start(const char* message)
 {
-    EM_ASM({ tm4Port.netSession = ({ status : "error", message : UTF8ToString($0) }); }, message);
+    WEB_BROWSER_REPORT({ tm4Port.netSession = ({ status : "error", message : UTF8ToString($0) }); }, message);
     return 0;
 }
 
@@ -153,11 +153,11 @@ EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s3
     match.tick = 0;
     match.players = players;
     match.view_slot = view_slot;
-    EM_ASM({
+    WEB_BROWSER_REPORT({
         tm4Port.networkSynchronous = true;
         tm4Port.renderLimit = 30;
         tm4Port.renderSmoothing = false;
-        window.dispatchEvent(new CustomEvent("tm4-network-mode", { detail: true }));
+        globalThis.dispatchEvent?.(new CustomEvent("tm4-network-mode", { detail: true }));
         tm4Port.netSession = ({ status : "loading" });
     });
     start_session();
@@ -192,7 +192,7 @@ static void start_session(void)
     WebLevelStart();
     match.physical_pad = (PadCache) { 0 };
     memset(PadJpad, 0, sizeof(PadJpad));
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.netSession = ({ status : "ready" });
             tm4Port.netMatch = ({ players : $0, tick : 0, status : "ready" });
@@ -203,8 +203,11 @@ static void start_session(void)
 
 static const char* checkpoint_resource_blocker(void)
 {
+/* The standalone boundary supplies stock local resources and has no JS mod loader. */
+#ifndef TM4_STANDALONE
     if (EM_ASM_INT({ return !!Module.tm4CodeMods?.size; }))
         return "independent module state";
+#endif
     if (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count != 0)
         return "game mode state";
     return NULL;
@@ -240,10 +243,15 @@ int WebNetPortableCheckpointEnabled(void)
 
 int WebNetLocalCheckpointSupported(void)
 {
+#ifdef TM4_STANDALONE
+    const int host_checkpoint = 1;
+#else
+    const int host_checkpoint
+        = EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; });
+#endif
     return match.players && !checkpoint_resource_blocker()
         && (WebNetRenderedPrediction() || (match.view_slot < 0 && WebAuthorityStartup()
-            && (portable_checkpoint
-                || EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; }))));
+            && (portable_checkpoint || host_checkpoint)));
 }
 
 static int local_checkpoint_boundary(void)
@@ -254,7 +262,7 @@ static int local_checkpoint_boundary(void)
 
 static int local_checkpoint_error(const char* message)
 {
-    EM_ASM({ tm4Port.localCheckpointError = $0 ? UTF8ToString($0) : null; }, message);
+    WEB_BROWSER_REPORT({ tm4Port.localCheckpointError = $0 ? UTF8ToString($0) : null; }, message);
     return 0;
 }
 
@@ -558,7 +566,7 @@ void WebNetMatchPublishTick(void)
         unsupported = state.unsupported;
     if (unsupported && WebLevelCheckpointActive())
         WebCheckpointRejectState();
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             Object.assign(tm4Port.netMatch, {
                 tick : $0,
@@ -578,12 +586,15 @@ void WebNetMatchPublishTick(void)
         digest, state.session, state.cars, state.objects, state.world, state.sound, unsupported);
     for (s32 slot = 0; slot < match.players; ++slot) {
         const Tm4GamePlayer* player = &GameInfo.players[slot];
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             { tm4Port.netMatch.scores.push({ wins : $0, losses : $1 }); }, player->wins,
             player->losses);
     }
+#ifndef TM4_STANDALONE
+    /* The standalone host reads the C boundary after WebNetQueueTick returns. */
     if (match.tick && !WebNetReplaying())
         EM_ASM({ tm4Port.netMatchTick ?.(); });
+#endif
 }
 
 void WebNetMatchEnd(void)
@@ -592,11 +603,11 @@ void WebNetMatchEnd(void)
     portable_checkpoint = 0;
     memset(&match, 0, sizeof(match));
     memset(configured_cars, 0, sizeof(configured_cars));
-    EM_ASM({
+    WEB_BROWSER_REPORT({
         delete tm4Port.netMatch;
         delete tm4Port.netCapturedState;
         delete tm4Port.localCheckpointError;
         tm4Port.networkSynchronous = false;
-        window.dispatchEvent(new CustomEvent("tm4-network-mode", { detail: false }));
+        globalThis.dispatchEvent?.(new CustomEvent("tm4-network-mode", { detail: false }));
     });
 }

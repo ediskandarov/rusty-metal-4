@@ -1,7 +1,7 @@
 #include "src/modules/cars/auger/private.h"
 #include "../../overlays.h"
 #include "tm4/main/game.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 static void construct_class(RegistryDirectory* directory)
@@ -18,7 +18,7 @@ s32 WebAugerProcess(Car* car, void* context)
     s32 result = CarAugerProcess(car, drill);
     if (car == GameInfo.players[0].car) {
         Car* target = GameIsCarRegistered(drill->target) ? drill->target : NULL;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.auger = ({
                     angle : $0,

@@ -1,7 +1,7 @@
 #include "src/modules/expl/private.h"
 #include "../overlays.h"
 #include "tm4/gpu.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 void ExplosionShockWaveClassConstructor(RegistryDirectory*);
 void ExplosionShockWaveClassDestructor(RegistryDirectory* directory);
@@ -14,7 +14,7 @@ static s32 construct(void* object, va_list args)
     s32 result = ExplosionShockWaveConstructor(object, args);
     if (result) {
         ExplosionWave* wave = object;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.shockwaveSpawns = (tm4Port.shockwaveSpawns || 0) + 1;
                 tm4Port.lastShockwave = UTF8ToString($0);
@@ -26,14 +26,14 @@ static s32 construct(void* object, va_list args)
 static void destroy(void* object)
 {
     ExplosionShockWaveDestructor(object);
-    EM_ASM({ tm4Port.shockwaveRemoved = (tm4Port.shockwaveRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.shockwaveRemoved = (tm4Port.shockwaveRemoved || 0) + 1; });
 }
 static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* view)
 {
     u8* start = *output;
     ExplosionShockWaveDisplay(object, ordering, output, end, view);
     if (start != *output)
-        EM_ASM({ tm4Port.shockwaveDraws = (tm4Port.shockwaveDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.shockwaveDraws = (tm4Port.shockwaveDraws || 0) + 1; });
 }
 static void destroy_class(RegistryDirectory* directory)
 {

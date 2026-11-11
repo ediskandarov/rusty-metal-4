@@ -1,0 +1,20 @@
+--- a/src/main/loading.c
++++ b/src/main/loading.c
+@@ -2,7 +2,7 @@
+ #include "port/web/net_match.h"
+ 
+ #include "tm4_scalar.h"
+-#include <emscripten.h>
++#include "port/web/browser_report.h"
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/main/game.h"
+@@ -77,7 +77,7 @@
+ 
+     loaded = loadingBytesLoaded + mul64s(loadingBytesCurrent, progress, 12);
+     s32 total_progress = ((loaded << 8) / loadingBytesTotal) << 4;
+-    EM_ASM({ tm4Port.loading = $0 / 4096; }, total_progress);
++    WEB_BROWSER_REPORT({ tm4Port.loading = $0 / 4096; }, total_progress);
+     LoadingDisplay(total_progress);
+ }
+ #endif

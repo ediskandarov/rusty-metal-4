@@ -1,7 +1,7 @@
 #include "src/modules/anim/private.h"
 #include "../overlays.h"
 #include "tm4/gpu.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 void AnimClassConstructor(RegistryDirectory*);
 void InteractCarWithAnim_goggle(Car*, Anim*);
@@ -15,7 +15,7 @@ static s32 construct(void* object, va_list args)
 {
     s32 result = AnimConstructor(object, args);
     if (result)
-        EM_ASM({ tm4Port.animSpawns = (tm4Port.animSpawns || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.animSpawns = (tm4Port.animSpawns || 0) + 1; });
     return result;
 }
 static void process(void* object)
@@ -47,14 +47,14 @@ static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end
     u8* start = *output;
     AnimDisplay(object, ordering, output, end, view);
     if (*output != start)
-        EM_ASM({ tm4Port.animDraws = (tm4Port.animDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.animDraws = (tm4Port.animDraws || 0) + 1; });
 }
 static void goggle_contact(Car* car, Anim* animation)
 {
     s32 health = car->health;
     InteractCarWithAnim_goggle(car, animation);
     if (car->health < health)
-        EM_ASM({ tm4Port.flameDamage = (tm4Port.flameDamage || 0) + $0; }, health - car->health);
+        WEB_BROWSER_REPORT({ tm4Port.flameDamage = (tm4Port.flameDamage || 0) + $0; }, health - car->health);
 }
 
 OSWord WebAnimExport(const char* name)

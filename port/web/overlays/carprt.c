@@ -2,7 +2,7 @@
 #include "../overlays.h"
 #include "tm4/gpu.h"
 #include "tm4/main/memory.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 s32 CarpartConstructor(Carpart*, va_list);
 void CarpartProcess(Carpart*);
@@ -35,7 +35,7 @@ static s32 construct(void* object, va_list args)
     frame->first_face = 0;
     debris->part.group = &debris->group;
     debris->part.faces = debris->faces;
-    EM_ASM({ tm4Port.debrisSpawns = (tm4Port.debrisSpawns || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.debrisSpawns = (tm4Port.debrisSpawns || 0) + 1; });
     return 1;
 }
 static void process(void* object)
@@ -46,7 +46,7 @@ static void destroy(void* object)
 {
     WebCarpart* debris = object;
     MemFree(debris->faces);
-    EM_ASM({ tm4Port.debrisRemoved = (tm4Port.debrisRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.debrisRemoved = (tm4Port.debrisRemoved || 0) + 1; });
 }
 static void display(void* object, Tm4OrderingTag* ot, u8** output, u8* end, MATRIX* view)
 {
@@ -54,7 +54,7 @@ static void display(void* object, Tm4OrderingTag* ot, u8** output, u8* end, MATR
 #if __has_feature(address_sanitizer)
     Carpart* part = object;
     CarRenderFrame* frame = &part->group->frames[CAR_RENDER_FRAME_DAMAGED];
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.lastDebris
                 = ({ faces : $0, firstFace : $1, faceCount : $2, vertices : $3, group : $4 });
@@ -63,7 +63,7 @@ static void display(void* object, Tm4OrderingTag* ot, u8** output, u8* end, MATR
 #endif
     CarpartDisplay(object, ot, output, end, view);
     if (*output != start)
-        EM_ASM({ tm4Port.debrisDraws = (tm4Port.debrisDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.debrisDraws = (tm4Port.debrisDraws || 0) + 1; });
 }
 OSWord WebCarpartExport(const char* name)
 {

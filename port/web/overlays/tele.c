@@ -2,7 +2,7 @@
 #include "../overlays.h"
 #include "tm4/main/registry.h"
 #include <STDARG.H>
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 void TeleporterClassConstructor(RegistryDirectory*);
@@ -19,7 +19,7 @@ static s32 instance(void* object, RegistryDirectory* directory)
 {
     s32 result = TeleporterInstanceConstructor(object, directory);
     if (result)
-        EM_ASM({ tm4Port.teleporterInstances = (tm4Port.teleporterInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.teleporterInstances = (tm4Port.teleporterInstances || 0) + 1; });
     return result;
 }
 static void process(void* object)
@@ -31,7 +31,7 @@ static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end
     u8* start = *output;
     TeleporterDisplay(object, ordering, output, end, view);
     if (*output != start)
-        EM_ASM({ tm4Port.teleporterDraws = (tm4Port.teleporterDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.teleporterDraws = (tm4Port.teleporterDraws || 0) + 1; });
 }
 OSWord WebTeleporterExport(const char* name)
 {

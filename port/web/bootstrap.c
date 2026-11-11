@@ -33,7 +33,7 @@
 #include "tm4/main/system.h"
 
 #include "level.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -130,7 +130,7 @@ static void apply_render_settings(void)
     WebDrawDistanceScale = render_settings.draw_distance;
     Psyz_VideoSetInternalResolution(scale);
     Psyz_VideoSetDitheringMode(dithering);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.renderScale = $0;
             tm4Port.renderDithering = $1;
@@ -151,7 +151,7 @@ static void count_presented_frame(void)
     unsigned int scale = Psyz_VideoGetInternalResolution();
     if (scale != reported_scale) {
         reported_scale = scale;
-        EM_ASM({ tm4Port.renderScale = $0; }, scale);
+        WEB_BROWSER_REPORT({ tm4Port.renderScale = $0; }, scale);
     }
 }
 
@@ -209,7 +209,7 @@ static s32 load_texture(char* path, s32 type, s32 size, void* data, char* regist
 static void load_registry(void)
 {
     u32 heap_offset = 0;
-#ifdef TM4_WEB_TEST_HOOKS
+#if defined(TM4_WEB_TEST_HOOKS) && !defined(TM4_STANDALONE)
     if (EM_ASM_INT({ return !!globalThis.tm4TestShiftResourceHeap; }))
         heap_offset = 65536;
 #endif
@@ -223,7 +223,7 @@ static void load_registry(void)
     WebLoadArchive("/DATA/MAIN.MR", "MAIN");
     count_registry(RegGetCurrentDirectoryPtr());
     printf("TM4 registry: %u directories, %u resources\n", directory_count, resource_count);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         { globalThis.tm4Port = ({ registryReady : true, directories : $0, resources : $1 }); },
         directory_count, resource_count);
 }
@@ -251,12 +251,12 @@ static void initialize_menu(void)
     set_menu_mask(1);
     MenuTicks = 0;
     SetDispMask(1);
-    EM_ASM({ globalThis.tm4Port.screen = 'main'; });
+    WEB_BROWSER_REPORT({ globalThis.tm4Port.screen = 'main'; });
 }
 
 void WebReturnToMenu(void)
 {
-    EM_ASM({ tm4Port.menuReady = false; });
+    WEB_BROWSER_REPORT({ tm4Port.menuReady = false; });
     WebLoadingBackground("TITLE.TIM");
     GameInfo.mode = GAME_MODE_MENU;
     GameInfo.next_mode = 0;
@@ -276,7 +276,7 @@ void WebReturnToMenu(void)
 /* SystemRunMenu restores its caller's CD directory after the menu returns. */
 void WebLeaveMenu(void)
 {
-    EM_ASM({ tm4Port.menuReady = false; });
+    WEB_BROWSER_REPORT({ tm4Port.menuReady = false; });
     if (!menu_initialized)
         return;
     MenuShutdown();
@@ -314,7 +314,7 @@ static void draw_menu(void)
     WebCardFlush();
     ++MenuTicks;
     ++frame_count;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             globalThis.tm4Port.frames = $0;
             globalThis.tm4Port.selected = $1;
@@ -357,7 +357,9 @@ static void initialize_platform(void)
         fprintf(stderr, "Cannot initialize browser audio\n");
         exit(1);
     }
+#ifndef TM4_HEADLESS
     WebMusicInitialize();
+#endif
     RedbookInitialize();
     SetVideoMode(MODE_NTSC);
     GameInitialize();
@@ -400,9 +402,14 @@ int main(int argc, char** argv)
     load_registry();
     initialize_platform();
     WebNetPublishCatalog();
-    EM_ASM({ tm4Port.platformReady = true; });
-    if (authority_startup)
+    WEB_BROWSER_REPORT({ tm4Port.platformReady = true; });
+    if (authority_startup) {
+#ifdef TM4_STANDALONE
+        return 0;
+#else
         emscripten_exit_with_live_runtime();
+#endif
+    }
     emscripten_set_main_loop(browser_frame, 0, 1);
     return 0;
 }

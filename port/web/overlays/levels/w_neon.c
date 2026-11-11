@@ -1,7 +1,7 @@
 #include "src/modules/levels/w_neon/private.h"
 #include "../../overlays.h"
 #include "tm4/main/game.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 void TrainClassConstructor(RegistryDirectory*);
@@ -37,7 +37,7 @@ static s32 train_instance(Train* train, RegistryDirectory* directory)
 {
     s32 result = TrainInstanceConstructor(train, directory);
     if (result)
-        EM_ASM({ tm4Port.trainInstances = (tm4Port.trainInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.trainInstances = (tm4Port.trainInstances || 0) + 1; });
     return result;
 }
 
@@ -45,7 +45,7 @@ static s32 ufo_instance(Ufo* ufo, RegistryDirectory* directory)
 {
     s32 result = UfoInstanceConstructor(ufo, directory);
     if (result)
-        EM_ASM({ tm4Port.ufoInstances = (tm4Port.ufoInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.ufoInstances = (tm4Port.ufoInstances || 0) + 1; });
     return result;
 }
 
@@ -56,7 +56,7 @@ static void train_process(Train* train)
         return;
     }
     TrainProcess(train);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         { tm4Port.trainPosition = ([ $0, $1, $2 ]); }, train->path.local_to_world.t[0],
         train->path.local_to_world.t[1], train->path.local_to_world.t[2]);
 }
@@ -65,7 +65,7 @@ static void ufo_process(Ufo* ufo)
 {
     Car* held = ufo->car;
     UfoProcess(ufo);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.ufoPosition = ([ $0, $1, $2 ]);
             tm4Port.ufoHolding = !!$3;
@@ -73,7 +73,7 @@ static void ufo_process(Ufo* ufo)
         ufo->path.local_to_world.t[0], ufo->path.local_to_world.t[1], ufo->path.local_to_world.t[2],
         ufo->car != NULL);
     if (!held && ufo->car)
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.ufoCaptures = (tm4Port.ufoCaptures || 0) + 1;
                 tm4Port.ufoCapturedPlayer = !!$0;
@@ -81,7 +81,7 @@ static void ufo_process(Ufo* ufo)
             ufo->car == GameInfo.players[0].car);
     if (held && !ufo->car) {
         SVECTOR* drop = ufo->drop_world_position;
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.ufoReleases = (tm4Port.ufoReleases || 0) + 1;
                 tm4Port.ufoRelease
@@ -98,7 +98,7 @@ static void train_display(Train* train, Tm4OrderingTag* table, u8** cursor, u8* 
     u8* start = *cursor;
     TrainDisplay(train, table, cursor, end, view);
     if (*cursor != start)
-        EM_ASM({ tm4Port.trainDraws = (tm4Port.trainDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.trainDraws = (tm4Port.trainDraws || 0) + 1; });
 }
 
 static void ufo_display(Ufo* ufo, Tm4OrderingTag* table, u8** cursor, u8* end, MATRIX* view)
@@ -106,7 +106,7 @@ static void ufo_display(Ufo* ufo, Tm4OrderingTag* table, u8** cursor, u8* end, M
     u8* start = *cursor;
     UfoDisplay(ufo, table, cursor, end, view);
     if (*cursor != start)
-        EM_ASM({ tm4Port.ufoDraws = (tm4Port.ufoDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.ufoDraws = (tm4Port.ufoDraws || 0) + 1; });
 }
 
 static void train_collision(Car* car, Train* train)
@@ -114,19 +114,19 @@ static void train_collision(Car* car, Train* train)
     s32 health = car->health;
     InteractCarWithTrain(car, train);
     if (car == GameInfo.players[0].car && car->health != health)
-        EM_ASM({ tm4Port.trainPlayerHits = (tm4Port.trainPlayerHits || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.trainPlayerHits = (tm4Port.trainPlayerHits || 0) + 1; });
 }
 
 static void train_destroy(Train* train)
 {
     TrainDestructor(train);
-    EM_ASM({ tm4Port.trainRemoved = (tm4Port.trainRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.trainRemoved = (tm4Port.trainRemoved || 0) + 1; });
 }
 
 static void ufo_destroy(Ufo* ufo)
 {
     UfoDestructor(ufo);
-    EM_ASM({ tm4Port.ufoRemoved = (tm4Port.ufoRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.ufoRemoved = (tm4Port.ufoRemoved || 0) + 1; });
 }
 
 OSWord WebNeonExport(const char* name)

@@ -1,6 +1,6 @@
 #include "src/modules/firing/private.h"
 #include "../overlays.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 extern u32 FireRingSizeof;
@@ -12,13 +12,13 @@ static s32 construct(void* object, va_list arguments)
 {
     s32 result = FireRingConstructor(object, arguments);
     if (result)
-        EM_ASM({ tm4Port.fireRingSpawns = (tm4Port.fireRingSpawns || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.fireRingSpawns = (tm4Port.fireRingSpawns || 0) + 1; });
     return result;
 }
 static void process(void* object)
 {
     FireRing* ring = object;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.fireRingPeakParticles = Math.max(tm4Port.fireRingPeakParticles || 0, $0);
             tm4Port.fireRingPeakRadius = Math.max(tm4Port.fireRingPeakRadius || 0, $1);
@@ -29,7 +29,7 @@ static void process(void* object)
 static void destroy(void* object)
 {
     FireRingDestructor(object);
-    EM_ASM({ tm4Port.fireRingRemoved = (tm4Port.fireRingRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.fireRingRemoved = (tm4Port.fireRingRemoved || 0) + 1; });
 }
 OSWord WebFireRingExport(const char* name)
 {

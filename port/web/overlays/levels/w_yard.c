@@ -1,6 +1,6 @@
 #include "src/modules/levels/w_yard/private.h"
 #include "../../overlays.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 extern s32 CraneSizeof, CraneCameraSizeof, DeathPointSizeof;
@@ -29,7 +29,7 @@ static s32 construct(void* object, RegistryDirectory* directory)
 {
     s32 result = CraneInstanceConstructor(object, directory);
     if (result)
-        EM_ASM({ tm4Port.craneInstances = (tm4Port.craneInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.craneInstances = (tm4Port.craneInstances || 0) + 1; });
     return result;
 }
 static void process(void* object)
@@ -37,11 +37,11 @@ static void process(void* object)
     Crane* crane = object;
     if (GameInfo.game_type == GAME_TYPE_TOURNAMENT && GameInfo.bosses_spawned) {
         CraneProcess(crane);
-        EM_ASM({ tm4Port.craneDestroyed = (tm4Port.craneDestroyed || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.craneDestroyed = (tm4Port.craneDestroyed || 0) + 1; });
         return;
     }
     CraneProcess(crane);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.crane = ({
                 angle : $0,
@@ -69,12 +69,12 @@ static void display(void* object, Tm4OrderingTag* table, u8** cursor, u8* end, M
     u8* start = *cursor;
     CraneDisplay(object, table, cursor, end, view);
     if (*cursor != start)
-        EM_ASM({ tm4Port.craneDraws = (tm4Port.craneDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.craneDraws = (tm4Port.craneDraws || 0) + 1; });
 }
 static void destroy(void* object)
 {
     CraneDestructor(object);
-    EM_ASM({ tm4Port.craneRemoved = (tm4Port.craneRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.craneRemoved = (tm4Port.craneRemoved || 0) + 1; });
 }
 static s32 deathpoint_instance(void* object, RegistryDirectory* directory)
 {

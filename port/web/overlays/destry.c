@@ -1,7 +1,7 @@
 #include "src/modules/destry/private.h"
 #include "../overlays.h"
 #include "tm4/main/object.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 static void bind_imports(void)
@@ -19,7 +19,7 @@ static s32 instance(void* object, RegistryDirectory* directory)
     bind_imports();
     s32 result = DestroyableInstanceConstructor(object, directory);
     if (result)
-        EM_ASM({ tm4Port.destroyableInstances = (tm4Port.destroyableInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.destroyableInstances = (tm4Port.destroyableInstances || 0) + 1; });
     return result;
 }
 static void process(void* object)
@@ -36,7 +36,7 @@ static s32 damage(Destroyable* object, s32 amount, s32 x, s32 y, s32 z)
     s32 serial = ObjectGetHeader(object)->serial;
     char* name = RegGetDirectoryNameP(object->registry);
     s32 result = DestroyableApplyDamage(object, amount, x, y, z);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.destroyableHits = (tm4Port.destroyableHits || 0) + 1;
             tm4Port.lastDestroyableHit = ({

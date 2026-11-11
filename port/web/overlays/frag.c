@@ -1,7 +1,7 @@
 #include "src/modules/frag/private.h"
 #include "../overlays.h"
 #include "tm4/main/os.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 s32 FragmentConstructor(Fragment*, va_list);
@@ -14,7 +14,7 @@ static s32 construct(void* object, va_list arguments)
     Import_SpawnExplosion = SpawnExplosion;
     s32 result = FragmentConstructor(object, arguments);
     if (result)
-        EM_ASM({ tm4Port.fragmentSpawns = (tm4Port.fragmentSpawns || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.fragmentSpawns = (tm4Port.fragmentSpawns || 0) + 1; });
     return result;
 }
 static void process(void* object)
@@ -26,7 +26,7 @@ static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end
     u8* start = *output;
     FragmentDisplay(object, ordering, output, end, view);
     if (*output != start)
-        EM_ASM({ tm4Port.fragmentDraws = (tm4Port.fragmentDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.fragmentDraws = (tm4Port.fragmentDraws || 0) + 1; });
 }
 OSWord WebFragmentExport(const char* name)
 {

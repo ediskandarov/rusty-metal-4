@@ -32,7 +32,7 @@
 #include "tm4/main/world.h"
 #include "tm4/modules/camera.h"
 #include <assert.h>
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <libetc.h>
 #include <libgpu.h>
 #include <stdio.h>
@@ -84,7 +84,7 @@ void WebLevelStart(void)
     }
     CarResourcesPrepare();
     GamePrepareSession();
-#ifdef TM4_WEB_TEST_HOOKS
+#if defined(TM4_WEB_TEST_HOOKS) && !defined(TM4_STANDALONE)
     u32 motion_seed = EM_ASM_INT({ return tm4Port.testMotionSeed || 0; });
     if (motion_seed && GameInfo.game_type == GAME_TYPE_TOURNAMENT) {
         /* GamePrepareSession selects the normal roster before the replay supplies its seed. */
@@ -127,9 +127,9 @@ void WebLevelStart(void)
         GameInfo.players[i].camera = i < camera_count ? ObjectCreate("camera", 0, NULL) : NULL;
         assert(i >= camera_count || GameInfo.players[i].camera);
     }
-    EM_ASM({ tm4Port.cameraSlots = []; });
+    WEB_BROWSER_REPORT({ tm4Port.cameraSlots = []; });
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i)
-        EM_ASM({ tm4Port.cameraSlots.push(!!$0); }, GameInfo.players[i].camera);
+        WEB_BROWSER_REPORT({ tm4Port.cameraSlots.push(!!$0); }, GameInfo.players[i].camera);
     ObjectStartupInstance();
     WebCheckpointArenaSelect(0);
     SoundSetMusicVolume(GameInfo.music_volume);
@@ -163,16 +163,18 @@ void WebLevelStart(void)
     if (WebNetRenderedPrediction())
         WebRollbackAudioReset();
     demo_draw_enabled = 1;
+#ifndef TM4_STANDALONE
     last_step = emscripten_get_now();
+#endif
     WebRenderResetTiming();
     if (WebNetPortableCheckpointEnabled() && checkpoint_arena)
         WebSnapshotWorldOpen();
-    EM_ASM({ tm4Port.renderPhaseCounts = ([ 0, 0, 0 ]); });
+    WEB_BROWSER_REPORT({ tm4Port.renderPhaseCounts = ([ 0, 0, 0 ]); });
     active = 1;
     printf("%s initialized: %d cells, %d vertices, %d faces, %d collision faces; spawn %d,%d,%d\n",
         GameInfo.world_name, squares, vertices, faces, collision_faces, start->position.vx,
         start->position.vy, start->position.vz);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             Object.assign(globalThis.tm4Port, {
                 screen : 'level',
@@ -247,7 +249,9 @@ static void process_level_step(void)
 {
 #ifdef TM4_WEB_TEST_HOOKS
     WebTestApplyPendingActions();
+#ifndef TM4_STANDALONE
     WebTestMotionInput();
+#endif
 #endif
     WebCarStep();
     ++simulation_steps;
@@ -280,9 +284,9 @@ static void present_level_frame(Tm4RenderBuffer* buffer, double phase)
     WebInterpolationEndDraw();
     WebRenderPresentLevelFrame();
     ++frames;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         { tm4Port.hudGlyphs = $0; }, buffer->font_prims.next_sprite - buffer->font_prims.sprites);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         { Object.assign(tm4Port, { levelFrames : $0, cameraX : $1, cameraY : $2, cameraZ : $3 }); },
         frames, GameInfo.players[0].camera->camera_to_world.t[0],
         GameInfo.players[0].camera->camera_to_world.t[1],
@@ -320,19 +324,19 @@ static void demo_frame(void)
             toggle = 1;
         if (controller->buttons & PADLdown) {
             SoundStopSounds();
-            EM_ASM({ tm4Port.demoFrozen = true; });
+            WEB_BROWSER_REPORT({ tm4Port.demoFrozen = true; });
             do {
                 VSync(0);
                 PadGetPad(8);
                 VSync(0);
             } while (PadJpad[i].buttons & PADLdown);
-            EM_ASM({ tm4Port.demoFrozen = false; });
+            WEB_BROWSER_REPORT({ tm4Port.demoFrozen = false; });
         }
     }
     demo_draw_enabled = toggle ? !demo_draw_enabled : 1;
     GameProcessMode();
     ++MainFrameCount;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.simulationTicks = $0;
             tm4Port.demoDrawEnabled = !!$1;
@@ -361,7 +365,7 @@ static void draw_network_view(s32 slot)
         GameInfo.active_view = active_view;
     }
     ++frames;
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             Object.assign(
                 tm4Port, { levelFrames : $0, netViewSlot : $1, netCameraAttached : !!$2 });
@@ -384,7 +388,7 @@ void WebLevelNetworkStep(void)
         WebScreenFinishPredictedTick();
     network_frame_pending = 1;
     ++MainFrameCount;
-    EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
+    WEB_BROWSER_REPORT({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     WebNetMatchPublishTick();
 }
 
@@ -416,7 +420,7 @@ void WebLevelFrame(void)
             WebRenderResetTiming();
         motion = selected;
         WebInterpolationReset();
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.renderSmoothing = !!$0;
                 tm4Port.renderSmoothingLead = $1;
@@ -448,7 +452,7 @@ void WebLevelFrame(void)
             }
         }
         if (GameInfo.pause_player) {
-            EM_ASM(
+            WEB_BROWSER_REPORT(
                 {
                     tm4Port.paused = true;
                     tm4Port.pausePlayer = $0;
@@ -458,7 +462,7 @@ void WebLevelFrame(void)
             s32 result = PauseMenu(&buffer, GameInfo.pause_player - 1, 0);
             GameInfo.pause_player = 0;
             WebRenderResetTiming();
-            EM_ASM({ tm4Port.paused = false; });
+            WEB_BROWSER_REPORT({ tm4Port.paused = false; });
             now = emscripten_get_now();
             last_step = now - step_ms;
             /* The first resumed draw should use the current pose. */
@@ -477,7 +481,7 @@ void WebLevelFrame(void)
             WebInterpolationFinishStep(motion.lead);
         ++MainFrameCount;
 #ifdef TM4_WEB_TEST_HOOKS
-        EM_ASM(
+        WEB_BROWSER_REPORT(
             {
                 tm4Port.testMotionSimulation?.push([
                     $0, $1, tm4Port.cars, tm4Port.weaponAmmo, tm4Port.carSelectedWeapon
@@ -493,7 +497,7 @@ void WebLevelFrame(void)
         last_step = now;
         WebInterpolationReset();
     }
-    EM_ASM({ tm4Port.simulationTicks = $0; }, MainFrameCount);
+    WEB_BROWSER_REPORT({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     present_level_frame(buffer, (now - last_step) / step_ms);
     if (GameInfo.next_mode)
         finish_session();

@@ -1,7 +1,7 @@
 #include "src/modules/levels/w_carni/private.h"
 #include "../../overlays.h"
 #include "tm4/main/game.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 void CoasterClassConstructor(RegistryDirectory*);
@@ -27,7 +27,7 @@ static s32 coaster_instance(Coaster* coaster, RegistryDirectory* directory)
 {
     s32 result = CoasterInstanceConstructor(coaster, directory);
     if (result)
-        EM_ASM({ tm4Port.coasterInstances = (tm4Port.coasterInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.coasterInstances = (tm4Port.coasterInstances || 0) + 1; });
     return result;
 }
 
@@ -38,7 +38,7 @@ static void coaster_process(Coaster* coaster)
         return;
     }
     CoasterProcess(coaster);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         { tm4Port.coasterPosition = ([ $0, $1, $2 ]); }, coaster->path.local_to_world.t[0],
         coaster->path.local_to_world.t[1], coaster->path.local_to_world.t[2]);
 }
@@ -49,7 +49,7 @@ static void coaster_display(
     u8* start = *cursor;
     CoasterDisplay(coaster, table, cursor, end, view);
     if (*cursor != start)
-        EM_ASM({ tm4Port.coasterDraws = (tm4Port.coasterDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.coasterDraws = (tm4Port.coasterDraws || 0) + 1; });
 }
 
 static void coaster_collision(Car* car, Coaster* coaster)
@@ -57,13 +57,13 @@ static void coaster_collision(Car* car, Coaster* coaster)
     s32 health = car->health;
     InteractCarWithCoaster(car, coaster);
     if (car == GameInfo.players[0].car && car->health != health)
-        EM_ASM({ tm4Port.coasterPlayerHits = (tm4Port.coasterPlayerHits || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.coasterPlayerHits = (tm4Port.coasterPlayerHits || 0) + 1; });
 }
 
 static void coaster_destroy(Coaster* coaster)
 {
     CoasterDestructor(coaster);
-    EM_ASM({ tm4Port.coasterRemoved = (tm4Port.coasterRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.coasterRemoved = (tm4Port.coasterRemoved || 0) + 1; });
 }
 
 OSWord WebCarnivalExport(const char* name)

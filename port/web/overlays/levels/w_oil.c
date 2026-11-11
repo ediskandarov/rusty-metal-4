@@ -1,6 +1,6 @@
 #include "src/modules/levels/w_oil/private.h"
 #include "../../overlays.h"
-#include <emscripten.h>
+#include "port/web/browser_report.h"
 #include <string.h>
 
 void HelicopterClassConstructor(RegistryDirectory*);
@@ -21,14 +21,14 @@ static s32 construct(Helicopter* helicopter, RegistryDirectory* directory)
 {
     s32 result = HelicopterInstanceConstructor(helicopter, directory);
     if (result)
-        EM_ASM({ tm4Port.helicopterInstances = (tm4Port.helicopterInstances || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.helicopterInstances = (tm4Port.helicopterInstances || 0) + 1; });
     return result;
 }
 
 static void process(Helicopter* helicopter)
 {
     HelicopterProcess(helicopter);
-    EM_ASM(
+    WEB_BROWSER_REPORT(
         {
             tm4Port.helicopter = ({
                 position : [ $0, $1, $2 ],
@@ -45,7 +45,7 @@ static void process(Helicopter* helicopter)
         helicopter->health_powerup ? helicopter->health_powerup->position.fields.active : -1,
         helicopter->path.wrapped);
     if (helicopter->path.wrapped)
-        EM_ASM({ tm4Port.helicopterLaps = (tm4Port.helicopterLaps || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.helicopterLaps = (tm4Port.helicopterLaps || 0) + 1; });
 }
 
 static void display(
@@ -54,13 +54,13 @@ static void display(
     u8* start = *cursor;
     HelicopterDisplay(helicopter, table, cursor, end, view);
     if (*cursor != start)
-        EM_ASM({ tm4Port.helicopterDraws = (tm4Port.helicopterDraws || 0) + 1; });
+        WEB_BROWSER_REPORT({ tm4Port.helicopterDraws = (tm4Port.helicopterDraws || 0) + 1; });
 }
 
 static void destroy(Helicopter* helicopter)
 {
     HelicopterDestructor(helicopter);
-    EM_ASM({ tm4Port.helicopterRemoved = (tm4Port.helicopterRemoved || 0) + 1; });
+    WEB_BROWSER_REPORT({ tm4Port.helicopterRemoved = (tm4Port.helicopterRemoved || 0) + 1; });
 }
 
 OSWord WebOilExport(const char* name)
