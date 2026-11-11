@@ -2,7 +2,9 @@ import { chmod, copyFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-import { root, run } from "../common.js";
+import { $ } from "bun";
+
+import { root } from "../common.js";
 
 const { values } = parseArgs({
   options: { mode: { type: "string", default: "release" } },
@@ -20,27 +22,9 @@ const bundle = join(root, "build", mode, "server");
 if (!(await Bun.file(join(bundle, "site/play/simulation-build.json")).exists()))
   throw new Error(`Build the matching server bundle first: ${bundle}`);
 const target = join(root, "build/network-native");
-const child = Bun.spawn(
-  [
-    "cargo",
-    "build",
-    "--locked",
-    "--release",
-    "--bin",
-    "tm4-deathmatch-server",
-    "--features",
-    "embedded-server",
-    "--target-dir",
-    target,
-  ],
-  {
-    cwd: join(root, "network"),
-    env: { ...process.env, TM4_SERVER_BUNDLE: bundle },
-    stdout: "inherit",
-    stderr: "inherit",
-  },
-);
-if (await child.exited) throw new Error("Standalone server build failed");
+await $`cargo build --locked --release --bin tm4-deathmatch-server --features embedded-server --target-dir ${target}`
+  .cwd(join(root, "network"))
+  .env({ ...process.env, TM4_SERVER_BUNDLE: bundle });
 const output = join(root, "build/server-release");
 const directory = join(output, platform);
 await rm(directory, { recursive: true, force: true });
@@ -53,14 +37,10 @@ await copyFile(join(root, "LICENSE"), join(directory, "LICENSE"));
 const archive = join(output, `tm4-rewired-server-${platform}${suffix ? ".zip" : ".tar.gz"}`);
 if (suffix) {
   const quote = (path: string) => `'${path.replaceAll("'", "''")}'`;
-  await run([
-    "powershell",
-    "-NoProfile",
-    "-Command",
-    `Compress-Archive -LiteralPath ${quote(join(directory, name))},${quote(join(directory, "LICENSE"))} -DestinationPath ${quote(archive)} -Force`,
-  ]);
+  const command = `Compress-Archive -LiteralPath ${quote(join(directory, name))},${quote(join(directory, "LICENSE"))} -DestinationPath ${quote(archive)} -Force`;
+  await $`powershell -NoProfile -Command ${command}`.cwd(root);
 } else {
-  await run(["tar", "-czf", archive, "-C", directory, name, "LICENSE"]);
+  await $`tar -czf ${archive} -C ${directory} ${name} LICENSE`.cwd(root);
 }
 console.log(`Standalone server: ${join(directory, name)}`);
 console.log(`Release archive: ${archive}`);

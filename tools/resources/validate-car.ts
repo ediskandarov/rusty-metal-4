@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 
 import { readMr } from "@tm4/resources/compatibility/mr";
 import { type CarDisplayOptions, validateCarMr } from "@tm4/resources/mods/car-display";
+import { $ } from "bun";
 
 function requireValue(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -24,17 +25,12 @@ async function independentComparison(
     )
     .sort((a, b) => a.path.localeCompare(b.path));
   const code = `import hashlib,json,sys\nfrom pathlib import Path\nsys.path.insert(0,str(Path(sys.argv[1])/'tools'))\nfrom overlay_resources import MR\nm=MR(Path(sys.argv[2]).read_bytes())\nprint(json.dumps([{'path':'/'.join(e['parts']),'type':e['type'],'array':e['array_size'],'sha':hashlib.sha256(e['_payload']).hexdigest()} for e in m.entries]))`;
-  const process = Bun.spawn([Bun.env.PYTHON ?? "python3", "-c", code, referenceRoot, input], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const [stdout, stderr, status] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
-  ]);
-  requireValue(status === 0, `Independent reader failed: ${stderr.trim()}`);
-  const expected = (JSON.parse(stdout) as typeof actual).sort((a, b) =>
+  const python = Bun.env.PYTHON ?? "python3";
+  const { stdout, stderr, exitCode } = await $`${python} -c ${code} ${referenceRoot} ${input}`
+    .quiet()
+    .nothrow();
+  requireValue(exitCode === 0, `Independent reader failed: ${stderr.toString().trim()}`);
+  const expected = (JSON.parse(stdout.toString()) as typeof actual).sort((a, b) =>
     a.path.localeCompare(b.path),
   );
   requireValue(

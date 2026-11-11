@@ -1,7 +1,9 @@
 import { readFile, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-import { json, options, root, run, write } from "../common.js";
+import { $ } from "bun";
+
+import { json, options, root, write } from "../common.js";
 import { findDefinitions, planExports, selectExports, validateExports } from "../exports/model.js";
 import { renderAccessor, renderRegistry } from "../exports/templates.js";
 
@@ -34,21 +36,10 @@ async function generate({ manifestFile, unitId, output, compiler }) {
   if (!unit) throw new Error(`Unknown export unit: ${unitId}`);
   if (!compiler.length) throw new Error("Supply the compiler command after --");
 
-  const astText = await run(
-    [
-      ...compiler,
-      "-fsyntax-only",
-      "-Xclang",
-      "-ast-dump=json",
-      "-MMD",
-      "-MF",
-      output + ".d",
-      "-MT",
-      output,
-      unit.source,
-    ],
-    { capture: true },
-  );
+  const astText =
+    await $`${compiler} -fsyntax-only -Xclang -ast-dump=json -MMD -MF ${output + ".d"} -MT ${output} ${unit.source} 2> ${Bun.stderr}`
+      .cwd(root)
+      .text();
   const definitions = findDefinitions(JSON.parse(astText));
   const names = selectExports(manifest, unit, definitions);
 

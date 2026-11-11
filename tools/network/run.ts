@@ -1,7 +1,9 @@
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { root, run } from "../common.js";
+import { $ } from "bun";
+
+import { root } from "../common.js";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -20,20 +22,9 @@ const manifest = join(root, "network/Cargo.toml");
 const cargo = process.env.TM4_RUST_TOOLCHAIN
   ? ["cargo", "+" + process.env.TM4_RUST_TOOLCHAIN]
   : ["cargo"];
-await run(
-  [
-    ...cargo,
-    "build",
-    "--locked",
-    "--manifest-path",
-    manifest,
-    "--target-dir",
-    target,
-    ...(values.diagnostic ? ["--features", "rollback_probe"] : []),
-  ],
-  {
-    cwd: join(root, "network"),
-  },
+const features = values.diagnostic ? ["--features", "rollback_probe"] : [];
+await $`${cargo} build --locked --manifest-path ${manifest} --target-dir ${target} ${features}`.cwd(
+  join(root, "network"),
 );
 const executable =
   process.platform === "win32" ? "tm4-deathmatch-server.exe" : "tm4-deathmatch-server";

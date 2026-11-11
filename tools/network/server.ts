@@ -1,7 +1,9 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-import { root, run } from "../common.js";
+import { $ } from "bun";
+
+import { root } from "../common.js";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -18,19 +20,10 @@ if (!process.env.TM4_ADMIN_SECRET || process.env.TM4_ADMIN_SECRET.length < 24)
   throw new Error("Set TM4_ADMIN_SECRET to a private startup secret of at least 24 characters");
 const target = join(root, "build/network-native");
 const profile = mode === "release" ? "release" : "debug";
-await run(
-  [
-    "cargo",
-    "build",
-    "--locked",
-    "--bin",
-    "tm4-deathmatch-server",
-    "--target-dir",
-    target,
-    ...(mode === "release" ? ["--release"] : []),
-    ...(mode === "diagnostic" ? ["--features", "rollback_probe"] : []),
-  ],
-  { cwd: join(root, "network") },
+const release = mode === "release" ? ["--release"] : [];
+const features = mode === "diagnostic" ? ["--features", "rollback_probe"] : [];
+await $`cargo build --locked --bin tm4-deathmatch-server --target-dir ${target} ${release} ${features}`.cwd(
+  join(root, "network"),
 );
 const directory = join(root, "build", mode, "server");
 const executable =

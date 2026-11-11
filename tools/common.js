@@ -9,17 +9,6 @@ export function options(names, args = process.argv.slice(2)) {
     options: Object.fromEntries(names.map((name) => [name, { type: "string" }])),
   }).values;
 }
-export async function run(command, { cwd = root, capture = false } = {}) {
-  const child = Bun.spawn(command, {
-    cwd,
-    stdout: capture ? "pipe" : "inherit",
-    stderr: "inherit",
-  });
-  const output = capture ? await new Response(child.stdout).text() : "";
-  const status = await child.exited;
-  if (status !== 0) throw new Error(`${command[0]} failed (${status})`);
-  return output;
-}
 export async function write(path, text) {
   await mkdir(dirname(path), { recursive: true });
   if ((await readFile(path, "utf8").catch(() => null)) !== text) await writeFile(path, text);

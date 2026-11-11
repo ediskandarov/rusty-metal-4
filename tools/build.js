@@ -2,9 +2,11 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+import { $ } from "bun";
+
 import { buildPlayer } from "../apps/player/build.ts";
 import { buildServer } from "../apps/server/build.ts";
-import { root, run } from "./common.js";
+import { root } from "./common.js";
 const { values } = parseArgs({
   options: {
     dev: { type: "boolean", default: false },
@@ -17,29 +19,20 @@ const diagnostics = values.diagnostic;
 const directory = join(root, "build", mode);
 const site = join(directory, "site");
 await mkdir(site, { recursive: true });
-await run(["bun", "run", "typecheck"]);
-await run([
-  "emcmake",
-  "cmake",
-  "-S",
-  root,
-  "-B",
-  directory,
+await $`bun run typecheck`.cwd(root);
+const definitions = [
   `-DCMAKE_BUILD_TYPE=${diagnostics ? "Debug" : "Release"}`,
   `-DTM4_WEB_TEST_HOOKS=${diagnostics ? "ON" : "OFF"}`,
-]);
-await run([
-  "cmake",
-  "--build",
-  directory,
-  "--parallel",
-  String(Math.min(8, navigator.hardwareConcurrency)),
-]);
+];
+await $`emcmake cmake -S ${root} -B ${directory} ${definitions}`.cwd(root);
+await $`cmake --build ${directory} --parallel ${Math.min(8, navigator.hardwareConcurrency)}`.cwd(
+  root,
+);
 await buildPlayer({ mode, site });
 console.log(`Built ${mode}: ${site}`);
 
-await run(["bun", "tools/network/build.ts", "--mode", mode]);
-await run(["bun", "tools/headless/build.ts", "--mode", mode]);
+await $`bun tools/network/build.ts --mode ${mode}`.cwd(root);
+await $`bun tools/headless/build.ts --mode ${mode}`.cwd(root);
 const authority = await Bun.file(
   join(directory, "authority/site/tm4_standalone.wasm"),
 ).arrayBuffer();
