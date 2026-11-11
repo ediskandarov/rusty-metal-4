@@ -1,8 +1,10 @@
 import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import { inspectDisc } from "@tm4/resources/host/disc";
+
 import { json, options, root } from "./common.js";
-import { inspectDisc, isolationHeaders, serveFile, staticFile } from "./server/files.js";
+import { isolationHeaders, serveFile, staticFile } from "./server/files.js";
 
 const args = options(["port", "site", "disc-dir"]);
 const local = (await Bun.file(join(root, ".local/dev.json")).exists())
@@ -15,6 +17,8 @@ const discDirectory = args["disc-dir"] ?? process.env.TM4_DISC_DIR ?? local.disc
 const disc = discDirectory
   ? await inspectDisc(resolve(root, discDirectory), await json(join(root, "config/disc.json")))
   : null;
+for (const file of disc?.files ?? [])
+  console.log(`${file.matchesReference ? "OK" : "Modified"} ${file.name}`);
 for (const warning of disc?.warnings ?? []) console.warn(warning);
 const port = Number(args.port ?? "8080");
 if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");

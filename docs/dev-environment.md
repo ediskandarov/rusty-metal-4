@@ -9,9 +9,14 @@ and `typecheck`) cover the workspaces together.
 - `apps/server` owns the native server's web launcher and private resource setup UI.
   It reuses the disc loader and bundles the existing player under `/play/`.
 - `@tm4/resources` provides disc/image loading, compatibility checks and car mod
-  formats/installers to both the player and host tools. It uses web-standard file,
-  fetch and crypto APIs without DOM or application dependencies. Reference data in
-  `config/` remains shared with the Rust host and resource tools.
+  formats/installers to both the player and host tools. Its `loader`, `compatibility`
+  and `mods` exports use web-standard APIs without DOM or application dependencies.
+  Bun-only `host/disc` provides lazy directory sources and streaming identity inspection;
+  `host/resources` generates strict stock references and prepares resource directories.
+  These functions take input paths, references and destinations explicitly, without
+  command-line parsing or logging. Reference generation requires full stock track hashes;
+  ordinary loading checks resource compatibility and permits supported modifications.
+  Reference data in `config/` remains shared with the Rust host and resource tools.
 - `@tm4/game-client` provides browser Wasm startup and the network client. The
   player supplies settings initialization and match status presentation through
   callbacks; packages do not reach into the player's UI.

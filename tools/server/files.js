@@ -1,4 +1,4 @@
-import { readdir, realpath } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 
 export const isolationHeaders = {
@@ -53,38 +53,4 @@ export async function staticFile(directory, pathname) {
   const path = relative(directory, file);
   if (!path || path === ".." || path.startsWith(`..${sep}`) || path.startsWith(sep)) return null;
   return Bun.file(file);
-}
-
-export async function inspectDisc(directory, reference) {
-  const root = await realpath(directory);
-  const files = [];
-  const warnings = [];
-  const names = (await readdir(root))
-    .filter((name) => /\.(cue|bin|ccd|img|sub)$/i.test(name))
-    .sort();
-  if (!names.some((name) => /\.(bin|img)$/i.test(name)))
-    throw new Error("No BIN or IMG files in the disc directory");
-  for (const name of names) {
-    const path = await realpath(resolve(root, name));
-    if (relative(root, path).startsWith(".."))
-      throw new Error(`Disc file escapes its directory: ${name}`);
-    const file = Bun.file(path);
-    const hash = new Bun.CryptoHasher("sha256");
-    for await (const chunk of file.stream()) hash.update(chunk);
-    const sha256 = hash.digest("hex");
-    const expected = reference.files.find(
-      (entry) => entry.name.toLowerCase() === name.toLowerCase(),
-    );
-    if (!expected || expected.sha256 !== sha256)
-      warnings.push(
-        `Modified or unrecognized disc file: ${name}. Resource compatibility will be checked in the browser.`,
-      );
-    files.push({ name, size: file.size, sha256, file });
-    console.log(`${expected?.sha256 === sha256 ? "OK" : "Modified"} ${name}`);
-  }
-  for (const expected of reference.files) {
-    if (!names.some((name) => name.toLowerCase() === expected.name.toLowerCase()))
-      warnings.push(`Missing disc file: ${expected.name}`);
-  }
-  return { files, warnings };
 }

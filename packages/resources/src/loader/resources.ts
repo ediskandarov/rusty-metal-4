@@ -3,7 +3,7 @@ import type { ResourceCandidate } from "../compatibility/index.ts";
 import { Disc } from "./disc.ts";
 import { checkRange } from "./sources.ts";
 import { discTracks, RAW_SECTOR } from "./tracks.ts";
-import type { DiscSource, DiscSources } from "./types.ts";
+import type { DiscReference, DiscSource, DiscSources } from "./types.ts";
 
 const maxResourceBytes = 128 * 1024 * 1024;
 
@@ -22,9 +22,13 @@ async function readRange(source: DiscSource, offset: number, size: number, signa
 }
 
 // Disc layout support is independent of resource compatibility.
-export async function discoverResources(sources: DiscSources, signal: AbortSignal) {
+export async function discoverResources(
+  sources: DiscSources,
+  signal: AbortSignal,
+  reference: DiscReference = discReference,
+) {
   const notices: string[] = [];
-  const { tracks } = await discTracks(sources, discReference, (notice) => notices.push(notice), {
+  const { tracks } = await discTracks(sources, reference, (notice) => notices.push(notice), {
     signal,
   });
   signal.throwIfAborted();

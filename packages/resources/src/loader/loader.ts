@@ -1,14 +1,29 @@
-import reference from "../../../../config/disc.json";
-import { checkResource, requireResources, resourceReference } from "../compatibility/index.ts";
+import defaultDiscReference from "../../../../config/disc.json";
+import {
+  checkResource,
+  requireResources,
+  resourceReference as defaultResourceReference,
+} from "../compatibility/index.ts";
+import type { ResourceReference } from "../compatibility/index.ts";
 import { Disc } from "./disc.ts";
 import { discTracks } from "./tracks.ts";
-import type { DiscAssets, DiscSources, LoaderProgress } from "./types.ts";
+import type { DiscAssets, DiscReference, DiscSources, LoaderProgress } from "./types.ts";
+export interface DiscLoaderOptions extends LoaderProgress {
+  discReference?: DiscReference;
+  resourceReference?: ResourceReference[];
+}
+
 export async function loadDisc(
   sources: DiscSources,
-  { progress = () => {}, warn = () => {} }: LoaderProgress = {},
+  {
+    progress = () => {},
+    warn = () => {},
+    discReference = defaultDiscReference,
+    resourceReference = defaultResourceReference,
+  }: DiscLoaderOptions = {},
 ): Promise<DiscAssets> {
   progress("Reading disc directory…");
-  const { tracks, leadout } = await discTracks(sources, reference, warn);
+  const { tracks, leadout } = await discTracks(sources, discReference, warn);
   const first = tracks[0];
   if (!first?.source) throw new Error("Required data track missing");
   const disc = new Disc(first.source, first.index);
