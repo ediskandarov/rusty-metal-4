@@ -23,7 +23,9 @@
     "test:simulation:record": "bun tools/headless/record-browser.cjs",
     "test:simulation": "bun tools/headless/test.ts",
     "build:player": "bun apps/player/build.ts",
-    "build:server": "bun apps/server/build.ts"
+    "build:server": "bun apps/server/build.ts",
+    "build:server:standalone": "bun tools/network/build-server.ts",
+    "test:server:standalone": "bun test tests/server/standalone.test.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "^1.0.11",

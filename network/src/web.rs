@@ -32,6 +32,7 @@ use tokio::{
 use tower::{ServiceExt, limit::ConcurrencyLimitLayer};
 use tower_http::services::ServeDir;
 
+use crate::assets::{Simulation, Site};
 use tm4_network::protocol::MAX_PLAYERS;
 #[derive(Debug, PartialEq)]
 pub enum SetupRequest {
@@ -84,8 +85,8 @@ impl Drop for PrivateDirectory {
 }
 
 pub struct Launcher {
-    pub site: PathBuf,
-    pub wasm: PathBuf,
+    pub site: Site,
+    pub wasm: Simulation,
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
     requests: Receiver<SetupRequest>,
@@ -111,20 +112,8 @@ impl Launcher {
                 && !secret.bytes().any(|c| c.is_ascii_control()),
             "Invalid TM4_ADMIN_SECRET"
         );
-        let binary = env::current_exe()?
-            .parent()
-            .context("Binary directory missing")?
-            .to_owned();
-        let root = env::var_os("TM4_SERVER_SITE_DIR").map(PathBuf::from).unwrap_or_else(|| binary.join("site")).canonicalize()
-            .context("Build the server site and set TM4_SERVER_SITE_DIR, or place site/ next to the binary")?;
-        ensure!(
-            root.join("index.html").is_file(),
-            "Server site index.html missing"
-        );
-        let site = root.join("play");
-        let wasm = env::var_os("TM4_SIMULATION_WASM")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| binary.join("tm4_standalone.wasm"));
+        let site = Site::load()?;
+        let wasm = Simulation::load()?;
         let reference: Reference =
             serde_json::from_str(include_str!("../../config/resources.json"))?;
         let resources: BTreeMap<_, _> = reference
@@ -144,7 +133,9 @@ impl Launcher {
             .canonicalize()?
             .join(format!("tm4-server-{:032x}", u128::from_le_bytes(random)));
         ensure!(
-            !private.starts_with(&root),
+            !site
+                .directory()
+                .is_some_and(|root| private.starts_with(root)),
             "Static root must not contain private temporary storage"
         );
         #[cfg(unix)]
@@ -169,7 +160,7 @@ impl Launcher {
         }));
         let (sender, requests) = mpsc::channel();
         let service = Arc::new(Service {
-            root,
+            site: site.clone(),
             private: private.0.clone(),
             secret,
             resources,
@@ -262,7 +253,7 @@ fn serve_http(
 }
 
 struct Service {
-    root: PathBuf,
+    site: Site,
     private: PathBuf,
     secret: String,
     resources: BTreeMap<String, Resource>,
@@ -498,21 +489,21 @@ impl Service {
     }
 }
 
-async fn contained_file(root: &Path, uri: &str) -> Option<PathBuf> {
+fn safe_site_path(uri: &str) -> bool {
     // Site paths are generated ASCII; reject escapes, traversal and alternate separators.
     if !uri.starts_with('/')
         || uri.contains(['%', '\\'])
         || uri.bytes().any(|byte| byte.is_ascii_control())
     {
-        return None;
+        return false;
     }
     let relative = Path::new(uri.trim_start_matches('/'));
-    if relative
+    relative
         .components()
-        .any(|c| !matches!(c, Component::Normal(_)))
-    {
-        return None;
-    }
+        .all(|c| matches!(c, Component::Normal(_)))
+}
+async fn contained_file(root: &Path, uri: &str) -> Option<PathBuf> {
+    let relative = Path::new(uri.trim_start_matches('/'));
     let mut path = tokio::fs::canonicalize(root.join(relative)).await.ok()?;
     if !path.starts_with(root) {
         return None;
@@ -531,18 +522,26 @@ async fn static_file(State(service): State<Arc<Service>>, mut request: Request) 
     if request.method() != Method::GET && request.method() != Method::HEAD {
         return StatusCode::METHOD_NOT_ALLOWED.into_response();
     }
-    let Some(path) = contained_file(&service.root, request.uri().path()).await else {
+    if !safe_site_path(request.uri().path()) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    let root = match &service.site {
+        Site::Directory(root) => root,
+        #[cfg(feature = "embedded-server")]
+        Site::Embedded => return crate::assets::response(&request),
+    };
+    let Some(path) = contained_file(root, request.uri().path()).await else {
         return StatusCode::NOT_FOUND.into_response();
     };
     // Serve the resolved path so an escaping symlink never reaches ServeDir.
-    let Some(relative) = path.strip_prefix(&service.root).ok().and_then(Path::to_str) else {
+    let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let Ok(uri) = format!("/{relative}").parse::<Uri>() else {
         return StatusCode::NOT_FOUND.into_response();
     };
     *request.uri_mut() = uri;
-    ServeDir::new(&service.root)
+    ServeDir::new(root)
         .oneshot(request)
         .await
         .unwrap()
@@ -621,7 +620,7 @@ mod tests {
             }));
             let (sender, requests) = mpsc::channel();
             let service = Arc::new(Service {
-                root,
+                site: Site::Directory(root),
                 private,
                 secret: "test-secret".into(),
                 resources: [(resource.id.clone(), resource)].into(),
@@ -944,7 +943,7 @@ mod tests {
         {
             std::os::unix::fs::symlink(
                 &fixture.service.private,
-                fixture.service.root.join("leaked"),
+                fixture.service.site.directory().unwrap().join("leaked"),
             )
             .unwrap();
             assert_eq!(
@@ -965,7 +964,8 @@ mod tests {
     async fn static_head_uses_metadata_and_get_supports_streamed_ranges() {
         let fixture = Fixture::new();
         // A sparse 1 GiB asset makes a regression to reading HEAD bodies conspicuous.
-        let file = fs::File::create(fixture.service.root.join("large.wasm")).unwrap();
+        let file =
+            fs::File::create(fixture.service.site.directory().unwrap().join("large.wasm")).unwrap();
         file.set_len(1 << 30).unwrap();
         let head = fixture.request("HEAD", "/large.wasm", Body::empty()).await;
         assert_eq!(head.status(), StatusCode::OK);
@@ -1007,8 +1007,8 @@ mod tests {
         )
         .unwrap();
         let launcher = Launcher {
-            site: fixture.service.root.clone(),
-            wasm: PathBuf::new(),
+            site: fixture.service.site.clone(),
+            wasm: Simulation::File(PathBuf::new()),
             stopped,
             status,
             requests: fixture.requests,

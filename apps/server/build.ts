@@ -41,6 +41,13 @@ export async function buildServer(mode: PlayerMode) {
   if (!result.success) throw new AggregateError(result.logs, "Server launcher bundle failed");
   await cp(join(import.meta.dir, "index.html"), join(site, "index.html"));
   await cp(join(import.meta.dir, "style.css"), join(site, "style.css"));
+  await mkdir(join(site, "licenses"), { recursive: true });
+  for (const [name, path] of [
+    ["rewired", "LICENSE"],
+    ["psyz", "external/psyz/LICENSE"],
+    ["sdl", "external/psyz/external/SDL/LICENSE.txt"],
+  ] as const)
+    await cp(join(root, path), join(site, "licenses", `${name}.txt`));
   return output;
 }
 

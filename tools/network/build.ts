@@ -59,4 +59,5 @@ await run([
   join(root, "build", mode, "site/network"),
   "--target",
   "web",
+  ...(mode === "release" ? ["--remove-name-section"] : []),
 ]);

@@ -42,16 +42,41 @@ Use `bun run build:server --mode release` (or `diagnostic`) with the matching ru
 build first. The same mode also selects the binary for `bun run test:server` through
 `TM4_SERVER_MODE`.
 
-The production process is the Rust binary alone: invoke
-`tm4-deathmatch-server --serve 2` with the generated server `site/` directory and
-`tm4_standalone.wasm` next to it. Alternatively set `TM4_SERVER_SITE_DIR` and
-`TM4_SIMULATION_WASM`. `TM4_HTTP_LISTEN` defaults to `127.0.0.1:8120`;
+For a single-file server release, first run `bun run build`, then
+`bun run build:server:standalone`. The latter embeds the generated server site and
+WASI simulation in an optimized Rust binary with symbol tables removed, using
+`include_dir!` and `include_bytes!`. It produces a platform archive under `build/server-release/`;
+`--mode dev` uses an existing dev bundle for local packaging tests. Bun, Rust,
+Wasm runtimes and adjacent asset files are not required on the destination machine.
+The archive contains the executable and license; no disc resources are included.
+
+Set `TM4_ADMIN_SECRET` as above and run `tm4-rewired-server` (`.exe` on Windows).
+The embedded build opens server mode by default; `--serve 4` sets an initial player
+count. `TM4_SERVER_SITE_DIR` and `TM4_SIMULATION_WASM` can override the embedded
+files during development. The ordinary Cargo build still loads `site/` and
+`tm4_standalone.wasm` beside the executable or from these variables.
+`TM4_HTTP_LISTEN` defaults to `127.0.0.1:8120`;
 `TM4_MATCH_LISTEN` defaults to `127.0.0.1:8122`. Both require loopback addresses.
-Axum/Tokio and tower-http run inside this native process: static files stream from
-disk and HEAD reads only metadata. Upload validation and publication run on a
-blocking worker; explicit start commands cross to the existing native simulation
-thread. HTTP and Lightyear remain on separate ports, with the player following
-the endpoint advertised by the server.
+Axum serves embedded static bytes directly, including MIME types, HEAD and byte
+ranges. External static files retain streaming and metadata-only HEAD requests.
+Wasmtime reads the embedded simulation directly; no temporary asset extraction is
+needed. Upload validation runs on a blocking worker; setup commands cross to the
+native simulation thread. HTTP and Lightyear remain on separate ports.
+
+Only `v*` tags trigger server archive builds, GitHub Releases and Pages publication. CI builds the shared
+Web/Wasm bundle once, then builds and tests Linux x64, Windows x64 and macOS ARM64
+executables against that exact bundle. After checks pass, it publishes all three
+archives and `SHA256SUMS` in a GitHub Release; tags containing `-` produce
+prereleases. Pushes to main run the usual checks and web build without publishing
+Pages, building server executables or uploading server artifacts. The server
+serves its bundled player, so updating Pages does not change an older server's client.
+
+`TM4_SERVER_EXECUTABLE=<path> bun run test:server:standalone` copies the executable
+to an empty temporary directory and tests its built-in site without a checkout,
+external site or game disc. Rust tests with `--features embedded-server` require
+`TM4_SERVER_BUNDLE` to point at the generated bundle; they also check both Wasm
+hashes and validate the embedded simulation with Wasmtime.
+
 The startup secret is supplied through the environment, never embedded in the
 site, URL or logs. Uploaded resources live in an owner-only temporary directory
 outside the static tree and are removed on normal exit, SIGINT or SIGTERM.

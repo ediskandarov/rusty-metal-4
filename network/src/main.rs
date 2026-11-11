@@ -1,3 +1,4 @@
+mod assets;
 mod journal;
 mod resume;
 mod simulator;
@@ -1150,7 +1151,14 @@ fn accept_native_inputs(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
-    let mut first = args.next().unwrap_or_else(|| "2".into());
+    let mut first = args.next().unwrap_or_else(|| {
+        if cfg!(feature = "embedded-server") {
+            "--serve"
+        } else {
+            "2"
+        }
+        .into()
+    });
     let serve = first == "--serve";
     if serve {
         first = args.next().unwrap_or_else(|| "2".into());
@@ -1184,10 +1192,11 @@ fn main() -> Result<(), Box<dyn Error>> {
             let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
                 return Ok(());
             };
-            match simulator::Simulator::from_paths(
+            match simulator::Simulator::from_assets(
                 &launcher.wasm,
                 launcher.resource_directory(),
                 &launcher.site,
+                "play/",
             ) {
                 Ok(simulator) => {
                     launcher.ready(simulator.catalog.worlds.clone());

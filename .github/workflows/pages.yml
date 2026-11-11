@@ -1,8 +1,9 @@
-name: CI and Pages
+name: CI, Pages and Server Releases
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
   workflow_dispatch:
 
@@ -76,22 +77,30 @@ jobs:
         run: |
           source .emsdk/emsdk_env.sh
           bun run build
+      - name: Upload shared server bundle
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-bundle
+          path: build/release/server
+          if-no-files-found: error
+          retention-days: 7
       - name: Install browser
         run: bun x playwright install --with-deps chromium
       - name: Check static hosting without disc files
         run: bun run test:pages
       - name: Configure Pages
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Upload release site
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
         with:
           path: build/release/site
 
   deploy:
     needs: build
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -104,3 +113,82 @@ jobs:
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
+
+  server:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux-x64
+            executable: tm4-rewired-server
+          - runner: windows-2022
+            platform: windows-x64
+            executable: tm4-rewired-server.exe
+          - runner: macos-15
+            platform: macos-arm64
+            executable: tm4-rewired-server
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.4"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: server-bundle
+          path: build/release/server
+      - name: Build standalone server and archive
+        run: bun run build:server:standalone
+      - name: Test embedded assets and server
+        working-directory: network
+        env:
+          TM4_SERVER_BUNDLE: ${{ github.workspace }}/build/release/server
+        run: cargo test --locked --release --lib --bin tm4-deathmatch-server --features embedded-server --target-dir ../build/network-native
+      - name: Run copied standalone binary
+        env:
+          TM4_SERVER_EXECUTABLE: build/server-release/${{ matrix.platform }}/${{ matrix.executable }}
+        run: bun run test:server:standalone
+      - name: Upload server release archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-release-${{ matrix.platform }}
+          path: |
+            build/server-release/*.tar.gz
+            build/server-release/*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: server
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: server-release-*
+          merge-multiple: true
+          path: build/release-assets
+      - name: Publish versioned server archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          cd build/release-assets
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+          prerelease=()
+          if [[ "$RELEASE_TAG" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$RELEASE_TAG" --verify-tag --generate-notes "${prerelease[@]}" *.tar.gz *.zip SHA256SUMS

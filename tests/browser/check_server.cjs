@@ -15,7 +15,8 @@ const { chromium } = require("playwright");
   const temporary = mkdtempSync(resolve("build/server-smoke-private-"));
   const profile = mode === "release" ? "release" : "debug";
   const executable = resolve(
-    `build/network-native/${profile}/tm4-deathmatch-server${process.platform === "win32" ? ".exe" : ""}`,
+    process.env.TM4_SERVER_EXECUTABLE ??
+      `build/network-native/${profile}/tm4-deathmatch-server${process.platform === "win32" ? ".exe" : ""}`,
   );
   let logs = "";
   const server = Bun.spawn([executable, "--serve", "4"], {
@@ -24,8 +25,12 @@ const { chromium } = require("playwright");
       TM4_ADMIN_SECRET: secret,
       TM4_HTTP_LISTEN: `127.0.0.1:${httpPort}`,
       TM4_MATCH_LISTEN: `127.0.0.1:${matchPort}`,
-      TM4_SERVER_SITE_DIR: resolve(directory, "site"),
-      TM4_SIMULATION_WASM: resolve(directory, "tm4_standalone.wasm"),
+      TM4_SERVER_SITE_DIR:
+        process.env.TM4_SERVER_EMBEDDED === "1" ? undefined : resolve(directory, "site"),
+      TM4_SIMULATION_WASM:
+        process.env.TM4_SERVER_EMBEDDED === "1"
+          ? undefined
+          : resolve(directory, "tm4_standalone.wasm"),
       TM4_JOURNAL_DIR: resolve("build/server-smoke-journal"),
       TMPDIR: temporary,
     },

@@ -141,16 +141,32 @@ impl Simulator {
     }
 
     pub fn from_paths(wasm: &Path, resources: &Path, site: &Path) -> Result<Self> {
-        let build: Build = serde_json::from_slice(&fs::read(site.join("simulation-build.json"))?)?;
-        let bytes = fs::read(wasm)?;
+        Self::from_assets(
+            &crate::assets::Simulation::File(wasm.into()),
+            resources,
+            &crate::assets::Site::Directory(site.into()),
+            "",
+        )
+    }
+
+    pub fn from_assets(
+        wasm: &crate::assets::Simulation,
+        resources: &Path,
+        site: &crate::assets::Site,
+        prefix: &str,
+    ) -> Result<Self> {
+        let build: Build =
+            serde_json::from_slice(&site.read(&format!("{prefix}simulation-build.json"))?)?;
+        let bytes = wasm.read()?;
         ensure!(
             hash(&bytes) == build.authority_sha256,
             "Standalone simulation does not match the browser build manifest"
         );
-        let mut browser_build = fs::read(site.join("tm4_web.wasm"))?;
-        browser_build.extend(fs::read(site.join("network/tm4_network_bg.wasm"))?);
+        let mut browser_hash = Sha256::new();
+        browser_hash.update(site.read(&format!("{prefix}tm4_web.wasm"))?);
+        browser_hash.update(site.read(&format!("{prefix}network/tm4_network_bg.wasm"))?);
         ensure!(
-            hash(browser_build) == build.sha256,
+            format!("{:x}", browser_hash.finalize()) == build.sha256,
             "Browser simulation build manifest is stale"
         );
         let compatibility = Compatibility {
