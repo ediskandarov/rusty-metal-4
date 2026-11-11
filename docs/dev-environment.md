@@ -72,8 +72,10 @@ Only `v*` tags trigger server archive builds, GitHub Releases and Pages publicat
 Web/Wasm bundle once, then builds and tests Linux x64, Windows x64 and macOS ARM64
 executables against that exact bundle. After checks pass, it publishes all three
 archives and `SHA256SUMS` in a GitHub Release; tags containing `-` produce
-prereleases. Pushes to main run the usual checks and web build without publishing
-Pages, building server executables or uploading server artifacts. The server
+prereleases. Pushes to main run formatting, lint, typechecks and unit tests only.
+Same-repository pull requests and manual runs on branches also build the Web/Wasm
+bundle and run the Pages smoke test, without publishing or building server executables.
+Fork pull requests run only the checks, without access to private game sources. The server
 serves its bundled player, so updating Pages does not change an older server's client.
 
 `TM4_SERVER_EXECUTABLE=<path> bun run test:server:standalone` copies the executable
