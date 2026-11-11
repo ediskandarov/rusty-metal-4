@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = ["server"]
-server = ["lightyear/server", "dep:wasmtime", "dep:wasmtime-wasi", "dep:anyhow", "dep:sha2", "dep:base64"]
+server = ["lightyear/server", "dep:wasmtime", "dep:wasmtime-wasi", "dep:anyhow", "dep:sha2", "dep:base64", "dep:ctrlc", "dep:axum", "dep:tokio", "dep:tower", "dep:tower-http"]
 client = ["lightyear/client"]
 rollback_probe = []
 
@@ -40,6 +40,11 @@ serde_json = "1"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 getrandom = "0.4"
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "fs", "sync", "macros"], optional = true }
+tower = { version = "0.5", features = ["util", "limit"], optional = true }
+tower-http = { version = "0.7", features = ["fs"], optional = true }
+ctrlc = { version = "3.5", features = ["termination"], optional = true }
 anyhow = { version = "1", optional = true }
 sha2 = { version = "0.10", optional = true }
 base64 = { version = "0.22", optional = true }
@@ -48,3 +53,7 @@ wasmtime-wasi = { version = "=47.0.1", default-features = false, features = ["p1
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 console_error_panic_hook = "0.1"
+
+[target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+futures-util = "0.3"
+tokio = { version = "1", features = ["test-util"] }

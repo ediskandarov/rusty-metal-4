@@ -1,6 +1,7 @@
 mod journal;
 mod resume;
 mod simulator;
+mod web;
 
 use std::{
     collections::HashSet,
@@ -1062,7 +1063,11 @@ fn accept_native_inputs(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args().skip(1);
-    let first = args.next().unwrap_or_else(|| "2".into());
+    let mut first = args.next().unwrap_or_else(|| "2".into());
+    let serve = first == "--serve";
+    if serve {
+        first = args.next().unwrap_or_else(|| "2".into());
+    }
     if first == "--inspect-journal" {
         let path = args.next().ok_or("Expected the journal path")?;
         println!(
@@ -1075,9 +1080,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !(2..=MAX_PLAYERS).contains(&count) {
         return Err("Expected a player count from 2 to 8".into());
     }
-    let simulator = simulator::Simulator::from_environment()?;
-    let compatibility = simulator.compatibility.clone();
-    let catalog = simulator.catalog.clone();
     let addr: SocketAddr = env::var("TM4_MATCH_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8122".into())
         .parse()?;
@@ -1085,6 +1087,50 @@ fn main() -> Result<(), Box<dyn Error>> {
     if !addr.ip().is_loopback() {
         return Err("This diagnostic server requires a loopback address; public admission/TLS is not implemented".into());
     }
+    let launcher = if serve {
+        Some(web::Launcher::start(count, addr)?)
+    } else {
+        None
+    };
+    let simulator = if let Some(launcher) = &launcher {
+        loop {
+            let Some(resources) = launcher.wait_for_resources() else {
+                return Ok(());
+            };
+            match simulator::Simulator::from_paths(&launcher.wasm, &resources, &launcher.site) {
+                Ok(simulator) => break simulator,
+                Err(error) => {
+                    launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
+                }
+            }
+        }
+    } else {
+        simulator::Simulator::from_environment()?
+    };
+    if let Err(error) = run_match(count, addr, simulator, launcher.as_ref()) {
+        if let Some(launcher) = &launcher {
+            launcher.phase(
+                "closed",
+                &format!("Match server failed: {error}. Restart the server to try again."),
+            );
+            while !launcher.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                thread::sleep(Duration::from_millis(100));
+            }
+        } else {
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+
+fn run_match(
+    count: usize,
+    addr: SocketAddr,
+    simulator: simulator::Simulator,
+    launcher: Option<&web::Launcher>,
+) -> Result<(), Box<dyn Error>> {
+    let compatibility = simulator.compatibility.clone();
+    let catalog = simulator.catalog.clone();
     let mut app = App::new();
     app.add_plugins((
         bevy_app::TaskPoolPlugin::default(),
@@ -1180,10 +1226,54 @@ fn main() -> Result<(), Box<dyn Error>> {
         thread::sleep(Duration::from_millis(1));
     }
     println!("Lightyear listening on ws://{addr} for {count} players");
+    if let Some(launcher) = launcher {
+        launcher.phase(
+            "lobby",
+            "Match ready. Players can open the player and select their own local disc.",
+        );
+    }
+    let mut next_status = Instant::now();
     loop {
+        if launcher
+            .is_some_and(|launcher| launcher.stopped.load(std::sync::atomic::Ordering::Relaxed))
+        {
+            break;
+        }
         app.update();
+        if Instant::now() >= next_status {
+            next_status = Instant::now() + Duration::from_millis(250);
+            if let Some(launcher) = launcher {
+                let game = app.world().resource::<Match>();
+                let mut status = launcher.status.lock().unwrap();
+                status.connected = game
+                    .players
+                    .iter()
+                    .filter(|player| player.entity.is_some())
+                    .count();
+                status.tick = game.tick;
+                if game.ended {
+                    if game
+                        .last_state
+                        .as_ref()
+                        .is_some_and(|state| state.next_mode != 0)
+                    {
+                        status.phase = "results".into();
+                        status.message =
+                            "Match finished. Restart the server to prepare the next match.".into();
+                    } else {
+                        status.phase = "closed".into();
+                        status.message =
+                            "Match stopped. Restart the server to prepare a new match.".into();
+                    }
+                } else if game.started {
+                    status.phase = "match".into();
+                    status.message = "Roster locked. Existing participants can reconnect.".into();
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(1));
     }
+    Ok(())
 }
 
 #[cfg(test)]

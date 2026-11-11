@@ -10,17 +10,20 @@
     "dev": "bun tools/serve.js",
     "dev:diagnostic": "bun tools/serve.js --site build/diagnostic/site",
     "match": "bun tools/network/run.ts",
+    "server": "bun tools/network/server.ts",
     "test": "bun test tests/unit",
     "fmt": "bun fmt --no-script tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml",
     "fmt:check": "bun fmt --no-script --check tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml",
     "lint": "bun lint --no-script tools apps packages tests",
     "typecheck": "tsc --noEmit && bun run --filter \"@tm4/*\" typecheck",
     "test:pages": "bun tests/browser/check_pages.cjs",
+    "test:server": "bun tests/browser/check_server.cjs",
     "build:mod": "bun tools/mods/build.ts",
     "build:simulation": "bun tools/headless/build.ts",
     "test:simulation:record": "bun tools/headless/record-browser.cjs",
     "test:simulation": "bun tools/headless/test.ts",
-    "build:player": "bun apps/player/build.ts"
+    "build:player": "bun apps/player/build.ts",
+    "build:server": "bun apps/server/build.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "^1.0.11",

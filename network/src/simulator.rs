@@ -137,8 +137,12 @@ impl Simulator {
         let site = PathBuf::from(
             env::var("TM4_SITE_DIR").context("Set TM4_SITE_DIR to the matching browser site")?,
         );
+        Self::from_paths(&wasm, &resources, &site)
+    }
+
+    pub fn from_paths(wasm: &Path, resources: &Path, site: &Path) -> Result<Self> {
         let build: Build = serde_json::from_slice(&fs::read(site.join("simulation-build.json"))?)?;
-        let bytes = fs::read(&wasm)?;
+        let bytes = fs::read(wasm)?;
         ensure!(
             hash(&bytes) == build.authority_sha256,
             "Standalone simulation does not match the browser build manifest"
@@ -152,9 +156,9 @@ impl Simulator {
         let compatibility = Compatibility {
             protocol: 8,
             build: build.sha256,
-            content: resource_content(&resources)?,
+            content: resource_content(resources)?,
         };
-        let mut simulator = Self::new(&bytes, &resources, compatibility)?;
+        let mut simulator = Self::new(&bytes, resources, compatibility)?;
         #[cfg(feature = "rollback_probe")]
         {
             simulator.fixture_file = env::var_os("TM4_TEST_ACTIONS").map(PathBuf::from);

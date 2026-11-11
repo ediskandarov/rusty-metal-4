@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 
 import { buildPlayer } from "../apps/player/build.ts";
+import { buildServer } from "../apps/server/build.ts";
 import { root, run } from "./common.js";
 const { values } = parseArgs({
   options: {
@@ -53,3 +54,4 @@ await Bun.write(
       .digest("hex"),
   }),
 );
+await buildServer(mode);

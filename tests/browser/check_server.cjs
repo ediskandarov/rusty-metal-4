@@ -1,0 +1,206 @@
+const assert = require("node:assert/strict");
+const { mkdtempSync, readdirSync, rmdirSync } = require("node:fs");
+const { resolve } = require("node:path");
+const { chromium } = require("playwright");
+
+// Build the server bundle/native binary first. A disc is optional for the setup smoke;
+// TM4_DISC_DIR also exercises administrator provisioning and two local players.
+(async () => {
+  const mode = process.env.TM4_SERVER_MODE ?? "dev";
+  const directory = resolve(`build/${mode}/server`);
+  const httpPort = Number(process.env.TM4_SERVER_TEST_PORT ?? 18290);
+  const matchPort = httpPort + 1;
+  const url = `http://127.0.0.1:${httpPort}/`;
+  const secret = crypto.randomUUID();
+  const temporary = mkdtempSync(resolve("build/server-smoke-private-"));
+  const profile = mode === "release" ? "release" : "debug";
+  const executable = resolve(
+    `build/network-native/${profile}/tm4-deathmatch-server${process.platform === "win32" ? ".exe" : ""}`,
+  );
+  let logs = "";
+  const server = Bun.spawn([executable, "--serve", "2"], {
+    env: {
+      ...process.env,
+      TM4_ADMIN_SECRET: secret,
+      TM4_HTTP_LISTEN: `127.0.0.1:${httpPort}`,
+      TM4_MATCH_LISTEN: `127.0.0.1:${matchPort}`,
+      TM4_SERVER_SITE_DIR: resolve(directory, "site"),
+      TM4_SIMULATION_WASM: resolve(directory, "tm4_standalone.wasm"),
+      TM4_JOURNAL_DIR: resolve("build/server-smoke-journal"),
+      TMPDIR: temporary,
+    },
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const capture = async (stream) => {
+    for await (const bytes of stream) logs += new TextDecoder().decode(bytes);
+  };
+  const output = Promise.all([capture(server.stdout), capture(server.stderr)]);
+  let browser;
+  const request = (path, init = {}) => fetch(new URL(path, url), init);
+  const admin = (method, body) => ({
+    method,
+    headers: { Authorization: `Bearer ${secret}` },
+    body,
+  });
+  try {
+    for (let retry = 0; ; retry++) {
+      try {
+        if ((await request("/api/status")).ok) break;
+      } catch {
+        /* Starting. */
+      }
+      if (retry >= 100 || server.exitCode !== null)
+        throw new Error(`Server did not start: ${logs}`);
+      await Bun.sleep(50);
+    }
+    const response = await request("/");
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("Cross-Origin-Opener-Policy"), "same-origin");
+    assert.equal(response.headers.get("Cross-Origin-Embedder-Policy"), "require-corp");
+    const head = await request("/play/tm4_web.wasm", { method: "HEAD" });
+    assert.equal(head.headers.get("Content-Type"), "application/wasm");
+    assert.equal(
+      Number(head.headers.get("Content-Length")),
+      Bun.file(resolve(directory, "site/play/tm4_web.wasm")).size,
+    );
+    assert.equal((await head.arrayBuffer()).byteLength, 0);
+    assert.equal((await (await request("/api/status")).json()).phase, "setup");
+    assert.equal((await request("/api/start", { method: "POST" })).status, 401);
+    assert.equal((await request("/api/start", admin("POST"))).status, 400);
+    assert.equal(
+      (await request("/api/resources/DATA/MAIN.MR", admin("PUT", new Uint8Array([0])))).status,
+      400,
+    );
+    const state = await (await request("/api/status")).json();
+    assert.equal(state.phase, "setup");
+    assert.equal(state.uploaded, 0);
+    for (const path of ["/DATA/MAIN.MR", "/api/resources/DATA/MAIN.MR", "/%2e%2e%2fCargo.toml"])
+      assert.notEqual((await request(path)).status, 200);
+
+    browser = await chromium.launch({
+      executablePath:
+        process.env.TM4_CHROME ||
+        (process.platform === "darwin"
+          ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+          : undefined),
+      headless: true,
+      args: ["--enable-unsafe-swiftshader", "--mute-audio"],
+    });
+    const page = await browser.newPage();
+    const errors = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(url);
+    await page.locator("#status").filter({ hasText: "Administrator" }).waitFor();
+    assert(await page.locator("#setup").evaluate((node) => node.open));
+    assert(await page.locator("#join").isHidden());
+    assert(await page.evaluate(() => crossOriginIsolated));
+    if (process.env.TM4_DISC_DIR) {
+      await page.locator("#secret").fill(secret);
+      await page.locator("#disc").setInputFiles(process.env.TM4_DISC_DIR);
+      await page.locator("#prepare").click();
+      await page.waitForFunction(
+        () =>
+          !document.getElementById("join").hidden || !document.getElementById("prepare").disabled,
+        null,
+        { timeout: 120000 },
+      );
+      assert(await page.locator("#join").isVisible(), await page.locator("#progress").innerText());
+      assert.equal((await (await request("/api/status")).json()).phase, "lobby");
+      assert.equal(
+        (await request("/api/resources/DATA/MAIN.MR", admin("PUT", new Uint8Array([0])))).status,
+        409,
+      );
+      assert.equal((await request("/DATA/MAIN.MR")).status, 404);
+      const join = await page.locator("#join").getAttribute("href");
+      const clients = await Promise.all([browser.newPage(), browser.newPage()]);
+      const uploads = [];
+      for (const client of clients) {
+        client.on("pageerror", (error) => errors.push(error.message));
+        client.on("requestfailed", (request) =>
+          console.error("player request:", request.url(), request.failure()),
+        );
+        client.on("request", (request) => {
+          if (request.method() === "PUT" || request.method() === "POST")
+            uploads.push(request.url());
+        });
+      }
+      await Promise.all(
+        clients.map(async (client) => {
+          const navigation = await client.goto(join);
+          assert.equal(
+            navigation.status(),
+            200,
+            `Player navigation: ${join} ${await navigation.text()}`,
+          );
+          await client.waitForFunction(
+            () => !document.getElementById("disc-folder").disabled,
+            null,
+            { timeout: 10000 },
+          );
+          await client.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
+          await client.waitForFunction(
+            () =>
+              globalThis.tm4Port?.netConfirmedTick > 30 ||
+              document.getElementById("status")?.dataset.matchState === "error" ||
+              document.getElementById("startup-progress")?.textContent.includes("Reload the page"),
+            null,
+            {
+              timeout: 120000,
+            },
+          );
+          assert(
+            await client.evaluate(() => globalThis.tm4Port?.netConfirmedTick > 30),
+            (await client.locator("#status").innerText()) +
+              " " +
+              (await client.locator("#startup-progress").innerText()),
+          );
+        }),
+      );
+      assert.deepEqual(uploads, [], "Players must not upload their disc resources");
+      assert.equal((await (await request("/api/status")).json()).phase, "match");
+      console.log(
+        "PASS: browser administrator provisioning and two players reached native match ticks",
+      );
+    } else {
+      const player = await browser.newPage();
+      await player.goto(new URL("play/", url).href);
+      await player.waitForFunction(() => !document.getElementById("disc-folder").disabled);
+      assert(await player.locator("#startup").isVisible());
+    }
+    assert.deepEqual(errors, []);
+    assert(!logs.includes(secret));
+    console.log(
+      "PASS: native setup before resources, isolated static/wasm serving, authentication, invalid upload safety, and browser setup",
+    );
+  } catch (error) {
+    console.error(logs);
+    for (const context of browser?.contexts() ?? []) {
+      for (const page of context.pages()) {
+        console.error(
+          await page.evaluate(() => ({
+            url: location.href,
+            title: document.title,
+            progress: document.getElementById("startup-progress")?.textContent,
+            status: document.getElementById("status")?.textContent,
+          })),
+        );
+      }
+    }
+    throw error;
+  } finally {
+    await browser?.close();
+    server.kill("SIGTERM");
+    await server.exited;
+    await output;
+    assert.deepEqual(
+      readdirSync(temporary),
+      [],
+      "Private uploaded resources must be removed on shutdown",
+    );
+    rmdirSync(temporary);
+  }
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});

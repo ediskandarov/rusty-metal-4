@@ -23,6 +23,12 @@
         "@tm4/resources": "workspace:*",
       },
     },
+    "apps/server": {
+      "name": "@tm4/server",
+      "dependencies": {
+        "@tm4/resources": "workspace:*",
+      },
+    },
     "packages/game-client": {
       "name": "@tm4/game-client",
       "dependencies": {
@@ -39,6 +45,8 @@
     "@tm4/player": ["@tm4/player@workspace:apps/player"],
 
     "@tm4/resources": ["@tm4/resources@workspace:packages/resources"],
+
+    "@tm4/server": ["@tm4/server@workspace:apps/server"],
 
     "@tsconfig/bun": ["@tsconfig/bun@1.0.11", "", {}, "sha512-DQA3HOKFQ+/yPTUa73k5QGcuEM1ExtL6uWQMR0QrfOTitm0oLHqHd1tI74WtEtMqlIu+tvSMELJ6p5uNxVE7lw=="],
 

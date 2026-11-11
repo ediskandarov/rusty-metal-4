@@ -1,0 +1,83 @@
+:root {
+  color-scheme: dark;
+  font:
+    17px/1.5 system-ui,
+    sans-serif;
+  background: #12151a;
+  color: #e6ebf3;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 760px;
+  padding: 48px 24px;
+  margin: auto;
+}
+h1 {
+  font-size: clamp(2rem, 6vw, 3rem);
+  margin: 0 0 28px;
+  line-height: 1.1;
+}
+h2 {
+  margin-top: 0;
+  font-size: 1.3rem;
+}
+.eyebrow {
+  color: #edb36e;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+section,
+details {
+  background: #1d232c;
+  border: 1px solid #354151;
+  border-radius: 12px;
+  padding: 24px;
+  margin: 20px 0;
+}
+summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+p {
+  color: #c0cad7;
+}
+label {
+  display: block;
+  margin: 20px 0;
+}
+input {
+  display: block;
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+}
+input[type="password"] {
+  width: 100%;
+}
+button,
+#join {
+  background: #e7a759;
+  color: #15171b;
+  font: inherit;
+  font-weight: 650;
+  padding: 10px 18px;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  text-decoration: none;
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+#progress {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+[hidden] {
+  display: none !important;
+}
