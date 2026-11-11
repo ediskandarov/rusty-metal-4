@@ -117,6 +117,12 @@ export function initializeRendering(module: GameModule) {
   );
   const smoothing = smoothingSettings(module, changed);
   const settings = [
+    selectSetting(
+      "texture-filtering",
+      module._WebSetTextureFiltering,
+      { ultra: 1, ps1: 0 },
+      changed,
+    ),
     selectSetting("render-antialiasing", module._WebSetAntialiasing, { ultra: 2, ps1: 0 }, changed),
     selectSetting("render-scale", module._WebSetRenderScale, { ultra: 8, ps1: 1 }, changed),
     selectSetting("car-lod-distance", module._WebSetCarLodDistance, { ultra: 8, ps1: 1 }, changed),

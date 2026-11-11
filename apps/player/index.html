@@ -95,6 +95,21 @@
             their original detail.
           </p>
           <label
+            >Texture filtering
+            <select id="texture-filtering">
+              <option value="0">Nearest (PS1)</option>
+              <option value="1" selected>Bilinear</option>
+              <option value="2">Manual anisotropic 4×</option>
+              <option value="3">Mipmaps (experimental)</option>
+              <option value="4">Mipmaps + anisotropic 4× (experimental)</option>
+            </select>
+          </label>
+          <p>
+            Softens texture pixels. Mipmaps reduce distant shimmer; hardware anisotropic filtering
+            keeps tilted surfaces sharper. If unsupported, anisotropic mode uses mipmaps alone.
+            Transparent cutouts retain their PS1 coverage.
+          </p>
+          <label
             >Antialiasing
             <select id="render-antialiasing">
               <option value="0">Off</option>

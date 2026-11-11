@@ -88,6 +88,9 @@ set_property(TARGET psyz PROPERTY SOURCES "${TM4_PSYZ_SOURCES}")
 target_sources(psyz PRIVATE "${TM4_PSYZ_RUNTIME}/platform/sdl3_gl.c"
     "${TM4_PSYZ_RUNTIME}/psyz/libgpu.c"
     "${TM4_PSYZ_RUNTIME}/psyz/libapi.c" "${TM4_PSYZ_RUNTIME}/psyz/libgte.c")
+if(NOT TM4_STANDALONE)
+    target_sources(psyz PRIVATE "${TM4_ROOT}/port/psyz/texture_mipmaps.c")
+endif()
 target_include_directories(psyz PRIVATE "${TM4_ROOT}/port/psyz")
 set(TM4_SDK_ALIASES "${CMAKE_CURRENT_BINARY_DIR}/sdk-includes")
 file(GLOB TM4_PSYZ_HEADERS CONFIGURE_DEPENDS "${TM4_ROOT}/external/psyz/psyz/include/*.h")

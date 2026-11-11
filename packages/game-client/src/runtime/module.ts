@@ -4,6 +4,7 @@ import type { NetworkEngine } from "../network/protocol.ts";
 
 export interface GameExports extends NetworkEngine {
   _WebSetAntialiasing(this: void, value: number): void;
+  _WebSetTextureFiltering(this: void, value: number): void;
   _WebSetRenderScale(this: void, value: number): void;
   _WebSetCarLodDistance(this: void, value: number): void;
   _WebSetDrawDistance(this: void, value: number): void;

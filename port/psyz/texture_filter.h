@@ -1,0 +1,14 @@
+#ifndef TM4_PSYZ_TEXTURE_FILTER_H
+#define TM4_PSYZ_TEXTURE_FILTER_H
+
+enum PsyzTextureFilter {
+    PSYZ_TEXTURE_NEAREST,
+    PSYZ_TEXTURE_BILINEAR,
+    PSYZ_TEXTURE_ANISOTROPIC_4X,
+    PSYZ_TEXTURE_MIPMAPS,
+    PSYZ_TEXTURE_MIPMAP_ANISOTROPIC_4X,
+};
+
+void Psyz_SetTextureFiltering(int mode);
+
+#endif

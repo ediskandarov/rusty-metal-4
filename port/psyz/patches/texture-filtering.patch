@@ -1,0 +1,321 @@
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -3,6 +3,8 @@
+ #include <psyz/overlay_sdl3_gl.h>
+ #include <assert.h>
+ #include "present_filter.h"
++#include "texture_filter.h"
++#include "texture_mipmaps.h"
+ #include <math.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+@@ -139,10 +141,17 @@
+     "uniform sampler2D texVram;\n"
+     "uniform sampler2D maskSnapshot;\n"
+     "uniform bool maskPass, forceMask, checkMask;\n"
++    "uniform int textureFilter;\n"
++    "uniform highp sampler2DArray decodedTexture;\n"
++    "uniform bool useMipmaps;\n"
++    "uniform vec4 textureRegion;\n"
+     "\n"
+-    "uvec2 resolveTexel() {\n"
+-    "    vec2 uv = rawUV + 1.0 / 512.0;\n"
+-    "    if (weightedUV.z > 0.0) uv = weightedUV.xy / weightedUV.z + 1.0 / 512.0;\n"
++    "vec2 textureUV() {\n"
++    "    vec2 uv = rawUV;\n"
++    "    if (weightedUV.z > 0.0) uv = weightedUV.xy / weightedUV.z;\n"
++    "    return uv + 1.0 / 512.0;\n"
++    "}\n"
++    "uvec2 resolveTexel(vec2 uv) {\n"
+     "    uvec2 texel = uvec2(clamp(floor(uv), vec2(0.0), vec2(255.0)));\n"
+     "    return (texel & texWindow.xy) | texWindow.zw;\n"
+     "}\n"
+@@ -154,6 +163,60 @@
+     "    uint a = uint(c.a + 0.5);\n"
+     "    return r | (g << 5u) | (b << 10u) | (a << 15u);\n"
+     "}\n"
++    "vec4 readTexel(vec2 uv) {\n"
++    "    ivec2 texel = ivec2(resolveTexel(uv));\n"
++    "    if (textureMode == 1u)\n"
++    "        return texelFetch(texVram, pageBase + texel, 0);\n"
++    "    uint subPixel = uint(texel.x) & subPixelMask;\n"
++    "    ivec2 texelPos = pageBase + ivec2(texel.x >> texelShift, texel.y);\n"
++    "    uint word16 = rgb5551ToU16(texelFetch(texVram, texelPos, 0));\n"
++    "    uint colorIdx = (word16 >> (subPixel * indexShift)) & indexMask;\n"
++    "    ivec2 clutBase = ivec2((clut % 64u) * 16u, clut / 64u);\n"
++    "    return texelFetch(texVram, clutBase + ivec2(colorIdx, 0), 0);\n"
++    "}\n"
++    "vec3 compatibleColor(vec4 sampleColor, vec4 center) {\n"
++    "    // Never mix transparent black or pixels with a different PS1 blend/mask bit.\n"
++    "    if (sampleColor == vec4(0.0) || sampleColor.a != center.a) return center.rgb;\n"
++    "    return sampleColor.rgb;\n"
++    "}\n"
++    "vec3 filteredColor(vec2 uv, vec4 center) {\n"
++    "    vec2 base = floor(uv), weight = fract(uv);\n"
++    "    vec3 right = compatibleColor(readTexel(base + vec2(1.0, 0.0)), center);\n"
++    "    vec3 bottom = compatibleColor(readTexel(base + vec2(0.0, 1.0)), center);\n"
++    "    vec3 diagonal = compatibleColor(readTexel(base + vec2(1.0, 1.0)), center);\n"
++    "    return mix(mix(center.rgb, right, weight.x), mix(bottom, diagonal, weight.x), weight.y);\n"
++    "}\n"
++    "\n"
++    "vec2 anisotropicSpan(vec2 uv) {\n"
++    "    // Principal axis of the texture-space pixel footprint, including sheared UVs.\n"
++    "    vec2 dx = dFdx(uv), dy = dFdy(uv);\n"
++    "    float a = dx.x * dx.x + dy.x * dy.x;\n"
++    "    float b = dx.x * dx.y + dy.x * dy.y;\n"
++    "    float d = dx.y * dx.y + dy.y * dy.y;\n"
++    "    float root = sqrt(max((a - d) * (a - d) + 4.0 * b * b, 0.0));\n"
++    "    float majorSquared = max(0.5 * (a + d + root), 0.0);\n"
++    "    float minor = sqrt(max(0.5 * (a + d - root), 0.0));\n"
++    "    float major = sqrt(majorSquared);\n"
++    "    if (major <= max(1.0, minor)) return vec2(0.0);\n"
++    "    vec2 axis = vec2(b, majorSquared - a);\n"
++    "    axis = dot(axis, axis) > 1e-8 ? normalize(axis) : vec2(1.0, 0.0);\n"
++    "    // Four bilinear taps cannot cover a wide isotropic footprint without mipmaps.\n"
++    "    // Cap the span to four texels rather than sparsely sampling distant atlas data.\n"
++    "    float strength = clamp(major / max(1.0, minor) - 1.0, 0.0, 1.0);\n"
++    "    return axis * min(major, 4.0) * strength;\n"
++    "}\n"
++    "vec3 anisotropicColor(vec2 uv, vec2 span, vec4 center) {\n"
++    "    if (dot(span, span) < 1e-8) return filteredColor(uv, center);\n"
++    "    vec3 color = vec3(0.0);\n"
++    "    for (int i = 0; i < 4; ++i) {\n"
++    "        vec2 sampleUV = uv + (float(i) * 0.25 - 0.375) * span;\n"
++    "        vec4 sampleCenter = readTexel(sampleUV);\n"
++    "        sampleCenter = vec4(compatibleColor(sampleCenter, center), center.a);\n"
++    "        color += filteredColor(sampleUV, sampleCenter);\n"
++    "    }\n"
++    "    return color * 0.25;\n"
++    "}\n"
++    "\n"
+     "const mat4 ditherMatrix = mat4("
+     "    -4.0, +0.0, -3.0, +1.0,"
+     "    +2.0, -2.0, +3.0, -1.0,"
+@@ -170,24 +233,23 @@
+     "}\n"
+     "\n"
+     "void main() {\n"
++    "    // Derivatives must be evaluated before any non-uniform discard or mask return.\n"
++    "    vec2 uv = textureUV();\n"
++    "    vec2 span = vec2(0.0);\n"
++    "    if (textureFilter == 2) span = anisotropicSpan(uv);\n"
++    "    vec2 mipDx = vec2(0.0), mipDy = vec2(0.0);\n"
++    "    if (useMipmaps) {\n"
++    "        mipDx = dFdx(uv) / textureRegion.zw;\n"
++    "        mipDy = dFdy(uv) / textureRegion.zw;\n"
++    "    }\n"
+     "    if (checkMask && texelFetch(maskSnapshot, ivec2(gl_FragCoord.xy), 0).a > 0.5) discard;\n"
+     "    vec4 texColor;\n"
+     "    if (textureMode == 0u) {\n" // untextured
+     "        texColor = vec4(1, 1, 1, 2);\n"
+-    "    } else if (textureMode == 1u) {\n" // 16-bit bitmap
+-    "        texColor =\n"
+-    "            texelFetch(texVram, pageBase + ivec2(resolveTexel()), 0);\n"
+-    "    } else {\n" // indexed
+-    "        ivec2 texel = ivec2(resolveTexel());\n"
+-    "        uint subPixel = uint(texel.x) & subPixelMask;\n"
+-    "        ivec2 texelPos =\n"
+-    "            pageBase + ivec2(texel.x >> texelShift, texel.y);\n"
+-    "        uint word16 = rgb5551ToU16(texelFetch(texVram, texelPos, 0));\n"
+-    "        uint colorIdx = (word16 >> (subPixel * indexShift)) & indexMask;\n"
+-    "        ivec2 clutBase = ivec2((clut % 64u) * 16u, clut / 64u);\n"
+-    "        texColor = texelFetch(texVram, clutBase + ivec2(colorIdx, 0), "
+-    "0);\n"
++    "    } else {\n"
++    "        texColor = readTexel(uv);\n"
+     "    }\n"
++    "\n"
+     // check for full transparency
+     "    if (texColor == vec4(0, 0, 0, 0)) {\n"
+     "        discard;\n"
+@@ -197,7 +259,17 @@
+     "        bool masked = forceMask || (textureMode != 0u && texColor.a > 0.5);\n"
+     "        FragColor = vec4(0.0, 0.0, 0.0, masked ? 1.0 : 0.0);\n"
+     "        return;\n"
++    "    }\n"
++    "    if (textureMode != 0u) {\n"
++    "        if (useMipmaps) {\n"
++    "            vec2 coord = (uv - textureRegion.xy + 0.5) / textureRegion.zw;\n"
++    "            vec4 color = textureGrad(decodedTexture,\n"
++    "                vec3(coord, texColor.a > 0.5 ? 1.0 : 0.0), mipDx, mipDy);\n"
++    "            if (color.a > 0.001) texColor.rgb = color.rgb / color.a;\n"
++    "        } else if (textureFilter == 1 || textureFilter >= 3) texColor.rgb = filteredColor(uv, texColor);\n"
++    "        else if (textureFilter == 2) texColor.rgb = anisotropicColor(uv, span, texColor);\n"
+     "    }\n"
++    "\n"
+     // check for setSemiTrans(p, 1)
+     "    bool isSemiTrans = vertexColor.a < 0.75;"
+     // when a color has the 0x8000 bit left then it has the semitrans flag on
+@@ -256,6 +328,19 @@
+ static GLint uniform_half_pixel = 0;
+ static GLint uniform_target_size = 0;
+ static GLint uniform_mask_pass, uniform_force_mask, uniform_check_mask;
++static GLint uniform_texture_filter;
++static int texture_filtering;
++static GLint uniform_use_mipmaps, uniform_texture_region;
++static GLuint empty_mip_texture;
++static SDL_Rect texture_regions[MAX_VERTEX_COUNT];
++
++void Psyz_SetTextureFiltering(int mode) {
++    if (mode < PSYZ_TEXTURE_NEAREST || mode > PSYZ_TEXTURE_MIPMAP_ANISOTROPIC_4X) return;
++    if (texture_filtering != mode) {
++        Draw_FlushBuffer();
++        texture_filtering = mode;
++    }
++}
+ static GLuint mask_snapshot_texture;
+ static GLuint vram_texture;
+ static GLuint vram_fbo = 0;
+@@ -286,6 +371,7 @@
+ static SDL_Rect scissor_rect = {0, 0, VRAM_W, VRAM_H};
+ 
+ static void MarkRgb24Dirty(int x, int y, int w, int h) {
++    PsyzMipmaps_Invalidate(x, y, w, h);
+     if (display_rgb24 &&
+         Rgb24RegionOverlaps(display_area.x, display_area.y, display_size.x,
+                             display_size.y, x, y, w, h)) {
+@@ -465,6 +551,16 @@
+     uniform_mask_pass = glGetUniformLocation(shader_program, "maskPass");
+     uniform_force_mask = glGetUniformLocation(shader_program, "forceMask");
+     uniform_check_mask = glGetUniformLocation(shader_program, "checkMask");
++    uniform_texture_filter = glGetUniformLocation(shader_program, "textureFilter");
++    glUniform1i(glGetUniformLocation(shader_program, "decodedTexture"), 2);
++    uniform_use_mipmaps = glGetUniformLocation(shader_program, "useMipmaps");
++    uniform_texture_region = glGetUniformLocation(shader_program, "textureRegion");
++    glGenTextures(1, &empty_mip_texture);
++    glActiveTexture(GL_TEXTURE2);
++    glBindTexture(GL_TEXTURE_2D_ARRAY, empty_mip_texture);
++    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, 1, 1, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+     glGenTextures(1, &mask_snapshot_texture);
+     glActiveTexture(GL_TEXTURE1);
+     glBindTexture(GL_TEXTURE_2D, mask_snapshot_texture);
+@@ -1059,6 +1155,9 @@
+         glDeleteProgram(shader_program);
+         shader_program = 0;
+     }
++    PsyzMipmaps_Shutdown();
++    glDeleteTextures(1, &empty_mip_texture);
++    empty_mip_texture = 0;
+     if (mask_snapshot_texture) {
+         glDeleteTextures(1, &mask_snapshot_texture);
+         mask_snapshot_texture = 0;
+@@ -1399,6 +1498,24 @@
+     glBindVertexArray(0);
+ }
+ 
++/* PsyQ packets have no texture allocation metadata. Use the complete primitive's
++ * UV rectangle as a conservative filter boundary, never the entire VRAM atlas. */
++static void EnqueueFilteredPrimitive(int vertices, int indices) {
++    int x0 = 255, y0 = 255, x1 = 0, y1 = 0;
++    for (int i = 0; i < vertices; i++) {
++        int u = vertex_cur[i].u, v = vertex_cur[i].v;
++        if (u < x0) x0 = u;
++        if (v < y0) y0 = v;
++        if (u > x1) x1 = u;
++        if (v > y1) y1 = v;
++    }
++    if (x1 > 255) x1 = 255;
++    if (y1 > 255) y1 = 255;
++    SDL_Rect region = {x0, y0, x1 - x0 + 1, y1 - y0 + 1};
++    for (int i = 0; i < vertices; i++) texture_regions[n_vertices + i] = region;
++    Draw_EnqueueBuffer(vertices, indices);
++}
++
+ int Psyz_DrawPushPrimWithPositions(u_long* packets, int max_len,
+     const PsyzSubpixelPosition* positions, unsigned int options) {
+     int len = max_len;
+@@ -1493,7 +1610,7 @@
+                 }
+                 vertex_cur[i].inv_depth = perspective ? positions[i].inv_depth : 0.0f;
+             }
+-            Draw_EnqueueBuffer(nVertices, nIndices);
++            EnqueueFilteredPrimitive(nVertices, nIndices);
+         } else {
+             // shouldn't happen on a normal PSX application
+             WARNF("code %02X not supported", code);
+@@ -1607,7 +1724,7 @@
+                 index_cur[3] = base + 0;
+                 index_cur[4] = base + 2;
+                 index_cur[5] = base + 3;
+-                Draw_EnqueueBuffer(4, 6);
++                EnqueueFilteredPrimitive(4, 6);
+             }
+         }
+     } else if (isTile) {
+@@ -1683,7 +1800,7 @@
+         SET_TC_ALL(vertex_cur, tpage, clut);
+         for (int i = 0; i < 4; ++i)
+             vertex_cur[i].inv_depth = 0.0f;
+-        Draw_EnqueueBuffer(4, 6);
++        EnqueueFilteredPrimitive(4, 6);
+     }
+     return max_len - len;
+ }
+@@ -2042,11 +2159,55 @@
+         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+         break;
+     }
++}
++
++static PsyzTextureView TextureViewAt(int index) {
++    int vertex_index = index_buf[index];
++    const Vertex* v = &vertex_buf[vertex_index];
++    const SDL_Rect* r = &texture_regions[vertex_index];
++    return (PsyzTextureView){v->t & 0x19f, (v->t & 0x100) ? 0 : v->c,
++        v->twin, r->x, r->y, r->w, r->h};
+ }
+ 
++static bool SameTextureView(const PsyzTextureView* a, const PsyzTextureView* b) {
++    return a->page == b->page && a->clut == b->clut && a->window == b->window &&
++        a->x == b->x && a->y == b->y && a->width == b->width && a->height == b->height;
++}
++
++static bool CanUseMipmaps(int index) {
++    const Vertex* v = &vertex_buf[index_buf[index]];
++    return (v->t & (TPAGE_NOTEXTURE | TPAGE_POLYGON)) == TPAGE_POLYGON;
++}
++
+ static void DrawIndices(int start, int end) {
+-    glDrawElements(GL_TRIANGLES, end - start, GL_UNSIGNED_SHORT,
+-                   (const GLvoid*)((uintptr_t)start * sizeof(unsigned short)));
++    if (texture_filtering < PSYZ_TEXTURE_MIPMAPS) {
++        glUniform1i(uniform_use_mipmaps, 0);
++        glDrawElements(GL_TRIANGLES, end - start, GL_UNSIGNED_SHORT,
++            (const GLvoid*)((uintptr_t)start * sizeof(unsigned short)));
++        return;
++    }
++    while (start < end) {
++        PsyzTextureView view = TextureViewAt(start);
++        bool filtered = CanUseMipmaps(start);
++        int next = start + 3;
++        while (next < end && CanUseMipmaps(next) == filtered) {
++            PsyzTextureView other = TextureViewAt(next);
++            if (filtered && !SameTextureView(&view, &other)) break;
++            next += 3;
++        }
++        GLuint texture = filtered ? PsyzMipmaps_Get(vram_texture, use_gles, &view,
++            texture_filtering == PSYZ_TEXTURE_MIPMAP_ANISOTROPIC_4X) : 0;
++        glActiveTexture(GL_TEXTURE2);
++        glBindSampler(2, 0);
++        glBindTexture(GL_TEXTURE_2D_ARRAY, texture ? texture : empty_mip_texture);
++        glActiveTexture(GL_TEXTURE0);
++        glUniform1i(uniform_use_mipmaps, texture != 0);
++        if (texture) glUniform4f(uniform_texture_region, (float)view.x, (float)view.y,
++            (float)view.width, (float)view.height);
++        glDrawElements(GL_TRIANGLES, next - start, GL_UNSIGNED_SHORT,
++            (const GLvoid*)((uintptr_t)start * sizeof(unsigned short)));
++        start = next;
++    }
+ }
+ 
+ // The color pass uses alpha as a blend factor; the second pass writes only
+@@ -2136,6 +2297,7 @@
+     }
+     glUniform1i(uniform_force_mask, force_mask_bit);
+     glUniform1i(uniform_check_mask, check_mask_bit);
++    glUniform1i(uniform_texture_filter, texture_filtering);
+     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+     if (check_mask_bit) {
+         // Each triangle sees masks written by earlier primitives in this batch.

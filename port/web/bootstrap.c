@@ -2,6 +2,7 @@
 #ifndef TM4_STANDALONE
 #include "antialiasing.h"
 #include "port/psyz/present_filter.h"
+#include "port/psyz/texture_filter.h"
 #endif
 #include "car.h"
 #include "cheats.h"
@@ -145,6 +146,13 @@ static void apply_render_settings(void)
         Psyz_VideoGetInternalResolution(), Psyz_VideoGetDitheringMode(),
         WebCarLodDistanceScale, WebDrawDistanceScale, render_settings.limit);
 }
+
+#ifndef TM4_STANDALONE
+EMSCRIPTEN_KEEPALIVE void WebSetTextureFiltering(int mode)
+{
+    Psyz_SetTextureFiltering(mode);
+}
+#endif
 
 static unsigned int presented_frames;
 
