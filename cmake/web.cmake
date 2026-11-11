@@ -273,6 +273,32 @@ target_link_options(tm4_gte_batches_check PRIVATE -sASSERTIONS=1 -sPTHREAD_POOL_
 tm4_web_configure_target(tm4_gte_batches_check
     OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/site/gte-batches-check")
 
+if(NOT TM4_STANDALONE)
+    # Embed shaders so the player needs no extra runtime requests.
+    set(aa_header "${CMAKE_CURRENT_BINARY_DIR}/antialiasing_shaders.h")
+    file(WRITE "${aa_header}" "")
+    foreach(shader IN ITEMS "vertex_source|port/web/shaders/fullscreen.vert"
+            "fragment_source|port/web/shaders/fxaa.frag" "smaa_source|external/smaa/SMAA.hlsl")
+        string(REPLACE "|" ";" parts "${shader}")
+        list(GET parts 0 symbol)
+        list(GET parts 1 path)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${TM4_ROOT}/${path}")
+        file(READ "${TM4_ROOT}/${path}" source)
+        if(symbol STREQUAL "fragment_source")
+            set(fxaa_shader "${TM4_ROOT}/external/fxaa/fxaa.glsl")
+            set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${fxaa_shader}")
+            file(READ "${fxaa_shader}" fxaa_source)
+            string(REPLACE "#pragma glslify: export(fxaa)" "" fxaa_source "${fxaa_source}")
+            string(REPLACE "#include \"fxaa.glsl\"" "${fxaa_source}" source "${source}")
+        endif()
+        string(HEX "${source}" bytes)
+        string(REGEX REPLACE "(..)" "0x\\1," bytes "${bytes}")
+        file(APPEND "${aa_header}" "static const char ${symbol}[] = { ${bytes} 0 };\n")
+    endforeach()
+    target_include_directories(tm4_web PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    target_sources(tm4_web PRIVATE "${TM4_WEB}/antialiasing.c")
+endif()
+
 # Embedded authority: recovered C with no browser or device host.
 if(TM4_STANDALONE)
     get_target_property(sources psyz SOURCES)

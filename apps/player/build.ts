@@ -41,6 +41,24 @@ export async function buildPlayer({ mode, site }: { mode: PlayerMode; site: stri
     join(root, "node_modules/coi-serviceworker/LICENSE"),
     join(site, "coi-serviceworker.LICENSE.txt"),
   );
+  const fxaaSource = await Bun.file(join(root, "external/fxaa/fxaa.glsl")).text();
+  const fxaaNotice =
+    fxaaSource.startsWith("/**") && fxaaSource.includes("*/")
+      ? fxaaSource.slice(3, fxaaSource.indexOf("*/")).trim()
+      : null;
+  if (!fxaaNotice) throw new Error("Missing FXAA source copyright notice");
+  const fxaaLicense = await Bun.file(join(root, "external/fxaa/LICENSE.md")).text();
+  const smaaLicense = await Bun.file(join(root, "external/smaa/LICENSE.txt")).text();
+  await Bun.write(
+    join(site, "antialiasing.LICENSE.txt"),
+    [
+      "FXAA: https://github.com/mattdesl/glsl-fxaa",
+      fxaaNotice,
+      fxaaLicense,
+      "SMAA: https://github.com/iryoku/smaa",
+      smaaLicense,
+    ].join("\n\n"),
+  );
   await cp(join(app, "index.html"), join(site, "index.html"));
   await cp(join(app, "styles"), join(site, "styles"), { recursive: true });
 }

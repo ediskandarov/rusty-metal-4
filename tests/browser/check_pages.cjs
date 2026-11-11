@@ -13,6 +13,7 @@ const { chromium } = require("playwright");
     "tm4_web.wasm",
     "coi-serviceworker.js",
     "coi-serviceworker.LICENSE.txt",
+    "antialiasing.LICENSE.txt",
     "simulation-build.json",
     "network/tm4_network.js",
     "network/tm4_network_bg.wasm",

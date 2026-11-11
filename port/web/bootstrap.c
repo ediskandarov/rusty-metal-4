@@ -1,4 +1,8 @@
 #include <libgte.h>
+#ifndef TM4_STANDALONE
+#include "antialiasing.h"
+#include "port/psyz/present_filter.h"
+#endif
 #include "car.h"
 #include "cheats.h"
 #include "loading.h"
@@ -352,6 +356,10 @@ static void initialize_platform(void)
 {
     ResetGraph(0);
     Psyz_OverlayFrameCB(count_presented_frame);
+#ifndef TM4_STANDALONE
+    Psyz_SetPresentFilter(WebAntialiasingPresent);
+    Psyz_OverlayDestroyCB(WebAntialiasingShutdown);
+#endif
     PadInitPad();
     if (!simulation_only && Psyz_AudioInit() != 0) {
         fprintf(stderr, "Cannot initialize browser audio\n");

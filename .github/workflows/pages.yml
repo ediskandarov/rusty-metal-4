@@ -53,9 +53,9 @@ jobs:
           path: game
           ssh-key: ${{ secrets.GAME_DEPLOY_KEY }}
           persist-credentials: false
-      - name: Check out pinned PsyZ and SDL
+      - name: Check out pinned rendering dependencies
         run: |
-          git submodule update --init --depth 1 external/psyz
+          git submodule update --init --depth 1 external/psyz external/smaa external/fxaa
           git -C external/psyz submodule update --init --depth 1 external/SDL
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:

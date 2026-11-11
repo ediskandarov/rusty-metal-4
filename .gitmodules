@@ -4,3 +4,9 @@
 [submodule "external/psyz"]
 	path = external/psyz
 	url = https://github.com/Xeeynamo/psyz.git
+[submodule "external/smaa"]
+	path = external/smaa
+	url = https://github.com/iryoku/smaa.git
+[submodule "external/fxaa"]
+	path = external/fxaa
+	url = https://github.com/mattdesl/glsl-fxaa.git

@@ -1,0 +1,62 @@
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -2,6 +2,7 @@
+ #include <psyz/overlay.h>
+ #include <psyz/overlay_sdl3_gl.h>
+ #include <assert.h>
++#include "present_filter.h"
+ #include <math.h>
+ #include <stdbool.h>
+ #include <stdlib.h>
+@@ -935,8 +936,29 @@
+                            (display_pal ? 0x13 : 0x10)) *
+                           (float)rect.h / (display_pal ? 288.0f : 240.0f));
+     return rect;
++}
++
++static PsyzPresentFilter present_filter;
++
++void Psyz_SetPresentFilter(PsyzPresentFilter filter) {
++    present_filter = filter;
+ }
+ 
++static void PresentImage(int sx0, int sy0, int sx1, int sy1,
++                         int dx0, int dy0, int dx1, int dy1) {
++    if (present_filter) {
++        GLint framebuffer;
++        glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &framebuffer);
++        const int source[4] = {sx0, sy0, sx1, sy1};
++        const int destination[4] = {dx0, dy0, dx1, dy1};
++        if (present_filter((unsigned)framebuffer, source, destination)) {
++            return;
++        }
++    }
++    glBlitFramebuffer(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1,
++                      GL_COLOR_BUFFER_BIT, GL_NEAREST);
++}
++
+ static void PlatformBackend_Present(void) {
+     if (!sdl3_window && !InitPlatform()) {
+         return;
+@@ -991,16 +1013,15 @@
+             const int cw = layout.canvas.w * (int)canvas_res;
+             const int ch = layout.canvas.h * (int)canvas_res;
+             glBindFramebuffer(GL_READ_FRAMEBUFFER, canvas_fbo[fb_index]);
+-            glBlitFramebuffer(0, ch, cw, 0, p.x, win.h - p.y - p.h, p.x + p.w,
+-                              win.h - p.y, GL_COLOR_BUFFER_BIT, GL_NEAREST);
++            PresentImage(0, ch, cw, 0, p.x, win.h - p.y - p.h, p.x + p.w,
++                         win.h - p.y);
+         }
+     } else if (disp_on) {
+         dst.y = win.h - dst.y - dst.h;
+         dst = OffsetAndClipDisplay(dst, win.h);
+-        glBlitFramebuffer(src.x * n, (src.y + src.h) * n, (src.x + src.w) * n,
+-                          src.y * n, dst.x, win.h - dst.y - dst.h,
+-                          dst.x + dst.w, win.h - dst.y,
+-                          GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        PresentImage(src.x * n, (src.y + src.h) * n, (src.x + src.w) * n,
++                     src.y * n, dst.x, win.h - dst.y - dst.h,
++                     dst.x + dst.w, win.h - dst.y);
+     }
+     glDisable(GL_SCISSOR_TEST);
+     if (overlay_frame_cb) {

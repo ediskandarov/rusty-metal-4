@@ -95,6 +95,18 @@
             their original detail.
           </p>
           <label
+            >Antialiasing
+            <select id="render-antialiasing">
+              <option value="0">Off</option>
+              <option value="1">FXAA</option>
+              <option value="2" selected>SMAA</option>
+            </select>
+          </label>
+          <p>
+            SMAA preserves more fine detail; FXAA is faster but softer. Both smooth at the rendering
+            resolution before scaling to the window, including in-game text.
+          </p>
+          <label
             >Stabilize 3D vertices <input id="subpixel-vertices" type="checkbox" checked
           /></label>
           <p>Retains fractional vertex positions to reduce polygon jitter.</p>
