@@ -101,11 +101,11 @@ export class TestServer extends DurableObject<Env> {
       await this.ctx.storage.put("previousHealth", snapshot);
       this.env.HEALTH.writeDataPoint({
         indexes: [this.ctx.id.toString()],
-        blobs: ["tm4_telemetry_scrape_success", "gauge"],
+        blobs: ["rustymetal4_telemetry_scrape_success", "gauge"],
         doubles: [1],
       });
       const connected =
-        snapshot.measurements.find((row) => row.name === "tm4_players_connected")?.value ??
+        snapshot.measurements.find((row) => row.name === "rustymetal4_players_connected")?.value ??
         0;
       if (connected === 0 && this.emptySince === undefined) {
         this.emptySince = Date.now();
@@ -126,7 +126,7 @@ export class TestServer extends DurableObject<Env> {
     } catch (error) {
       this.env.HEALTH.writeDataPoint({
         indexes: [this.ctx.id.toString()],
-        blobs: ["tm4_telemetry_scrape_success", "gauge"],
+        blobs: ["rustymetal4_telemetry_scrape_success", "gauge"],
         doubles: [0],
       });
       console.error(
@@ -164,7 +164,7 @@ export class TestServer extends DurableObject<Env> {
           `
 p=
 for d in /proc/[0-9]*; do
-  case "$(readlink "$d/exe")" in */tm4-rewired-server) p=$d; break;; esac
+  case "$(readlink "$d/exe")" in */rustymetal4-server) p=$d; break;; esac
 done
 test -n "$p" || exit 1
 echo BEGIN

@@ -7,7 +7,8 @@ async function database(): Promise<IDBDatabase> {
     request.onupgradeneeded = () => request.result.createObjectStore("packages");
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("Mod storage failed"));
-    request.onblocked = () => reject(new Error("Close other Rewired tabs to update mod storage"));
+    request.onblocked = () =>
+      reject(new Error("Close other Rusty Metal 4 tabs to update mod storage"));
   });
 }
 export async function savedPackages(): Promise<Uint8Array<ArrayBuffer>[]> {

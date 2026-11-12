@@ -18,8 +18,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/x86_64-unknown-linux-gnu/release/tm4-deathmatch-server /server
 
 FROM debian:trixie-slim
-COPY --from=build /server /usr/local/bin/tm4-rewired-server
+COPY --from=build /server /usr/local/bin/rustymetal4-server
 USER 65532:65532
 ENV TM4_HTTP_LISTEN=0.0.0.0:8120 TM4_MATCH_LISTEN=0.0.0.0:8122 TM4_BEHIND_PROXY=1 TM4_JOURNAL_DIR=/tmp/tm4-journals
 EXPOSE 8120 8122
-ENTRYPOINT ["tm4-rewired-server", "--serve", "2"]
+ENTRYPOINT ["rustymetal4-server", "--serve", "2"]

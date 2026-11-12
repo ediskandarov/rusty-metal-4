@@ -51,7 +51,7 @@ export async function hasSession(
 
 export function accessPage(message = "Enter the test access code.", status = 200): Response {
   return new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TM4 Rewired test server</title><style>body{background:#111820;color:#eee;font:18px system-ui;max-width:30rem;margin:12vh auto;padding:1rem}input,button{font:inherit;padding:.7rem;margin:.6rem 0;width:100%;box-sizing:border-box}button{cursor:pointer}</style><h1>TM4 Rewired</h1><p>${message}</p><form method="post" action="/_access"><label>Access code<input name="code" type="password" required autocomplete="current-password" maxlength="256"></label><button>Open server</button></form></html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rusty Metal 4 test server</title><style>body{background:#111820;color:#eee;font:18px system-ui;max-width:30rem;margin:12vh auto;padding:1rem}input,button{font:inherit;padding:.7rem;margin:.6rem 0;width:100%;box-sizing:border-box}button{cursor:pointer}</style><h1>Rusty Metal 4</h1><p>${message}</p><form method="post" action="/_access"><label>Access code<input name="code" type="password" required autocomplete="current-password" maxlength="256"></label><button>Open server</button></form></html>`,
     {
       status,
       headers: {

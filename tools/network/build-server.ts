@@ -30,11 +30,11 @@ const directory = join(output, platform);
 await rm(directory, { recursive: true, force: true });
 await mkdir(directory, { recursive: true });
 const suffix = process.platform === "win32" ? ".exe" : "";
-const name = `tm4-rewired-server${suffix}`;
+const name = `rustymetal4-server${suffix}`;
 await copyFile(join(target, "release", `tm4-deathmatch-server${suffix}`), join(directory, name));
 await chmod(join(directory, name), 0o755);
 await copyFile(join(root, "LICENSE"), join(directory, "LICENSE"));
-const archive = join(output, `tm4-rewired-server-${platform}${suffix ? ".zip" : ".tar.gz"}`);
+const archive = join(output, `rustymetal4-server-${platform}${suffix ? ".zip" : ".tar.gz"}`);
 if (suffix) {
   const quote = (path: string) => `'${path.replaceAll("'", "''")}'`;
   const command = `Compress-Archive -LiteralPath ${quote(join(directory, name))},${quote(join(directory, "LICENSE"))} -DestinationPath ${quote(archive)} -Force`;

@@ -11,8 +11,8 @@ const snapshot = (boot: string, uptimeSeconds: number, ticks: number): HealthSna
   uptimeSeconds,
   phase: "match",
   measurements: [
-    { name: "tm4_simulation_ticks_total", kind: "counter", value: ticks },
-    { name: "tm4_players_connected", kind: "gauge", value: 8 },
+    { name: "rustymetal4_simulation_ticks_total", kind: "counter", value: ticks },
+    { name: "rustymetal4_players_connected", kind: "gauge", value: 8 },
   ],
 });
 function points(current: HealthSnapshot, previous?: HealthSnapshot) {
@@ -51,7 +51,7 @@ test("slot and histogram bucket identity keep independent counter histories", ()
     b = snapshot("one", 20, 600);
   for (const value of [a, b])
     value.measurements = [0, 1].map((slot) => ({
-      name: "tm4_input_received_total",
+      name: "rustymetal4_input_received_total",
       kind: "counter",
       value: slot * 10 + value.uptimeSeconds,
       slot,

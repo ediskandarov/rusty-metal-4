@@ -55,7 +55,7 @@ WASI simulation in an optimized Rust binary with symbol tables removed, using
 Wasm runtimes and adjacent asset files are not required on the destination machine.
 The archive contains the executable and license; no disc resources are included.
 
-Set `TM4_ADMIN_SECRET` as above and run `tm4-rewired-server` (`.exe` on Windows).
+Set `TM4_ADMIN_SECRET` as above and run `rustymetal4-server` (`.exe` on Windows).
 The embedded build opens server mode by default; `--serve 4` sets an initial player
 count. `TM4_SERVER_SITE_DIR` and `TM4_SIMULATION_WASM` can override the embedded
 files during development. The ordinary Cargo build still loads `site/` and

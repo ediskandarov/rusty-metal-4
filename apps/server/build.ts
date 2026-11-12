@@ -43,7 +43,7 @@ export async function buildServer(mode: PlayerMode) {
   await cp(join(import.meta.dir, "style.css"), join(site, "style.css"));
   await mkdir(join(site, "licenses"), { recursive: true });
   for (const [name, path] of [
-    ["rewired", "LICENSE"],
+    ["rustymetal4", "LICENSE"],
     ["psyz", "external/psyz/LICENSE"],
     ["sdl", "external/psyz/external/SDL/LICENSE.txt"],
   ] as const)

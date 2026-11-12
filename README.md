@@ -1,4 +1,4 @@
-# TM4 Rewired
+# Rusty Metal 4
 
 Build and run instructions, private local resource preparation, and the embedded
 Rust/Wasmtime match host are documented in [the network workflow](docs/network-audit.md#embedded-simulation-and-local-checks).

@@ -89,14 +89,14 @@ impl Default for Metrics {
             duration: Histogram::default(),
             lateness: Histogram::default(),
             events: [
-                "tm4_match_errors_total",
-                "tm4_simulation_errors_total",
-                "tm4_simulation_unsupported_total",
-                "tm4_input_rejected_total",
-                "tm4_checkpoint_capture_success_total",
-                "tm4_checkpoint_capture_errors_total",
-                "tm4_reconnections_accepted_total",
-                "tm4_journal_write_errors_total",
+                "rustymetal4_match_errors_total",
+                "rustymetal4_simulation_errors_total",
+                "rustymetal4_simulation_unsupported_total",
+                "rustymetal4_input_rejected_total",
+                "rustymetal4_checkpoint_capture_success_total",
+                "rustymetal4_checkpoint_capture_errors_total",
+                "rustymetal4_reconnections_accepted_total",
+                "rustymetal4_journal_write_errors_total",
             ]
             .into_iter()
             .map(|name| (name, 0))
@@ -161,23 +161,23 @@ impl Metrics {
     }
     pub fn snapshot(&self, phase: &str, connected: usize) -> Snapshot {
         let mut rows = vec![
-            Measurement::counter("tm4_simulation_ticks_total", self.ticks as f64),
-            Measurement::gauge("tm4_players_connected", connected as f64),
+            Measurement::counter("rustymetal4_simulation_ticks_total", self.ticks as f64),
+            Measurement::gauge("rustymetal4_players_connected", connected as f64),
             Measurement::gauge(
-                "tm4_server_ready",
+                "rustymetal4_server_ready",
                 f64::from(matches!(phase, "ready" | "lobby" | "match" | "results")),
             ),
         ];
         if let Some(last) = self.last_tick {
             rows.push(Measurement::gauge(
-                "tm4_simulation_last_tick_age_seconds",
+                "rustymetal4_simulation_last_tick_age_seconds",
                 last.elapsed().as_secs_f64(),
             ));
         }
         self.duration
-            .append(&mut rows, "tm4_simulation_tick_duration_seconds");
+            .append(&mut rows, "rustymetal4_simulation_tick_duration_seconds");
         self.lateness
-            .append(&mut rows, "tm4_simulation_tick_lateness_seconds");
+            .append(&mut rows, "rustymetal4_simulation_tick_lateness_seconds");
         rows.extend(
             self.events
                 .iter()
@@ -185,18 +185,18 @@ impl Metrics {
         );
         for (slot, value) in self.slots.iter().enumerate() {
             let mut input =
-                Measurement::counter("tm4_input_received_total", value.received as f64);
+                Measurement::counter("rustymetal4_input_received_total", value.received as f64);
             input.slot = Some(slot);
             rows.push(input);
             let mut pending = Measurement::gauge(
-                "tm4_network_unacknowledged_messages",
+                "rustymetal4_network_unacknowledged_messages",
                 value.unacknowledged as f64,
             );
             pending.slot = Some(slot);
             rows.push(pending);
             if let Some(last) = value.last_input {
                 let mut age = Measurement::gauge(
-                    "tm4_input_last_received_age_seconds",
+                    "rustymetal4_input_last_received_age_seconds",
                     last.elapsed().as_secs_f64(),
                 );
                 age.slot = Some(slot);
@@ -239,7 +239,7 @@ mod tests {
             snapshot
                 .measurements
                 .iter()
-                .filter(|m| m.name == "tm4_input_last_received_age_seconds")
+                .filter(|m| m.name == "rustymetal4_input_last_received_age_seconds")
                 .count(),
             1
         );

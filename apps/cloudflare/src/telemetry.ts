@@ -36,7 +36,7 @@ export function parseHealth(value: unknown): HealthSnapshot {
     if (
       !row ||
       typeof row.name !== "string" ||
-      !/^tm4_[a-z0-9_]+$/.test(row.name) ||
+      !/^rustymetal4_[a-z0-9_]+$/.test(row.name) ||
       !["counter", "gauge"].includes(row.kind) ||
       !Number.isFinite(row.value) ||
       row.value < 0 ||

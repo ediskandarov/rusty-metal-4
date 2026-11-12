@@ -140,10 +140,10 @@ jobs:
         include:
           - runner: ubuntu-22.04
             platform: linux-x64
-            executable: tm4-rewired-server
+            executable: rustymetal4-server
           - runner: macos-15
             platform: macos-arm64
-            executable: tm4-rewired-server
+            executable: rustymetal4-server
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
