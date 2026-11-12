@@ -223,7 +223,7 @@ export default {
       if (!length || length > 1024) return new Response("Invalid request size", { status: 413 });
       const code = new URLSearchParams(await request.text()).get("code") ?? "";
       if (!(await sameSecret(code, env.TEST_ACCESS_CODE)))
-        return accessPage("Incorrect access code.", 401);
+        return accessPage(env.ASSETS, request, true);
       return new Response(null, {
         status: 303,
         headers: {
@@ -235,7 +235,7 @@ export default {
     }
     if (!(await hasSession(request, env.TEST_ACCESS_CODE))) {
       return request.method === "GET" && request.headers.get("upgrade") !== "websocket"
-        ? accessPage()
+        ? accessPage(env.ASSETS, request)
         : new Response("Test access code required", { status: 401 });
     }
     // Never derive the object name from user input: this deployment owns one container.

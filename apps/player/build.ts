@@ -5,25 +5,20 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
+import { buildSite } from "../../tools/web/build.ts";
+
 export type PlayerMode = "release" | "dev" | "diagnostic";
 const root = resolve(import.meta.dir, "../..");
-const app = import.meta.dir;
 
 // Bundle the player independently of the CMake and Cargo runtime builds.
 export async function buildPlayer({ mode, site }: { mode: PlayerMode; site: string }) {
   const diagnostic = mode === "diagnostic";
   await mkdir(site, { recursive: true });
-  const result = await Bun.build({
-    entrypoints: [join(app, "src/main.ts")],
-    outdir: site,
-    naming: "web.js",
-    target: "browser",
-    minify: !diagnostic,
-    sourcemap: diagnostic ? "linked" : "none",
-    define: { TM4_DEV: JSON.stringify(mode !== "release") },
-  });
-  if (!result.success) throw new AggregateError(result.logs, "Browser bundle failed");
-  if (!diagnostic) await rm(join(site, "web.js.map"), { force: true });
+  await buildSite("player", mode, site);
+  // Remove artifacts from the former handwritten HTML/Bun bundle.
+  await rm(join(site, "web.js"), { force: true });
+  await rm(join(site, "web.js.map"), { force: true });
+  await rm(join(site, "styles"), { recursive: true, force: true });
   if (diagnostic) {
     const probe = await Bun.build({
       entrypoints: [fileURLToPath(import.meta.resolve("@tm4/game-client/network/rollbackProbe"))],
@@ -41,8 +36,6 @@ export async function buildPlayer({ mode, site }: { mode: PlayerMode; site: stri
     join(root, "node_modules/coi-serviceworker/LICENSE"),
     join(site, "coi-serviceworker.LICENSE.txt"),
   );
-  await cp(join(app, "index.html"), join(site, "index.html"));
-  await cp(join(app, "styles"), join(site, "styles"), { recursive: true });
 }
 
 if (import.meta.main) {

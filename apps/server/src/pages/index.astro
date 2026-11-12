@@ -1,0 +1,74 @@
+---
+import Page from "../layouts/Page.astro";
+import { Content as PlayerInstructions } from "../content/players.md";
+import { Content as SetupInstructions } from "../content/setup.md";
+---
+
+<Page>
+  <main>
+    <p class="eyebrow">Rusty Metal 4</p>
+    <h1>Deathmatch server</h1>
+    <section aria-labelledby="match-heading">
+      <h2 id="match-heading">Server status</h2>
+      <p id="status" role="status">
+        Connecting to the server…
+      </p>
+      <p id="players"></p>
+      <a id="join" hidden>
+        Open player
+      </a>
+      <PlayerInstructions />
+    </section>
+    <details id="setup">
+      <summary>Administrator setup</summary>
+      <SetupInstructions />
+      <label>
+        Startup secret
+        <input
+          id="secret"
+          type="password"
+          autocomplete="off"
+          minlength="24"
+          maxlength="256"
+          required
+        />
+      </label>
+      <form id="provision">
+        <label>
+          Disc folder (CUE + BIN or CCD + IMG)
+          <input id="disc" type="file" webkitdirectory multiple required />
+        </label>
+        <button id="prepare" type="submit">
+          Prepare resources
+        </button>
+      </form>
+      <form id="match-options">
+        <label>
+          Players
+          <select id="player-count" disabled>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+          </select>
+        </label>
+        <label>
+          Map
+          <select id="world" disabled required>
+            <option value="">Prepare resources to load maps</option>
+          </select>
+        </label>
+        <button id="start" type="submit" disabled>
+          Open match
+        </button>
+      </form>
+      <p id="progress" role="status"></p>
+    </details>
+  </main>
+</Page>
+<script>
+  import "../main.ts";
+</script>

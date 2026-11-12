@@ -1,0 +1,62 @@
+---
+import { Content as Help } from "../content/controls.md";
+---
+
+<details id="input-settings" hidden>
+  <summary>Controls</summary>
+  <div id="input-panel" class="settings-panel">
+    <header>
+      <label for="input-player">Player</label>
+      <select id="input-player">
+        <option value="0">Player 1</option>
+        <option value="1">Player 2</option>
+        <option value="2">Player 3</option>
+        <option value="3">Player 4</option>
+      </select>
+      <button id="input-close" type="button">
+        Close
+      </button>
+    </header>
+    <p id="input-device"></p>
+    <Help />
+    <div class="input-controller">
+      <svg viewBox="0 0 400 184" aria-hidden="true">
+        <path
+          class="controller-seam"
+          d="M48 33 V16 Q48 6 57 6 H75 Q84 6 84 16 V33 Z
+          M316 33 V16 Q316 6 325 6 H343 Q352 6 352 16 V33 Z"
+        />
+        <path
+          class="controller-shell"
+          d="M54 36 Q34 38 27 60 L8 144 Q1 174 21 179
+          Q40 185 56 162 L92 121 Q102 112 111 116 Q128 152 150 149
+          Q167 149 182 133 H218 Q233 149 250 149 Q272 152 289 116
+          Q298 112 308 121 L344 162 Q360 185 379 179 Q399 174 392 144
+          L373 60 Q366 38 346 36 Z"
+        />
+        <path
+          class="controller-seam"
+          d="M53 37 H347 M174 133 H226
+          M62 67 H88 V81 H102 V105 H88 V119 H62 V105 H48 V81 H62 Z"
+        />
+        <circle cx="325" cy="92" r="42" class="controller-seam" />
+        <circle cx="149" cy="114" r="25" class="controller-seam" />
+        <circle cx="251" cy="114" r="25" class="controller-seam" />
+      </svg>
+    </div>
+    <div id="input-capture" hidden>
+      <span id="input-capture-prompt"></span>
+      <button id="input-cancel" type="button">
+        Cancel
+      </button>
+    </div>
+    <p id="input-message" role="status"></p>
+    <div id="input-map"></div>
+    <p id="input-sticks" hidden>
+      Sticks keep the game’s analog controls. Triggers can be assigned as buttons.
+    </p>
+    <button id="input-reset" type="button">
+      Restore all input defaults
+    </button>
+  </div>
+</details>

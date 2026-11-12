@@ -1,0 +1,133 @@
+---
+import { Content as Help } from "../content/rendering.md";
+---
+
+<details id="render-settings" hidden>
+  <summary>Rendering</summary>
+  <div id="render-panel" class="settings-panel">
+    <label>
+      Preset
+      <select id="render-preset">
+        <option value="ultra" selected>
+          Ultra
+        </option>
+        <option value="ps1">PS1</option>
+        <option value="custom">Custom</option>
+      </select>
+    </label>
+    <Help />
+    <label>
+      Scale
+      <select id="render-scale" aria-label="Rendering resolution">
+        <option value="0">Auto</option>
+        <option value="1">1×</option>
+        <option value="2">2×</option>
+        <option value="3">3×</option>
+        <option value="4">4×</option>
+        <option value="5">5×</option>
+        <option value="6">6×</option>
+        <option value="7">7×</option>
+        <option value="8" selected>
+          8×
+        </option>
+      </select>
+    </label>
+    <p>
+      Auto fits the rendering scale to the window and display pixel density. Textures retain their
+      original detail.
+    </p>
+    <label>
+      Stabilize 3D vertices <input id="subpixel-vertices" type="checkbox" checked />
+    </label>
+    <p>Retains fractional vertex positions to reduce polygon jitter.</p>
+    <p id="network-render-note" hidden>
+      Network matches render at 30 FPS without motion smoothing. Single-player timing settings are
+      restored when the match ends.
+    </p>
+    <label>
+      Motion smoothing <input id="render-smoothing" type="checkbox" checked />
+    </label>
+    <label class="smoothing-range">
+      Smoothing delay
+      <input
+        id="render-smoothing-delay"
+        type="range"
+        min="0"
+        max="7"
+        step="1"
+        value="7"
+        aria-describedby="render-smoothing-note"
+      />
+    </label>
+    <div id="render-smoothing-ends" aria-hidden="true">
+      <span>0 ms · Prediction</span>
+      <span>Full interpolation</span>
+    </div>
+    <output id="render-smoothing-readout" for="render-smoothing-delay">
+      33.3 ms · Full interpolation · No prediction
+    </output>
+    <p id="render-smoothing-note">
+      Lower delay makes motion respond sooner and can make corrections more visible. Contact can
+      briefly add pose delay. One simulation frame is 33.3 ms at 30 TPS. Turn smoothing off for
+      Vanilla motion.
+    </p>
+    <label>
+      Perspective-correct textures <input id="perspective-textures" type="checkbox" checked />
+    </label>
+    <p>Reduces texture warping on 3D surfaces.</p>
+    <label>
+      Car LOD distance
+      <select id="car-lod-distance">
+        <option value="1">1× — Original</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8" selected>
+          8×
+        </option>
+      </select>
+    </label>
+    <p>Keeps detailed car models farther away. Higher values draw more polygons.</p>
+    <label>
+      World draw distance
+      <select id="draw-distance">
+        <option value="1">1× — Original</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="8" selected>
+          8×
+        </option>
+      </select>
+    </label>
+    <p>Extends detailed scenery and its polygon budget. Higher values cost performance.</p>
+    <label>
+      Dithering
+      <select id="render-dithering">
+        <option value="0">Game default</option>
+        <option value="1">Off</option>
+      </select>
+    </label>
+    <p>Disabling the PS1 grain can reveal color banding.</p>
+    <label>
+      Render limit
+      <select id="render-limit" aria-describedby="render-limit-note">
+        <option value="30">30 FPS</option>
+        <option value="60">60 FPS</option>
+        <option value="120" selected>
+          120 FPS
+        </option>
+        <option value="0">Display refresh rate</option>
+      </select>
+    </label>
+    <p id="render-limit-note">
+      Simulation stays at 30 TPS. Higher frame rates are available with motion smoothing and up to
+      two players. Vanilla, menus and video keep their original timing.
+    </p>
+    <label>
+      Performance graphs <input id="render-fps" type="checkbox" />
+    </label>
+    <p>Simulation, render and browser callback rates over the last 15 seconds.</p>
+    <button id="render-reset" type="button">
+      Restore defaults
+    </button>
+  </div>
+</details>

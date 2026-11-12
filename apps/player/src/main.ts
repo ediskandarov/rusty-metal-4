@@ -93,6 +93,7 @@ folderPicker.addEventListener("change", () => {
   const files = folderPicker.files;
   if (files?.length) void launch(() => directorySources(files));
 });
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener("pointerdown", () => canvas.focus());
 
 folderPicker.disabled = !crossOriginIsolated;

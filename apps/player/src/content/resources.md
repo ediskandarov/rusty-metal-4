@@ -1,0 +1,1 @@
+Compatible means the resource passes its checks. Warnings do not block startup; uncompatible resources do. TIM artwork and music may change. MR archives are checked for structure and decompression; MAIN.MR also checks resource references. Other formats without a dedicated validator use known supported content; unverified content gets a warning.

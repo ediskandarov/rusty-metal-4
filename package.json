@@ -12,8 +12,8 @@
     "match": "bun tools/network/run.ts",
     "server": "bun tools/network/server.ts",
     "test": "bun test tests/unit",
-    "fmt": "bun fmt --no-script tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml",
-    "fmt:check": "bun fmt --no-script --check tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml",
+    "fmt": "bun fmt --no-script tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml && bun tools/web/format.ts",
+    "fmt:check": "bun fmt --no-script --check tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml && bun tools/web/format.ts --check",
     "lint": "bun lint --no-script tools apps packages tests",
     "typecheck": "tsc --noEmit && bun run --filter \"@tm4/*\" typecheck",
     "test:pages": "bun tests/browser/check_pages.cjs",
@@ -29,11 +29,15 @@
     "server:site": "bun tools/network/serve.ts"
   },
   "devDependencies": {
+    "@astrojs/check": "0.9.12",
     "@tsconfig/bun": "^1.0.11",
     "@types/bun": "^1.4.4",
+    "astro": "7.4.11",
     "coi-serviceworker": "0.1.7",
     "playwright": "1.56.1",
-    "typescript": "^7.0.2",
+    "prettier": "3.10.1",
+    "prettier-plugin-astro": "1.1.2",
+    "typescript": "6.0.3",
     "wrangler": "^4.160.1"
   },
   "workspaces": [

@@ -4,9 +4,10 @@ Run `bun install --frozen-lockfile` once at the repository root. The root comman
 (`build`, `build:dev`, `build:diagnostic`, `dev`, `match`, `test`, `fmt`, `lint`
 and `typecheck`) cover the workspaces together.
 
-- `apps/player` owns the standalone player's HTML, styles, startup flow, UI and mod persistence.
-  Its `build.ts` bundles the app; `tools/build.js` coordinates CMake, the player and Cargo.
-- `apps/server` owns the native server's web launcher and private resource setup UI.
+- `apps/player` owns the player's Astro pages, UI components, Markdown help, styles
+  and browser TypeScript. Its `build.ts` builds the static frontend; `tools/build.js`
+  coordinates it with CMake and Cargo.
+- `apps/server` owns the Astro server launcher, private resource setup UI and access page.
   It reuses the disc loader and bundles the existing player under `/play/`.
 - `@tm4/resources` provides disc/image loading, compatibility checks and car mod
   formats/installers to both the player and host tools. Its `loader`, `compatibility`
@@ -26,6 +27,16 @@ The single root lockfile also owns tooling dependencies. C/Wasm remains on CMake
 and Rust remains on Cargo. Public site URLs and output directories are unchanged.
 After a full build, `bun run build:player --mode dev` (or `release`/`diagnostic`)
 rebuilds just the player against existing runtime artifacts in `build/<mode>/site`.
+
+`tools/web/build.ts` builds Astro into a separate intermediate directory before
+publishing the generated HTML/CSS/JavaScript alongside the C/Rust artifacts.
+Asset links are relative so the same player works at the root, under `/play/`,
+and in a Pages repository subpath. Text lives in each app's `src/content/*.md`;
+forms and interactive structure live in `src/components/` and `src/pages/`.
+
+`typecheck` checks TypeScript and Astro templates. TypeScript uses the version
+supported by Astro's checker. Bun formats the usual sources; `tools/web/format.ts`
+formats Astro through its Prettier plugin using the same `bunfig.toml` settings.
 
 For the native web launcher, run `bun run build:server --mode dev` after a matching
 full build, then set `TM4_ADMIN_SECRET` to a private startup secret of at least 24

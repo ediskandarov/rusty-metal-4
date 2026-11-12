@@ -3,6 +3,7 @@ import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer, type PlayerMode } from "../player/build.ts";
 
 const root = resolve(import.meta.dir, "../..");
@@ -52,16 +53,7 @@ export async function buildServer(mode: PlayerMode) {
   );
   // The hosted player always uses the local folder picker, including development builds.
   await buildPlayer({ mode: "release", site: player });
-  const result = await Bun.build({
-    entrypoints: [join(import.meta.dir, "src/main.ts")],
-    outdir: site,
-    naming: "server.js",
-    target: "browser",
-    minify: mode !== "diagnostic",
-  });
-  if (!result.success) throw new AggregateError(result.logs, "Server launcher bundle failed");
-  await cp(join(import.meta.dir, "index.html"), join(site, "index.html"));
-  await cp(join(import.meta.dir, "style.css"), join(site, "style.css"));
+  await buildSite("server", mode, site);
   await mkdir(join(site, "licenses"), { recursive: true });
   for (const [name, path] of [
     ["rustymetal4", "LICENSE"],

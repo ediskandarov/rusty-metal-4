@@ -49,18 +49,30 @@ export async function hasSession(
   return crypto.subtle.verify("HMAC", await key(secret), signature, encoder.encode(match[1]));
 }
 
-export function accessPage(message = "Enter the test access code.", status = 200): Response {
-  return new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Rusty Metal 4 test server</title><style>body{background:#111820;color:#eee;font:18px system-ui;max-width:30rem;margin:12vh auto;padding:1rem}input,button{font:inherit;padding:.7rem;margin:.6rem 0;width:100%;box-sizing:border-box}button{cursor:pointer}</style><h1>Rusty Metal 4</h1><p>${message}</p><form method="post" action="/_access"><label>Access code<input name="code" type="password" required autocomplete="current-password" maxlength="256"></label><button>Open server</button></form></html>`,
-    {
-      status,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-        "Content-Security-Policy":
-          "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
-        "X-Content-Type-Options": "nosniff",
-      },
+export async function accessPage(
+  assets: { fetch(request: Request): Promise<Response> },
+  request: Request,
+  invalid = false,
+): Promise<Response> {
+  const page = await assets.fetch(new Request(new URL("/access/", request.url)));
+  if (!page.ok) return new Response("Access page unavailable", { status: 503 });
+  const rendered = invalid
+    ? new HTMLRewriter()
+        .on("#access-error", {
+          element(element) {
+            element.removeAttribute("hidden");
+          },
+        })
+        .transform(page)
+    : page;
+  return new Response(rendered.body, {
+    status: invalid ? 401 : 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Security-Policy":
+        "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+      "X-Content-Type-Options": "nosniff",
     },
-  );
+  });
 }

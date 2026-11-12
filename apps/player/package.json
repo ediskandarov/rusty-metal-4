@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "bun build.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "bun --bun astro check"
   },
   "dependencies": {
     "@tm4/game-client": "workspace:*",

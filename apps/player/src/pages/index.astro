@@ -1,0 +1,26 @@
+---
+import Page from "../layouts/Page.astro";
+import Startup from "../components/Startup.astro";
+import GameStage from "../components/GameStage.astro";
+import Rendering from "../components/Rendering.astro";
+import Controls from "../components/Controls.astro";
+import Cheats from "../components/Cheats.astro";
+import Resources from "../components/Resources.astro";
+import Mods from "../components/Mods.astro";
+---
+
+<Page>
+  <Startup />
+  <GameStage />
+  <div id="video-controls" hidden>
+    <Rendering />
+    <Controls />
+    <Cheats />
+    <Resources />
+    <Mods />
+  </div>
+  <div id="mod-drop-hint" role="status" hidden></div>
+</Page>
+<script>
+  import "../main.ts";
+</script>

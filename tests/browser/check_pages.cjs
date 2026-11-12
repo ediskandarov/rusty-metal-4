@@ -8,7 +8,6 @@ const { chromium } = require("playwright");
   const site = resolve("build/release/site");
   const allowed = new Set([
     "index.html",
-    "web.js",
     "tm4_web.js",
     "tm4_web.wasm",
     "coi-serviceworker.js",
@@ -24,7 +23,7 @@ const { chromium } = require("playwright");
     if (stat.isDirectory()) continue;
     assert(stat.isFile(), `Only regular files can be published: ${path}`);
     assert(
-      allowed.has(path) || /^styles\/[\w-]+\.css$/.test(path),
+      allowed.has(path) || /^_astro\/[\w.-]+\.(?:css|js)$/.test(path),
       `Unexpected file in the public site: ${path}`,
     );
   }

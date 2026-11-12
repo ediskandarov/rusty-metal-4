@@ -1,0 +1,16 @@
+---
+import { Content as Help } from "../content/mods.md";
+---
+
+<details id="mods">
+  <summary>Mods</summary>
+  <div class="settings-panel" id="mod-panel">
+    <Help />
+    <input id="mod-files" type="file" accept=".tm4mod" multiple aria-label="Add mod packages" />
+    <ul id="mod-list" class="mod-list"></ul>
+    <p id="mod-status" role="status"></p>
+    <button id="mod-restart" type="button" hidden>
+      Restart with selected mods
+    </button>
+  </div>
+</details>

@@ -20,6 +20,17 @@ const { readyInLobby } = require("./network_lobby.cjs");
   context.setDefaultTimeout(120000);
   let authenticated = false;
   try {
+    const gate = await context.request.get(url);
+    assert.equal(gate.status(), 200);
+    assert((await gate.text()).includes('name="code"'));
+    const rejected = await context.request.post(new URL("/_access", url).href, {
+      headers: { Origin: new URL(url).origin },
+      form: { code: crypto.randomUUID() },
+      maxRedirects: 0,
+    });
+    assert.equal(rejected.status(), 401);
+    const alert = /<p\b[^>]*id="access-error"[^>]*>/.exec(await rejected.text())?.[0];
+    assert(alert && !alert.includes("hidden"));
     const login = await context.request.post(new URL("/_access", url).href, {
       headers: { Origin: new URL(url).origin },
       form: { code },

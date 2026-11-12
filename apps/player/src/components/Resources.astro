@@ -1,0 +1,28 @@
+---
+import { Content as Help } from "../content/resources.md";
+---
+
+<details id="resources" hidden>
+  <summary>Resources</summary>
+  <aside id="resource-panel" class="settings-panel" aria-label="Disc resources">
+    <p id="resource-summary" role="status"></p>
+    <progress id="resource-progress" aria-label="Resource checks"></progress>
+    <Help />
+    <p id="resource-notices"></p>
+    <input
+      id="resource-search"
+      type="search"
+      placeholder="Find a resource…"
+      aria-label="Find a resource"
+    />
+    <div id="resource-filters">
+      <label>
+        <input id="resource-issues" type="checkbox" /> Warnings / errors only
+      </label>
+      <button id="resource-check" type="button" disabled>
+        Pause checks
+      </button>
+    </div>
+    <div id="resource-list"></div>
+  </aside>
+</details>
