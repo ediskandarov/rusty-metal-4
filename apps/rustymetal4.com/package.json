@@ -3,8 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "bun build.ts",
+    "dev": "bun build.ts && wrangler dev --local --port 8787 --persist-to ../../build/rustymetal4.com-state",
     "deploy": "bun ../../tools/web/deploy.ts",
     "types": "wrangler types",
-    "typecheck": "wrangler types && tsc --noEmit"
+    "typecheck": "wrangler types && tsc --noEmit -p src/worker/tsconfig.json && bun --bun astro check"
   }
 }

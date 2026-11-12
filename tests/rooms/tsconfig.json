@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "types": ["bun"], "lib": ["ESNext"], "skipLibCheck": true },
+  "include": ["*.ts", "../../apps/rustymetal4.com/worker-configuration.d.ts"]
+}

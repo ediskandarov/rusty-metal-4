@@ -92,7 +92,7 @@ An uncatchable process kill may leave that private temporary directory behind.
 This first slice preserves the existing one-match session: the configured 2–8
 slots fill, the roster locks, and eligible participants can reconnect. Status
 shows completion or failure; restart the process for the next match. Returning
-results to a reusable lobby and map rotation are follow-up work. The Cloudflare test deployment below supplies TLS and admission separately.
+results to a reusable lobby and map rotation are follow-up work. The rustymetal4.com website below provides the separate public room feature.
 
 With the server bundle and native debug binary built, `bun run test:server`
 checks the empty setup state, HTTP isolation, administrator authentication,
@@ -102,35 +102,49 @@ players reaching native match ticks without uploading player files. Rust unit
 tests cover atomic upload publication, index validation, private storage and
 the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
-## Cloudflare deployment
+## rustymetal4.com website
 
-`apps/rustymetal4.com` fronts one named container with HTTPS and WebSocket on the same
-origin. The custom domain is `rustymetal4.com`; the existing Worker name and
-workers.dev address remain unchanged, retaining its secrets and Durable Object.
+`apps/rustymetal4.com` owns the public Astro website and Worker. It is separate
+from the native launcher in `apps/server` and standalone player in `apps/player`.
+Rooms gather players and choose settings; ready/start and match integration are
+future work. No disc resources or simulation container are needed for room use.
 
-After `bun install --frozen-lockfile`, load the Emscripten environment and use
-the pinned Rust toolchain. `bun run deploy:prepare` builds the release and checks
-static hosting in Chromium without publishing. `bun run deploy` performs the same
-steps, then publishes through Wrangler; Docker must be running and Wrangler
-authenticated. Existing Worker secrets `TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET`
-are reused. Set them through Wrangler when deploying to a new account.
-GitHub Actions runs tests only. Deploy between matches while this is a single server.
+Run `bun run dev:rustymetal4.com` and open [localhost:8787](http://localhost:8787).
+This builds only the frontend and runs Wrangler locally, persisting room state
+in ignored `build/rustymetal4.com-state/`. The configured `dev.enable_containers: false`
+disables local container building; Docker, game builds, secrets and Cloudflare
+authentication are unnecessary for this workflow. Enable that development setting
+only when working on the retained container infrastructure.
 
-Worker Assets serves the separate frontend without starting the container.
-Only authenticated host setup starts a sleeping server; status polling does not.
-Docker cross-compiles a static Linux x64 server into `scratch`, running as UID 65532
-with writable `/tmp`. The image contains no website, shell or disc resources.
-The image build precompiles its trusted simulation with the same pinned Wasmtime
-and baseline CPU target used at runtime. Cranelift remains available for Wasm mods.
-`TM4_SIMULATION_PRECOMPILED` accepts only deployment-owned native cache files,
-never uploads. Wasm and frontend updates do not invalidate the Rust compilation layer.
+- `bun run build:rustymetal4.com`: frontend only, into `build/release/rustymetal4.com-site`.
+- `bun test tests/unit/room-state.test.ts`: validation and state transitions.
+- `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
+  admission, creation retries, permissions, reconnect/hibernation, host succession,
+  directory outages and complete empty-room cleanup. Allow about 90 seconds.
+- `bun run test:rooms:browser`: builds the frontend and checks two browser
+  identities, reload/tabs, live updates, leave/cleanup, mobile layout and initial
+  session/snapshot recovery. Uses system Chrome on macOS; set `TM4_CHROME` elsewhere.
+  Screenshots are written under `build/room-tests/`.
+- Optional: `bun tools/web/check-room-catalog.ts /path/to/DATA/MAIN.MR` verifies
+  map labels against the native registry without adding private inputs to CI.
 
-The access code admits test players; the separate administrator secret authorizes
-resource upload and match setup. Enter each in the browser when prompted. Local
-secret files belong in ignored `.local/`. The container uses ¼ vCPU and 256 MiB,
-with a five-minute inactivity timeout. An active match keeps it alive; idle launcher polling does not. Sleep discards uploads and the match; the host must prepare it again.
+The existing Worker name `tm4-rewired-test`, domain `rustymetal4.com`, `TestServer`
+Durable Object declaration, `SERVER` binding, container image and health dataset
+are preserved. The same declarative `exports` map adds SQLite `Room` and
+`RoomDirectory` classes; no legacy migration or namespace retirement is introduced.
+The website Worker replaces the old access-code/admin UI and its API.
+The retained container controller is available to bound Worker code for subsequent
+match integration, and keeps its existing administrator secret and sizing.
 
-An authenticated `POST /_server/stop` with the administrator Bearer token stops
-the container. Preparing resources starts a fresh server. This is one private test lobby, not the public lobby directory.
+Deployment still prepares the existing release/server bundle and container image:
+after installing dependencies, load the Emscripten environment and pinned Rust
+toolchain. `bun run deploy:prepare` performs the release build, Pages verification
+and focused room checks without publishing. `bun run deploy` then uses Wrangler;
+Docker must be running and Wrangler authenticated. GitHub Actions runs tests only.
 
-Application health export and Analytics Engine queries: [server observability](server-observability.md).
+The retained Dockerfile builds a static Linux x64 server into `scratch`, running
+as UID 65532 with private temporary storage. It includes no website or disc files.
+Trusted simulation precompilation and native resource setup remain unchanged.
+Server health export: [server observability](server-observability.md).
+The agreed target lifecycle, resource policy and transport boundary remain in
+[Cloudflare architecture](cloudflare-architecture.md).

@@ -6,7 +6,7 @@ import { build } from "astro";
 import { root } from "../common.js";
 
 export async function buildSite(
-  app: "player" | "server",
+  app: "player" | "server" | "rustymetal4.com",
   mode: "release" | "dev" | "diagnostic",
   site: string,
 ) {
@@ -17,7 +17,7 @@ export async function buildSite(
     outDir: output,
     cacheDir: join(root, "build", mode, "astro-cache", app),
     output: "static",
-    build: { assetsPrefix: "." },
+    build: { assetsPrefix: app === "rustymetal4.com" ? undefined : "." },
     vite: {
       define: { TM4_DEV: JSON.stringify(mode !== "release") },
       build: { target: "esnext", sourcemap: mode === "diagnostic", minify: mode !== "diagnostic" },

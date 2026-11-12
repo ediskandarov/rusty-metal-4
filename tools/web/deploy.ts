@@ -19,6 +19,10 @@ if (values.help) {
   if (!values["prepare-only"]) await $`docker info`.quiet();
   await $`bun run build`.cwd(root);
   await $`bun run test:pages`.cwd(root);
+  await $`bun run build:rustymetal4.com`.cwd(root);
+  await $`bun test tests/unit/room-state.test.ts`.cwd(root);
+  await $`bun run test:rooms`.cwd(root);
+  await $`bun run test:rooms:browser`.cwd(root);
   if (values["prepare-only"]) {
     console.log("Release prepared and checked. Nothing published.");
   } else {

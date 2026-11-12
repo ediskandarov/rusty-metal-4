@@ -8,28 +8,28 @@ Standalone GitHub Pages play and the local Rust server remain supported.
 flowchart TD
     Browser["Browser: project site + game"] --> Static["Shared static assets"]
     Browser --> Worker["Worker: API, authentication, routing"]
-    Worker --> Directory["Directory Durable Object<br/>Public lobby summaries"]
-    Worker --> Lobby["Lobby Durable Object<br/>One per lobby ID"]
-    Lobby --> State["Durable storage<br/>Members, settings, phase, deadlines"]
-    Lobby --> Container["On-demand container<br/>One active match per lobby"]
+    Worker --> Directory["Directory Durable Object<br/>Public room summaries"]
+    Worker --> Room["Room Durable Object<br/>One per room ID"]
+    Room --> State["Durable storage<br/>Members, settings, phase, deadlines"]
+    Room --> Container["On-demand container<br/>One active match per room"]
     Container --> Rust["Rust + Lightyear + Wasmtime<br/>Authoritative 30 Hz simulation"]
 ```
 
 | Owner | Authority |
 | --- | --- |
 | Directory | Discoverability; never grants a player slot |
-| Lobby | Membership, host, readiness, settings, admission, container lifecycle |
+| Room | Membership, host, readiness, settings, admission, container lifecycle |
 | Rust | Match simulation, accepted input, rollback protocol, reconnect state, results |
 | Cloudflare | Placement, object activation/hibernation and container execution |
 
 The directory is an expiring index, not a second source of membership state.
-Joining always checks the lobby. Catalog reads never start a container.
+Joining always checks the room. Catalog reads never start a container.
 
-## Lobby lifecycle
+## Room lifecycle
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Waiting: Create lobby
+    [*] --> Waiting: Create room
     Waiting --> Preparing: Host starts / reserve capacity and freeze roster
     Preparing --> Playing: Resources validated and clients ready
     Preparing --> Waiting: Failure or timeout / stop container and unlock roster
@@ -38,20 +38,20 @@ stateDiagram-v2
     Waiting --> EmptyGrace: Last member leaves
     Preparing --> EmptyGrace: Last member leaves / cancel preparation
     Playing --> EmptyGrace: All participants disconnect
-    EmptyGrace --> Waiting: Return to an unstarted lobby
+    EmptyGrace --> Waiting: Return to an unstarted room
     EmptyGrace --> Playing: Match participant reconnects before deadline
     EmptyGrace --> Closing: Deadline expires
     Closing --> [*]: Stop container, remove listing, clear stored state
 ```
 
-- Waiting: no container; lobby WebSockets use hibernation.
+- Waiting: no container; room WebSockets use hibernation.
 - Playing: roster is fixed; only existing participants may reconnect.
 - Empty-match grace retains the running match for reconnects. Proposed grace:
   120 seconds, configurable. Its expiry ends the match, not merely its visibility.
-- A lobby alarm checks persisted deadlines and current membership before cleanup.
+- A room alarm checks persisted deadlines and current membership before cleanup.
   Returning players invalidate the old deadline.
 - Host departure in Waiting transfers ownership to a remaining member.
-- Match results return remaining members to the same lobby; a new match gets a
+- Match results return remaining members to the same room; a new match gets a
   new session ID and fresh container process.
 
 ## Starting a match
@@ -59,7 +59,7 @@ stateDiagram-v2
 ```mermaid
 sequenceDiagram
     participant H as Host browser
-    participant L as Lobby DO
+    participant L as Room DO
     participant C as Rust container
     participant P as Player browsers
     H->>L: Start match
@@ -75,7 +75,7 @@ sequenceDiagram
     C-->>P: Lightyear start synchronization
     Note over P,C: Gameplay remains in Lightyear, DO does not interpret ticks
     C-->>L: Match finished and results
-    L-->>P: Return to lobby
+    L-->>P: Return to room
     L->>C: Stop and release resources
 ```
 
@@ -90,7 +90,7 @@ upload; persistent resource caching is outside this first version.
 ```mermaid
 sequenceDiagram
     participant P as Players
-    participant L as Lobby DO
+    participant L as Room DO
     participant A as Durable alarm
     participant C as Container
     participant D as Directory
@@ -103,7 +103,7 @@ sequenceDiagram
         L->>L: Mark closing, reject new admission
         L->>C: Graceful stop, then bounded forced stop if necessary
         L->>D: Remove listing
-        L->>L: Clear lobby data and alarm
+        L->>L: Clear room data and alarm
     else Member returned or session changed
         L->>L: Ignore obsolete cleanup
     end
@@ -118,13 +118,13 @@ membership policy: status polling must not keep an empty match alive indefinitel
 
 - Candidate container: **0.25 vCPU, 256 MiB RAM, 2 GB disk**. Validate on Cloudflare;
   increase CPU if the eight-player workload cannot sustain 30 TPS.
-- Bound active containers globally, lobby creation per user, preparation time,
+- Bound active containers globally, room creation per user, preparation time,
   upload size and empty grace. Reserve capacity before startup; release on every
   failure/exit path. Connected but unready users must not hold preparation forever.
-- Keep simulation traffic out of durable storage. Persist lobby transitions, not
+- Keep simulation traffic out of durable storage. Persist room transitions, not
   per-tick input or positions. Enable hibernation only where eligible; active game
   proxy connections may keep the object awake.
-- Container files are temporary. Durable lobby metadata survives a restart;
+- Container files are temporary. Durable room metadata survives a restart;
   running match recovery after container loss is not promised in this version.
 - Resource measurements and sizing limitations: [server capacity](server-capacity.md).
 
@@ -135,20 +135,37 @@ Lightyear 0.30.1 supports WebTransport, but the Worker/Durable Object ingress pa
 currently does not support incoming WebTransport sessions (checked 2026-11-12).
 Enabling the Lightyear feature alone does not remove this hosting limitation.
 
-To use WebTransport, keep the site and lobby on Cloudflare and host match servers
+To use WebTransport, keep the site and room on Cloudflare and host match servers
 on infrastructure with public UDP/QUIC ingress. Browsers connect directly to those
-servers; the lobby returns their endpoints and scoped admission credentials.
+servers; the room returns their endpoints and scoped admission credentials.
 
 References: [Lightyear WebTransport](https://docs.rs/lightyear/0.30.1/lightyear/webtransport/server/index.html),
 [Cloudflare support discussion](https://github.com/cloudflare/workerd/discussions/6454).
 
 ## Implementation boundary
 
-The private test deployment serves its website through Worker Assets and proxies
-API/WebSocket traffic to one on-demand container. Rust handles setup and one match
-per process. Public directory, per-lobby admission and match completion transitions
-remain to be implemented; they must not duplicate Rust's editable roster.
-Local Bun hosting uses the same frontend with the API served by a separate Rust process.
+The implemented slice provides the public room directory, creation/joining,
+host settings, participants and invite links. Creation asks only for the player
+and room names; the server supplies Deathmatch, Construction Yard and eight slots.
+The host can edit those settings inside the room while others join. One room
+Durable Object owns admission and permissions; the directory contains only expiring public summaries.
+A private browser credential restores membership across reloads and tabs without
+appearing in listings or invite URLs.
+
+Room sockets hibernate. Persisted disconnect and empty deadlines bound reconnect
+and cleanup; host departure transfers ownership. An expired empty room first
+removes its directory summary, then closes sockets, calls `deleteAll()` and clears
+memory. Directory-removal failures retain a future retry deadline; stale summaries
+also expire independently. Explicit creation tickets expire before empty cleanup,
+so old requests cannot recreate deleted rooms without leaving tombstones.
+
+Ready/start controls, resource upload and the Preparing/Playing transitions above
+remain future work. Room operations do not address a simulation container.
+The existing `TestServer` Durable Object class, namespace declaration, container
+binding, Docker build and health collector are retained for server integration;
+the Worker does not expose the replaced single-test-server API.
+No existing namespace is retired by this slice. Local Bun hosting continues to
+serve `apps/server` with the API provided by a separate Rust process.
 
 Cloudflare references: [container lifecycle](https://developers.cloudflare.com/containers/concepts/architecture/),
 [WebSocket hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).

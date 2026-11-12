@@ -1,5 +1,5 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "types": [], "lib": ["ESNext"], "allowJs": false },
-  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+  "extends": ["../../tsconfig.base.json", "astro/tsconfigs/strict"],
+  "compilerOptions": { "lib": ["ESNext", "DOM", "DOM.Iterable"], "types": [], "allowJs": false },
+  "include": ["src/client.ts", "src/protocol.ts", "src/**/*.astro", ".astro/types.d.ts"]
 }

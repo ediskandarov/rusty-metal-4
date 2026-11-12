@@ -1,13 +1,9 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { accessPage, hasSession, sameSecret, sessionCookie } from "./access.ts";
-import { frontend, isolated } from "./assets.ts";
-import { exportHealth, type HealthSnapshot, parseHealth } from "./telemetry.ts";
+import { isolated } from "../assets.ts";
+import { exportHealth, type HealthSnapshot, parseHealth } from "../telemetry.ts";
 
-interface Env {
-  SERVER: DurableObjectNamespace<TestServer>;
-  ASSETS: Fetcher;
-  TEST_ACCESS_CODE: string;
+export interface ServerEnv {
   TM4_ADMIN_SECRET: string;
   HEALTH: AnalyticsEngineDataset;
   CONTAINER_VCPU: string;
@@ -18,13 +14,13 @@ const httpPort = 8120;
 const matchPort = 8122;
 const metricsIntervalMs = 10_000;
 
-export class TestServer extends DurableObject<Env> {
+export class TestServer extends DurableObject<ServerEnv> {
   private starting: Promise<void> | undefined;
   private previousHealth: HealthSnapshot | undefined;
   private lastExternalActivity = Date.now();
   private emptySince: number | undefined;
 
-  constructor(ctx: DurableObjectState, env: Env) {
+  constructor(ctx: DurableObjectState, env: ServerEnv) {
     super(ctx, env);
     if (ctx.container?.running) {
       void ctx.blockConcurrencyWhile(async () => {
@@ -210,76 +206,3 @@ export class TestServer extends DurableObject<Env> {
     return this.ctx.container!.getTcpPort(match ? matchPort : httpPort).fetch(forwarded);
   }
 }
-
-export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    if (!env.TEST_ACCESS_CODE || !env.TM4_ADMIN_SECRET)
-      return new Response("Server access is not configured", { status: 503 });
-    const url = new URL(request.url);
-    if (url.pathname === "/_access" && request.method === "POST") {
-      if (request.headers.get("origin") !== url.origin)
-        return new Response("Invalid origin", { status: 403 });
-      const length = Number(request.headers.get("content-length"));
-      if (!length || length > 1024) return new Response("Invalid request size", { status: 413 });
-      const code = new URLSearchParams(await request.text()).get("code") ?? "";
-      if (!(await sameSecret(code, env.TEST_ACCESS_CODE)))
-        return accessPage(env.ASSETS, request, true);
-      return new Response(null, {
-        status: 303,
-        headers: {
-          Location: "/",
-          "Set-Cookie": await sessionCookie(env.TEST_ACCESS_CODE),
-          "Cache-Control": "no-store",
-        },
-      });
-    }
-    if (!(await hasSession(request, env.TEST_ACCESS_CODE))) {
-      return request.method === "GET" && request.headers.get("upgrade") !== "websocket"
-        ? accessPage(env.ASSETS, request)
-        : new Response("Test access code required", { status: 401 });
-    }
-    // Never derive the object name from user input: this deployment owns one container.
-    if (url.pathname === "/match" && request.headers.get("upgrade")?.toLowerCase() !== "websocket")
-      return new Response("WebSocket required", { status: 426 });
-    const origin = request.headers.get("origin");
-    if (origin && origin !== url.origin) return new Response("Invalid origin", { status: 403 });
-    if (
-      url.pathname.startsWith("/_server/") &&
-      (request.method !== "POST" ||
-        !(await sameSecret(
-          request.headers.get("authorization") ?? "",
-          `Bearer ${env.TM4_ADMIN_SECRET}`,
-        )))
-    ) {
-      return new Response("Administrator secret required", { status: 401 });
-    }
-    if (
-      url.pathname.startsWith("/api/") &&
-      url.pathname !== "/api/status" &&
-      !(await sameSecret(
-        request.headers.get("authorization") ?? "",
-        `Bearer ${env.TM4_ADMIN_SECRET}`,
-      ))
-    ) {
-      return new Response("Administrator secret required", { status: 401 });
-    }
-    if (
-      !url.pathname.startsWith("/api/") &&
-      !url.pathname.startsWith("/_server/") &&
-      url.pathname !== "/match"
-    )
-      return frontend(env.ASSETS, request);
-    try {
-      return await env.SERVER.getByName("test").fetch(request);
-    } catch (error) {
-      console.error(
-        "Test server request failed",
-        error instanceof Error ? error.message : "Unknown error",
-      );
-      return new Response("The test server is starting or unavailable. Try again shortly.", {
-        status: 503,
-        headers: { "Retry-After": "5", "Cache-Control": "no-store" },
-      });
-    }
-  },
-} satisfies ExportedHandler<Env>;

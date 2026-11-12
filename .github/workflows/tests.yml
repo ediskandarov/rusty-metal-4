@@ -27,9 +27,13 @@ jobs:
       - name: Install locked workspace dependencies
         run: bun install --frozen-lockfile
       - run: bun run fmt:check
-      - run: bun run lint
       - run: bun run typecheck
+      - run: bun run lint
       - run: bun run test
+      - run: bun run build:rustymetal4.com
+      - run: bun run test:rooms
+      - name: Check room browsers without game files
+        run: TM4_CHROME="$(command -v google-chrome)" bun run test:rooms:browser
 
   build:
     needs: checks
