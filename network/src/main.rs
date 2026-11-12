@@ -1,4 +1,5 @@
 mod assets;
+mod health;
 mod journal;
 mod resume;
 mod simulator;
@@ -205,6 +206,8 @@ struct Match {
     journal_sealed: bool,
     prediction: AcceptedTimeline,
     next_resume: u32,
+    health: health::Shared,
+    tick_schedule: Option<Instant>,
 }
 
 fn send(
@@ -257,7 +260,13 @@ impl Match {
                         sent: 0,
                         acknowledged: 0,
                     });
-                    match simulator.snapshot() {
+                    let capture = simulator.snapshot();
+                    self.health.lock().unwrap().event(if capture.is_ok() {
+                        "tm4_checkpoint_capture_success_total"
+                    } else {
+                        "tm4_checkpoint_capture_errors_total"
+                    });
+                    match capture {
                         Ok(data) => {
                             let snapshot = attempt.requested.as_mut().unwrap();
                             snapshot.total = data.len();
@@ -376,6 +385,10 @@ impl Match {
         }
         self.journal_sealed = true;
         if let Err(error) = journal.finish(end) {
+            self.health
+                .lock()
+                .unwrap()
+                .event("tm4_journal_write_errors_total");
             eprintln!("Journal finalization failed: {error}");
             return false;
         }
@@ -393,6 +406,10 @@ impl Match {
         message: &str,
     ) {
         self.ended = true;
+        self.health
+            .lock()
+            .unwrap()
+            .event("tm4_match_errors_total");
         self.finish_journal(journal::End::Aborted);
         let error = Message::Error {
             message: message.into(),
@@ -416,6 +433,10 @@ impl Match {
             .expect("stepping requires a journal")
             .append(tick, &inputs, &state);
         if let Err(error) = result {
+            self.health
+                .lock()
+                .unwrap()
+                .event("tm4_journal_write_errors_total");
             eprintln!("Appending match journal failed: {error}");
             self.journal_sealed = true;
             self.fail(links, "The match journal could not be written.");
@@ -592,6 +613,10 @@ impl Match {
                 if let (Some(slot), Some(session)) = (requested, session)
                     && self.players[slot].entity.is_none()
                 {
+                    self.health
+                        .lock()
+                        .unwrap()
+                        .event("tm4_reconnections_accepted_total");
                     self.next_resume = self.next_resume.wrapping_add(1);
                     let player = &mut self.players[slot];
                     player.entity = Some(entity);
@@ -966,6 +991,10 @@ fn update(
                 game.journal = Some(journal);
             }
             Err(error) => {
+                game.health
+                    .lock()
+                    .unwrap()
+                    .event("tm4_journal_write_errors_total");
                 eprintln!("Opening match journal failed: {error}");
                 game.fail(&mut links, "The match journal could not be opened.");
                 return;
@@ -1023,6 +1052,9 @@ fn update(
         return;
     }
     if lag_ticks >= 0 {
+        let step_started = Instant::now();
+        let scheduled = *game.tick_schedule.get_or_insert(step_started);
+        let lateness = step_started.saturating_duration_since(scheduled);
         let tick = game.tick;
         let inputs: Vec<_> = game
             .players
@@ -1040,7 +1072,20 @@ fn update(
         }
         match simulator.step(tick, &inputs) {
             Ok(state) => {
+                if state.unsupported.is_some() {
+                    game.health
+                        .lock()
+                        .unwrap()
+                        .event("tm4_simulation_unsupported_total");
+                }
                 game.completed(&mut links, tick, inputs, state, now);
+                if game.tick == tick + 1 {
+                    game.health
+                        .lock()
+                        .unwrap()
+                        .tick(step_started.elapsed(), lateness);
+                    game.tick_schedule = Some(scheduled + STEP);
+                }
                 if game.ended
                     && let Err(error) = simulator.finish()
                 {
@@ -1048,6 +1093,10 @@ fn update(
                 }
             }
             Err(error) => {
+                game.health
+                    .lock()
+                    .unwrap()
+                    .event("tm4_simulation_errors_total");
                 eprintln!("Embedded simulator tick {tick} failed: {error:#}");
                 game.fail(
                     &mut links,
@@ -1120,6 +1169,7 @@ fn accept_native_inputs(
         return;
     }
     let earliest = game.tick;
+    let health = game.health.clone();
     for (identity, buffer) in &controllers {
         let (Some(mut tick), Some((last, _))) = (buffer.start_tick, buffer.get_last_with_tick())
         else {
@@ -1135,12 +1185,19 @@ fn accept_native_inputs(
                 if player.resume.is_none() && command.sequence > player.received_sequence {
                     player.received_sequence = command.sequence;
                     if command.epoch == 1 && player.receives_live() {
-                        let _ = player.history.enqueue(
+                        health.lock().unwrap().input(usize::from(identity.slot));
+                        let queued = player.history.enqueue(
                             earliest,
                             command.sequence,
                             command.tick,
                             command.input,
                         );
+                        if queued.is_err() {
+                            health
+                                .lock()
+                                .unwrap()
+                                .event("tm4_input_rejected_total");
+                        }
                     }
                 }
             }
@@ -1313,6 +1370,10 @@ fn run_match(
         journal_sealed: false,
         prediction: AcceptedTimeline::default(),
         next_resume: 0,
+        health: launcher
+            .map(|launcher| launcher.health.clone())
+            .unwrap_or_default(),
+        tick_schedule: None,
     });
     app.insert_non_send(simulator);
     app.add_systems(Update, update);
@@ -1362,6 +1423,16 @@ fn run_match(
                     .filter(|player| player.entity.is_some())
                     .count();
                 status.tick = game.tick;
+                let mut health = game.health.lock().unwrap();
+                for (slot, player) in game.players.iter().enumerate() {
+                    health.unacknowledged(
+                        slot,
+                        player
+                            .entity
+                            .and_then(|entity| app.world().get::<Admission>(entity))
+                            .map_or(0, |admission| admission.unacknowledged.len()),
+                    );
+                }
                 if game.ended {
                     if game
                         .last_state

@@ -112,3 +112,5 @@ it active. Sleep discards uploads and the match; the host must prepare it again.
 An authenticated `POST /_server/stop` with the administrator Bearer token stops
 the container. Close player/launcher tabs first; a subsequent request starts a
 fresh server. This is one private test lobby, not the public lobby directory.
+
+Application health export and Analytics Engine queries: [server observability](server-observability.md).

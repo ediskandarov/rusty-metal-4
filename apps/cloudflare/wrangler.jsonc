@@ -7,6 +7,7 @@
   "preview_urls": false,
   "vars": { "CONTAINER_VCPU": "0.25" },
   "observability": { "enabled": true },
+  "analytics_engine_datasets": [{ "binding": "HEALTH", "dataset": "tm4_server_health" }],
   "containers": [
     {
       "class_name": "TestServer",

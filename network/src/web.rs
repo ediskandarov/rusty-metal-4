@@ -94,6 +94,7 @@ pub struct Launcher {
     pub wasm: Simulation,
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
+    pub health: crate::health::Shared,
     requests: Receiver<SetupRequest>,
     _private: PrivateDirectory,
     http: Option<thread::JoinHandle<()>>,
@@ -167,6 +168,7 @@ impl Launcher {
             uploaded: 0,
             required: resources.len() + 1,
         }));
+        let health = crate::health::Shared::default();
         let (sender, requests) = mpsc::channel();
         let service = Arc::new(Service {
             site: site.clone(),
@@ -174,6 +176,7 @@ impl Launcher {
             secret,
             resources,
             status: status.clone(),
+            health: health.clone(),
             sender,
             mutation: Arc::new(AsyncMutex::new(())),
         });
@@ -184,6 +187,7 @@ impl Launcher {
             wasm,
             stopped,
             status,
+            health,
             requests,
             _private: private,
             http: Some(http),
@@ -267,6 +271,7 @@ struct Service {
     secret: String,
     resources: BTreeMap<String, Resource>,
     status: Arc<Mutex<Status>>,
+    health: crate::health::Shared,
     sender: Sender<SetupRequest>,
     mutation: Arc<AsyncMutex<()>>,
 }
@@ -301,6 +306,7 @@ fn require_setup(service: &Service) -> std::result::Result<(), (StatusCode, Stri
 }
 fn router(service: Arc<Service>) -> Router {
     let admin = Router::new()
+        .route("/api/metrics", get(metrics))
         .route("/api/resources", get(manifest))
         .route("/api/resources/{*path}", put(upload))
         .route("/api/prepare", post(prepare))
@@ -351,6 +357,16 @@ async fn authenticate(
 }
 async fn status(State(service): State<Arc<Service>>) -> Json<Status> {
     Json(service.status.lock().unwrap().clone())
+}
+async fn metrics(State(service): State<Arc<Service>>) -> Json<crate::health::Snapshot> {
+    let status = service.status.lock().unwrap().clone();
+    Json(
+        service
+            .health
+            .lock()
+            .unwrap()
+            .snapshot(&status.phase, status.connected),
+    )
 }
 async fn manifest(State(service): State<Arc<Service>>) -> Json<Vec<Resource>> {
     Json(service.resources.values().cloned().collect())
@@ -634,6 +650,7 @@ mod tests {
                 secret: "test-secret".into(),
                 resources: [(resource.id.clone(), resource)].into(),
                 status,
+                health: crate::health::Shared::default(),
                 sender,
                 mutation: Arc::new(AsyncMutex::new(())),
             });
@@ -1000,6 +1017,37 @@ mod tests {
         assert_eq!(to_bytes(response.into_body(), 64).await.unwrap().len(), 64);
     }
 
+    #[tokio::test]
+    async fn health_snapshot_is_read_only_and_requires_administrator_access() {
+        let fixture = Fixture::new();
+        let unauthenticated = router(fixture.service.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/metrics")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthenticated.status(), StatusCode::UNAUTHORIZED);
+        fixture
+            .service
+            .health
+            .lock()
+            .unwrap()
+            .tick(Duration::from_millis(4), Duration::ZERO);
+        let response = fixture.request("GET", "/api/metrics", Body::empty()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let snapshot: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(snapshot["schema"], 1);
+        assert_eq!(snapshot["phase"], "setup");
+        assert_eq!(snapshot["measurements"][0]["value"], 1.0);
+        assert!(fixture.requests.try_recv().is_err());
+    }
+
     #[test]
     fn shutdown_joins_http_before_removing_private_uploads() {
         let fixture = Fixture::new();
@@ -1020,6 +1068,7 @@ mod tests {
             wasm: Simulation::File(PathBuf::new()),
             stopped,
             status,
+            health: fixture.service.health.clone(),
             requests: fixture.requests,
             _private: PrivateDirectory(path.clone()),
             http: Some(http),

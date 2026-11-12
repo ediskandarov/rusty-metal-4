@@ -1,25 +1,38 @@
 import { DurableObject } from "cloudflare:workers";
 
 import { accessPage, hasSession, sameSecret, sessionCookie } from "./access.ts";
+import { exportHealth, type HealthSnapshot, parseHealth } from "./telemetry.ts";
 
 interface Env {
   SERVER: DurableObjectNamespace<TestServer>;
   TEST_ACCESS_CODE: string;
   TM4_ADMIN_SECRET: string;
+  HEALTH: AnalyticsEngineDataset;
   CONTAINER_VCPU: string;
 }
 
 const idleTimeoutMs = 5 * 60 * 1000;
 const httpPort = 8120;
 const matchPort = 8122;
+const metricsIntervalMs = 10_000;
 
 export class TestServer extends DurableObject<Env> {
   private starting: Promise<void> | undefined;
+  private previousHealth: HealthSnapshot | undefined;
+  private lastExternalActivity = Date.now();
+  private emptySince: number | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     if (ctx.container?.running) {
-      void ctx.blockConcurrencyWhile(() => ctx.container!.setInactivityTimeout(idleTimeoutMs));
+      void ctx.blockConcurrencyWhile(async () => {
+        this.lastExternalActivity =
+          (await ctx.storage.get<number>("lastExternalActivity")) ?? Date.now();
+        this.emptySince = await ctx.storage.get<number>("emptySince");
+        this.previousHealth = await ctx.storage.get<HealthSnapshot>("previousHealth");
+        await ctx.container!.setInactivityTimeout(idleTimeoutMs);
+        await this.scheduleMetrics();
+      });
     }
   }
 
@@ -46,7 +59,10 @@ export class TestServer extends DurableObject<Env> {
           .getTcpPort(httpPort)
           .fetch("http://container/api/status", { signal: AbortSignal.timeout(1000) });
         await response.body?.cancel();
-        if (response.ok) return;
+        if (response.ok) {
+          await this.scheduleMetrics();
+          return;
+        }
       } catch {
         // Only readiness probes are retried; uploads and game messages are never replayed.
       }
@@ -55,8 +71,86 @@ export class TestServer extends DurableObject<Env> {
     throw new Error("Test server did not become ready");
   }
 
+  private async scheduleMetrics(): Promise<void> {
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + metricsIntervalMs);
+    }
+  }
+
+  override async alarm(): Promise<void> {
+    const container = this.ctx.container!;
+    if (!container.running) {
+      this.previousHealth = undefined;
+      return;
+    }
+    try {
+      const response = await container.getTcpPort(httpPort).fetch("http://container/api/metrics", {
+        headers: { Authorization: `Bearer ${this.env.TM4_ADMIN_SECRET}` },
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!response.ok) throw new Error(`Health endpoint returned ${response.status}`);
+      const snapshot = parseHealth(await response.json());
+      exportHealth(
+        this.env.HEALTH,
+        this.ctx.id.toString(),
+        this.vcpu,
+        snapshot,
+        this.previousHealth,
+      );
+      this.previousHealth = snapshot;
+      await this.ctx.storage.put("previousHealth", snapshot);
+      this.env.HEALTH.writeDataPoint({
+        indexes: [this.ctx.id.toString()],
+        blobs: ["tm4_telemetry_scrape_success", "gauge"],
+        doubles: [1],
+      });
+      const connected =
+        snapshot.measurements.find((row) => row.name === "tm4_players_connected")?.value ??
+        0;
+      if (connected === 0 && this.emptySince === undefined) {
+        this.emptySince = Date.now();
+        await this.ctx.storage.put("emptySince", this.emptySince);
+      } else if (connected > 0 && this.emptySince !== undefined) {
+        this.emptySince = undefined;
+        await this.ctx.storage.delete("emptySince");
+      }
+      const remaining =
+        Math.max(this.lastExternalActivity, this.emptySince ?? 0) + idleTimeoutMs - Date.now();
+      // Monitoring must not keep an empty container alive indefinitely.
+      if (connected === 0) {
+        await container.setInactivityTimeout(Math.max(1, remaining));
+        if (remaining <= 0) return;
+      } else {
+        await container.setInactivityTimeout(idleTimeoutMs);
+      }
+    } catch (error) {
+      this.env.HEALTH.writeDataPoint({
+        indexes: [this.ctx.id.toString()],
+        blobs: ["tm4_telemetry_scrape_success", "gauge"],
+        doubles: [0],
+      });
+      console.error(
+        "Application health collection failed",
+        error instanceof Error ? error.message : "Unknown error",
+      );
+      if (
+        this.emptySince !== undefined &&
+        Date.now() - Math.max(this.lastExternalActivity, this.emptySince) >= idleTimeoutMs
+      ) {
+        // A monitoring failure must never actively terminate a match.
+        return;
+      }
+    }
+    if (container.running) await this.ctx.storage.setAlarm(Date.now() + metricsIntervalMs);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     if (new URL(request.url).pathname === "/_server/stop") {
+      await this.ctx.storage.deleteAlarm();
+      this.previousHealth = undefined;
+      this.emptySince = undefined;
+      await this.ctx.storage.delete("emptySince");
+      await this.ctx.storage.delete("previousHealth");
       if (this.ctx.container!.running) await this.ctx.container!.destroy();
       return new Response(null, { status: 204 });
     }
@@ -103,6 +197,8 @@ echo END
         headers: { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" },
       });
     }
+    this.lastExternalActivity = Date.now();
+    await this.ctx.storage.put("lastExternalActivity", this.lastExternalActivity);
     this.starting ??= this.ready().finally(() => {
       this.starting = undefined;
     });
