@@ -37,6 +37,8 @@ jobs:
 
   build:
     needs: checks
+    env:
+      CARGO_BUILD_BUILD_DIR: ${{ github.workspace }}/build/network-wasm
     # Forks never receive the private game deploy key.
     if: >-
       (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
@@ -110,6 +112,8 @@ jobs:
 
   server:
     needs: build
+    env:
+      CARGO_BUILD_BUILD_DIR: ${{ github.workspace }}/build/network-native
     strategy:
       fail-fast: false
       matrix:

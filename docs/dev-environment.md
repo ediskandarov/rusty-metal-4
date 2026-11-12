@@ -1,6 +1,18 @@
 # Development environment
 
-Run `bun install --frozen-lockfile` once at the repository root. The root commands
+Run `bun install --frozen-lockfile` once at the repository root.
+Its postinstall hook links `build/cargo-cache` to the repository shared
+`<git-common-dir>/rm4-cache/cargo`; `bun run setup:cache` repeats only that setup.
+Cargo dependencies and intermediates are shared; final binaries stay in each
+checkout. Cargo serializes shared builds. The pass-through workspace compiler
+wrapper gives each checkout its own crate cache key: without it Cargo can reuse
+another branch incorrectly. Do not override `RUSTC_WORKSPACE_WRAPPER` or symlink
+an entire build/target directory. Clean shared intermediates only when no checkout
+is compiling. CMake outputs remain local; Docker retains its BuildKit cache.
+CI uses a single checkout per job and overrides the intermediate directory to the
+existing platform-specific target directory retained by the Rust cache action.
+
+The root commands
 (`build`, `build:dev`, `build:diagnostic`, `dev`, `match`, `test`, `fmt`, `lint`
 and `typecheck`) cover the workspaces together.
 

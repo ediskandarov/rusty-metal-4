@@ -32,7 +32,10 @@
     "build:rustymetal4.com": "bun apps/rustymetal4.com/build.ts",
     "dev:rustymetal4.com": "bun run --cwd apps/rustymetal4.com dev",
     "test:rooms": "bun tests/rooms/integration.ts",
-    "test:rooms:browser": "bun run build:rustymetal4.com && bun tests/browser/check_rooms.cjs && bun tests/browser/check_room_recovery.cjs"
+    "test:rooms:browser": "bun run build:rustymetal4.com && bun tests/browser/check_rooms.cjs && bun tests/browser/check_room_recovery.cjs",
+    "setup:cache": "bun tools/cache/setup.ts",
+    "postinstall": "bun run setup:cache",
+    "test:cache": "bun tests/cache/shared-cargo.ts"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",

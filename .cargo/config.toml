@@ -1,0 +1,3 @@
+[build]
+build-dir = "build/cargo-cache"
+rustc-workspace-wrapper = "tools/cache/rustc.sh"
