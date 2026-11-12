@@ -102,12 +102,21 @@ players reaching native match ticks without uploading player files. Rust unit
 tests cover atomic upload publication, index validation, private storage and
 the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
-## Cloudflare test server
+## Cloudflare deployment
 
 `apps/rustymetal4.com` fronts one named container with HTTPS and WebSocket on the same
-origin. Build the release bundle with `bun run build`, set Worker secrets
-`TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET` with Wrangler, then run
-`bun run --cwd apps/rustymetal4.com deploy`. Worker Assets serves the separate frontend without starting the container.
+origin. The custom domain is `rustymetal4.com`; the existing Worker name and
+workers.dev address remain unchanged, retaining its secrets and Durable Object.
+
+After `bun install --frozen-lockfile`, load the Emscripten environment and use
+the pinned Rust toolchain. `bun run deploy:prepare` builds the release and checks
+static hosting in Chromium without publishing. `bun run deploy` performs the same
+steps, then publishes through Wrangler; Docker must be running and Wrangler
+authenticated. Existing Worker secrets `TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET`
+are reused. Set them through Wrangler when deploying to a new account.
+GitHub Actions runs tests only. Deploy between matches while this is a single server.
+
+Worker Assets serves the separate frontend without starting the container.
 Only authenticated host setup starts a sleeping server; status polling does not.
 Docker cross-compiles a static Linux x64 server into `scratch`, running as UID 65532
 with writable `/tmp`. The image contains no website, shell or disc resources.

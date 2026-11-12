@@ -26,7 +26,9 @@
     "build:server": "bun apps/server/build.ts",
     "build:server:standalone": "bun tools/network/build-server.ts",
     "test:server:standalone": "bun test tests/server/standalone.test.ts",
-    "server:site": "bun tools/network/serve.ts"
+    "server:site": "bun tools/network/serve.ts",
+    "deploy": "bun tools/web/deploy.ts",
+    "deploy:prepare": "bun tools/web/deploy.ts --prepare-only"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",

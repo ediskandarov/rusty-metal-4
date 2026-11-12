@@ -1,0 +1,27 @@
+import { join } from "node:path";
+import { parseArgs } from "node:util";
+
+import { $ } from "bun";
+
+import { root } from "../common.js";
+
+const { values } = parseArgs({
+  options: {
+    "prepare-only": { type: "boolean", default: false },
+    help: { type: "boolean", default: false },
+  },
+});
+
+if (values.help) {
+  console.log("bun run deploy:prepare — build and check the release without publishing");
+  console.log("bun run deploy — build, check and publish rustymetal4.com");
+} else {
+  if (!values["prepare-only"]) await $`docker info`.quiet();
+  await $`bun run build`.cwd(root);
+  await $`bun run test:pages`.cwd(root);
+  if (values["prepare-only"]) {
+    console.log("Release prepared and checked. Nothing published.");
+  } else {
+    await $`bunx --no-install wrangler deploy`.cwd(join(root, "apps/rustymetal4.com"));
+  }
+}

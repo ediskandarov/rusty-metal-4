@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
+    "deploy": "bun ../../tools/web/deploy.ts",
     "types": "wrangler types",
     "typecheck": "wrangler types && tsc --noEmit"
   }
