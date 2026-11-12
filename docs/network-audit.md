@@ -371,7 +371,7 @@ includes GPU/renderer processes, separate from checkpoint bytes and Wasm memory.
 The reported accepted-tick rate measures the received authority frontier.
 
 Start a fresh match server for each network test with
-`TM4_MATCH_LISTEN=127.0.0.1:18182`, the matching `TM4_SITE_DIR`,
+`TM4_MATCH_LISTEN=127.0.0.1:18182`, the matching `TM4_SIMULATION_BUILD`,
 `TM4_SIMULATION_WASM`, and private `TM4_RESOURCE_DIR`. Supply
 `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` to the browser fixtures. Run
@@ -413,7 +413,7 @@ bun run build:dev
 TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2
 ```
 
-The normal match command launches only the Rust server. `TM4_SITE_DIR`,
+The normal match command launches only the Rust server. `TM4_SIMULATION_BUILD`,
 `TM4_SIMULATION_WASM`, and `TM4_RESOURCE_DIR` override its default local paths.
 Existing `TM4_MATCH_CARS` and `TM4_MATCH_WORLD` choose stock roster/map identities.
 The standalone C API exposes catalog, match setup, per-slot commands, stepping,

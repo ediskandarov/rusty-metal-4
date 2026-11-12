@@ -1,10 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 
 import { accessPage, hasSession, sameSecret, sessionCookie } from "./access.ts";
+import { frontend, isolated } from "./assets.ts";
 import { exportHealth, type HealthSnapshot, parseHealth } from "./telemetry.ts";
 
 interface Env {
   SERVER: DurableObjectNamespace<TestServer>;
+  ASSETS: Fetcher;
   TEST_ACCESS_CODE: string;
   TM4_ADMIN_SECRET: string;
   HEALTH: AnalyticsEngineDataset;
@@ -197,8 +199,37 @@ echo END
         headers: { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" },
       });
     }
-    this.lastExternalActivity = Date.now();
-    await this.ctx.storage.put("lastExternalActivity", this.lastExternalActivity);
+    if (path === "/api/status" && !this.ctx.container!.running) {
+      return isolated(
+        Response.json(
+          {
+            phase: "setup",
+            sleeping: true,
+            message: "Administrator: supply your disc resources to start the server.",
+            players: 2,
+            worlds: [],
+            world: null,
+            connected: 0,
+            tick: 0,
+            endpoint: "/match",
+            uploaded: 0,
+            required: 0,
+          },
+          { headers: { "Cache-Control": "no-store" } },
+        ),
+      );
+    }
+    const startsServer =
+      path === "/api/resources" ||
+      path.startsWith("/api/resources/") ||
+      path === "/api/prepare" ||
+      path === "/api/start";
+    if (!this.ctx.container!.running && !startsServer)
+      return new Response("Server not running", { status: 409 });
+    if (startsServer) {
+      this.lastExternalActivity = Date.now();
+      await this.ctx.storage.put("lastExternalActivity", this.lastExternalActivity);
+    }
     this.starting ??= this.ready().finally(() => {
       this.starting = undefined;
     });
@@ -257,6 +288,22 @@ export default {
     ) {
       return new Response("Administrator secret required", { status: 401 });
     }
+    if (
+      url.pathname.startsWith("/api/") &&
+      url.pathname !== "/api/status" &&
+      !(await sameSecret(
+        request.headers.get("authorization") ?? "",
+        `Bearer ${env.TM4_ADMIN_SECRET}`,
+      ))
+    ) {
+      return new Response("Administrator secret required", { status: 401 });
+    }
+    if (
+      !url.pathname.startsWith("/api/") &&
+      !url.pathname.startsWith("/_server/") &&
+      url.pathname !== "/match"
+    )
+      return frontend(env.ASSETS, request);
     try {
       return await env.SERVER.getByName("test").fetch(request);
     } catch (error) {

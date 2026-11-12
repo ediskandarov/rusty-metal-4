@@ -144,11 +144,11 @@ References: [Lightyear WebTransport](https://docs.rs/lightyear/0.30.1/lightyear/
 
 ## Implementation boundary
 
-The current Rust launcher owns lobby setup and requires a process restart after
-one match. Cloud hosting needs a session-configuration/admission interface and
-completion notification; the cloud lobby must not duplicate Rust's editable roster.
-The local launcher can supply the same session configuration without Cloudflare.
-Public endpoint routing and container-accessible listen addresses also need adapting.
+The private test deployment serves its website through Worker Assets and proxies
+API/WebSocket traffic to one on-demand container. Rust handles setup and one match
+per process. Public directory, per-lobby admission and match completion transitions
+remain to be implemented; they must not duplicate Rust's editable roster.
+Local Bun hosting uses the same frontend with the API served by a separate Rust process.
 
 Cloudflare references: [container lifecycle](https://developers.cloudflare.com/containers/concepts/architecture/),
 [WebSocket hibernation](https://developers.cloudflare.com/durable-objects/best-practices/websockets/).

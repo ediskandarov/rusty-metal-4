@@ -10,6 +10,10 @@ const { chromium } = require("playwright");
   const directory = resolve(`build/${mode}/server`);
   const httpPort = Number(process.env.TM4_SERVER_TEST_PORT ?? 18290);
   const matchPort = httpPort + 1;
+  const apiPort = httpPort + 2;
+  const site = resolve(`build/${mode}/server-site`);
+  const { serveHost } = await import("../../tools/network/serve.ts");
+  const host = await serveHost({ site, api: `http://127.0.0.1:${apiPort}`, port: httpPort });
   const url = `http://127.0.0.1:${httpPort}/`;
   const secret = crypto.randomUUID();
   const temporary = mkdtempSync(resolve("build/server-smoke-private-"));
@@ -23,10 +27,12 @@ const { chromium } = require("playwright");
     env: {
       ...process.env,
       TM4_ADMIN_SECRET: secret,
-      TM4_HTTP_LISTEN: `127.0.0.1:${httpPort}`,
+      TM4_HTTP_LISTEN: `127.0.0.1:${apiPort}`,
       TM4_MATCH_LISTEN: `127.0.0.1:${matchPort}`,
-      TM4_SERVER_SITE_DIR:
-        process.env.TM4_SERVER_EMBEDDED === "1" ? undefined : resolve(directory, "site"),
+      TM4_SIMULATION_BUILD:
+        process.env.TM4_SERVER_EMBEDDED === "1"
+          ? undefined
+          : resolve(directory, "simulation-build.json"),
       TM4_SIMULATION_WASM:
         process.env.TM4_SERVER_EMBEDDED === "1"
           ? undefined
@@ -59,6 +65,7 @@ const { chromium } = require("playwright");
         throw new Error(`Server did not start: ${logs}`);
       await Bun.sleep(50);
     }
+    assert.equal((await fetch(`http://127.0.0.1:${apiPort}/`)).status, 404);
     const response = await request("/");
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("Cross-Origin-Opener-Policy"), "same-origin");
@@ -67,9 +74,12 @@ const { chromium } = require("playwright");
     assert.equal(head.headers.get("Content-Type"), "application/wasm");
     assert.equal(
       Number(head.headers.get("Content-Length")),
-      Bun.file(resolve(directory, "site/play/tm4_web.wasm")).size,
+      Bun.file(resolve(site, "play/tm4_web.wasm")).size,
     );
     assert.equal((await head.arrayBuffer()).byteLength, 0);
+    const range = await request("/play/tm4_web.wasm", { headers: { Range: "bytes=0-3" } });
+    assert.equal(range.status, 206);
+    assert.deepEqual([...new Uint8Array(await range.arrayBuffer())], [0, 97, 115, 109]);
     assert.equal((await (await request("/api/status")).json()).phase, "setup");
     assert.equal((await request("/api/start", { method: "POST" })).status, 401);
     assert.equal((await request("/api/start", admin("POST"))).status, 409);
@@ -280,6 +290,7 @@ const { chromium } = require("playwright");
     server.kill("SIGTERM");
     await server.exited;
     await output;
+    await host.stop(true);
     assert.deepEqual(
       readdirSync(temporary),
       [],

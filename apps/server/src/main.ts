@@ -25,6 +25,7 @@ let busy = false;
 
 interface Status {
   phase: string;
+  sleeping?: boolean;
   message: string;
   players: number;
   worlds: string[];
@@ -75,8 +76,9 @@ async function refresh() {
     start.disabled = busy || state.phase !== "ready";
     disc.disabled = busy || !canUpload;
     status.textContent = state.message;
-    players.textContent =
-      state.phase === "setup" || state.phase === "failed"
+    players.textContent = state.sleeping
+      ? "Server sleeping · starts when the host supplies resources"
+      : state.phase === "setup" || state.phase === "failed"
         ? `${state.uploaded}/${state.required} server resources prepared · ${state.players} player slots`
         : `${state.connected}/${state.players} players connected${state.world ? ` · ${state.world}` : ""}${state.tick ? ` · Tick ${state.tick}` : ""}`;
     join.hidden = state.phase !== "lobby" && state.phase !== "match";

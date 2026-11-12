@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { $ } from "bun";
 
 import { root } from "../common.js";
+import { serveHost } from "./serve.ts";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -28,10 +29,18 @@ await $`cargo build --locked --bin tm4-deathmatch-server --target-dir ${target} 
 const directory = join(root, "build", mode, "server");
 const executable =
   process.platform === "win32" ? "tm4-deathmatch-server.exe" : "tm4-deathmatch-server";
+const host = await serveHost({
+  site: join(root, "build", mode, "server-site"),
+  api: `http://${process.env.TM4_HTTP_LISTEN ?? "127.0.0.1:8121"}`,
+  port: Number(process.env.TM4_HOST_PORT ?? 8120),
+});
+console.log(`Server web app: ${host.url}`);
 const server = Bun.spawn([join(target, profile, executable), "--serve", String(players)], {
   env: {
     ...process.env,
-    TM4_SERVER_SITE_DIR: process.env.TM4_SERVER_SITE_DIR ?? join(directory, "site"),
+    TM4_HTTP_LISTEN: process.env.TM4_HTTP_LISTEN ?? "127.0.0.1:8121",
+    TM4_SIMULATION_BUILD:
+      process.env.TM4_SIMULATION_BUILD ?? join(directory, "simulation-build.json"),
     TM4_SIMULATION_WASM: process.env.TM4_SIMULATION_WASM ?? join(directory, "tm4_standalone.wasm"),
     TM4_JOURNAL_DIR: process.env.TM4_JOURNAL_DIR ?? join(root, "build/network-journals"),
   },
@@ -41,4 +50,8 @@ const server = Bun.spawn([join(target, profile, executable), "--serve", String(p
 const stop = () => server.kill("SIGTERM");
 process.once("SIGINT", stop);
 process.once("SIGTERM", stop);
-process.exitCode = await server.exited;
+try {
+  process.exitCode = await server.exited;
+} finally {
+  await host.stop(true);
+}

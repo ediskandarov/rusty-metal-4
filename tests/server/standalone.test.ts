@@ -60,7 +60,7 @@ afterAll(async () => {
   await rm(directory, { recursive: true, force: true });
 });
 
-test("a copied binary serves the complete site with no adjacent assets", async () => {
+test("a copied binary runs its API without adjacent files or a website", async () => {
   const status: unknown = await (await fetch(`${address}/api/status`)).json();
   expect(status).toMatchObject({ phase: "setup" });
   for (const path of [
@@ -68,48 +68,25 @@ test("a copied binary serves the complete site with no adjacent assets", async (
     "/play/",
     "/style.css",
     "/server.js",
-    "/play/web.js",
-    "/play/network/tm4_network.js",
-  ]) {
-    const response = await fetch(address + path);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("cross-origin-opener-policy")).toBe("same-origin");
-    expect(response.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
-    expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
-  }
-  const manifest: unknown = await (await fetch(`${address}/play/simulation-build.json`)).json();
-  const wasm = await (await fetch(`${address}/play/tm4_web.wasm`)).arrayBuffer();
-  const network = await (await fetch(`${address}/play/network/tm4_network_bg.wasm`)).arrayBuffer();
-  expect(manifest).toMatchObject({
-    sha256: new Bun.CryptoHasher("sha256").update(wasm).update(network).digest("hex"),
-  });
-  const head = await fetch(`${address}/play/tm4_web.wasm`, { method: "HEAD" });
-  expect(head.status).toBe(200);
-  expect(head.headers.get("content-type")).toBe("application/wasm");
-  expect(Number(head.headers.get("content-length"))).toBe(wasm.byteLength);
-  expect((await head.arrayBuffer()).byteLength).toBe(0);
-  const range = await fetch(`${address}/play/tm4_web.wasm`, { headers: { Range: "bytes=0-3" } });
-  expect(range.status).toBe(206);
-  expect(new Uint8Array(await range.arrayBuffer())).toEqual(new Uint8Array([0, 97, 115, 109]));
-});
-
-test("embedded files do not bypass path isolation or administrator authentication", async () => {
-  for (const path of [
+    "/play/tm4_web.wasm",
+    "/simulation-build.json",
     "/tm4_standalone.wasm",
     "/DATA/MAIN.MR",
-    "/api/no-such-route",
     "/%2e%2e%2fLICENSE",
   ]) {
-    expect((await fetch(address + path)).status).toBe(404);
+    for (const method of ["GET", "HEAD"]) {
+      const response = await fetch(address + path, { method, headers: { Range: "bytes=0-3" } });
+      expect(response.status).toBe(404);
+    }
   }
-  expect((await fetch(`${address}/api/resources`)).status).toBe(401);
+});
+
+test("private APIs require administrator authentication", async () => {
+  for (const path of ["/api/resources", "/api/metrics"])
+    expect((await fetch(address + path)).status).toBe(401);
   expect(
     (await fetch(`${address}/api/resources`, { headers: { Authorization: `Bearer ${secret}` } }))
       .status,
   ).toBe(200);
-  expect(
-    (await fetch(`${address}/play/tm4_web.wasm`, { headers: { Range: "bytes=9999999999-" } }))
-      .status,
-  ).toBe(416);
   expect(logs.includes(secret)).toBe(false);
 });

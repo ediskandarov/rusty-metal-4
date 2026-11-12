@@ -32,10 +32,13 @@ const server = Bun.spawn([join(target, "debug", executable), String(players)], {
   env: {
     ...process.env,
     TM4_MATCH_LISTEN: listen,
-    TM4_SITE_DIR: resolve(root, process.env.TM4_SITE_DIR ?? `build/${mode}/site`),
+    TM4_SIMULATION_BUILD: resolve(
+      root,
+      process.env.TM4_SIMULATION_BUILD ?? `build/${mode}/server/simulation-build.json`,
+    ),
     TM4_SIMULATION_WASM: resolve(
       root,
-      process.env.TM4_SIMULATION_WASM ?? `build/${mode}/authority/site/tm4_standalone.wasm`,
+      process.env.TM4_SIMULATION_WASM ?? `build/${mode}/server/tm4_standalone.wasm`,
     ),
     TM4_RESOURCE_DIR: resolve(root, process.env.TM4_RESOURCE_DIR ?? "build/resources"),
     TM4_JOURNAL_DIR: process.env.TM4_JOURNAL_DIR ?? join(root, "build/network-journals"),

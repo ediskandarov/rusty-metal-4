@@ -1252,12 +1252,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
                 return Ok(());
             };
-            match simulator::Simulator::from_assets(
-                &launcher.wasm,
-                launcher.resource_directory(),
-                &launcher.site,
-                "play/",
-            ) {
+            match simulator::Simulator::from_assets(&launcher.wasm, launcher.resource_directory()) {
                 Ok(simulator) => {
                     launcher.ready(simulator.catalog.worlds.clone());
                     let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup() else {

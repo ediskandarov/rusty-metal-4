@@ -11,9 +11,30 @@ export async function buildServer(mode: PlayerMode) {
   const directory = join(root, "build", mode);
   const source = join(directory, "site");
   const output = join(directory, "server");
-  const site = join(output, "site");
+  const site = join(directory, "server-site");
   const player = join(site, "play");
   await rm(site, { recursive: true, force: true });
+  await rm(output, { recursive: true, force: true });
+  await mkdir(output, { recursive: true });
+  const manifest: unknown = await Bun.file(join(source, "simulation-build.json")).json();
+  const simulation = await Bun.file(
+    join(directory, "authority/site/tm4_standalone.wasm"),
+  ).arrayBuffer();
+  const authorityHash = new Bun.CryptoHasher("sha256").update(simulation).digest("hex");
+  const browserHash = new Bun.CryptoHasher("sha256")
+    .update(await Bun.file(join(source, "tm4_web.wasm")).arrayBuffer())
+    .update(await Bun.file(join(source, "network/tm4_network_bg.wasm")).arrayBuffer())
+    .digest("hex");
+  if (
+    !manifest ||
+    typeof manifest !== "object" ||
+    !("authoritySha256" in manifest) ||
+    manifest.authoritySha256 !== authorityHash ||
+    !("sha256" in manifest) ||
+    manifest.sha256 !== browserHash
+  )
+    throw new Error("Server/client build manifest is stale");
+  await cp(join(source, "simulation-build.json"), join(output, "simulation-build.json"));
   await mkdir(join(player, "network"), { recursive: true });
   // Only runtime artifacts enter the distribution. Never copy disc/resource directories.
   for (const name of [
@@ -56,5 +77,5 @@ if (import.meta.main) {
   const mode = values.mode;
   if (mode !== "release" && mode !== "dev" && mode !== "diagnostic")
     throw new Error("Choose --mode release, dev or diagnostic");
-  console.log(`Built server site: ${await buildServer(mode)}`);
+  console.log(`Built server bundle: ${await buildServer(mode)}`);
 }

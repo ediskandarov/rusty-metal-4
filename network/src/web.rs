@@ -2,9 +2,9 @@
 use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
-    body::{Body, to_bytes},
+    body::to_bytes,
     extract::{Request, State},
-    http::{HeaderMap, HeaderValue, Method, StatusCode, Uri, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -29,10 +29,9 @@ use tokio::{
     sync::Mutex as AsyncMutex,
     time::{sleep, timeout},
 };
-use tower::{ServiceExt, limit::ConcurrencyLimitLayer};
-use tower_http::services::ServeDir;
+use tower::limit::ConcurrencyLimitLayer;
 
-use crate::assets::{Simulation, Site};
+use crate::assets::Simulation;
 use tm4_network::protocol::MAX_PLAYERS;
 #[derive(Debug, PartialEq)]
 pub enum SetupRequest {
@@ -90,7 +89,6 @@ impl Drop for PrivateDirectory {
 }
 
 pub struct Launcher {
-    pub site: Site,
     pub wasm: Simulation,
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
@@ -118,7 +116,6 @@ impl Launcher {
                 && !secret.bytes().any(|c| c.is_ascii_control()),
             "Invalid TM4_ADMIN_SECRET"
         );
-        let site = Site::load()?;
         let wasm = Simulation::load()?;
         let reference: Reference =
             serde_json::from_str(include_str!("../../config/resources.json"))?;
@@ -138,12 +135,6 @@ impl Launcher {
         let private = env::temp_dir()
             .canonicalize()?
             .join(format!("tm4-server-{:032x}", u128::from_le_bytes(random)));
-        ensure!(
-            !site
-                .directory()
-                .is_some_and(|root| private.starts_with(root)),
-            "Static root must not contain private temporary storage"
-        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
@@ -171,7 +162,6 @@ impl Launcher {
         let health = crate::health::Shared::default();
         let (sender, requests) = mpsc::channel();
         let service = Arc::new(Service {
-            site: site.clone(),
             private: private.0.clone(),
             secret,
             resources,
@@ -183,7 +173,6 @@ impl Launcher {
         let http = serve_http(listener, router(service), stopped.clone(), status.clone())?;
         println!("Server launcher: http://{listen}/");
         Ok(Self {
-            site,
             wasm,
             stopped,
             status,
@@ -248,7 +237,7 @@ fn serve_http(
             let server = axum::serve(listener, router).with_graceful_shutdown(async move {
                 while !graceful.load(Ordering::Relaxed) { sleep(Duration::from_millis(100)).await; }
             });
-            // Bound shutdown even if a static response's recipient stops reading.
+            // Bound shutdown even if an HTTP recipient stops reading.
             let shutdown_deadline = async {
                 while !stopped.load(Ordering::Relaxed) { sleep(Duration::from_millis(100)).await; }
                 sleep(HTTP_TIMEOUT).await;
@@ -266,7 +255,6 @@ fn serve_http(
 }
 
 struct Service {
-    site: Site,
     private: PathBuf,
     secret: String,
     resources: BTreeMap<String, Resource>,
@@ -318,7 +306,6 @@ fn router(service: Arc<Service>) -> Router {
     Router::new()
         .route("/api/status", get(status))
         .merge(admin)
-        .fallback(static_file)
         .with_state(service)
         .layer(ConcurrencyLimitLayer::new(64))
         .layer(middleware::from_fn(isolation_and_timeout))
@@ -514,64 +501,6 @@ impl Service {
     }
 }
 
-fn safe_site_path(uri: &str) -> bool {
-    // Site paths are generated ASCII; reject escapes, traversal and alternate separators.
-    if !uri.starts_with('/')
-        || uri.contains(['%', '\\'])
-        || uri.bytes().any(|byte| byte.is_ascii_control())
-    {
-        return false;
-    }
-    let relative = Path::new(uri.trim_start_matches('/'));
-    relative
-        .components()
-        .all(|c| matches!(c, Component::Normal(_)))
-}
-async fn contained_file(root: &Path, uri: &str) -> Option<PathBuf> {
-    let relative = Path::new(uri.trim_start_matches('/'));
-    let mut path = tokio::fs::canonicalize(root.join(relative)).await.ok()?;
-    if !path.starts_with(root) {
-        return None;
-    }
-    if tokio::fs::metadata(&path).await.ok()?.is_dir() {
-        path = tokio::fs::canonicalize(path.join("index.html"))
-            .await
-            .ok()?;
-    }
-    (path.starts_with(root) && tokio::fs::metadata(&path).await.ok()?.is_file()).then_some(path)
-}
-async fn static_file(State(service): State<Arc<Service>>, mut request: Request) -> Response {
-    if request.uri().path().starts_with("/api/") {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    if request.method() != Method::GET && request.method() != Method::HEAD {
-        return StatusCode::METHOD_NOT_ALLOWED.into_response();
-    }
-    if !safe_site_path(request.uri().path()) {
-        return StatusCode::NOT_FOUND.into_response();
-    }
-    let root = match &service.site {
-        Site::Directory(root) => root,
-        #[cfg(feature = "embedded-server")]
-        Site::Embedded => return crate::assets::response(&request),
-    };
-    let Some(path) = contained_file(root, request.uri().path()).await else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    // Serve the resolved path so an escaping symlink never reaches ServeDir.
-    let Some(relative) = path.strip_prefix(root).ok().and_then(Path::to_str) else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    let Ok(uri) = format!("/{relative}").parse::<Uri>() else {
-        return StatusCode::NOT_FOUND.into_response();
-    };
-    *request.uri_mut() = uri;
-    ServeDir::new(root)
-        .oneshot(request)
-        .await
-        .unwrap()
-        .map(Body::new)
-}
 fn validate_index(data: &[u8]) -> Result<()> {
     let text = std::str::from_utf8(data)?;
     ensure!(!text.is_empty(), "Empty resource sector index");
@@ -600,12 +529,13 @@ fn validate_index(data: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Bytes;
+    use axum::body::{Body, Bytes};
     use futures_util::stream;
     use std::{
         future::Future,
         task::{Context as TaskContext, Poll, Waker},
     };
+    use tower::ServiceExt;
 
     const STOCK: &[u8] = b"test stock fixture";
     struct Fixture {
@@ -621,11 +551,8 @@ mod tests {
                 .canonicalize()
                 .unwrap()
                 .join(format!("tm4-web-test-{:032x}", u128::from_le_bytes(random)));
-            let root = directory.join("site");
             let private = directory.join("private");
-            fs::create_dir_all(&root).unwrap();
             fs::create_dir_all(&private).unwrap();
-            fs::write(root.join("index.html"), b"launcher").unwrap();
             let resource = Resource {
                 id: "/DATA/MAIN.MR".into(),
                 size: STOCK.len(),
@@ -645,7 +572,6 @@ mod tests {
             }));
             let (sender, requests) = mpsc::channel();
             let service = Arc::new(Service {
-                site: Site::Directory(root),
                 private,
                 secret: "test-secret".into(),
                 resources: [(resource.id.clone(), resource)].into(),
@@ -952,69 +878,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn static_paths_and_symlinks_cannot_expose_private_storage() {
+    async fn server_never_serves_web_or_private_files() {
         let fixture = Fixture::new();
-        fixture.provision().await;
+        fixture.service.publish("/DATA/MAIN.MR", STOCK).unwrap();
         for path in [
+            "/",
+            "/play/",
+            "/index.html",
+            "/style.css",
+            "/server.js",
+            "/play/tm4_web.wasm",
+            "/DATA/MAIN.MR",
             "/../private/DATA/MAIN.MR",
             "/%2e%2e/private/DATA/MAIN.MR",
-            "/foo\\bar",
-            "/DATA/MAIN.MR",
-            "/api/resources/DATA/MAIN.MR",
+            "/api/unknown",
         ] {
-            let response = fixture.request("GET", path, Body::empty()).await;
-            assert!(!response.status().is_success(), "{path}");
+            for method in ["GET", "HEAD"] {
+                assert_eq!(
+                    fixture.request(method, path, Body::empty()).await.status(),
+                    StatusCode::NOT_FOUND,
+                    "{method} {path}"
+                );
+            }
         }
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(
-                &fixture.service.private,
-                fixture.service.site.directory().unwrap().join("leaked"),
-            )
-            .unwrap();
-            assert_eq!(
-                fixture
-                    .request("GET", "/leaked/DATA/MAIN.MR", Body::empty())
-                    .await
-                    .status(),
-                StatusCode::NOT_FOUND
-            );
-        }
-        assert_eq!(
-            fixture.request("GET", "/", Body::empty()).await.status(),
-            StatusCode::OK
-        );
-    }
-
-    #[tokio::test]
-    async fn static_head_uses_metadata_and_get_supports_streamed_ranges() {
-        let fixture = Fixture::new();
-        // A sparse 1 GiB asset makes a regression to reading HEAD bodies conspicuous.
-        let file =
-            fs::File::create(fixture.service.site.directory().unwrap().join("large.wasm")).unwrap();
-        file.set_len(1 << 30).unwrap();
-        let head = fixture.request("HEAD", "/large.wasm", Body::empty()).await;
-        assert_eq!(head.status(), StatusCode::OK);
-        assert_eq!(
-            head.headers()[header::CONTENT_LENGTH],
-            (1u64 << 30).to_string()
-        );
-        assert_eq!(head.headers()[header::CONTENT_TYPE], "application/wasm");
-        assert_eq!(head.headers()["cross-origin-opener-policy"], "same-origin");
-        assert!(to_bytes(head.into_body(), 0).await.unwrap().is_empty());
-        let response = router(fixture.service.clone())
-            .oneshot(
-                Request::builder()
-                    .uri("/large.wasm")
-                    .header(header::RANGE, "bytes=0-63")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
-        assert_eq!(response.headers()[header::CONTENT_LENGTH], "64");
-        assert_eq!(to_bytes(response.into_body(), 64).await.unwrap().len(), 64);
     }
 
     #[tokio::test]
@@ -1064,7 +950,6 @@ mod tests {
         )
         .unwrap();
         let launcher = Launcher {
-            site: fixture.service.site.clone(),
             wasm: Simulation::File(PathBuf::new()),
             stopped,
             status,

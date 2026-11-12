@@ -33,6 +33,11 @@ const { readyInLobby } = require("./network_lobby.cjs");
     await host.goto(url);
     await host.locator("#status").filter({ hasText: "Administrator" }).waitFor({ timeout: 120000 });
     assert(await host.evaluate(() => crossOriginIsolated));
+    assert.equal(
+      (await (await context.request.get(new URL("/api/status", url).href)).json()).sleeping,
+      true,
+      "Loading the website must not start a container",
+    );
     assert.equal((await context.request.get(new URL("/api/resources", url).href)).status(), 401);
     assert.equal((await context.request.get(new URL("/DATA/MAIN.MR", url).href)).status(), 404);
     await host.locator("#secret").fill(secret);

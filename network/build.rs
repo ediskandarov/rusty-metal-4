@@ -11,20 +11,9 @@ fn main() {
     )
     .canonicalize()
     .expect("Server bundle directory missing");
-    for file in [
-        "site/index.html",
-        "site/play/index.html",
-        "site/play/tm4_web.wasm",
-        "site/play/network/tm4_network_bg.wasm",
-        "site/play/simulation-build.json",
-        "tm4_standalone.wasm",
-    ] {
+    for file in ["tm4_standalone.wasm", "simulation-build.json"] {
         assert!(root.join(file).is_file(), "Server bundle missing {file}");
+        println!("cargo:rerun-if-changed={}", root.join(file).display());
     }
-    println!("cargo:rerun-if-changed={}", root.join("site").display());
-    println!(
-        "cargo:rerun-if-changed={}",
-        root.join("tm4_standalone.wasm").display()
-    );
     println!("cargo:rustc-env=TM4_SERVER_BUNDLE={}", root.display());
 }

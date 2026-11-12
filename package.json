@@ -25,7 +25,8 @@
     "build:player": "bun apps/player/build.ts",
     "build:server": "bun apps/server/build.ts",
     "build:server:standalone": "bun tools/network/build-server.ts",
-    "test:server:standalone": "bun test tests/server/standalone.test.ts"
+    "test:server:standalone": "bun test tests/server/standalone.test.ts",
+    "server:site": "bun tools/network/serve.ts"
   },
   "devDependencies": {
     "@tsconfig/bun": "^1.0.11",

@@ -45,12 +45,6 @@ pub struct Simulator {
 }
 
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Build {
-    sha256: String,
-    authority_sha256: String,
-}
-#[derive(Deserialize)]
 struct Reference {
     files: Vec<Resource>,
 }
@@ -134,40 +128,15 @@ impl Simulator {
             env::var("TM4_RESOURCE_DIR")
                 .context("Set TM4_RESOURCE_DIR to prepared local resources")?,
         );
-        let site = PathBuf::from(
-            env::var("TM4_SITE_DIR").context("Set TM4_SITE_DIR to the matching browser site")?,
-        );
-        Self::from_paths(&wasm, &resources, &site)
+        Self::from_assets(&crate::assets::Simulation::File(wasm), &resources)
     }
 
-    pub fn from_paths(wasm: &Path, resources: &Path, site: &Path) -> Result<Self> {
-        Self::from_assets(
-            &crate::assets::Simulation::File(wasm.into()),
-            resources,
-            &crate::assets::Site::Directory(site.into()),
-            "",
-        )
-    }
-
-    pub fn from_assets(
-        wasm: &crate::assets::Simulation,
-        resources: &Path,
-        site: &crate::assets::Site,
-        prefix: &str,
-    ) -> Result<Self> {
-        let build: Build =
-            serde_json::from_slice(&site.read(&format!("{prefix}simulation-build.json"))?)?;
+    pub fn from_assets(wasm: &crate::assets::Simulation, resources: &Path) -> Result<Self> {
+        let build = wasm.build()?;
         let bytes = wasm.read()?;
         ensure!(
             hash(&bytes) == build.authority_sha256,
-            "Standalone simulation does not match the browser build manifest"
-        );
-        let mut browser_hash = Sha256::new();
-        browser_hash.update(site.read(&format!("{prefix}tm4_web.wasm"))?);
-        browser_hash.update(site.read(&format!("{prefix}network/tm4_network_bg.wasm"))?);
-        ensure!(
-            format!("{:x}", browser_hash.finalize()) == build.sha256,
-            "Browser simulation build manifest is stale"
+            "Standalone simulation does not match its build manifest"
         );
         let compatibility = Compatibility {
             protocol: 9,

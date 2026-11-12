@@ -19,7 +19,7 @@ const platforms: Record<string, string> = {
 const platform = platforms[`${process.platform}-${process.arch}`];
 if (!platform) throw new Error("Unsupported server release platform");
 const bundle = join(root, "build", mode, "server");
-if (!(await Bun.file(join(bundle, "site/play/simulation-build.json")).exists()))
+if (!(await Bun.file(join(bundle, "simulation-build.json")).exists()))
   throw new Error(`Build the matching server bundle first: ${bundle}`);
 const target = join(root, "build/network-native");
 await $`cargo build --locked --release --bin tm4-deathmatch-server --features embedded-server --target-dir ${target}`

@@ -168,7 +168,7 @@ jobs:
           path: build/release/server
       - name: Build standalone server and archive
         run: bun run build:server:standalone
-      - name: Test embedded assets and server
+      - name: Test embedded simulation and API
         working-directory: network
         env:
           TM4_SERVER_BUNDLE: ${{ github.workspace }}/build/release/server

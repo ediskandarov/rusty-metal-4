@@ -47,35 +47,31 @@ Use `bun run build:server --mode release` (or `diagnostic`) with the matching ru
 build first. The same mode also selects the binary for `bun run test:server` through
 `TM4_SERVER_MODE`.
 
-For a single-file server release, first run `bun run build`, then
-`bun run build:server:standalone`. The latter embeds the generated server site and
-WASI simulation in an optimized Rust binary with symbol tables removed, using
-`include_dir!` and `include_bytes!`. It produces a platform archive under `build/server-release/`;
-`--mode dev` uses an existing dev bundle for local packaging tests. Bun, Rust,
-Wasm runtimes and adjacent asset files are not required on the destination machine.
-The archive contains the executable and license; no disc resources are included.
+The Rust executable serves **only the API and match transport**, never a website.
+`build/<mode>/server` holds the simulation and compatibility manifest;
+`build/<mode>/server-site` holds the launcher and player. The build verifies the
+manifest against both client Wasm files and the authority Wasm before separating them.
+`bun run server` runs Bun on port 8120 and the Rust API on 8121; Lightyear uses 8122.
+Bun serves files and proxies `/api/`. `TM4_HOST_PORT` changes the local website port.
 
-Set `TM4_ADMIN_SECRET` as above and run `rustymetal4-server` (`.exe` on Windows).
-The embedded build opens server mode by default; `--serve 4` sets an initial player
-count. `TM4_SERVER_SITE_DIR` and `TM4_SIMULATION_WASM` can override the embedded
-files during development. The ordinary Cargo build still loads `site/` and
-`tm4_standalone.wasm` beside the executable or from these variables.
-`TM4_HTTP_LISTEN` defaults to `127.0.0.1:8120`;
-`TM4_MATCH_LISTEN` defaults to `127.0.0.1:8122`. Both require loopback addresses unless `TM4_BEHIND_PROXY=1` explicitly enables
-a private listener behind an authenticated HTTPS/WebSocket proxy. That mode
-advertises `/match` on the launcher's origin. Never expose those unencrypted
-ports directly.
-Axum serves embedded static bytes directly, including MIME types, HEAD and byte
-ranges. External static files retain streaming and metadata-only HEAD requests.
-Wasmtime reads the embedded simulation directly; no temporary asset extraction is
-needed. Upload validation runs on a blocking worker; setup commands cross to the
-native simulation thread. HTTP and Lightyear remain on separate ports.
+For a single-file API server, run `bun run build:server:standalone` after a full build.
+The optimized binary embeds only its own Wasm simulation and compatibility manifest;
+archives under `build/server-release/` contain the executable and license.
+Run `rustymetal4-server --serve 4` with `TM4_ADMIN_SECRET` set. Serve the separate
+frontend with Bun (`bun run server:site --mode release --api http://127.0.0.1:8120 --port 8119`)
+or a static host with an API/WebSocket reverse proxy.
 
-`TM4_SERVER_EXECUTABLE=<path> bun run test:server:standalone` copies the executable
-to an empty temporary directory and tests its built-in site without a checkout,
-external site or game disc. Rust tests with `--features embedded-server` require
-`TM4_SERVER_BUNDLE` to point at the generated bundle; they also check both Wasm
-hashes and validate the embedded simulation with Wasmtime.
+Ordinary Cargo builds load `tm4_standalone.wasm` and `simulation-build.json` beside
+the binary, or via `TM4_SIMULATION_WASM` and `TM4_SIMULATION_BUILD`.
+Native HTTP defaults to `127.0.0.1:8120` and Lightyear to `127.0.0.1:8122`.
+Non-loopback listeners require `TM4_BEHIND_PROXY=1` behind an authenticated
+HTTPS/WebSocket proxy; that mode advertises `/match` on the website's origin.
+Never expose the unencrypted listeners directly.
+
+`TM4_SERVER_EXECUTABLE=<path> bun run test:server:standalone` checks a copied binary
+in an empty directory: API access, authentication and absence of static serving.
+Rust tests with `--features embedded-server` require `TM4_SERVER_BUNDLE` pointing
+at the generated backend bundle and validate the embedded simulation and manifest.
 
 The startup secret is supplied through the environment, never embedded in the
 site, URL or logs. Uploaded resources live in an owner-only temporary directory
@@ -100,17 +96,15 @@ the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 `apps/cloudflare` fronts one named container with HTTPS and WebSocket on the same
 origin. Build the release bundle with `bun run build`, set Worker secrets
 `TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET` with Wrangler, then run
-`bun run --cwd apps/cloudflare deploy`. Docker cross-compiles the embedded Rust
-server for Linux x64; the image contains no disc resources.
+`bun run --cwd apps/cloudflare deploy`. Worker Assets serves the separate frontend without starting the container.
+Only authenticated host setup starts a sleeping server; status polling does not.
 
 The access code admits test players; the separate administrator secret authorizes
 resource upload and match setup. Enter each in the browser when prompted. Local
 secret files belong in ignored `.local/`. The container uses ¼ vCPU and 256 MiB,
-with a five-minute inactivity timeout. An open launcher or game connection keeps
-it active. Sleep discards uploads and the match; the host must prepare it again.
+with a five-minute inactivity timeout. An active match keeps it alive; idle launcher polling does not. Sleep discards uploads and the match; the host must prepare it again.
 
 An authenticated `POST /_server/stop` with the administrator Bearer token stops
-the container. Close player/launcher tabs first; a subsequent request starts a
-fresh server. This is one private test lobby, not the public lobby directory.
+the container. Preparing resources starts a fresh server. This is one private test lobby, not the public lobby directory.
 
 Application health export and Analytics Engine queries: [server observability](server-observability.md).

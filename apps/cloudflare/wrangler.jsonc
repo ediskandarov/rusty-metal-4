@@ -5,6 +5,11 @@
   "compatibility_date": "2026-11-11",
   "workers_dev": true,
   "preview_urls": false,
+  "assets": {
+    "directory": "../../build/release/server-site",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+  },
   "vars": { "CONTAINER_VCPU": "0.25" },
   "observability": { "enabled": true },
   "analytics_engine_datasets": [{ "binding": "HEALTH", "dataset": "rustymetal4_server_health" }],
