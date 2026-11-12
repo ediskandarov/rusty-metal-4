@@ -1,0 +1,10 @@
+{
+  "name": "@tm4/cloudflare",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "types": "wrangler types",
+    "typecheck": "wrangler types && tsc --noEmit"
+  }
+}

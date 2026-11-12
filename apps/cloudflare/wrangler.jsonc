@@ -1,0 +1,19 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "tm4-rewired-test",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-11",
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": { "CONTAINER_VCPU": "0.25" },
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "TestServer",
+      "scheduling_policy": "durable_object",
+      "images": { "base": { "dockerfile": "./Dockerfile", "build_context": "../.." } },
+    },
+  ],
+  "durable_objects": { "bindings": [{ "name": "SERVER", "class_name": "TestServer" }] },
+  "exports": { "TestServer": { "type": "durable-object", "storage": "sqlite" } },
+}

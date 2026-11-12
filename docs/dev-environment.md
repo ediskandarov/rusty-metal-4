@@ -61,7 +61,10 @@ count. `TM4_SERVER_SITE_DIR` and `TM4_SIMULATION_WASM` can override the embedded
 files during development. The ordinary Cargo build still loads `site/` and
 `tm4_standalone.wasm` beside the executable or from these variables.
 `TM4_HTTP_LISTEN` defaults to `127.0.0.1:8120`;
-`TM4_MATCH_LISTEN` defaults to `127.0.0.1:8122`. Both require loopback addresses.
+`TM4_MATCH_LISTEN` defaults to `127.0.0.1:8122`. Both require loopback addresses unless `TM4_BEHIND_PROXY=1` explicitly enables
+a private listener behind an authenticated HTTPS/WebSocket proxy. That mode
+advertises `/match` on the launcher's origin. Never expose those unencrypted
+ports directly.
 Axum serves embedded static bytes directly, including MIME types, HEAD and byte
 ranges. External static files retain streaming and metadata-only HEAD requests.
 Wasmtime reads the embedded simulation directly; no temporary asset extraction is
@@ -82,8 +85,7 @@ An uncatchable process kill may leave that private temporary directory behind.
 This first slice preserves the existing one-match session: the configured 2–8
 slots fill, the roster locks, and eligible participants can reconnect. Status
 shows completion or failure; restart the process for the next match. Returning
-results to a reusable lobby and map rotation are follow-up work. Public hosting,
-TLS and non-local admission are not implemented.
+results to a reusable lobby and map rotation are follow-up work. The Cloudflare test deployment below supplies TLS and admission separately.
 
 With the server bundle and native debug binary built, `bun run test:server`
 checks the empty setup state, HTTP isolation, administrator authentication,
@@ -92,3 +94,21 @@ your existing disc folder to also exercise the administrator upload UI and two
 players reaching native match ticks without uploading player files. Rust unit
 tests cover atomic upload publication, index validation, private storage and
 the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
+
+## Cloudflare test server
+
+`apps/cloudflare` fronts one named container with HTTPS and WebSocket on the same
+origin. Build the release bundle with `bun run build`, set Worker secrets
+`TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET` with Wrangler, then run
+`bun run --cwd apps/cloudflare deploy`. Docker cross-compiles the embedded Rust
+server for Linux x64; the image contains no disc resources.
+
+The access code admits test players; the separate administrator secret authorizes
+resource upload and match setup. Enter each in the browser when prompted. Local
+secret files belong in ignored `.local/`. The container uses ¼ vCPU and 256 MiB,
+with a five-minute inactivity timeout. An open launcher or game connection keeps
+it active. Sleep discards uploads and the match; the host must prepare it again.
+
+An authenticated `POST /_server/stop` with the administrator Bearer token stops
+the container. Close player/launcher tabs first; a subsequent request starts a
+fresh server. This is one private test lobby, not the public lobby directory.

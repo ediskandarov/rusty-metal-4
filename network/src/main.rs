@@ -1179,8 +1179,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|_| "127.0.0.1:8122".into())
         .parse()?;
 
-    if !addr.ip().is_loopback() {
-        return Err("This diagnostic server requires a loopback address; public admission/TLS is not implemented".into());
+    if !addr.ip().is_loopback() && !web::behind_proxy() {
+        return Err(
+            "Non-loopback WebSocket requires TM4_BEHIND_PROXY=1 and an authenticated HTTPS proxy"
+                .into(),
+        );
     }
     let launcher = if serve {
         Some(web::Launcher::start(count, addr)?)

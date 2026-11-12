@@ -1,0 +1,15 @@
+**
+!network/
+!network/Cargo.toml
+!network/Cargo.lock
+!network/build.rs
+!network/src/
+!network/src/**
+!config/
+!config/resources.json
+!build/
+!build/release/
+!build/release/server/
+!build/release/server/**
+!network/examples/
+!network/examples/**

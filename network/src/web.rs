@@ -1,4 +1,4 @@
-//! Loopback HTTP launcher. Simulation stays on the native game thread.
+//! HTTP launcher. Simulation stays on the native game thread.
 use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
@@ -52,6 +52,11 @@ struct StartOptions {
 }
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
+// The proxy owns TLS and admission; never enable this on a directly exposed listener.
+pub fn behind_proxy() -> bool {
+    env::var("TM4_BEHIND_PROXY").as_deref() == Ok("1")
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
@@ -99,8 +104,8 @@ impl Launcher {
             .unwrap_or_else(|_| "127.0.0.1:8120".into())
             .parse()?;
         ensure!(
-            listen.ip().is_loopback(),
-            "HTTP setup currently requires a loopback address"
+            listen.ip().is_loopback() || behind_proxy(),
+            "Non-loopback HTTP requires TM4_BEHIND_PROXY=1 and an authenticated HTTPS proxy"
         );
         let secret = env::var("TM4_ADMIN_SECRET").context(
             "Set TM4_ADMIN_SECRET to a private startup secret of at least 24 characters",
@@ -154,7 +159,11 @@ impl Launcher {
             world: None,
             connected: 0,
             tick: 0,
-            endpoint: format!("ws://{endpoint}"),
+            endpoint: if behind_proxy() {
+                "/match".into()
+            } else {
+                format!("ws://{endpoint}")
+            },
             uploaded: 0,
             required: resources.len() + 1,
         }));

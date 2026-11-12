@@ -81,7 +81,10 @@ async function refresh() {
         : `${state.connected}/${state.players} players connected${state.world ? ` · ${state.world}` : ""}${state.tick ? ` · Tick ${state.tick}` : ""}`;
     join.hidden = state.phase !== "lobby" && state.phase !== "match";
     const url = new URL("play/", location.href);
-    url.searchParams.set("match", state.endpoint);
+    const endpoint = new URL(state.endpoint, location.href);
+    if (endpoint.protocol === "https:") endpoint.protocol = "wss:";
+    else if (endpoint.protocol === "http:") endpoint.protocol = "ws:";
+    url.searchParams.set("match", endpoint.href);
     join.href = url.href;
     join.textContent = state.phase === "match" ? "Reconnect existing player" : "Open player";
     prepare.disabled = busy || (state.phase !== "setup" && state.phase !== "failed");

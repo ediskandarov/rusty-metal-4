@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "types": [], "lib": ["ESNext"], "allowJs": false },
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
+}

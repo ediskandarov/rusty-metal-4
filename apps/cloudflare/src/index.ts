@@ -1,0 +1,177 @@
+import { DurableObject } from "cloudflare:workers";
+
+import { accessPage, hasSession, sameSecret, sessionCookie } from "./access.ts";
+
+interface Env {
+  SERVER: DurableObjectNamespace<TestServer>;
+  TEST_ACCESS_CODE: string;
+  TM4_ADMIN_SECRET: string;
+  CONTAINER_VCPU: string;
+}
+
+const idleTimeoutMs = 5 * 60 * 1000;
+const httpPort = 8120;
+const matchPort = 8122;
+
+export class TestServer extends DurableObject<Env> {
+  private starting: Promise<void> | undefined;
+
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    if (ctx.container?.running) {
+      void ctx.blockConcurrencyWhile(() => ctx.container!.setInactivityTimeout(idleTimeoutMs));
+    }
+  }
+
+  private get vcpu(): number {
+    const value = Number(this.env.CONTAINER_VCPU);
+    if (!Number.isFinite(value) || value <= 0) throw new Error("Invalid container CPU allocation");
+    return value;
+  }
+
+  private async ready(): Promise<void> {
+    const container = this.ctx.container!;
+    if (!container.running) {
+      container.start({
+        image: container.images.base!,
+        instance: { vcpu: this.vcpu, memoryMib: 256, diskMb: 2000 },
+        enableInternet: false,
+        env: { TM4_ADMIN_SECRET: this.env.TM4_ADMIN_SECRET },
+      });
+      await container.setInactivityTimeout(idleTimeoutMs);
+    }
+    for (let attempt = 0; attempt < 100; attempt++) {
+      try {
+        const response = await container
+          .getTcpPort(httpPort)
+          .fetch("http://container/api/status", { signal: AbortSignal.timeout(1000) });
+        await response.body?.cancel();
+        if (response.ok) return;
+      } catch {
+        // Only readiness probes are retried; uploads and game messages are never replayed.
+      }
+      await scheduler.wait(200);
+    }
+    throw new Error("Test server did not become ready");
+  }
+
+  override async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname === "/_server/stop") {
+      if (this.ctx.container!.running) await this.ctx.container!.destroy();
+      return new Response(null, { status: 204 });
+    }
+    const path = new URL(request.url).pathname;
+    if (path === "/_server/measure") {
+      if (!this.ctx.container!.running) return new Response("Server not running", { status: 409 });
+      const process = await this.ctx.container!.exec(
+        [
+          "/bin/sh",
+          "-c",
+          `
+p=
+for d in /proc/[0-9]*; do
+  case "$(readlink "$d/exe")" in */tm4-rewired-server) p=$d; break;; esac
+done
+test -n "$p" || exit 1
+echo BEGIN
+cat /proc/uptime "$p/stat" "$p/status"
+echo CGROUP
+for f in cpu.stat cpu.max memory.current memory.peak memory.events; do
+  echo "$f"
+  cat /sys/fs/cgroup/$f 2>/dev/null
+done
+echo NET
+cat /proc/net/dev
+echo END
+`,
+        ],
+        { stderr: "ignore" },
+      );
+      const output = await process.output();
+      return new Response(output.stdout, {
+        status: output.exitCode === 0 ? 200 : 503,
+        headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
+      });
+    }
+    if (path === "/_server/journal") {
+      if (!this.ctx.container!.running) return new Response("Server not running", { status: 409 });
+      const process = await this.ctx.container!.exec(
+        ["/bin/sh", "-c", "cat /tmp/tm4-journals/*.tm4j"],
+        { stderr: "ignore" },
+      );
+      return new Response(process.stdout, {
+        headers: { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" },
+      });
+    }
+    this.starting ??= this.ready().finally(() => {
+      this.starting = undefined;
+    });
+    await this.starting;
+    const url = new URL(request.url);
+    const match = url.pathname === "/match";
+    url.protocol = "http:";
+    url.host = "container";
+    if (match) url.pathname = "/";
+    const forwarded = new Request(url, request);
+    forwarded.headers.delete("host");
+    forwarded.headers.delete("cookie");
+    return this.ctx.container!.getTcpPort(match ? matchPort : httpPort).fetch(forwarded);
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    if (!env.TEST_ACCESS_CODE || !env.TM4_ADMIN_SECRET)
+      return new Response("Server access is not configured", { status: 503 });
+    const url = new URL(request.url);
+    if (url.pathname === "/_access" && request.method === "POST") {
+      if (request.headers.get("origin") !== url.origin)
+        return new Response("Invalid origin", { status: 403 });
+      const length = Number(request.headers.get("content-length"));
+      if (!length || length > 1024) return new Response("Invalid request size", { status: 413 });
+      const code = new URLSearchParams(await request.text()).get("code") ?? "";
+      if (!(await sameSecret(code, env.TEST_ACCESS_CODE)))
+        return accessPage("Incorrect access code.", 401);
+      return new Response(null, {
+        status: 303,
+        headers: {
+          Location: "/",
+          "Set-Cookie": await sessionCookie(env.TEST_ACCESS_CODE),
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+    if (!(await hasSession(request, env.TEST_ACCESS_CODE))) {
+      return request.method === "GET" && request.headers.get("upgrade") !== "websocket"
+        ? accessPage()
+        : new Response("Test access code required", { status: 401 });
+    }
+    // Never derive the object name from user input: this deployment owns one container.
+    if (url.pathname === "/match" && request.headers.get("upgrade")?.toLowerCase() !== "websocket")
+      return new Response("WebSocket required", { status: 426 });
+    const origin = request.headers.get("origin");
+    if (origin && origin !== url.origin) return new Response("Invalid origin", { status: 403 });
+    if (
+      url.pathname.startsWith("/_server/") &&
+      (request.method !== "POST" ||
+        !(await sameSecret(
+          request.headers.get("authorization") ?? "",
+          `Bearer ${env.TM4_ADMIN_SECRET}`,
+        )))
+    ) {
+      return new Response("Administrator secret required", { status: 401 });
+    }
+    try {
+      return await env.SERVER.getByName("test").fetch(request);
+    } catch (error) {
+      console.error(
+        "Test server request failed",
+        error instanceof Error ? error.message : "Unknown error",
+      );
+      return new Response("The test server is starting or unavailable. Try again shortly.", {
+        status: 503,
+        headers: { "Retry-After": "5", "Cache-Control": "no-store" },
+      });
+    }
+  },
+} satisfies ExportedHandler<Env>;
