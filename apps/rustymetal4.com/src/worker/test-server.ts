@@ -1,7 +1,9 @@
+import { createServerClient } from "@tm4/rustymetal-server-client";
+import type { HealthSnapshot } from "@tm4/rustymetal-server-client/schemas";
 import { DurableObject } from "cloudflare:workers";
 
 import { isolated } from "../assets.ts";
-import { exportHealth, type HealthSnapshot, parseHealth } from "../telemetry.ts";
+import { exportHealth } from "../telemetry.ts";
 
 export interface ServerEnv {
   TM4_ADMIN_SECRET: string;
@@ -40,6 +42,14 @@ export class TestServer extends DurableObject<ServerEnv> {
     return value;
   }
 
+  private api() {
+    return createServerClient({
+      baseURL: "http://container/api/",
+      headers: () => ({ Authorization: "Bearer " + this.env.TM4_ADMIN_SECRET }),
+      fetch: (request) => this.ctx.container!.getTcpPort(httpPort).fetch(request),
+    });
+  }
+
   private async ready(): Promise<void> {
     const container = this.ctx.container!;
     if (!container.running) {
@@ -53,14 +63,9 @@ export class TestServer extends DurableObject<ServerEnv> {
     }
     for (let attempt = 0; attempt < 100; attempt++) {
       try {
-        const response = await container
-          .getTcpPort(httpPort)
-          .fetch("http://container/api/status", { signal: AbortSignal.timeout(1000) });
-        await response.body?.cancel();
-        if (response.ok) {
-          await this.scheduleMetrics();
-          return;
-        }
+        await this.api().status(AbortSignal.timeout(1000));
+        await this.scheduleMetrics();
+        return;
       } catch {
         // Only readiness probes are retried; uploads and game messages are never replayed.
       }
@@ -82,12 +87,7 @@ export class TestServer extends DurableObject<ServerEnv> {
       return;
     }
     try {
-      const response = await container.getTcpPort(httpPort).fetch("http://container/api/metrics", {
-        headers: { Authorization: `Bearer ${this.env.TM4_ADMIN_SECRET}` },
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!response.ok) throw new Error(`Health endpoint returned ${response.status}`);
-      const snapshot = parseHealth(await response.json());
+      const snapshot = await this.api().health(AbortSignal.timeout(3000));
       exportHealth(
         this.env.HEALTH,
         this.ctx.id.toString(),
@@ -166,6 +166,9 @@ export class TestServer extends DurableObject<ServerEnv> {
         Response.json(
           {
             phase: "setup",
+            sessionId: null,
+            cars: [],
+            compatibility: null,
             sleeping: true,
             message: "Administrator: supply your disc resources to start the server.",
             players: 2,

@@ -1,5 +1,8 @@
+import type { CatchupChunk } from "@tm4/lightyear-client/schemas";
+
 import type { NetworkEngine, NetworkPort } from "./protocol.ts";
 import { stateSections } from "./protocol.ts";
+export type { CatchupChunk } from "@tm4/lightyear-client/schemas";
 
 export const maxResumeTicks = 240;
 const maxChunkTicks = 64;
@@ -7,15 +10,6 @@ const framePrefix = 29;
 const inputBytes = 7;
 const maxBatchTicks = 24;
 const batchBudgetMs = 8;
-
-export type CatchupChunk = {
-  type: "catchup_frames";
-  attempt: number;
-  start: number;
-  head: number;
-  data: number[];
-  checksum: number;
-};
 
 function integer(value: number, max: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= max;

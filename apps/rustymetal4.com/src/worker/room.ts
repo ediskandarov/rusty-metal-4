@@ -1,7 +1,8 @@
+import { mapLabel } from "@tm4/rooms-client/schemas";
+import { createServerClient } from "@tm4/rustymetal-server-client";
 import { DurableObject } from "cloudflare:workers";
 
 import { failure, json, readJson } from "../http.ts";
-import { type Compatibility, mapLabel } from "../protocol.ts";
 import {
   beginPreparation,
   connect,
@@ -181,6 +182,18 @@ export class Room extends DurableObject<Env> {
     );
   }
 
+  private api() {
+    return createServerClient({
+      baseURL: "https://server/api/",
+      fetch: (request) =>
+        this.server(new URL(request.url).pathname, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+        }),
+    });
+  }
+
   private async stopMatch(message: string): Promise<void> {
     const state = this.state!;
     const match = state.match;
@@ -251,32 +264,7 @@ export class Room extends DurableObject<Env> {
         await this.stopMatch("The server reservation expired. Prepare a new match.");
         return;
       }
-      const response = await this.server("/api/status");
-      if (!response.ok) throw new Error("The match server stopped. Prepare a new match.");
-      const value: unknown = await response.json();
-      const status = value as {
-        phase: string;
-        sessionId: string | null;
-        sleeping?: boolean;
-        cars: string[];
-        compatibility: Compatibility | null;
-        message: string;
-      };
-      if (
-        !status ||
-        ![
-          "setup",
-          "loading",
-          "ready",
-          "starting",
-          "lobby",
-          "match",
-          "results",
-          "failed",
-          "closed",
-        ].includes(status.phase)
-      )
-        throw new Error("Invalid match status");
+      const status = await this.api().status();
       if (status.sleeping || ["failed", "closed"].includes(status.phase)) {
         await this.stopMatch(
           status.sleeping
@@ -285,8 +273,6 @@ export class Room extends DurableObject<Env> {
         );
         return;
       }
-      if (match.roster.length && status.sessionId !== null && typeof status.sessionId !== "string")
-        throw new Error("Invalid match session status");
       if (match.roster.length && status.sessionId !== match.id) {
         await this.stopMatch("The match server session changed.");
         return;
@@ -451,18 +437,12 @@ export class Room extends DurableObject<Env> {
           const match = freezeRoster(state, key, now);
           await this.commit();
           try {
-            const response = await this.server("/api/start", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                players: match.roster.length,
-                world: mapLabel(state.settings.mapId),
-                sessionId: match.id,
-                roster: match.roster.map(({ credential, car }) => ({ credential, car })),
-              }),
+            await this.api().start({
+              players: match.roster.length,
+              world: mapLabel(state.settings.mapId),
+              sessionId: match.id,
+              roster: match.roster.map(({ credential, car }) => ({ credential, car })),
             });
-            if (!response.ok) throw new Error(await response.text());
-            await response.body?.cancel();
           } catch (error) {
             await this.stopMatch("Match startup failed. Prepare the server and try again.");
             throw error;

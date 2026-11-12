@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 
+import type { RoomSnapshot, RoomSummary } from "@tm4/rooms-client/schemas";
 import { WebSocket as NetworkWebSocket } from "ws";
 
-import type { RoomSnapshot, RoomSummary } from "../../apps/rustymetal4.com/src/protocol.ts";
 import { eventually, runtime } from "./runtime.ts";
 
 const mf = await runtime();

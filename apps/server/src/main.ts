@@ -1,5 +1,6 @@
 import { loadDisc } from "@tm4/resources/loader/loader";
 import { directorySources } from "@tm4/resources/loader/sources";
+import { createServerClient } from "@tm4/rustymetal-server-client";
 
 function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
   const node = document.getElementById(id);
@@ -23,40 +24,14 @@ const join = element("join", HTMLAnchorElement);
 const setup = element("setup", HTMLDetailsElement);
 let busy = false;
 
-interface Status {
-  phase: string;
-  sleeping?: boolean;
-  message: string;
-  players: number;
-  worlds: string[];
-  world: string | null;
-  connected: number;
-  tick: number;
-  endpoint: string;
-  uploaded: number;
-  required: number;
-}
-interface Resource {
-  id: string;
-  size: number;
-  sha256: string;
-}
-
-async function api(path: string, init: RequestInit = {}) {
-  const response = await fetch(path, {
-    ...init,
-    cache: "no-store",
-    headers: { ...init.headers, Authorization: `Bearer ${secret.value}` },
-  });
-  if (!response.ok) throw new Error(await response.text());
-  return response;
-}
+const server = createServerClient({
+  baseURL: new URL("/api/", location.href),
+  headers: () => ({ Authorization: "Bearer " + secret.value }),
+});
 
 async function refresh() {
   try {
-    const response = await fetch("/api/status", { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const state = (await response.json()) as Status;
+    const state = await server.status();
     const canUpload = state.phase === "setup" || state.phase === "failed";
     const editable = canUpload || state.phase === "ready";
     const locked = ["starting", "lobby", "match", "results", "closed"].includes(state.phase);
@@ -114,7 +89,7 @@ async function provision() {
   disc.disabled = true;
   secret.disabled = true;
   try {
-    const resources = (await (await api("/api/resources")).json()) as Resource[];
+    const resources = await server.resources();
     const assets = await loadDisc(directorySources(disc.files ?? []), {
       progress: (message) => {
         progress.textContent = message;
@@ -125,9 +100,9 @@ async function provision() {
       const bytes = assets.files.get(id);
       if (!bytes) throw new Error(`Required server resource missing: ${id}`);
       progress.textContent = `Uploading validated server resources (${i + 1}/${required.length})…`;
-      await api(`/api/resources${id}`, { method: "PUT", body: bytes });
+      await server.upload(id, bytes);
     }
-    await api("/api/prepare", { method: "POST" });
+    await server.prepare();
     progress.textContent =
       "Upload complete. The native server is validating and preparing the match.";
     disc.value = "";
@@ -154,11 +129,7 @@ async function openMatch() {
   world.disabled = true;
   secret.disabled = true;
   try {
-    await api("/api/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(options),
-    });
+    await server.start(options);
     progress.textContent = "Opening the selected match…";
     secret.value = "";
   } catch (error) {

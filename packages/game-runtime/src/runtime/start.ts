@@ -1,3 +1,4 @@
+import { getBuildManifest } from "@tm4/lightyear-client";
 import type { DiscAssets } from "@tm4/resources/loader/types";
 
 import { type GameModule, requireRuntime } from "./module.ts";
@@ -24,7 +25,7 @@ export async function startGame(
       fingerprints.push(path + ":" + (await digest(bytes)));
   }
   const content = await digest(new TextEncoder().encode(fingerprints.join("\n")));
-  const build = (await (await fetch("simulation-build.json")).json()) as { sha256: string };
+  const build = await getBuildManifest(new URL("simulation-build.json", document.baseURI));
 
   const parameters = new URLSearchParams(location.search);
   return new Promise((resolve, reject) => {

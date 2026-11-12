@@ -1,0 +1,16 @@
+{
+  "name": "@tm4/rustymetal-server-client",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "4.6.7",
+    "@tm4/lightyear-client": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./schemas": "./src/schemas.ts"
+  }
+}

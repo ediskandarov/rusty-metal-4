@@ -11,5 +11,8 @@
     "./loader/*": "./src/loader/*.ts",
     "./mods/*": "./src/mods/*.ts",
     "./host/*": "./src/host/*.ts"
+  },
+  "dependencies": {
+    "@tm4/dev-server-client": "workspace:*"
   }
 }

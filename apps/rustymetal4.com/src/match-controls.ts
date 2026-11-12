@@ -1,4 +1,6 @@
-import type { Compatibility, RoomSnapshot } from "./protocol.ts";
+import { getBuildManifest } from "@tm4/lightyear-client";
+import { createRoomsClient } from "@tm4/rooms-client";
+import type { Compatibility, RoomSnapshot } from "@tm4/rooms-client/schemas";
 
 interface PlayerMessage {
   type: "rm4-player";
@@ -26,16 +28,11 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
   let runtimeAvailable: boolean | null = null;
   const send = (value: object) =>
     frame.contentWindow?.postMessage({ type: "rm4-room", roomId: id, ...value }, location.origin);
-  const post = async (path: string, body: object = {}) => {
-    const response = await fetch("/api/rooms/" + id + "/" + path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    const result = (await response.json()) as { room: RoomSnapshot; error?: string };
-    if (!response.ok) throw new Error(result.error ?? "Match request failed. Please retry.");
-    apply(result.room);
-    return result.room;
+  const rooms = createRoomsClient({ baseURL: new URL("/api/", location.href) });
+  const update = async (operation: Promise<RoomSnapshot>) => {
+    const room = await operation;
+    apply(room);
+    return room;
   };
   const action = (operation: () => Promise<unknown>) => {
     if (busy) return;
@@ -50,7 +47,7 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
       });
   };
   const player = (isReady: boolean) =>
-    post("player", { car: car.value || null, compatibility, ready: isReady });
+    update(rooms.player(id, { car: car.value || null, compatibility, ready: isReady }));
   const enter = () => {
     const match = current?.match;
     if (!compatibility || !match?.endpoint || !match.credential || sentSession === match.id) return;
@@ -110,10 +107,9 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
     }
     enter();
   };
-  void fetch("/play/simulation-build.json", { cache: "no-store" })
-    .then(async (response) => {
-      const build = response.ok ? ((await response.json()) as { sha256?: string }) : null;
-      runtimeAvailable = typeof build?.sha256 === "string" && /^[a-f0-9]{64}$/.test(build.sha256);
+  void getBuildManifest(new URL("/play/simulation-build.json", location.href))
+    .then(() => {
+      runtimeAvailable = true;
     })
     .catch(() => {
       runtimeAvailable = false;
@@ -128,11 +124,11 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
     action(() => player(!current?.participants.find((member) => member.id === current.you)?.ready));
   prepare.onclick = () =>
     action(async () => {
-      const room = current?.match ? current : await post("prepare");
+      const room = current?.match ? current : await update(rooms.prepare(id));
       if (room.match) send({ action: "upload", sessionId: room.match.id });
     });
-  cancel.onclick = () => action(() => post("match/" + current!.match!.id + "/cancel"));
-  start.onclick = () => action(() => post("start"));
+  cancel.onclick = () => action(() => update(rooms.cancel(id, current!.match!.id)));
+  start.onclick = () => action(() => update(rooms.start(id)));
   reconnect.onclick = () => {
     send({ action: "stop" });
     sentSession = null;

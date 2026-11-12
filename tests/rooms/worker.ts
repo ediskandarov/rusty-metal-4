@@ -1,6 +1,6 @@
+import type { RoomSummary } from "@tm4/rooms-client/schemas";
 import { DurableObject } from "cloudflare:workers";
 
-import type { RoomSummary } from "../../apps/rustymetal4.com/src/protocol.ts";
 import type { RoomState } from "../../apps/rustymetal4.com/src/room-state.ts";
 import { RoomDirectory as ProductionDirectory } from "../../apps/rustymetal4.com/src/worker/directory.ts";
 import { Room as ProductionRoom } from "../../apps/rustymetal4.com/src/worker/room.ts";
@@ -146,6 +146,14 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       if (this.statusFailure === "timeout") await scheduler.wait(6000);
       return Response.json({
         phase: this.phase,
+        players: 2,
+        worlds: ["Construction Yard"],
+        world: "Construction Yard",
+        connected: 2,
+        tick: 0,
+        endpoint: "/match",
+        uploaded: 1,
+        required: 1,
         sessionId: this.sessionId,
         cars: ["Orbital", "Pizza Boy"],
         compatibility: { protocol: 9, build: "a".repeat(64), content: "b".repeat(64) },

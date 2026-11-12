@@ -21,7 +21,7 @@ export async function buildPlayer({ mode, site }: { mode: PlayerMode; site: stri
   await rm(join(site, "styles"), { recursive: true, force: true });
   if (diagnostic) {
     const probe = await Bun.build({
-      entrypoints: [fileURLToPath(import.meta.resolve("@tm4/game-client/network/rollbackProbe"))],
+      entrypoints: [fileURLToPath(import.meta.resolve("@tm4/game-runtime/network/rollbackProbe"))],
       outdir: site,
       naming: "rollback-probe.js",
       target: "browser",

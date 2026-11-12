@@ -1,24 +1,19 @@
-import { matchControls } from "./match-controls.ts";
+import { createRoomsClient, RoomsApiError as ApiError } from "@tm4/rooms-client";
 import {
-  type DirectoryEvent,
   mapLabel,
   modeLabel,
-  type RoomEvent,
   type RoomSettings,
+  roomSettingsSchema,
   type RoomSnapshot,
   type RoomSummary,
-} from "./protocol.ts";
+} from "@tm4/rooms-client/schemas";
+
+import { matchControls } from "./match-controls.ts";
+
+const rooms = createRoomsClient({ baseURL: new URL("/api/", location.href) });
 
 const element = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
-class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
-    super(message);
-  }
-}
 const errorAt = (id: string, error?: unknown) => {
   const target = element(id);
   target.textContent =
@@ -31,30 +26,9 @@ const errorAt = (id: string, error?: unknown) => {
           : "";
   target.hidden = !error;
 };
-async function api<T>(path: string, body?: unknown): Promise<T> {
-  const response = await fetch(
-    `/api/${path}`,
-    body === undefined
-      ? { cache: "no-store" }
-      : {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        },
-  );
-  const result: unknown = await response.json();
-  if (!response.ok) {
-    const message =
-      result && typeof result === "object" && "error" in result && typeof result.error === "string"
-        ? result.error
-        : "The room service is unavailable.";
-    throw new ApiError(response.status, message);
-  }
-  return result as T;
-}
 async function session(): Promise<number> {
   // Two first-visit tabs must not replace each other's freshly issued browser credential.
-  const issue = () => api<{ serverTime: number }>("session", {});
+  const issue = () => rooms.session();
   const result = navigator.locks
     ? await navigator.locks.request("rm4-session", issue)
     : await issue();
@@ -83,12 +57,12 @@ function formSettings(form: HTMLFormElement): RoomSettings {
     const value = data.get(name);
     return typeof value === "string" ? value : "";
   };
-  return {
+  return roomSettingsSchema.parse({
     name: field("name"),
-    modeId: field("modeId") as RoomSettings["modeId"],
-    mapId: field("mapId") as RoomSettings["mapId"],
+    modeId: field("modeId"),
+    mapId: field("mapId"),
     capacity: Number(field("capacity")),
-  };
+  });
 }
 function submit(form: HTMLFormElement, errorId: string, action: () => Promise<void>): void {
   form.addEventListener("submit", (event) => {
@@ -108,64 +82,6 @@ function submit(form: HTMLFormElement, errorId: string, action: () => Promise<vo
     })();
   });
 }
-function stream(
-  path: string,
-  event: (value: unknown) => void,
-  status: (live: boolean) => void,
-  recover: () => Promise<boolean>,
-): () => void {
-  let socket: WebSocket | undefined;
-  let stopped = false;
-  let retry: ReturnType<typeof setTimeout> | undefined;
-  let lastPong = Date.now();
-  const open = () => {
-    if (stopped) return;
-    const url = new URL(`/api/${path}`, location.href);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    socket = new WebSocket(url);
-    socket.onopen = () => {
-      lastPong = Date.now();
-      status(true);
-    };
-    socket.onmessage = (message) => {
-      lastPong = Date.now();
-      if (message.data === "pong") return;
-      try {
-        event(JSON.parse(String(message.data)));
-      } catch {
-        socket?.close();
-      }
-    };
-    socket.onclose = () => {
-      if (stopped) return;
-      status(false);
-      retry = setTimeout(() => {
-        void (async () => {
-          try {
-            if (!(await recover())) return;
-          } catch {
-            /* The next socket retries after an outage. */
-          }
-          open();
-        })();
-      }, 2000);
-    };
-    socket.onerror = () => socket?.close();
-  };
-  const heartbeat = setInterval(() => {
-    if (socket?.readyState !== WebSocket.OPEN) return;
-    if (Date.now() - lastPong > 50_000) socket.close();
-    else socket.send("ping");
-  }, 20_000);
-  open();
-  return () => {
-    stopped = true;
-    clearTimeout(retry);
-    clearInterval(heartbeat);
-    socket?.close();
-  };
-}
-
 async function directory(): Promise<void> {
   const list = element("rooms");
   const render = (rooms: RoomSummary[]) => {
@@ -204,7 +120,7 @@ async function directory(): Promise<void> {
     );
   };
   const refresh = async () => {
-    render((await api<{ rooms: RoomSummary[] }>("rooms")).rooms);
+    render(await rooms.list());
     return true;
   };
   try {
@@ -213,14 +129,13 @@ async function directory(): Promise<void> {
     errorAt("directory-error", error);
     list.replaceChildren();
   }
-  stream(
-    "directory/live",
-    (value) => render((value as DirectoryEvent).rooms),
-    (live) => {
+  rooms.watchDirectory({
+    update: render,
+    status: (live) => {
       element("directory-status").textContent = live ? "Live directory" : "Reconnecting…";
     },
-    refresh,
-  );
+    recover: refresh,
+  });
   const form = element<HTMLFormElement>("create-form");
   fillName("create-player");
   let requestId: string | null = null;
@@ -238,7 +153,7 @@ async function directory(): Promise<void> {
       /* Optional retry persistence. */
     }
     try {
-      const { room } = await api<{ room: RoomSnapshot }>("rooms", {
+      const room = await rooms.create({
         name: element<HTMLInputElement>("create-name").value,
         playerName: rememberName(form),
         requestId,
@@ -269,7 +184,6 @@ async function room(): Promise<void> {
     errorAt("room-error", "This invite link is incomplete. Open a room from the directory.");
     return;
   }
-  const base = `rooms/${id}`;
   let current: RoomSnapshot | undefined;
   let stop: (() => void) | undefined;
   let editing = false;
@@ -340,11 +254,11 @@ async function room(): Promise<void> {
     recovery = (async () => {
       try {
         await session();
-        const result = await api<{ room: RoomSnapshot }>(base);
-        render(result.room);
-        if (!result.room.you) element("room-status").textContent = "Viewing room";
+        const result = await rooms.get(id);
+        render(result);
+        if (!result.you) element("room-status").textContent = "Viewing room";
         watch();
-        return Boolean(result.room.you);
+        return Boolean(result.you);
       } catch (error) {
         if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 410)) {
           element("room-status").textContent = current ? "Reconnecting…" : "Unavailable";
@@ -368,18 +282,17 @@ async function room(): Promise<void> {
   };
   const watch = () => {
     if (stop || !current?.you || leaving) return;
-    stop = stream(
-      `${base}/live`,
-      (value) => render((value as RoomEvent).room),
-      (live) => {
+    stop = rooms.watchRoom(id, {
+      update: render,
+      status: (live) => {
         element("room-status").textContent = live
           ? "Live room"
           : current?.you
             ? "Reconnecting…"
             : "Viewing room";
       },
-      refresh,
-    );
+      recover: refresh,
+    });
   };
   try {
     await refresh();
@@ -416,9 +329,7 @@ async function room(): Promise<void> {
   submit(element<HTMLFormElement>("join-form"), "join-error", async () => {
     const form = element<HTMLFormElement>("join-form");
     await session();
-    render(
-      (await api<{ room: RoomSnapshot }>(`${base}/join`, { playerName: rememberName(form) })).room,
-    );
+    render(await rooms.join(id, rememberName(form)));
     watch();
   });
   settingsForm.addEventListener("input", () => {
@@ -426,12 +337,9 @@ async function room(): Promise<void> {
     element("settings-status").textContent = "";
   });
   submit(settingsForm, "settings-error", async () => {
-    const result = await api<{ room: RoomSnapshot }>(
-      `${base}/settings`,
-      formSettings(settingsForm),
-    );
+    const result = await rooms.settings(id, formSettings(settingsForm));
     editing = false;
-    render(result.room);
+    render(result);
     element("settings-status").textContent = "Settings saved for everyone.";
   });
   element<HTMLButtonElement>("leave-button").onclick = () => {
@@ -439,7 +347,7 @@ async function room(): Promise<void> {
       const button = element<HTMLButtonElement>("leave-button");
       button.disabled = true;
       try {
-        await api(`${base}/leave`, {});
+        await rooms.leave(id);
         leaving = true;
         stop?.();
         location.assign("/");

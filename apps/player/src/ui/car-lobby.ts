@@ -1,4 +1,4 @@
-import type { LobbyView } from "@tm4/game-client/network/match";
+import type { LobbyView } from "@tm4/game-runtime/network/match";
 
 import { element } from "./dom.ts";
 

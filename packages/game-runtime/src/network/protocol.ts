@@ -1,34 +1,14 @@
-export type Input = { buttons: number; axes: number; analog: boolean };
-export type Compatibility = { protocol: number; build: string; content: string };
-export type Start = {
-  players: number;
-  world: string;
-  cars: string[];
-  seed: number;
-  epoch: number;
-  compatibility: Compatibility;
-  portable?: boolean;
-};
+import type { NetworkDiagnostics } from "@tm4/lightyear-client";
+import type { Compatibility, RoundState, Start } from "@tm4/lightyear-client/schemas";
+export type {
+  Input,
+  Compatibility,
+  Start,
+  Score,
+  RoundState,
+  Frame,
+} from "@tm4/lightyear-client/schemas";
 export const stateSections = ["session", "cars", "objects", "world", "sound"] as const;
-export type Score = { wins: number; losses: number };
-export type RoundState = {
-  remaining: number;
-  winner: number;
-  roundFinished: boolean;
-  acceptsContinue: boolean;
-  nextMode: number;
-  digest: number;
-  sections: [number, number, number, number, number];
-  unsupported: string | null;
-  scores: Score[];
-};
-export type Frame = {
-  tick: number;
-  inputs: Input[];
-  type: "frame";
-  state: RoundState;
-};
-
 export interface NetworkEngine {
   ccall(name: string, result: string, types: string[], values: (string | number)[]): number;
   _WebNetRequestMatch(players: number, world: number, seed: number, viewSlot: number): number;
@@ -91,31 +71,7 @@ export interface NetworkPort {
     replayChunks?: number;
     replayMs?: number;
     resumeRetargets?: number;
-    transport: {
-      rttMs: number;
-      jitterMs: number;
-      queuedPackets: number;
-      nativeTick: number;
-      pump: {
-        pollGapMs: number;
-        maxPollGapMs: number;
-        maxUpdateMs: number;
-        visibility: DocumentVisibilityState;
-      };
-      prediction?: {
-        head: number;
-        confirmed: number;
-        rollbacks: number;
-        windowWaits: number;
-        waitingForInput: boolean;
-        acceptedDepth: number;
-        replayed: number;
-        maxDepth: number;
-        historyBytes: number;
-        peakBytes: number;
-        buttonEdges: number;
-      };
-    };
+    transport: NetworkDiagnostics;
   };
 }
 

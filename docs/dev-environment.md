@@ -30,7 +30,7 @@ and `typecheck`) cover the workspaces together.
   command-line parsing or logging. Reference generation requires full stock track hashes;
   ordinary loading checks resource compatibility and permits supported modifications.
   Reference data in `config/` remains shared with the Rust host and resource tools.
-- `@tm4/game-client` provides browser Wasm startup and the network client. The
+- `@tm4/game-runtime` provides browser Wasm startup and the network client. The
   player supplies settings initialization and match status presentation through
   callbacks; packages do not reach into the player's UI.
 

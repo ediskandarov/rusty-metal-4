@@ -5,8 +5,12 @@
     "": {
       "name": "tm4-rewired",
       "dependencies": {
-        "@tm4/game-client": "workspace:*",
+        "@tm4/dev-server-client": "workspace:*",
+        "@tm4/game-runtime": "workspace:*",
+        "@tm4/lightyear-client": "workspace:*",
         "@tm4/resources": "workspace:*",
+        "@tm4/rooms-client": "workspace:*",
+        "@tm4/rustymetal-server-client": "workspace:*",
       },
       "devDependencies": {
         "@astrojs/check": "0.9.12",
@@ -27,27 +31,65 @@
     "apps/player": {
       "name": "@tm4/player",
       "dependencies": {
-        "@tm4/game-client": "workspace:*",
+        "@tm4/game-runtime": "workspace:*",
         "@tm4/resources": "workspace:*",
+        "@tm4/rooms-client": "workspace:*",
       },
     },
     "apps/rustymetal4.com": {
       "name": "@tm4/rustymetal4.com",
+      "dependencies": {
+        "@tm4/lightyear-client": "workspace:*",
+        "@tm4/rooms-client": "workspace:*",
+        "@tm4/rustymetal-server-client": "workspace:*",
+      },
     },
     "apps/server": {
       "name": "@tm4/server",
       "dependencies": {
         "@tm4/resources": "workspace:*",
+        "@tm4/rustymetal-server-client": "workspace:*",
       },
     },
-    "packages/game-client": {
-      "name": "@tm4/game-client",
+    "packages/dev-server-client": {
+      "name": "@tm4/dev-server-client",
       "dependencies": {
+        "zod": "4.6.7",
+      },
+    },
+    "packages/game-runtime": {
+      "name": "@tm4/game-runtime",
+      "dependencies": {
+        "@tm4/lightyear-client": "workspace:*",
         "@tm4/resources": "workspace:*",
+      },
+    },
+    "packages/lightyear-client": {
+      "name": "@tm4/lightyear-client",
+      "dependencies": {
+        "zod": "4.6.7",
       },
     },
     "packages/resources": {
       "name": "@tm4/resources",
+      "dependencies": {
+        "@tm4/dev-server-client": "workspace:*",
+      },
+    },
+    "packages/rooms-client": {
+      "name": "@tm4/rooms-client",
+      "dependencies": {
+        "@tm4/lightyear-client": "workspace:*",
+        "@tm4/rustymetal-server-client": "workspace:*",
+        "zod": "4.6.7",
+      },
+    },
+    "packages/rustymetal-server-client": {
+      "name": "@tm4/rustymetal-server-client",
+      "dependencies": {
+        "@tm4/lightyear-client": "workspace:*",
+        "zod": "4.6.7",
+      },
     },
   },
   "packages": {
@@ -347,11 +389,19 @@
 
     "@speed-highlight/core": ["@speed-highlight/core@1.2.24", "", {}, "sha512-qeW2e1l78afw8VhRPfPQ1Gjj+KU5XFQ/OFV5ti6eTa9bruO7mJyZtA4vw0ofqmA3tKCkROE9xLk3VZoeRc98nw=="],
 
-    "@tm4/game-client": ["@tm4/game-client@workspace:packages/game-client"],
+    "@tm4/dev-server-client": ["@tm4/dev-server-client@workspace:packages/dev-server-client"],
+
+    "@tm4/game-runtime": ["@tm4/game-runtime@workspace:packages/game-runtime"],
+
+    "@tm4/lightyear-client": ["@tm4/lightyear-client@workspace:packages/lightyear-client"],
 
     "@tm4/player": ["@tm4/player@workspace:apps/player"],
 
     "@tm4/resources": ["@tm4/resources@workspace:packages/resources"],
+
+    "@tm4/rooms-client": ["@tm4/rooms-client@workspace:packages/rooms-client"],
+
+    "@tm4/rustymetal-server-client": ["@tm4/rustymetal-server-client@workspace:packages/rustymetal-server-client"],
 
     "@tm4/rustymetal4.com": ["@tm4/rustymetal4.com@workspace:apps/rustymetal4.com"],
 

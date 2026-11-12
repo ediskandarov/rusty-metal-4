@@ -1,12 +1,13 @@
 {
-  "name": "@tm4/game-client",
+  "name": "@tm4/game-runtime",
   "private": true,
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tm4/resources": "workspace:*"
+    "@tm4/resources": "workspace:*",
+    "@tm4/lightyear-client": "workspace:*"
   },
   "exports": {
     "./runtime/*": "./src/runtime/*.ts",

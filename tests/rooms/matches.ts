@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import type { RoomSnapshot } from "../../apps/rustymetal4.com/src/protocol.ts";
+import type { RoomSnapshot } from "@tm4/rooms-client/schemas";
+
 import { monitoringGrace, type RoomMatch } from "../../apps/rustymetal4.com/src/room-state.ts";
 import { eventually, runtime } from "./runtime.ts";
 const mf = await runtime();

@@ -1,47 +1,19 @@
+import type { LobbyState, Request, SnapshotBegin } from "@tm4/lightyear-client/schemas";
+
 import { attachLivePrediction } from "./livePrediction.ts";
-import type { Frame, NetworkEngine, NetworkPort, RoundState, Start } from "./protocol.ts";
+import type { NetworkEngine, NetworkPort, RoundState } from "./protocol.ts";
 import { configureMatch } from "./protocol.ts";
-import type { CatchupChunk } from "./replay.ts";
 import { checksum, maxResumeTicks, SnapshotReplay } from "./replay.ts";
 import { connectNetwork } from "./transport.ts";
-
-export type LobbyState = {
-  cars: string[];
-  players: { connected: boolean; car: string | null; ready: boolean }[];
-};
+export type { LobbyState } from "@tm4/lightyear-client/schemas";
 
 export type LobbyView = (
   state: (LobbyState & { slot: number; select: (car: string, ready: boolean) => void }) | null,
 ) => void;
 
-type Message =
-  | (LobbyState & { type: "lobby" })
-  | (Omit<Start, "type"> & { type: "prediction_prepare" | "resume_prepare" })
-  | { type: "resume_credential"; token: string }
-  | SnapshotBegin
-  | { type: "snapshot_chunk"; attempt: number; offset: number; data: number[] }
-  | { type: "resume_catchup"; attempt: number; start: number; head: number; digest: number }
-  | { type: "resume_live"; attempt: number; anchor: number; head: number; sequence: number }
-  | { type: "resume_active"; head: number }
-  | { type: "prediction_offer" | "prediction_begin"; anchor: number }
-  | Frame
-  | CatchupChunk
-  | { type: "welcome"; slot: number }
-  | { type: "error"; message: string };
-
 const resumeIdleMs = 7_000;
 const maxSnapshotBytes = 256 * 1024;
 const snapshotChunkBytes = 8192;
-
-type SnapshotBegin = {
-  type: "snapshot_begin";
-  attempt: number;
-  tick: number;
-  anchor: number;
-  total: number;
-  checksum: number;
-  state: RoundState;
-};
 
 type SnapshotDownload = {
   header: SnapshotBegin;
@@ -113,7 +85,7 @@ export async function joinMatch(
     transport: socket.diagnostics(),
   });
 
-  const send = (message: object) => socket.send(message);
+  const send = (message: Request) => socket.send(message);
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (closed) return;
     closed = true;
@@ -147,12 +119,15 @@ export async function joinMatch(
     }
   };
 
-  socket.onopen = () =>
+  socket.onopen = () => {
+    const token = credential ?? admission;
+    if (!port.compatibility) throw new Error("Local resource compatibility is unavailable");
     send(
-      (credential ?? admission)
-        ? { type: "resume", token: credential ?? admission, compatibility: port.compatibility }
+      token
+        ? { type: "resume", token, compatibility: port.compatibility }
         : { type: "join", compatibility: port.compatibility },
     );
+  };
   socket.onerror = (error) => {
     try {
       diagnostics.transport = socket.diagnostics();
@@ -188,10 +163,9 @@ export async function joinMatch(
     armResumeTimeout();
   };
 
-  socket.onmessage = (data: unknown) => {
+  socket.onmessage = (message) => {
     if (closed) return;
     try {
-      const message = data as Message;
       switch (message.type) {
         case "welcome":
           if (!Number.isInteger(message.slot) || message.slot < 0 || message.slot >= 8)

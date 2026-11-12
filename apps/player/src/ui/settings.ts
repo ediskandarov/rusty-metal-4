@@ -1,4 +1,4 @@
-import type { GameModule } from "@tm4/game-client/runtime/module";
+import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
 import { initializeInputSettings } from "./controls.ts";
 import { element } from "./dom.ts";

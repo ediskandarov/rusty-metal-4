@@ -2,6 +2,8 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import { buildManifestSchema } from "@tm4/lightyear-client/schemas";
+
 import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer } from "../player/build.ts";
 
@@ -12,9 +14,9 @@ await buildSite("rustymetal4.com", "release", site);
 
 const runtime = process.env.TM4_PLAYER_RUNTIME ?? join(root, "build/release/site");
 if (await Bun.file(join(runtime, "simulation-build.json")).exists()) {
-  const manifest = (await Bun.file(join(runtime, "simulation-build.json")).json()) as {
-    sha256: string;
-  };
+  const manifest = buildManifestSchema.parse(
+    await Bun.file(join(runtime, "simulation-build.json")).json(),
+  );
   const digest = new Bun.CryptoHasher("sha256")
     .update(await Bun.file(join(runtime, "tm4_web.wasm")).arrayBuffer())
     .update(await Bun.file(join(runtime, "network/tm4_network_bg.wasm")).arrayBuffer())

@@ -1,7 +1,8 @@
-import { joinMatch } from "@tm4/game-client/network/match";
-import type { NetworkEngine, NetworkPort } from "@tm4/game-client/network/protocol";
+import { joinMatch } from "@tm4/game-runtime/network/match";
+import type { NetworkEngine, NetworkPort } from "@tm4/game-runtime/network/protocol";
 import { loadDisc } from "@tm4/resources/loader/loader";
 import type { DiscSources } from "@tm4/resources/loader/types";
+import { createRoomsClient } from "@tm4/rooms-client";
 
 import { matchStatus } from "./ui/match-status.ts";
 
@@ -93,14 +94,12 @@ if (inRoom) {
       /^[a-f0-9-]{36}$/.test(message.sessionId)
     ) {
       uploading = true;
-      const base = "/api/rooms/" + roomId + "/match/" + message.sessionId;
-      const request = async (path: string, init?: RequestInit) => {
-        const response = await fetch(base + path, { ...init, cache: "no-store" });
-        if (!response.ok) throw new Error(await response.text());
-        return response;
-      };
+      const resources = createRoomsClient({ baseURL: new URL("/api/", location.href) }).resources(
+        roomId,
+        message.sessionId,
+      );
       void (async () => {
-        const required = (await (await request("/resources")).json()) as { id: string }[];
+        const required = await resources.resources();
         const assets = await loadDisc(sources, { progress: status });
         for (const [index, id] of [
           ...required.map((entry) => entry.id),
@@ -115,10 +114,10 @@ if (inRoom) {
               (required.length + 1) +
               ")…",
           );
-          await request("/resources" + id, { method: "PUT", body: bytes });
+          await resources.upload(id, bytes);
         }
         assets.files.clear();
-        await request("/prepare", { method: "POST" });
+        await resources.prepare();
         status("Server upload complete. Waiting for validation…");
       })()
         .catch((error) => status(String(error)))

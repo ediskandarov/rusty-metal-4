@@ -1,4 +1,4 @@
-import type { MatchStatus } from "@tm4/game-client/network/match";
+import type { MatchStatus } from "@tm4/game-runtime/network/match";
 
 export function matchStatus(status: HTMLElement): MatchStatus {
   return (state, message) => {

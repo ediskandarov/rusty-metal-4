@@ -7,7 +7,8 @@
     "typecheck": "bun --bun astro check"
   },
   "dependencies": {
-    "@tm4/game-client": "workspace:*",
-    "@tm4/resources": "workspace:*"
+    "@tm4/game-runtime": "workspace:*",
+    "@tm4/resources": "workspace:*",
+    "@tm4/rooms-client": "workspace:*"
   }
 }

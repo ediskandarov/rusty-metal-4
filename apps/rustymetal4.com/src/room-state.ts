@@ -6,7 +6,7 @@ import {
   type RoomSettings,
   type RoomSnapshot,
   type RoomSummary,
-} from "./protocol.ts";
+} from "@tm4/rooms-client/schemas";
 
 export const reconnectGrace = 45_000;
 export const emptyGrace = 30_000;

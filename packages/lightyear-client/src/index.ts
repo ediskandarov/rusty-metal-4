@@ -1,4 +1,13 @@
-import { configureMatch } from "./protocol.ts";
+import { z } from "zod";
+
+import {
+  buildManifestSchema,
+  diagnosticsSchema,
+  type Message,
+  messageSchema,
+  type Request,
+  requestSchema,
+} from "./schemas.ts";
 /** Rust owns Lightyear's connection, channels, serialization, and network timelines.
  * The Emscripten game is a separate Wasm instance. This bridge copies JSON values
  * only at the JS/Rust boundary; the wire uses Lightyear's typed binary protocol.
@@ -61,25 +70,7 @@ export async function connectNetwork(endpoint: string) {
   const transport = {
     readyState: 0,
     diagnostics: () => ({
-      ...(JSON.parse(client.diagnostics()) as {
-        rttMs: number;
-        jitterMs: number;
-        queuedPackets: number;
-        nativeTick: number;
-        prediction: {
-          head: number;
-          confirmed: number;
-          rollbacks: number;
-          windowWaits: number;
-          waitingForInput: boolean;
-          acceptedDepth: number;
-          replayed: number;
-          maxDepth: number;
-          historyBytes: number;
-          peakBytes: number;
-          buttonEdges: number;
-        };
-      }),
+      ...diagnosticsSchema.parse(JSON.parse(client.diagnostics())),
       pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
     }),
     preparePrediction: (players: number, resuming: boolean) =>
@@ -115,11 +106,11 @@ export async function connectNetwork(endpoint: string) {
       client.prediction_input(buttons, axes, analog),
     condition: (latency: number, jitter: number) => client.condition(latency, jitter),
     onopen: (() => {}) as () => void,
-    onmessage: ((_message: unknown) => {}) as (message: unknown) => void,
+    onmessage: ((_message: Message) => {}) as (message: Message) => void,
     onerror: ((_error: unknown) => {}) as (error: unknown) => void,
-    send(message: object) {
+    send(message: Request) {
       if (closed || !opened) throw new Error("Lightyear connection is not open");
-      return client.send(JSON.stringify(message));
+      return client.send(JSON.stringify(requestSchema.parse(message)));
     },
     close() {
       if (closed) return;
@@ -139,7 +130,7 @@ export async function connectNetwork(endpoint: string) {
     maxPollGapMs = Math.max(maxPollGapMs, pollGapMs);
     lastPoll = now;
     try {
-      const messages = JSON.parse(client.update()) as unknown[];
+      const messages = z.array(messageSchema).parse(JSON.parse(client.update()));
       maxUpdateMs = Math.max(maxUpdateMs, performance.now() - now);
       const connected = client.connected();
       if (!opened && connected) {
@@ -162,7 +153,12 @@ export async function connectNetwork(endpoint: string) {
   return transport;
 }
 
-declare global {
-  var tm4Network: { connect: typeof connectNetwork; configure: typeof configureMatch };
+export async function getBuildManifest(url: string | URL, signal?: AbortSignal) {
+  const response = await fetch(url, { cache: "no-store", signal });
+  if (!response.ok) throw new Error("Game build manifest: HTTP " + response.status);
+  return buildManifestSchema.parse(await response.json());
 }
-globalThis.tm4Network = { connect: connectNetwork, configure: configureMatch };
+
+export type NetworkDiagnostics = ReturnType<
+  Awaited<ReturnType<typeof connectNetwork>>["diagnostics"]
+>;

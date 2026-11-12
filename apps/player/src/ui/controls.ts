@@ -1,4 +1,4 @@
-import type { GameModule } from "@tm4/game-client/runtime/module";
+import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
 import { element, item } from "./dom.ts";
 

@@ -1,6 +1,6 @@
-import { joinMatch } from "@tm4/game-client/network/match";
-import { hasNetworkEngine } from "@tm4/game-client/network/protocol";
-import { startGame } from "@tm4/game-client/runtime/start";
+import { joinMatch } from "@tm4/game-runtime/network/match";
+import { hasNetworkEngine } from "@tm4/game-runtime/network/protocol";
+import { startGame } from "@tm4/game-runtime/runtime/start";
 import { loadDisc } from "@tm4/resources/loader/loader";
 import { directorySources, remoteSources } from "@tm4/resources/loader/sources";
 import type { DiscSources } from "@tm4/resources/loader/types";

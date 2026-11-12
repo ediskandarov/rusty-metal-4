@@ -1,10 +1,9 @@
 import { expect, test } from "bun:test";
 
-import {
-  exportHealth,
-  type HealthSnapshot,
-  parseHealth,
-} from "../../apps/rustymetal4.com/src/telemetry.ts";
+import { type HealthSnapshot, healthSnapshotSchema } from "@tm4/rustymetal-server-client/schemas";
+
+import { exportHealth } from "../../apps/rustymetal4.com/src/telemetry.ts";
+const parseHealth = (value: unknown) => healthSnapshotSchema.parse(value);
 const snapshot = (boot: string, uptimeSeconds: number, ticks: number): HealthSnapshot => ({
   schema: 1,
   boot,

@@ -1,6 +1,7 @@
+import { maps, modes } from "@tm4/rooms-client/schemas";
+
 import { frontend } from "../assets.ts";
 import { digest, failure, json, readJson } from "../http.ts";
-import { maps, modes } from "../protocol.ts";
 import { object, RoomError, text } from "../room-state.ts";
 import type { RoomDirectory } from "./directory.ts";
 import type { Room } from "./room.ts";

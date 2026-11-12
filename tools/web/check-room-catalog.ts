@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
-import { maps } from "../../apps/rustymetal4.com/src/protocol.ts";
+import { maps } from "@tm4/rooms-client/schemas";
+
 import { readMr } from "../../packages/resources/src/compatibility/mr.ts";
 
 const path = process.argv[2];

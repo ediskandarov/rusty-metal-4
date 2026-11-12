@@ -1,7 +1,7 @@
+import type { RoomSummary } from "@tm4/rooms-client/schemas";
 import { DurableObject } from "cloudflare:workers";
 
 import { json } from "../http.ts";
-import type { RoomSummary } from "../protocol.ts";
 import { directoryLease } from "../room-state.ts";
 import type { Env } from "./index.ts";
 

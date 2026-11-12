@@ -1,0 +1,81 @@
+import { compatibilitySchema, sha256Schema } from "@tm4/lightyear-client/schemas";
+import { z } from "zod";
+const count = z.number().int().nonnegative();
+export const serverStatusSchema = z.object({
+  phase: z.enum([
+    "setup",
+    "loading",
+    "ready",
+    "starting",
+    "lobby",
+    "match",
+    "results",
+    "failed",
+    "closed",
+  ]),
+  sleeping: z.boolean().optional(),
+  sessionId: z.string().nullable(),
+  cars: z.array(z.string()),
+  compatibility: compatibilitySchema.nullable(),
+  message: z.string(),
+  players: count.min(2).max(8),
+  worlds: z.array(z.string()),
+  world: z.string().nullable(),
+  connected: count.max(8),
+  tick: count,
+  endpoint: z.string(),
+  uploaded: count,
+  required: count,
+});
+export type ServerStatus = z.infer<typeof serverStatusSchema>;
+export const resourceIdSchema = z
+  .string()
+  .regex(/^\/DATA\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9_.-]+$/)
+  .refine(
+    (id) => !id.split("/").some((part) => part === "." || part === ".."),
+    "Invalid resource path",
+  );
+export const resourceManifestSchema = z.array(
+  z.object({ id: resourceIdSchema, size: count, sha256: sha256Schema }),
+);
+export type ResourceManifest = z.infer<typeof resourceManifestSchema>;
+export const startOptionsSchema = z
+  .object({
+    players: count.min(2).max(8),
+    world: z.string().min(1),
+    sessionId: z.string().uuid().optional(),
+    roster: z.array(z.object({ credential: sha256Schema, car: z.string().min(1) })).optional(),
+  })
+  .refine(
+    (value) =>
+      (value.sessionId === undefined && value.roster === undefined) ||
+      (value.sessionId !== undefined &&
+        value.roster?.length === value.players &&
+        new Set(value.roster.map((member) => member.credential)).size === value.players),
+    "Invalid fixed room roster",
+  );
+export type StartOptions = z.infer<typeof startOptionsSchema>;
+export const measurementSchema = z.object({
+  name: z.string().regex(/^rustymetal4_[a-z0-9_]+$/),
+  kind: z.enum(["counter", "gauge"]),
+  value: z.number().finite().nonnegative(),
+  slot: count.max(7).optional(),
+  bucket: z.string().optional(),
+});
+export type Measurement = z.infer<typeof measurementSchema>;
+export const measurementKey = (row: Measurement) =>
+  row.name + "/" + (row.slot ?? "") + "/" + (row.bucket ?? "");
+export const healthSnapshotSchema = z
+  .object({
+    schema: z.literal(1),
+    boot: z.string(),
+    uptimeSeconds: z.number().finite().nonnegative(),
+    phase: z.string(),
+    measurements: z.array(measurementSchema).max(200),
+  })
+  .refine(
+    (snapshot) =>
+      new Set(snapshot.measurements.map(measurementKey)).size === snapshot.measurements.length,
+    "Duplicate health measurements",
+  );
+export type HealthSnapshot = z.infer<typeof healthSnapshotSchema>;

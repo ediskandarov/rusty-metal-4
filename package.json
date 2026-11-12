@@ -59,7 +59,11 @@
     "packages/*"
   ],
   "dependencies": {
-    "@tm4/game-client": "workspace:*",
-    "@tm4/resources": "workspace:*"
+    "@tm4/game-runtime": "workspace:*",
+    "@tm4/resources": "workspace:*",
+    "@tm4/rooms-client": "workspace:*",
+    "@tm4/rustymetal-server-client": "workspace:*",
+    "@tm4/lightyear-client": "workspace:*",
+    "@tm4/dev-server-client": "workspace:*"
   }
 }
