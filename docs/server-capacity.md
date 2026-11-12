@@ -86,3 +86,92 @@ match, and collect tick execution p50/p95/p99/max on the target hosting machine.
 - Local generated evidence: `build/benchmarks/server-2026-11-11/` contains the
   summary, CPU/RSS samples, socket counters, server log and validated journal.
   These artifacts are ignored by Git; this document retains the planning baseline.
+
+## Cloudflare eight-player run (2026-11-12)
+
+The same Bedroom/Sweet Tooth/seed-12345 input scenario ran against one Linux x64
+Rust/Wasmtime server in Cloudflare location `mxp06`, allocated **0.25 vCPU,
+256 MiB RAM and 2 GB disk**. The authority Wasm SHA-256 is identical to the local
+baseline above. The host was based on `52b62c6` plus the uncommitted HTTPS proxy
+support. Eight independent browser contexts ran on the Mac; their assets were
+loaded locally. Only their WebGL draw calls were suppressed in the long run;
+client simulation, prediction, network input and authoritative simulation ran.
+
+After 15 seconds of active warmup, all eight clients remained playing for
+**887.773 seconds (14 min 47.8 s)**, at **29.994 authoritative ticks/s**.
+Each slot contributed 26,629–26,630 driving ticks, 17,724–17,770 firing ticks and
+6,210–6,223 input changes. All eight cars were alive at the last healthy sample.
+
+| Comparable metric | Local baseline | Cloudflare |
+| --- | ---: | ---: |
+| Eight-player active window | 188.488 s | 887.773 s |
+| Authoritative ticks/s | 30.002 | 29.994 |
+| Rust CPU, percentage of one core | 12.18% | 11.99% over a 239.67 s combat subwindow |
+| Process RSS | 95.18 MiB mean | 80.38 MiB at the end of that subwindow |
+| WebSocket payload incoming | 136.99 kB/s | 146.46 kB/s |
+| WebSocket payload outgoing | 122.88 kB/s | 114.04 kB/s |
+
+WebSocket payload counters use the same Chrome protocol events in both runs;
+these rows exclude HTTP setup and TCP/TLS/proxy overhead. The earlier local
+socket-counter rows measure a different layer. CPU uses Linux `/proc` cumulative
+process counters versus macOS process counters; the cloud process window is
+shorter than the full session. RSS is not total container memory.
+
+Cloudflare's recorded combat samples averaged **50.69% of the allocated CPU**,
+with a highest sample of **58.88%**. Container memory averaged **101.92 MiB**,
+peaking at **103.03 MiB**. After ingestion completed, the retained provider response contained all 168
+five-second samples for 06:27–06:41 UTC (14 complete combat minutes).
+Memory rose by about 2 MiB across the recorded combat minutes. The server retains
+a bounded 8 MiB journal cache; these measurements do not establish a leak or
+longer-session memory stability. Startup was excluded from combat averages.
+
+**The 15-minute stability target did not pass.** At approximately 889 seconds,
+six clients reported `The native local prediction history has a missing tick`
+and disconnected. The server continued advancing; two clients remained playing.
+An earlier full-render attempt hit the same error on one client after 204 seconds.
+The authoritative long-run journal validated 29,820 ticks, with no unsupported
+simulation state. Its incomplete marker reflects capture during deliberate
+shutdown, not a completed match. Do not turn these results into a claim of stable
+eight-player WAN play or conclude that the prediction error is caused by CPU/RAM.
+
+The observed workload fits the resource allocation with headroom. Coverage is
+still one map and ordinary firing, not worst-case special attacks or all maps.
+Fix/reproduce the client prediction-history failure and repeat a complete long run
+before accepting the allocation for production. C/Wasmtime tick p95/p99 execution
+times were not measured in either baseline.
+
+Generated inputs, harness, snapshots, provider responses, browser observations,
+logs and both validated journals are under
+`build/benchmarks/cloudflare-2026-11-12/` (ignored by Git). The interrupted earlier
+run is retained separately in `attempt-1/`; it is not merged into the long-run
+statistics. Administrative measurement and journal endpoints require both the
+private test session and administrator token. Measurement now returns one bounded
+Linux snapshot; the experimental long stream used during this run was replaced.
+
+### Allocation decision
+
+Keep **0.25 vCPU / 256 MiB / 2 GB** for the next stage. The observed combat
+workload consumed about 0.127 vCPU on average and 0.147 vCPU at the highest
+provider sample, including observers. These are sampled CPU usage values, not
+maximum individual tick execution costs. Memory peaked at 40.2% of allocation.
+The client prediction-history failure prevents a stability acceptance, but the
+recorded resource metrics do not justify increasing CPU or RAM to address it.
+
+| Change | Decision from these measurements |
+| --- | --- |
+| Increase CPU/RAM | No resource-driven need in this workload. Reconsider for missed server deadlines, memory exhaustion, or heavier scenarios. |
+| Reduce memory/disk | Already at Cloudflare's custom-instance minimums: 256 MiB and 2 GB. |
+| Reduce CPU to 0.1875 vCPU | Untested candidate only: the observed mean/peak would consume about 67.6%/78.5% of that budget, leaving less room for startup and complex ticks. |
+| Reduce CPU to 0.125 vCPU | Reject for eight-player planning: observed mean demand already exceeds it, before workload variation. |
+| Use 0.0625-vCPU lite | Below the observed eight-player CPU demand. |
+
+Cloudflare bills CPU by active usage, while RAM and disk are billed by provisioned
+size. Reducing only the CPU cap therefore does not directly reduce the cost of
+the same computation. With RAM/disk already minimal, prefer the current CPU
+headroom. Scaling empty containers to zero remains the useful idle-cost control.
+See [instance minimums](https://developers.cloudflare.com/containers/platform/limits/)
+and [CPU/memory/disk pricing](https://developers.cloudflare.com/containers/platform/pricing/).
+
+No smaller profile was benchmarked or deployed. The profile decision applies to
+the observed eight-player scenario; it is not a worst-case guarantee for every
+map and special attack.
