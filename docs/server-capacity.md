@@ -148,7 +148,7 @@ statistics. Administrative measurement and journal endpoints require both the
 private test session and administrator token. Measurement now returns one bounded
 Linux snapshot; the experimental long stream used during this run was replaced.
 
-### Allocation decision
+### Initial allocation decision
 
 Keep **0.25 vCPU / 256 MiB / 2 GB** for the next stage. The observed combat
 workload consumed about 0.127 vCPU on average and 0.147 vCPU at the highest
@@ -172,6 +172,84 @@ headroom. Scaling empty containers to zero remains the useful idle-cost control.
 See [instance minimums](https://developers.cloudflare.com/containers/platform/limits/)
 and [CPU/memory/disk pricing](https://developers.cloudflare.com/containers/platform/pricing/).
 
-No smaller profile was benchmarked or deployed. The profile decision applies to
-the observed eight-player scenario; it is not a worst-case guarantee for every
-map and special attack.
+These initial decisions precede the fixed-client repeat below. None of the runs
+establishes a worst-case guarantee for every map and special attack.
+
+
+## Fixed-client repeat: 0.25 versus 0.1875 vCPU
+
+Two independent eight-client runs used the prediction-history fix at `23d9d70`,
+the same Bedroom/Sweet Tooth/seed-12345 input policy and 15-second active warmup.
+The authority Wasm is unchanged; the browser compatibility hash is
+`6e0323cc8ccf9758ff9160773ab8b85e050e6735d66d8a5539ab89946a789f0d`.
+Both containers ran in `mxp06` with 256 MiB RAM and 2 GB disk. Cloudflare's
+allocation API confirmed the smaller instance actually received 0.1875 vCPU.
+
+| Metric | 0.25 vCPU | 0.1875 vCPU |
+| --- | ---: | ---: |
+| Active duration | 901.028 s | 902.945 s |
+| Authoritative ticks/s, HTTP observation | 30.002 | 30.006 |
+| Clients playing at completion | 8 | 8 |
+| Minimum observed car health | 12,106 | 8,899 |
+| Cloudflare CPU, allocated-budget percentage: mean / highest sample | 50.37% / 59.52% | 52.96% / 62.21% |
+| Rust CPU, percentage of one core | 12.54% | 9.77% |
+| Linux container memory, mean / recorded peak | 99.90 / 101.56 MiB | 104.46 / 105.89 MiB |
+| Process RSS, mean | 77.54 MiB | 78.72 MiB |
+| WebSocket payload, incoming / outgoing | 146.73 / 112.59 kB/s | 146.34 / 106.76 kB/s |
+| Validated authoritative journal ticks, including preparation | 30,030 | 30,060 |
+
+**Both completed the 15-minute stability target.** No client prediction-history
+failure, disconnect, unsupported simulation state or OOM occurred. Each slot
+contributed about 27,000 accepted driving ticks, 18,000 firing ticks and 6,300
+input changes. Journal `incomplete` markers again mean capture during deliberate
+shutdown; both journals passed structural validation.
+
+Cloudflare CPU statistics cover 168 samples across 14 complete minutes in the
+first run and 180 samples across 15 complete minutes in the second. Linux CPU
+windows cover 894.49 and 900.09 seconds. Do not compare process RSS with total
+container memory or interpret five-second CPU samples as tick execution peaks.
+Both used independent WAN clients and the same input policy, not an identical
+recorded input stream. Physical host performance was not controlled.
+
+Application health instrumentation and Workers Analytics Engine export were
+added between runs at the user's request. Only the smaller profile includes this
+extra work: read-only snapshots every ten seconds, counters and step histograms.
+Thus these results validate two operational runs; they do not isolate the causal
+cost of changing only the CPU cap. The apparent lower CPU consumption of the
+smaller instance must not be read as a general efficiency gain.
+
+### Application timing on 0.1875 vCPU
+
+Exact differences between the read-only snapshots bracketing the combat window:
+
+- 27,087 completed steps across 902.901 seconds: **29.99998 TPS**.
+- Mean completed-step duration: **1.133 ms**. Histogram upper bounds:
+  p50 ≤ 1 ms, p95 ≤ 2 ms, p99 ≤ 4 ms.
+- **252 steps (0.93%) exceeded 33⅓ ms**: 134 were at most 50 ms and 118
+  were between 50 and 100 ms. No step exceeded 100 ms. Exact maximum duration
+  was not retained; these are histogram bounds, not individual tick traces.
+- Start lateness relative to the fixed schedule averaged 0.426 ms, with
+  p99 ≤ 25 ms. Ten starts exceeded 33⅓ ms; none exceeded 100 ms.
+- No simulation, unsupported-state, match, journal or checkpoint-capture errors.
+  Five input enqueue rejections were counted; rejection reasons were not recorded.
+  Reconnection and checkpoint capture were not exercised in these runs.
+
+These measurements include wall-clock descheduling and work through journal append
+and frame enqueue, not just C execution. They do not identify whether an individual
+slow step came from CPU scheduling, I/O or application work. Corresponding fine-grained
+measurements do not exist for the 0.25-vCPU run, so a tail-latency comparison is still open.
+See [server observability](server-observability.md) for metric semantics and queries.
+
+**Keep 0.25 vCPU as the default.** The smaller profile successfully sustained this
+workload and needs no RAM increase, but it has not demonstrated uniform 33⅓-ms
+step completion. Compare both profiles with identical instrumentation before
+choosing a smaller production allocation. The current measurements do not justify
+increasing beyond 0.25 vCPU.
+
+Generated evidence is in `build/benchmarks/cloudflare-fixed-2026-11-12/`:
+per-profile observations, Linux snapshots, provider responses, journals and summaries;
+the smaller run also retains exact health snapshots, Analytics Engine results,
+allocation confirmation and instrumentation source hashes. A cold-start observer
+timeout before any players joined is kept separately and excluded from the combat
+results. The normal 0.25-vCPU configuration and health export were restored after
+testing; the container was stopped and allocation verified at zero.
