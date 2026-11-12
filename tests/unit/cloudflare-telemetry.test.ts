@@ -4,7 +4,7 @@ import {
   exportHealth,
   type HealthSnapshot,
   parseHealth,
-} from "../../apps/cloudflare/src/telemetry.ts";
+} from "../../apps/rustymetal4.com/src/telemetry.ts";
 const snapshot = (boot: string, uptimeSeconds: number, ticks: number): HealthSnapshot => ({
   schema: 1,
   boot,

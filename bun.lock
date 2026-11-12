@@ -21,15 +21,15 @@
         "wrangler": "^4.160.1",
       },
     },
-    "apps/cloudflare": {
-      "name": "@tm4/cloudflare",
-    },
     "apps/player": {
       "name": "@tm4/player",
       "dependencies": {
         "@tm4/game-client": "workspace:*",
         "@tm4/resources": "workspace:*",
       },
+    },
+    "apps/rustymetal4.com": {
+      "name": "@tm4/rustymetal4.com",
     },
     "apps/server": {
       "name": "@tm4/server",
@@ -344,13 +344,13 @@
 
     "@speed-highlight/core": ["@speed-highlight/core@1.2.24", "", {}, "sha512-qeW2e1l78afw8VhRPfPQ1Gjj+KU5XFQ/OFV5ti6eTa9bruO7mJyZtA4vw0ofqmA3tKCkROE9xLk3VZoeRc98nw=="],
 
-    "@tm4/cloudflare": ["@tm4/cloudflare@workspace:apps/cloudflare"],
-
     "@tm4/game-client": ["@tm4/game-client@workspace:packages/game-client"],
 
     "@tm4/player": ["@tm4/player@workspace:apps/player"],
 
     "@tm4/resources": ["@tm4/resources@workspace:packages/resources"],
+
+    "@tm4/rustymetal4.com": ["@tm4/rustymetal4.com@workspace:apps/rustymetal4.com"],
 
     "@tm4/server": ["@tm4/server@workspace:apps/server"],
 

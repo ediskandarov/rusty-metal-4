@@ -3,7 +3,7 @@ import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { frontend } from "../../apps/cloudflare/src/assets.ts";
+import { frontend } from "../../apps/rustymetal4.com/src/assets.ts";
 import { serveHost } from "../../tools/network/serve.ts";
 
 test("the separate frontend serves ranges, isolates Wasm and proxies only API requests", async () => {

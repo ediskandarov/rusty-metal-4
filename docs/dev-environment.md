@@ -104,10 +104,10 @@ the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
 ## Cloudflare test server
 
-`apps/cloudflare` fronts one named container with HTTPS and WebSocket on the same
+`apps/rustymetal4.com` fronts one named container with HTTPS and WebSocket on the same
 origin. Build the release bundle with `bun run build`, set Worker secrets
 `TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET` with Wrangler, then run
-`bun run --cwd apps/cloudflare deploy`. Worker Assets serves the separate frontend without starting the container.
+`bun run --cwd apps/rustymetal4.com deploy`. Worker Assets serves the separate frontend without starting the container.
 Only authenticated host setup starts a sleeping server; status polling does not.
 Docker cross-compiles a static Linux x64 server into `scratch`, running as UID 65532
 with writable `/tmp`. The image contains no website, shell or disc resources.

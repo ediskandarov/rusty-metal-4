@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { hasSession, sameSecret, sessionCookie } from "../../apps/cloudflare/src/access.ts";
+import { hasSession, sameSecret, sessionCookie } from "../../apps/rustymetal4.com/src/access.ts";
 
 const secret = "test-only-access-code-not-a-deployed-secret";
 const now = Date.UTC(2026, 10, 12);
@@ -27,7 +27,7 @@ test("access codes require an exact match", async () => {
 });
 
 test("the test gate uses the static Astro page without accessing the container", async () => {
-  const { accessPage } = await import("../../apps/cloudflare/src/access.ts");
+  const { accessPage } = await import("../../apps/rustymetal4.com/src/access.ts");
   const paths: string[] = [];
   const assets = {
     fetch(request: Request) {
