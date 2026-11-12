@@ -157,46 +157,11 @@ export class TestServer extends DurableObject<Env> {
       return new Response(null, { status: 204 });
     }
     const path = new URL(request.url).pathname;
-    if (path === "/_server/measure") {
+    if (path === "/_server/measure" || path === "/_server/journal") {
       if (!this.ctx.container!.running) return new Response("Server not running", { status: 409 });
-      const process = await this.ctx.container!.exec(
-        [
-          "/bin/sh",
-          "-c",
-          `
-p=
-for d in /proc/[0-9]*; do
-  case "$(readlink "$d/exe")" in */rustymetal4-server) p=$d; break;; esac
-done
-test -n "$p" || exit 1
-echo BEGIN
-cat /proc/uptime "$p/stat" "$p/status"
-echo CGROUP
-for f in cpu.stat cpu.max memory.current memory.peak memory.events; do
-  echo "$f"
-  cat /sys/fs/cgroup/$f 2>/dev/null
-done
-echo NET
-cat /proc/net/dev
-echo END
-`,
-        ],
-        { stderr: "ignore" },
-      );
-      const output = await process.output();
-      return new Response(output.stdout, {
-        status: output.exitCode === 0 ? 200 : 503,
-        headers: { "Content-Type": "text/plain", "Cache-Control": "no-store" },
-      });
-    }
-    if (path === "/_server/journal") {
-      if (!this.ctx.container!.running) return new Response("Server not running", { status: 409 });
-      const process = await this.ctx.container!.exec(
-        ["/bin/sh", "-c", "cat /tmp/tm4-journals/*.tm4j"],
-        { stderr: "ignore" },
-      );
-      return new Response(process.stdout, {
-        headers: { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" },
+      const endpoint = path === "/_server/measure" ? "system-metrics" : "journal";
+      return this.ctx.container!.getTcpPort(httpPort).fetch(`http://container/api/${endpoint}`, {
+        headers: { Authorization: `Bearer ${this.env.TM4_ADMIN_SECRET}` },
       });
     }
     if (path === "/api/status" && !this.ctx.container!.running) {

@@ -115,6 +115,18 @@ const { readyInLobby } = require("./network_lobby.cjs");
     }
     assert.equal(serverState.connected, 2);
     assert(serverState.tick >= 300, JSON.stringify(serverState));
+    const headers = { Authorization: `Bearer ${secret}` };
+    const measure = await context.request.post(new URL("/_server/measure", url).href, { headers });
+    assert.equal(measure.status(), 200);
+    const observation = await measure.text();
+    assert(observation.startsWith("BEGIN\n") && observation.endsWith("END\n"));
+    assert(observation.includes("memory.current") && observation.includes("cpu.stat"));
+    const journal = await context.request.post(new URL("/_server/journal", url).href, { headers });
+    assert.equal(journal.status(), 200);
+    const bytes = await journal.body();
+    assert.equal(bytes.subarray(0, 8).toString(), "TM4JRNL\x01");
+    assert.equal(bytes.length, Number(journal.headers()["content-length"]));
+    await Bun.write("build/cloudflare-smoke.tm4j", bytes);
     assert.deepEqual(errors, []);
     await players[0].screenshot({ path: "build/cloudflare-match.png" });
     console.log(

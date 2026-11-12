@@ -3,6 +3,7 @@ mod health;
 mod journal;
 mod resume;
 mod simulator;
+mod system_metrics;
 mod web;
 
 use std::{
@@ -204,6 +205,7 @@ struct Match {
     journal_directory: PathBuf,
     journal: Option<journal::Journal>,
     journal_sealed: bool,
+    journal_export: journal::SharedExport,
     prediction: AcceptedTimeline,
     next_resume: u32,
     health: health::Shared,
@@ -986,7 +988,8 @@ fn update(
             initial_digest: game.initial_digest.unwrap(),
         };
         match journal::Journal::create(&game.journal_directory, &header) {
-            Ok(journal) => {
+            Ok(mut journal) => {
+                journal.attach_export(game.journal_export.clone());
                 println!("Match journal: {}", journal.path.display());
                 game.journal = Some(journal);
             }
@@ -1363,6 +1366,9 @@ fn run_match(
             .unwrap_or_else(|| PathBuf::from("build/network-journals")),
         journal: None,
         journal_sealed: false,
+        journal_export: launcher
+            .map(|launcher| launcher.journal.clone())
+            .unwrap_or_default(),
         prediction: AcceptedTimeline::default(),
         next_resume: 0,
         health: launcher

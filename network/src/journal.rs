@@ -2,6 +2,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{self, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -57,6 +58,14 @@ pub struct Summary {
     pub end: End,
 }
 
+#[derive(Clone)]
+pub struct Export {
+    pub path: PathBuf,
+    pub length: u64,
+}
+
+pub type SharedExport = Arc<Mutex<Option<Export>>>;
+
 pub struct Journal {
     pub path: PathBuf,
     writer: BufWriter<File>,
@@ -66,6 +75,7 @@ pub struct Journal {
     record_offset: u64,
     ticks: u32,
     rolling: u32,
+    export: Option<SharedExport>,
 }
 
 fn invalid(message: &'static str) -> io::Error {
@@ -138,7 +148,26 @@ impl Journal {
             record_offset: (MAGIC.len() + 8 + bytes.len()) as u64,
             ticks: 0,
             rolling,
+            export: None,
         })
+    }
+
+    pub fn attach_export(&mut self, export: SharedExport) {
+        self.export = Some(export);
+        self.publish(self.record_offset);
+    }
+
+    fn publish(&self, length: u64) {
+        if let Some(export) = &self.export {
+            *export.lock().unwrap() = Some(Export {
+                path: self.path.clone(),
+                length,
+            });
+        }
+    }
+
+    fn flushed_length(&self) -> u64 {
+        self.record_offset + u64::from(self.ticks) * (self.width + 5) as u64
     }
 
     pub fn append(&mut self, tick: u32, inputs: &[Input], state: &RoundState) -> io::Result<()> {
@@ -170,6 +199,9 @@ impl Journal {
         }
         self.ticks += 1;
         self.rolling = rolling;
+        if self.ticks.is_multiple_of(30) {
+            self.publish(self.flushed_length());
+        }
         Ok(())
     }
 
@@ -188,6 +220,7 @@ impl Journal {
         }
 
         self.writer.flush()?;
+        self.publish(self.flushed_length());
         let mut reader = BufReader::new(File::open(&self.path)?);
         let offset = self.record_offset + u64::from(start) * (self.width + 5) as u64;
         reader.seek(SeekFrom::Start(offset - 4))?;
@@ -223,7 +256,9 @@ impl Journal {
         self.writer
             .write_all(&checksum(self.rolling, &footer).to_le_bytes())?;
         self.writer.flush()?;
-        self.writer.get_ref().sync_data()
+        self.writer.get_ref().sync_data()?;
+        self.publish(self.flushed_length() + 10);
+        Ok(())
     }
 }
 
@@ -364,6 +399,44 @@ mod tests {
             unsupported: None,
             scores: Vec::new(),
         }
+    }
+
+    #[test]
+    fn export_freezes_a_complete_prefix_while_the_writer_keeps_appending() {
+        let directory = TestDirectory::new();
+        let mut journal = Journal::create(&directory.0, &header(2)).unwrap();
+        let export = SharedExport::default();
+        journal.attach_export(export.clone());
+        let header_length = export.lock().unwrap().as_ref().unwrap().length;
+        let inputs = [Input::default(); 2];
+        for tick in 0..30 {
+            journal.append(tick, &inputs, &state(tick, 0)).unwrap();
+        }
+        let frozen = export.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            frozen.length,
+            header_length + 30 * (journal.width + 5) as u64
+        );
+        for tick in 30..65 {
+            journal.append(tick, &inputs, &state(tick, 0)).unwrap();
+        }
+        let mut prefix = Vec::new();
+        File::open(frozen.path)
+            .unwrap()
+            .take(frozen.length)
+            .read_to_end(&mut prefix)
+            .unwrap();
+        let snapshot = directory.0.join("export.tm4j");
+        fs::write(&snapshot, prefix).unwrap();
+        let summary = inspect(&snapshot).unwrap();
+        assert_eq!((summary.ticks, summary.end), (30, End::Incomplete));
+        journal.finish(End::Aborted).unwrap();
+        let final_export = export.lock().unwrap().clone().unwrap();
+        assert_eq!(
+            final_export.length,
+            fs::metadata(&journal.path).unwrap().len()
+        );
+        assert_eq!(inspect(&final_export.path).unwrap().end, End::Aborted);
     }
 
     #[test]

@@ -82,11 +82,15 @@ test("a copied binary runs its API without adjacent files or a website", async (
 });
 
 test("private APIs require administrator authentication", async () => {
-  for (const path of ["/api/resources", "/api/metrics"])
+  for (const path of ["/api/resources", "/api/metrics", "/api/system-metrics", "/api/journal"])
     expect((await fetch(address + path)).status).toBe(401);
   expect(
     (await fetch(`${address}/api/resources`, { headers: { Authorization: `Bearer ${secret}` } }))
       .status,
   ).toBe(200);
+  expect(
+    (await fetch(`${address}/api/journal`, { headers: { Authorization: `Bearer ${secret}` } }))
+      .status,
+  ).toBe(404);
   expect(logs.includes(secret)).toBe(false);
 });

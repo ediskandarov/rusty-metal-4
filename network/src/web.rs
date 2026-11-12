@@ -2,7 +2,7 @@
 use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
-    body::to_bytes,
+    body::{Body, to_bytes},
     extract::{Request, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware::{self, Next},
@@ -25,6 +25,7 @@ use std::{
     time::Duration,
 };
 use tokio::{
+    io::AsyncReadExt,
     runtime::Builder,
     sync::Mutex as AsyncMutex,
     time::{sleep, timeout},
@@ -93,6 +94,7 @@ pub struct Launcher {
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
     pub health: crate::health::Shared,
+    pub journal: crate::journal::SharedExport,
     requests: Receiver<SetupRequest>,
     _private: PrivateDirectory,
     http: Option<thread::JoinHandle<()>>,
@@ -160,6 +162,7 @@ impl Launcher {
             required: resources.len() + 1,
         }));
         let health = crate::health::Shared::default();
+        let journal = crate::journal::SharedExport::default();
         let (sender, requests) = mpsc::channel();
         let service = Arc::new(Service {
             private: private.0.clone(),
@@ -167,6 +170,7 @@ impl Launcher {
             resources,
             status: status.clone(),
             health: health.clone(),
+            journal: journal.clone(),
             sender,
             mutation: Arc::new(AsyncMutex::new(())),
         });
@@ -177,6 +181,7 @@ impl Launcher {
             stopped,
             status,
             health,
+            journal,
             requests,
             _private: private,
             http: Some(http),
@@ -260,6 +265,7 @@ struct Service {
     resources: BTreeMap<String, Resource>,
     status: Arc<Mutex<Status>>,
     health: crate::health::Shared,
+    journal: crate::journal::SharedExport,
     sender: Sender<SetupRequest>,
     mutation: Arc<AsyncMutex<()>>,
 }
@@ -295,6 +301,8 @@ fn require_setup(service: &Service) -> std::result::Result<(), (StatusCode, Stri
 fn router(service: Arc<Service>) -> Router {
     let admin = Router::new()
         .route("/api/metrics", get(metrics))
+        .route("/api/system-metrics", get(system_metrics))
+        .route("/api/journal", get(journal))
         .route("/api/resources", get(manifest))
         .route("/api/resources/{*path}", put(upload))
         .route("/api/prepare", post(prepare))
@@ -310,6 +318,48 @@ fn router(service: Arc<Service>) -> Router {
         .layer(ConcurrencyLimitLayer::new(64))
         .layer(middleware::from_fn(isolation_and_timeout))
 }
+async fn system_metrics() -> ApiResult {
+    let body = tokio::task::spawn_blocking(crate::system_metrics::read)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "System metrics task failed".into(),
+            )
+        })?
+        .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response())
+}
+
+async fn journal(State(service): State<Arc<Service>>) -> ApiResult {
+    let export = service
+        .journal
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or((StatusCode::NOT_FOUND, "No match journal yet".into()))?;
+    let file = tokio::fs::File::open(&export.path).await.map_err(|_| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Journal unavailable".into(),
+        )
+    })?;
+    // Freeze the complete, flushed prefix: the writer may append while this response streams.
+    let body = Body::from_stream(tokio_util::io::ReaderStream::new(file.take(export.length)));
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/octet-stream".to_owned()),
+            (header::CONTENT_LENGTH, export.length.to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                "attachment; filename=match.tm4j".to_owned(),
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 async fn isolation_and_timeout(request: Request, next: Next) -> Response {
     let mut response = match timeout(HTTP_TIMEOUT, next.run(request)).await {
         Ok(response) => response,
@@ -529,7 +579,7 @@ fn validate_index(data: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::{Body, Bytes};
+    use axum::body::Bytes;
     use futures_util::stream;
     use std::{
         future::Future,
@@ -577,6 +627,7 @@ mod tests {
                 resources: [(resource.id.clone(), resource)].into(),
                 status,
                 health: crate::health::Shared::default(),
+                journal: crate::journal::SharedExport::default(),
                 sender,
                 mutation: Arc::new(AsyncMutex::new(())),
             });
@@ -617,10 +668,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn journal_download_streams_only_the_published_prefix() {
+        let fixture = Fixture::new();
+        assert_eq!(
+            fixture
+                .request("GET", "/api/journal", Body::empty())
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let path = fixture.service.private.join("journal.tm4j");
+        fs::write(&path, b"committed-unpublished").unwrap();
+        *fixture.service.journal.lock().unwrap() = Some(crate::journal::Export { path, length: 9 });
+        let response = fixture.request("GET", "/api/journal", Body::empty()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()[header::CONTENT_LENGTH], "9");
+        assert_eq!(
+            &to_bytes(response.into_body(), 1024).await.unwrap()[..],
+            b"committed"
+        );
+    }
+
+    #[tokio::test]
     async fn administrator_actions_require_the_startup_secret() {
         let fixture = Fixture::new();
         for (method, path) in [
             ("GET", "/api/resources"),
+            ("GET", "/api/system-metrics"),
+            ("GET", "/api/journal"),
             ("POST", "/api/start"),
             ("POST", "/api/prepare"),
             ("PUT", "/api/resources/DATA/MAIN.MR"),
@@ -954,6 +1029,7 @@ mod tests {
             stopped,
             status,
             health: fixture.service.health.clone(),
+            journal: fixture.service.journal.clone(),
             requests: fixture.requests,
             _private: PrivateDirectory(path.clone()),
             http: Some(http),
