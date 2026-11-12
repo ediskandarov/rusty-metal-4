@@ -4,6 +4,7 @@ import { type GameModule, requireRuntime } from "./module.ts";
 
 export interface StartOptions {
   resourceMods?: number;
+  session?: boolean;
   beforeMain?(this: void, module: GameModule): void;
 }
 
@@ -11,7 +12,7 @@ export interface StartOptions {
 export async function startGame(
   assets: DiscAssets,
   canvas: HTMLCanvasElement,
-  { resourceMods = 0, beforeMain }: StartOptions = {},
+  { resourceMods = 0, session = false, beforeMain }: StartOptions = {},
 ): Promise<GameModule> {
   const digest = async (bytes: Uint8Array<ArrayBuffer>) =>
     Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (value) =>
@@ -54,7 +55,8 @@ export async function startGame(
           const diagnostic = "_WebTestRestartNetworkReplay" in module;
           module.tm4LocalCheckpoint = diagnostic && parameters.get("checkpoint") === "1";
           module.callMain(
-            parameters.has("match") ||
+            session ||
+              parameters.has("match") ||
               (diagnostic && parameters.has("simulation-reference")) ||
               (diagnostic && parameters.has("session"))
               ? [

@@ -85,6 +85,46 @@ export class RoomDirectory extends DurableObject<Env> {
     });
   }
 
+  // Reservations are private RPCs; leases recover capacity after an object/process loss.
+  async reserveMatch(room: string, session: string): Promise<boolean> {
+    return this.locked(async () => {
+      const now = Date.now();
+      const reservations = await this.ctx.storage.list<{ session: string; until: number }>({
+        prefix: "match:",
+      });
+      await Promise.all(
+        [...reservations].map(async ([key, lease]) => {
+          if (lease.until > now) return;
+          try {
+            const response = await this.env.SERVER.getByName(
+              key.slice(6) + ":" + lease.session,
+            ).fetch("https://server/_server/stop", {
+              method: "POST",
+              signal: AbortSignal.timeout(30_000),
+            });
+            if (!response.ok) return;
+            await this.ctx.storage.delete(key);
+            reservations.delete(key);
+          } catch {
+            /* Keep capacity reserved until its server is confirmed stopped. */
+          }
+        }),
+      );
+      const previous = reservations.get("match:" + room);
+      if (previous && previous.session !== session) return false;
+      if (!previous && reservations.size >= 10) return false;
+      await this.ctx.storage.put("match:" + room, { session, until: now + 60_000 });
+      return true;
+    });
+  }
+  async releaseMatch(room: string, session: string): Promise<void> {
+    await this.locked(async () => {
+      const key = "match:" + room;
+      if ((await this.ctx.storage.get<{ session: string }>(key))?.session === session)
+        await this.ctx.storage.delete(key);
+    });
+  }
+
   override async fetch(request: Request): Promise<Response> {
     return this.locked(async () => {
       await this.expire();

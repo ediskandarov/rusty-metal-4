@@ -101,10 +101,10 @@ site, URL or logs. Uploaded resources live in an owner-only temporary directory
 outside the static tree and are removed on normal exit, SIGINT or SIGTERM.
 An uncatchable process kill may leave that private temporary directory behind.
 
-This first slice preserves the existing one-match session: the configured 2–8
-slots fill, the roster locks, and eligible participants can reconnect. Status
-shows completion or failure; restart the process for the next match. Returning
-results to a reusable lobby and map rotation are follow-up work. The rustymetal4.com website below provides the separate public room feature.
+The standalone launcher remains one match per process: its configured 2–8 slots
+fill, the roster locks and eligible participants reconnect. Restart it after
+completion or failure. The website below supplies reusable rooms by releasing
+each completed match process and allocating a fresh one for the next match.
 
 With the server bundle and native debug binary built, `bun run test:server`
 checks the empty setup state, HTTP isolation, administrator authentication,
@@ -118,8 +118,11 @@ the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
 `apps/rustymetal4.com` owns the public Astro website and Worker. It is separate
 from the native launcher in `apps/server` and standalone player in `apps/player`.
-Rooms gather players and choose settings; ready/start and match integration are
-future work. No disc resources or simulation container are needed for room use.
+Rooms gather players, choose settings and prepare one match at a time. Browsing
+and joining need no disc resources or simulation container. The embedded existing
+player reads each participant's own disc. The host explicitly prepares the private
+server, then every participant readies and the host starts the actual roster.
+Native completion returns everyone to the same room and releases the server.
 
 Run `bun run dev:rustymetal4.com` and open [localhost:8787](http://localhost:8787).
 This builds only the frontend and runs Wrangler locally, persisting room state
@@ -128,8 +131,18 @@ disables local container building; Docker, game builds, secrets and Cloudflare
 authentication are unnecessary for this workflow. Enable that development setting
 only when working on the retained container infrastructure.
 
-- `bun run build:rustymetal4.com`: frontend only, into `build/release/rustymetal4.com-site`.
+- `bun run build:rustymetal4.com`: into `build/release/rustymetal4.com-site`; bundles
+  the existing player when `build/release/site` is available. `TM4_PLAYER_RUNTIME`
+  selects another matching runtime directory. Without it, room-only development
+  remains available. No disc files are copied.
 - `bun test tests/unit/room-state.test.ts`: validation and state transitions.
+- `bun run test:room-matches`: state and local Worker authority tests, with a mocked
+  native boundary for races, private setup, completion, session isolation and cleanup.
+- `bun run test:room-matches:browser`: two independent identities against the real
+  native process through local room DOs. Requires a diagnostic server/client bundle,
+  the diagnostic native binary, and `TM4_DISC_DIR`. Its existing combat fixture
+  positions a lethal duel; normal engine results release the process and a second
+  match uses the same room. It does not verify deployed Cloudflare containers.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
   admission, creation retries, permissions, reconnect/hibernation, host succession,
   directory outages and complete empty-room cleanup. Allow about 90 seconds.
@@ -145,8 +158,10 @@ Durable Object declaration, `SERVER` binding, container image and health dataset
 are preserved. The same declarative `exports` map adds SQLite `Room` and
 `RoomDirectory` classes; no legacy migration or namespace retirement is introduced.
 The website Worker replaces the old access-code/admin UI and its API.
-The retained container controller is available to bound Worker code for subsequent
-match integration, and keeps its existing administrator secret and sizing.
+The retained container controller is addressed by room and fresh match session.
+It keeps its administrator secret, sizing and telemetry; only host-authorized room
+requests reach private setup. Native result status is polled by persisted room
+alarms; simulation traffic stays in the existing Lightyear WebSocket transport.
 
 Deployment still prepares the existing release/server bundle and container image:
 after installing dependencies, load the Emscripten environment and pinned Rust

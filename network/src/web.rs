@@ -33,7 +33,7 @@ use tokio::{
 use tower::limit::ConcurrencyLimitLayer;
 
 use crate::assets::Simulation;
-use tm4_network::protocol::MAX_PLAYERS;
+use tm4_network::protocol::{Compatibility, MAX_PLAYERS};
 #[derive(Debug, PartialEq)]
 pub enum SetupRequest {
     Prepare,
@@ -41,12 +41,23 @@ pub enum SetupRequest {
 }
 #[derive(Debug, PartialEq)]
 pub struct MatchSetup {
+    pub roster: Vec<RosterMember>,
     pub players: usize,
     pub world: String,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
+pub struct RosterMember {
+    pub credential: String,
+    pub car: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartOptions {
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    roster: Vec<RosterMember>,
     players: usize,
     world: String,
 }
@@ -60,6 +71,9 @@ pub fn behind_proxy() -> bool {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    pub session_id: Option<String>,
+    pub cars: Vec<String>,
+    pub compatibility: Option<Compatibility>,
     pub phase: String,
     pub message: String,
     pub players: usize,
@@ -146,6 +160,9 @@ impl Launcher {
         fs::create_dir(&private)?;
         let private = PrivateDirectory(private);
         let status = Arc::new(Mutex::new(Status {
+            session_id: None,
+            cars: Vec::new(),
+            compatibility: None,
             phase: "setup".into(),
             message: "Administrator: supply your disc resources to prepare a match.".into(),
             players,
@@ -200,8 +217,10 @@ impl Launcher {
     pub fn resource_directory(&self) -> &Path {
         &self._private.0
     }
-    pub fn ready(&self, worlds: Vec<String>) {
+    pub fn ready(&self, worlds: Vec<String>, cars: Vec<String>, compatibility: Compatibility) {
         let mut status = self.status.lock().unwrap();
+        status.cars = cars;
+        status.compatibility = Some(compatibility);
         status.world = worlds.first().cloned();
         status.worlds = worlds;
         status.phase = "ready".into();
@@ -477,7 +496,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
             "Prepare resources before opening the match".into(),
         ));
     }
-    let bytes = to_bytes(request.into_body(), 1024).await.map_err(invalid)?;
+    let bytes = to_bytes(request.into_body(), 8192).await.map_err(invalid)?;
     let options: StartOptions = serde_json::from_slice(&bytes).map_err(invalid)?;
     if !(2..=MAX_PLAYERS).contains(&options.players) {
         return Err(invalid("Expected a player count from 2 to 8"));
@@ -487,12 +506,34 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         if !status.worlds.contains(&options.world) {
             return Err(invalid("Choose a map from the server catalog"));
         }
+        if options.session_id.is_some() || !options.roster.is_empty() {
+            if options.session_id.as_ref().is_none_or(|id| id.len() != 36)
+                || options.roster.len() != options.players
+                || options.roster.iter().any(|member| {
+                    member.credential.len() != 64
+                        || !member
+                            .credential
+                            .bytes()
+                            .all(|byte| byte.is_ascii_hexdigit())
+                        || !status.cars.contains(&member.car)
+                })
+                || options.roster.iter().enumerate().any(|(index, member)| {
+                    options.roster[..index]
+                        .iter()
+                        .any(|other| other.credential == member.credential)
+                })
+            {
+                return Err(invalid("Invalid fixed room roster"));
+            }
+        }
+        status.session_id = options.session_id;
         status.players = options.players;
         status.world = Some(options.world.clone());
         status.phase = "starting".into();
         status.message = "Opening match…".into();
     }
     service.send(SetupRequest::Start(MatchSetup {
+        roster: options.roster,
         players: options.players,
         world: options.world,
     }))?;
@@ -609,6 +650,9 @@ mod tests {
                 sha256: format!("{:x}", Sha256::digest(STOCK)),
             };
             let status = Arc::new(Mutex::new(Status {
+                session_id: None,
+                cars: Vec::new(),
+                compatibility: None,
                 phase: "setup".into(),
                 message: String::new(),
                 players: 2,
@@ -795,6 +839,7 @@ mod tests {
         assert_eq!(
             fixture.requests.try_recv().unwrap(),
             SetupRequest::Start(MatchSetup {
+                roster: Vec::new(),
                 players: 8,
                 world: "The Oil Rig".into()
             })
@@ -863,6 +908,50 @@ mod tests {
         assert!(fixture.service.mutation.try_lock().is_ok());
         assert_eq!(fixture.service.status.lock().unwrap().uploaded, 0);
         assert!(!fixture.service.private.join("DATA/MAIN.MR").exists());
+    }
+
+    #[tokio::test]
+    async fn room_roster_is_fixed_validated_and_never_exposed_in_status() {
+        let fixture = Fixture::new();
+        {
+            let mut status = fixture.service.status.lock().unwrap();
+            status.phase = "ready".into();
+            status.worlds = vec!["Construction Yard".into()];
+            status.cars = vec!["Orbital".into(), "Pizza Boy".into()];
+        }
+        let roster = vec![
+            serde_json::json!({"credential": "a".repeat(64), "car": "Orbital"}),
+            serde_json::json!({"credential": "b".repeat(64), "car": "Pizza Boy"}),
+        ];
+        let valid = serde_json::json!({"players": 2, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster});
+        for bad in [
+            serde_json::json!({"players": 2, "world": "Construction Yard", "roster": roster}),
+            serde_json::json!({"players": 3, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster}),
+            serde_json::json!({"players": 2, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": [roster[0], roster[0]]}),
+        ] {
+            assert_eq!(
+                fixture
+                    .request("POST", "/api/start", bad.to_string())
+                    .await
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+        }
+        assert_eq!(
+            fixture
+                .request("POST", "/api/start", valid.to_string())
+                .await
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        let SetupRequest::Start(setup) = fixture.requests.try_recv().unwrap() else {
+            panic!("Missing fixed setup")
+        };
+        assert_eq!(setup.roster.len(), 2);
+        assert_eq!(setup.roster[1].car, "Pizza Boy");
+        let public = serde_json::to_string(&*fixture.service.status.lock().unwrap()).unwrap();
+        assert!(!public.contains(&"a".repeat(64)));
+        assert!(!public.contains("credential"));
     }
 
     #[tokio::test]

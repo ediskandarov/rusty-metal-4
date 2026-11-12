@@ -150,6 +150,7 @@ export class TestServer extends DurableObject<ServerEnv> {
       await this.ctx.storage.delete("emptySince");
       await this.ctx.storage.delete("previousHealth");
       if (this.ctx.container!.running) await this.ctx.container!.destroy();
+      await this.ctx.storage.deleteAll();
       return new Response(null, { status: 204 });
     }
     const path = new URL(request.url).pathname;
@@ -200,9 +201,10 @@ export class TestServer extends DurableObject<ServerEnv> {
     url.protocol = "http:";
     url.host = "container";
     if (match) url.pathname = "/";
-    const forwarded = new Request(url, request);
+    const forwarded = new Request(url.href, request);
     forwarded.headers.delete("host");
     forwarded.headers.delete("cookie");
+    if (!match) forwarded.headers.set("Authorization", `Bearer ${this.env.TM4_ADMIN_SECRET}`);
     return this.ctx.container!.getTcpPort(match ? matchPort : httpPort).fetch(forwarded);
   }
 }

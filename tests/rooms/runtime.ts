@@ -2,7 +2,7 @@ import { join, resolve } from "node:path";
 
 import { Miniflare } from "miniflare";
 
-export async function runtime(assets = false) {
+export async function runtime(assets = false, nativeUrl?: string) {
   const directory = resolve("build/room-tests");
   const build = await Bun.build({
     entrypoints: ["tests/rooms/worker.ts"],
@@ -30,6 +30,8 @@ export async function runtime(assets = false) {
             },
           },
           env: {
+            ...(nativeUrl ? { NATIVE_URL: { type: "text" as const, value: nativeUrl } } : {}),
+            SERVER: { type: "durable-object", worker: "room-tests", exportName: "TestServer" },
             ROOMS: { type: "durable-object", worker: "room-tests", exportName: "Room" },
             DIRECTORY: {
               type: "durable-object",
@@ -49,6 +51,7 @@ export async function runtime(assets = false) {
             ...(assets ? { ASSETS: { type: "assets" as const } } : {}),
           },
           exports: {
+            TestServer: { type: "durable-object", storage: "sqlite" },
             Room: { type: "durable-object", storage: "sqlite" },
             RoomDirectory: { type: "durable-object", storage: "sqlite" },
           },

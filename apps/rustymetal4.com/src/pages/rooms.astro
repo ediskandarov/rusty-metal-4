@@ -39,8 +39,9 @@ import Settings from "../components/Settings.astro";
       </h2>
       <ol id="participants" aria-live="polite"></ol>
       <p>
-        A lost connection holds your place for 45 seconds. If the host leaves, another participant
-        becomes the host.
+        Before a match, a lost connection holds your place for 45 seconds. During a match, the fixed
+        participants can reconnect; an empty match stops after two minutes. If the host leaves,
+        another participant becomes the host.
       </p>
       <button id="leave-button" type="button" hidden>
         Leave room
@@ -73,6 +74,42 @@ import Settings from "../components/Settings.astro";
         <p id="join-error" class="error" role="alert" hidden></p>
         <button type="submit">Join room</button>
       </form>
+    </section>
+    <section id="match-panel" hidden>
+      <h2>Match preparation</h2>
+      <p id="match-status" role="status"></p>
+      <p>
+        Each player loads their own disc below. Only the host uploads required resources to the
+        private match server. Start with 2–8 ready players; empty slots do not need to be filled.
+      </p>
+      <label for="room-car">
+        Your car{" "}
+        <select id="room-car" disabled>
+          <option value="">Load your disc first</option>
+        </select>
+      </label>
+      <button id="room-ready" type="button" disabled>
+        Ready
+      </button>
+      <button id="prepare-match" type="button" hidden>
+        Prepare server from my disc
+      </button>
+      <button id="cancel-preparation" type="button" hidden>
+        Cancel preparation
+      </button>
+      <button id="start-match" type="button" hidden>
+        Start match
+      </button>
+      <button id="reconnect-match" type="button" hidden>
+        Reconnect game
+      </button>
+      <p id="player-status" role="status"></p>
+      <iframe
+        id="room-player"
+        title="Local disc and game"
+        allow="cross-origin-isolated; gamepad; fullscreen"
+        hidden
+      ></iframe>
     </section>
     <section id="settings-panel" hidden>
       <h2>Room settings</h2>

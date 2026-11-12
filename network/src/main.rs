@@ -193,6 +193,7 @@ struct Match {
     compatibility: Option<Compatibility>,
     catalog: Option<Catalog>,
     selected_world: Option<String>,
+    room_roster: Vec<web::RosterMember>,
     initial_digest: Option<u32>,
     started: bool,
     ended: bool,
@@ -531,7 +532,12 @@ impl Match {
             .iter()
             .position(|player| player.entity == Some(entity));
         match request {
-            Request::Join { compatibility } if !self.started && !self.ended && slot.is_none() => {
+            Request::Join { compatibility }
+                if !self.started
+                    && !self.ended
+                    && slot.is_none()
+                    && self.room_roster.is_empty() =>
+            {
                 if Some(&compatibility) != self.compatibility.as_ref() {
                     send(
                         links,
@@ -564,7 +570,12 @@ impl Match {
                     );
                 }
             }
-            Request::SelectCar { car, ready } if !self.started && !self.ended && slot.is_some() => {
+            Request::SelectCar { car, ready }
+                if !self.started
+                    && !self.ended
+                    && slot.is_some()
+                    && self.room_roster.is_empty() =>
+            {
                 match self.players[slot.unwrap()].select_car(
                     self.catalog.as_ref().unwrap(),
                     car,
@@ -592,8 +603,30 @@ impl Match {
                     .into(),
                 },
             ),
-            Request::Resume { compatibility, .. } if !self.started && !self.ended => {
-                self.request(links, entity, Request::Join { compatibility });
+            Request::Resume {
+                token,
+                compatibility,
+            } if !self.started && !self.ended => {
+                if self.room_roster.is_empty() {
+                    self.request(links, entity, Request::Join { compatibility });
+                } else if let Some(index) = self
+                    .room_roster
+                    .iter()
+                    .position(|member| resume::matches_credential(&member.credential, &token))
+                    && self.players[index].entity.is_none()
+                    && slot.is_none()
+                    && Some(&compatibility) == self.compatibility.as_ref()
+                {
+                    let player = &mut self.players[index];
+                    player.entity = Some(entity);
+                    player.compatibility = Some(compatibility);
+                    player.car = Some(self.room_roster[index].car.clone());
+                    player.lobby_ready = true;
+                    send(links, entity, &Message::Welcome { slot: index });
+                    self.broadcast_lobby(links);
+                } else {
+                    send(links, entity, &Message::Error { message: "This room participant cannot enter this match. Check your resources or close the other game tab.".into() });
+                }
             }
             Request::Resume {
                 token,
@@ -1259,18 +1292,22 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let (count, selected_world, simulator) = if let Some(launcher) = &launcher {
+    let (count, selected_world, room_roster, simulator) = if let Some(launcher) = &launcher {
         loop {
             let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
                 return Ok(());
             };
             match simulator::Simulator::from_assets(&launcher.wasm, launcher.resource_directory()) {
                 Ok(simulator) => {
-                    launcher.ready(simulator.catalog.worlds.clone());
+                    launcher.ready(
+                        simulator.catalog.worlds.clone(),
+                        simulator.catalog.cars.clone(),
+                        simulator.compatibility.clone(),
+                    );
                     let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup() else {
                         return Ok(());
                     };
-                    break (setup.players, Some(setup.world), simulator);
+                    break (setup.players, Some(setup.world), setup.roster, simulator);
                 }
                 Err(error) => {
                     launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
@@ -1278,9 +1315,21 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     } else {
-        (count, None, simulator::Simulator::from_environment()?)
+        (
+            count,
+            None,
+            Vec::new(),
+            simulator::Simulator::from_environment()?,
+        )
     };
-    if let Err(error) = run_match(count, selected_world, addr, simulator, launcher.as_ref()) {
+    if let Err(error) = run_match(
+        count,
+        selected_world,
+        room_roster,
+        addr,
+        simulator,
+        launcher.as_ref(),
+    ) {
         if let Some(launcher) = &launcher {
             launcher.phase(
                 "closed",
@@ -1299,6 +1348,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn run_match(
     count: usize,
     selected_world: Option<String>,
+    room_roster: Vec<web::RosterMember>,
     addr: SocketAddr,
     simulator: simulator::Simulator,
     launcher: Option<&web::Launcher>,
@@ -1361,6 +1411,7 @@ fn run_match(
         compatibility: Some(compatibility),
         catalog: Some(catalog),
         selected_world,
+        room_roster,
         initial_digest: None,
         started: false,
         ended: false,

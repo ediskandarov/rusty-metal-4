@@ -1,23 +1,33 @@
 import { DurableObject } from "cloudflare:workers";
 
 import { failure, json, readJson } from "../http.ts";
+import { type Compatibility, mapLabel } from "../protocol.ts";
 import {
+  beginPreparation,
   connect,
   createState,
   directoryRefresh,
   disconnect,
   edit,
+  emptyMatchGrace,
+  freezeRoster,
+  invalidateReady,
   join,
   memberFor,
+  monitoringGrace,
+  monitoringTimeout,
   nextDeadline,
   object,
   prune,
   reconnectGrace,
   removeMember,
+  requireHost,
+  resetMatch,
   RoomError,
   type RoomState,
   snapshot,
   summary,
+  updatePlayer,
 } from "../room-state.ts";
 import type { Env } from "./index.ts";
 
@@ -30,7 +40,7 @@ export const creationWindow = 20_000;
 const heartbeatTimeout = 70_000;
 
 export class Room extends DurableObject<Env> {
-  private state: RoomState | undefined;
+  protected state: RoomState | undefined;
   private queue: Promise<unknown> = Promise.resolve();
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -127,6 +137,10 @@ export class Room extends DurableObject<Env> {
         // A rejected new listing has no directory entry to remove.
       }
       if (state.closed) {
+        if (state.match) {
+          await this.stopMatch("Room closed.");
+          if (state.match) return;
+        }
         for (const socket of this.ctx.getWebSockets()) socket.close(1000, "Room closed");
         await this.ctx.storage.deleteAll();
         this.state = undefined;
@@ -151,6 +165,232 @@ export class Room extends DurableObject<Env> {
     await this.schedule();
     this.broadcast();
     await this.publish();
+  }
+
+  private server(path: string, init?: RequestInit): Promise<Response> {
+    const state = this.state!;
+    const match = state.match!;
+    return this.env.SERVER.getByName(state.id + ":" + match.id).fetch(
+      new Request("https://server" + path, {
+        ...init,
+        signal:
+          path === "/match"
+            ? undefined
+            : AbortSignal.timeout(path === "/api/status" ? monitoringTimeout : 30_000),
+      }),
+    );
+  }
+
+  private async stopMatch(message: string): Promise<void> {
+    const state = this.state!;
+    const match = state.match;
+    if (!match) return;
+    match.stage = "stopping";
+    match.message = message;
+    match.pollAt = Date.now() + 2000;
+    await this.ctx.storage.put("room", state);
+    await this.schedule();
+    try {
+      const response = await this.server("/_server/stop", { method: "POST" });
+      if (!response.ok) throw new Error("Container stop failed");
+      await this.env.DIRECTORY.getByName("public").releaseMatch(state.id, match.id);
+      resetMatch(state, message, Date.now());
+      await this.commit();
+    } catch {
+      // Keep the session identity and retry destruction before allowing another allocation.
+      await this.schedule();
+      this.broadcast();
+    }
+  }
+
+  private async monitorMatch(now: number): Promise<void> {
+    const state = this.state!;
+    const match = state.match;
+    if (!match) return;
+    if (match.stage === "stopping") {
+      await this.stopMatch(match.message);
+      return;
+    }
+    if (!state.members.some((member) => member.connections.length))
+      match.emptyUntil ??= now + emptyMatchGrace;
+    else match.emptyUntil = null;
+    if (
+      (match.emptyUntil !== null && match.emptyUntil <= now) ||
+      (match.stage !== "playing" && match.deadline <= now) ||
+      (!match.roster.length && state.hostId !== match.ownerId)
+    ) {
+      await this.stopMatch(
+        "Preparation or reconnect time expired. Prepare a new match when everyone is here.",
+      );
+      return;
+    }
+    if (match.monitoringUnavailableUntil != null && match.monitoringUnavailableUntil <= now) {
+      await this.stopMatch("The match service remained unavailable. Prepare a new match.");
+      return;
+    }
+    match.pollAt = now + 2000;
+    try {
+      // A timed-out renewal may still finish remotely. Its lease remains capacity-counted
+      // and Directory confirms destruction before reclaiming any expired reservation.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let reserved: boolean;
+      try {
+        reserved = await Promise.race([
+          this.env.DIRECTORY.getByName("public").reserveMatch(state.id, match.id),
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Reservation check timed out")),
+              monitoringTimeout,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
+      if (!reserved) {
+        await this.stopMatch("The server reservation expired. Prepare a new match.");
+        return;
+      }
+      const response = await this.server("/api/status");
+      if (!response.ok) throw new Error("The match server stopped. Prepare a new match.");
+      const value: unknown = await response.json();
+      const status = value as {
+        phase: string;
+        sessionId: string | null;
+        sleeping?: boolean;
+        cars: string[];
+        compatibility: Compatibility | null;
+        message: string;
+      };
+      if (
+        !status ||
+        ![
+          "setup",
+          "loading",
+          "ready",
+          "starting",
+          "lobby",
+          "match",
+          "results",
+          "failed",
+          "closed",
+        ].includes(status.phase)
+      )
+        throw new Error("Invalid match status");
+      if (status.sleeping || ["failed", "closed"].includes(status.phase)) {
+        await this.stopMatch(
+          status.sleeping
+            ? "The match server stopped. Prepare a new match."
+            : status.message || "The match server stopped. Prepare a new match.",
+        );
+        return;
+      }
+      if (match.roster.length && status.sessionId !== null && typeof status.sessionId !== "string")
+        throw new Error("Invalid match session status");
+      if (match.roster.length && status.sessionId !== match.id) {
+        await this.stopMatch("The match server session changed.");
+        return;
+      }
+      match.monitoringUnavailableUntil = null;
+      if (status.phase === "results") {
+        await this.stopMatch("Match finished. You are back in the same room.");
+        return;
+      }
+      if (status.phase === "lobby" && match.stage === "starting") {
+        match.stage = "connecting";
+        match.message = "Server ready. Connecting the fixed match roster…";
+        await this.commit();
+        return;
+      }
+      if (status.phase === "match" && match.stage !== "playing") {
+        match.stage = "playing";
+        match.message = "Match in progress. Existing players can reconnect.";
+        await this.commit();
+        return;
+      }
+      if (status.phase === "ready" && match.stage === "validating") {
+        if (!status.compatibility || !status.cars?.length) {
+          await this.stopMatch("The server did not provide a compatible game catalog.");
+          return;
+        }
+        match.compatibility = status.compatibility;
+        match.cars = status.cars;
+        match.stage = "ready";
+        match.message =
+          "Server ready. Choose cars and ready every participant; the host can start with 2–8 players.";
+        invalidateReady(state);
+        await this.commit();
+        return;
+      }
+    } catch {
+      // Persist the first outage deadline, including across eviction. HTTP errors,
+      // timeouts and temporary directory failures do not establish that gameplay ended.
+      match.monitoringUnavailableUntil ??= Date.now() + monitoringGrace;
+      if (match.monitoringUnavailableUntil <= Date.now()) {
+        await this.stopMatch("The match service remained unavailable. Prepare a new match.");
+        return;
+      }
+      match.pollAt = Math.min(Date.now() + 2000, match.monitoringUnavailableUntil);
+    }
+    await this.ctx.storage.put("room", state);
+    await this.schedule();
+  }
+
+  private async matchRequest(request: Request, key: string): Promise<Response> {
+    const state = this.state!;
+    const match = state.match;
+    const parts = new URL(request.url).pathname.split("/");
+    if (!match || parts[2] !== match.id)
+      throw new RoomError(409, "This match has ended. Return to the room.");
+    const member = memberFor(state, key);
+    if (!member) throw new RoomError(403, "Join this room first.");
+    const action = parts.slice(3).join("/");
+    if (action === "socket") {
+      if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket")
+        throw new RoomError(426, "A game WebSocket is required.");
+      if (
+        !["connecting", "playing"].includes(match.stage) ||
+        !match.roster.some((entry) => entry.id === member.id)
+      )
+        throw new RoomError(403, "Only the fixed match participants can connect.");
+      return this.server("/match", { headers: { Upgrade: "websocket" } });
+    }
+    requireHost(state, key);
+    if (action === "cancel" && request.method === "POST" && !match.roster.length) {
+      await this.stopMatch("Preparation cancelled. You can prepare another match.");
+      return json({ room: snapshot(state, key) });
+    }
+    if (member.id !== match.ownerId || match.stage !== "uploading")
+      throw new RoomError(409, "Resource setup is locked.");
+    const manifest = action === "resources" && request.method === "GET";
+    const upload = /^resources\/DATA\/[A-Za-z0-9_./-]+$/.test(action) && request.method === "PUT";
+    const prepare = action === "prepare" && request.method === "POST";
+    if (!manifest && !upload && !prepare) throw new RoomError(404, "Unknown match endpoint.");
+    // Native upload validation bounds each resource's exact stock size and a 15-second request.
+    try {
+      const response = await this.server("/api/" + action, {
+        method: request.method,
+        headers: {
+          "Content-Type": request.headers.get("content-type") ?? "application/octet-stream",
+        },
+        body: upload ? request.body : undefined,
+      });
+      if (!response.ok) {
+        const message = await response.text();
+        await this.stopMatch("Resource setup failed. Prepare the server and try again.");
+        throw new RoomError(response.status, message);
+      }
+      if (prepare) {
+        match.stage = "validating";
+        match.message = "Validating server resources…";
+        await this.commit();
+      }
+      return response;
+    } catch (error) {
+      if (state.match?.id === match.id)
+        await this.stopMatch("Resource setup failed. Prepare the server and try again.");
+      throw error;
+    }
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -185,11 +425,48 @@ export class Room extends DurableObject<Env> {
         const state = this.state;
         if (!state || state.closed)
           throw new RoomError(404, "This room has expired or no longer exists.");
+        if (path.startsWith("/match/")) return await this.matchRequest(request, key);
         if (path === "/" && request.method === "GET") return json({ room: snapshot(state, key) });
         if (path === "/join" && request.method === "POST") {
           const input = object(await readJson(request));
           join(state, key, input.playerName, now);
           await this.commit();
+        } else if (path === "/player" && request.method === "POST") {
+          updatePlayer(state, key, await readJson(request));
+          await this.commit();
+        } else if (path === "/prepare" && request.method === "POST") {
+          const match = beginPreparation(state, key, now);
+          await this.commit();
+          try {
+            if (!(await this.env.DIRECTORY.getByName("public").reserveMatch(state.id, match.id)))
+              throw new RoomError(503, "All match servers are busy. Try again shortly.");
+            const response = await this.server("/api/resources");
+            if (!response.ok) throw new Error("The match server could not start.");
+            await response.body?.cancel();
+          } catch (error) {
+            await this.stopMatch("Server preparation failed. Please try again.");
+            throw error;
+          }
+        } else if (path === "/start" && request.method === "POST") {
+          const match = freezeRoster(state, key, now);
+          await this.commit();
+          try {
+            const response = await this.server("/api/start", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                players: match.roster.length,
+                world: mapLabel(state.settings.mapId),
+                sessionId: match.id,
+                roster: match.roster.map(({ credential, car }) => ({ credential, car })),
+              }),
+            });
+            if (!response.ok) throw new Error(await response.text());
+            await response.body?.cancel();
+          } catch (error) {
+            await this.stopMatch("Match startup failed. Prepare the server and try again.");
+            throw error;
+          }
         } else if (path === "/settings" && request.method === "POST") {
           edit(state, key, await readJson(request));
           await this.commit();
@@ -231,6 +508,8 @@ export class Room extends DurableObject<Env> {
     await this.locked(async () => {
       if (!this.state) return;
       const now = Date.now();
+      await this.monitorMatch(now);
+      if (!this.state) return;
       const silent = this.reapSilentSockets(now);
       if (prune(this.state, now) || silent) await this.commit();
       else if (this.state.publishAt <= Date.now()) await this.publish();

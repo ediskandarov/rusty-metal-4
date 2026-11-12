@@ -84,6 +84,7 @@ export async function joinMatch(
   endpoint: string,
   show: MatchStatus,
   lobby: LobbyView,
+  admission?: string,
 ) {
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
   show("lobby", "Connecting to Deathmatch…");
@@ -148,8 +149,8 @@ export async function joinMatch(
 
   socket.onopen = () =>
     send(
-      credential
-        ? { type: "resume", token: credential, compatibility: port.compatibility }
+      (credential ?? admission)
+        ? { type: "resume", token: credential ?? admission, compatibility: port.compatibility }
         : { type: "join", compatibility: port.compatibility },
     );
   socket.onerror = (error) => {
@@ -459,4 +460,5 @@ export async function joinMatch(
       fail(error);
     }
   };
+  return () => cleanup("Returned to room", "lobby");
 }

@@ -20,6 +20,20 @@ export const maps = [
   { id: "son-of-a-ditch", label: "Son Of A Ditch" },
 ] as const;
 
+export interface Compatibility {
+  protocol: number;
+  build: string;
+  content: string;
+}
+export interface MatchSnapshot {
+  id: string;
+  stage: "uploading" | "validating" | "ready" | "starting" | "connecting" | "playing" | "stopping";
+  deadline: number;
+  cars: string[];
+  message: string;
+  endpoint: string | null;
+  credential: string | null;
+}
 export interface RoomSettings {
   name: string;
   modeId: (typeof modes)[number]["id"];
@@ -36,7 +50,16 @@ export interface RoomSnapshot extends RoomSummary {
   version: number;
   hostId: string | null;
   you: string | null;
-  participants: { id: string; name: string; connected: boolean }[];
+  participants: {
+    id: string;
+    name: string;
+    connected: boolean;
+    car: string | null;
+    ready: boolean;
+    loaded: boolean;
+  }[];
+  match: MatchSnapshot | null;
+  notice: string;
   emptyUntil: number | null;
   closed: boolean;
 }

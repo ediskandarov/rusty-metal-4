@@ -30,8 +30,8 @@ Joining always checks the room. Catalog reads never start a container.
 ```mermaid
 stateDiagram-v2
     [*] --> Waiting: Create room
-    Waiting --> Preparing: Host starts / reserve capacity and freeze roster
-    Preparing --> Playing: Resources validated and clients ready
+    Waiting --> Preparing: Host prepares / reserve capacity
+    Preparing --> Playing: Resources validated / host starts ready roster
     Preparing --> Waiting: Failure or timeout / stop container and unlock roster
     Playing --> Waiting: Results / stop container and reset readiness
     Playing --> Waiting: Container failure / report interrupted match
@@ -47,7 +47,7 @@ stateDiagram-v2
 - Waiting: no container; room WebSockets use hibernation.
 - Playing: roster is fixed; only existing participants may reconnect.
 - Empty-match grace retains the running match for reconnects. Proposed grace:
-  120 seconds, configurable. Its expiry ends the match, not merely its visibility.
+  120 seconds. Its expiry ends the match, not merely its visibility.
 - A room alarm checks persisted deadlines and current membership before cleanup.
   Returning players invalidate the old deadline.
 - Host departure in Waiting transfers ownership to a remaining member.
@@ -62,12 +62,15 @@ sequenceDiagram
     participant L as Room DO
     participant C as Rust container
     participant P as Player browsers
-    H->>L: Start match
-    L->>L: Check host, readiness and quota, freeze roster
+    H->>L: Prepare server from local disc
+    L->>L: Check host and reserve capacity
     L->>C: Start selected image and wait for readiness
     H->>L: Upload required resources with scoped authorization
     L->>C: Stream private resource upload
     C-->>L: Validated content and build identity
+    P->>L: Select cars and confirm readiness
+    H->>L: Start match
+    L->>L: Check all current participants ready and freeze roster
     L->>C: Immutable session configuration and roster
     L-->>P: Session endpoint and scoped join credentials
     P->>L: Connect using own compatible local resources
@@ -144,8 +147,8 @@ References: [Lightyear WebTransport](https://docs.rs/lightyear/0.30.1/lightyear/
 
 ## Implementation boundary
 
-The implemented slice provides the public room directory, creation/joining,
-host settings, participants and invite links. Creation asks only for the player
+The website provides the public room directory, creation/joining, host settings,
+participants, invite links and reusable matches. Creation asks only for the player
 and room names; the server supplies Deathmatch, Construction Yard and eight slots.
 The host can edit those settings inside the room while others join. One room
 Durable Object owns admission and permissions; the directory contains only expiring public summaries.
@@ -159,11 +162,27 @@ memory. Directory-removal failures retain a future retry deadline; stale summari
 also expire independently. Explicit creation tickets expire before empty cleanup,
 so old requests cannot recreate deleted rooms without leaving tombstones.
 
-Ready/start controls, resource upload and the Preparing/Playing transitions above
-remain future work. Room operations do not address a simulation container.
-The existing `TestServer` Durable Object class, namespace declaration, container
-binding, Docker build and health collector are retained for server integration;
-the Worker does not expose the replaced single-test-server API.
+Preparation begins only after the host loads a local disc. Resource validation
+precedes readiness so the native build/content identity and car catalog can be
+checked. The start operation freezes all current participants, with 2–8 required;
+room capacity is only an upper bound. Settings are locked during preparation,
+while car/resource changes clear the affected readiness.
+
+Each session addresses its own `TestServer` object. Directory capacity leases are
+private; expired reservations destroy their old server before freeing capacity.
+Persisted deadlines bound preparation and empty matches. Transient status-probe
+and reservation RPC failures receive a bounded monitoring grace, preserved across
+object eviction; recovery clears it. Confirmed terminal states or a changed native
+session end the match immediately. Cleanup retains the session until destruction
+succeeds, then resets readiness without changing room identity or useful settings. Native `results` status triggers this same path;
+there is no public finish endpoint.
+
+A room credential authorizes the WebSocket route; a private per-member match
+credential assigns the native slot through the existing Resume protocol. Native
+car selection is immutable for that fixed roster. Standalone Join/car selection
+remains unchanged. Session-specific endpoints isolate stored reconnect tokens
+from later matches. The existing container binding, Docker build and health
+collector are retained; the replaced single-test-server API remains private.
 No existing namespace is retired by this slice. Local Bun hosting continues to
 serve `apps/server` with the API provided by a separate Rust process.
 

@@ -7,6 +7,7 @@ import type { DiscSources } from "@tm4/resources/loader/types";
 import { installCarMods } from "@tm4/resources/mods/install";
 
 import { prepareIsolation } from "./isolation.ts";
+import { inRoom, roomPlayerReady } from "./room.ts";
 import { carLobby } from "./ui/car-lobby.ts";
 import { element } from "./ui/dom.ts";
 import { matchStatus } from "./ui/match-status.ts";
@@ -56,7 +57,7 @@ async function launch(resolveSources: () => DiscSources) {
     const endpoint = new URLSearchParams(location.search).get("match");
     const status = element("status", HTMLElement);
     const showMatchStatus = matchStatus(status);
-    if (endpoint) {
+    if (endpoint || inRoom) {
       showMatchStatus("lobby", "Preparing Deathmatch…");
       element("resources", HTMLDetailsElement).open = false;
     }
@@ -64,9 +65,14 @@ async function launch(resolveSources: () => DiscSources) {
     startup.hidden = true;
     const runtime = await startGame(assets, canvas, {
       resourceMods: selectedMods.length,
+      session: inRoom,
       beforeMain: (module) => initializeSettings(module, canvas),
     });
-    if (endpoint) {
+    if (inRoom) {
+      if (!hasNetworkEngine(runtime))
+        throw new Error("This build does not include the network runtime");
+      await roomPlayerReady(runtime, sources);
+    } else if (endpoint) {
       if (!hasNetworkEngine(runtime))
         throw new Error("This build does not include the network runtime");
       void joinMatch(runtime, endpoint, showMatchStatus, carLobby()).catch((error: unknown) => {

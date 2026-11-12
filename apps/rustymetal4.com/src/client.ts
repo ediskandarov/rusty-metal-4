@@ -1,3 +1,4 @@
+import { matchControls } from "./match-controls.ts";
 import {
   type DirectoryEvent,
   mapLabel,
@@ -276,9 +277,11 @@ async function room(): Promise<void> {
   let expired = false;
   let recovery: Promise<boolean> | undefined;
   const settingsForm = element<HTMLFormElement>("settings-form");
+  const renderMatch = matchControls(id, (room) => render(room));
   const render = (room: RoomSnapshot) => {
     if (current && room.version < current.version) return;
     current = room;
+    renderMatch(room);
     errorAt("room-error");
     element("room-content").hidden = room.closed;
     element("room-name").textContent = room.name;
@@ -304,13 +307,16 @@ async function room(): Promise<void> {
         fragment.querySelector(".participant-role")!.textContent =
           member.id === room.hostId ? "HOST" : "";
         const presence = fragment.querySelector(".participant-presence")!;
-        presence.textContent = member.connected ? "Online" : "Reconnecting…";
+        presence.textContent =
+          (member.connected ? "Online" : "Reconnecting…") +
+          (member.car ? " · " + member.car : "") +
+          (member.ready ? " · Ready" : "");
         presence.classList.toggle("online", member.connected);
         return fragment;
       }),
     );
     const host = room.you !== null && room.you === room.hostId;
-    element("settings-panel").hidden = !host;
+    element("settings-panel").hidden = !host || !!room.match;
     element("join-panel").hidden = room.you !== null;
     element("leave-button").hidden = !room.you;
     const joinButton =
