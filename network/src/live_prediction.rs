@@ -1,4 +1,5 @@
 use crate::input::{ControllerCommand, Input};
+use crate::prediction_input::LocalInputs;
 use crate::protocol::{ControllerIdentity, Message, PREDICTION_DEPTH};
 use bevy_app::{App, FixedPostUpdate, FixedPreUpdate, FixedUpdate, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
@@ -62,6 +63,7 @@ pub struct LivePrediction {
     resume_warmup: bool,
     pending_resume_rollback: Option<Tick>,
     held: Input,
+    local_inputs: LocalInputs,
     edges: VecDeque<Input>,
     checksums: VecDeque<VerifiedRow>,
     confirmations: VecDeque<Message>,
@@ -182,6 +184,7 @@ impl LivePrediction {
                 ));
             }
             state.confirmed = tick;
+            state.local_inputs.discard_confirmed(tick);
             ready.push(state.confirmations.pop_front().unwrap());
         }
         Ok(ready)
@@ -473,7 +476,7 @@ fn step_world(
     mut state: ResMut<LivePrediction>,
     timeline: SyncedLocalTimeline,
     mut checkpoint: Single<&mut CheckpointTick>,
-    local: Single<&ActionState<ControllerCommand>, With<InputMarker<ControllerCommand>>>,
+    local: Single<&NativeBuffer<ControllerCommand>, With<InputMarker<ControllerCommand>>>,
     mut slots: Query<(
         &ControllerIdentity,
         &ActionState<Input>,
@@ -522,25 +525,24 @@ fn step_world(
             input.0
         } else if slot != session.local_slot || state.resume_warmup {
             accepted.0
-        } else if state.restoring {
-            // A reconnect warmup predicted C inputs before local commands existed.
-            // Subsequent rollback reads that native prediction history as well.
-            let Some(input) = buffer.get(native_tick) else {
-                state.error = Some(format!(
-                    "The native local prediction history has a missing tick ({native_tick:?}, start {:?}, frontier {frontier:?})",
-                    buffer.start_tick
-                ));
-                return;
-            };
-            input.0
         } else {
-            if local.0.tick != tick || local.0.epoch != session.epoch {
-                state.error =
-                    Some("Lightyear lost the predicted local input for a fixed tick".into());
+            match state
+                .local_inputs
+                .get(&local, native_tick, session.epoch, tick)
+            {
+                Ok(input) => input,
+                Err(error) => {
+                    state.error = Some(error);
+                    return;
+                }
+            }
+        };
+        if slot == session.local_slot && state.resume_warmup {
+            if let Err(error) = state.local_inputs.remember_warmup(tick, input) {
+                state.error = Some(error);
                 return;
             }
-            local.0.input
-        };
+        }
         // Match against the actual C input, including the remote hold chosen by Lightyear.
         if native_tick > frontier {
             buffer.set(native_tick, ActionState(input));

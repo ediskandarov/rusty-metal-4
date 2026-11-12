@@ -175,8 +175,11 @@ copies can delay capture. After bounded retries the player can reconnect again.
 Frozen faces are rebuilt from the locally loaded car model.
 
 Closed transport links are reclaimed after their control marker is removed;
-the persistent controller entity and resume identity remain. Native replay reads
-the applied-input history, including reconnect warmup before local commands exist.
+the persistent controller entity and resume identity remain. Native replay uses exact
+accepted inputs through each controller's authoritative frontier. Beyond it, local
+input comes from the separate tick-addressed command buffer: Lightyear discards
+predictions in the accepted-input buffer after a mismatch. Reconnect warmup samples,
+created before local commands exist, are retained separately until confirmed.
 
 The authority captures one completed tick and continues stepping while the server
 forwards the checkpoint in acknowledged 8 KiB chunks. An attempt allows up to
