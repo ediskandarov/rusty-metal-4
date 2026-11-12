@@ -83,6 +83,7 @@ export interface Member {
 export interface RoomState {
   id: string;
   match: RoomMatch | null;
+  journal?: { matchId: string; expiresAt: number };
   notice: string;
   creatorKey: string;
   settings: RoomSettings;
@@ -252,6 +253,7 @@ export function snapshot(state: RoomState, key: string): RoomSnapshot {
               ?.credential ?? null,
         }
       : null,
+    journal: state.journal && state.journal.expiresAt > Date.now() ? state.journal : null,
     notice: state.notice,
     emptyUntil: state.emptyUntil,
     closed: state.closed,

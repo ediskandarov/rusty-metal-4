@@ -94,6 +94,14 @@ try {
   assert.equal((await guest(path + "/join", { playerName: "Guest" })).status, 200);
   assert.equal((await server().inspectForTest()).roster.length, 2);
   await eventually(view, (state) => state.match?.stage === "playing");
+  const journalPath = path + "/match/" + match.id + "/journal";
+  assert.equal((await guest(journalPath)).status, 403);
+  assert.equal((await stranger(journalPath)).status, 403);
+  const liveJournal = await host(journalPath);
+  assert.equal(liveJournal.status, 200);
+  const journalBytes = await liveJournal.arrayBuffer();
+  assert.equal(journalBytes.byteLength, 11);
+  assert.match(liveJournal.headers.get("content-disposition")!, /attachment/);
   const firstServer = server();
   const firstId = match.id;
   const directoryNamespace = (await mf.getDurableObjectNamespace(
@@ -146,6 +154,10 @@ try {
   assert.equal((await host(path + "/prepare", {})).status, 409);
   await firstServer.configureForTest({ failStop: false });
   const returned = await eventually(view, (state) => state.match === null);
+  assert.equal(returned.journal?.matchId, firstId);
+  assert.deepEqual(await (await host(journalPath)).arrayBuffer(), journalBytes);
+  assert.equal((await guest(journalPath)).status, 403);
+  console.log("PASS host-only server journal download before and after container stop");
   assert.equal(returned.id, initial.id);
   assert.equal(returned.participantCount, 2);
   assert(returned.participants.every((member) => !member.ready));

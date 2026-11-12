@@ -39,7 +39,14 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
   const cheats = element("cheat-settings", HTMLDetailsElement);
   const input = element("input-settings", HTMLDetailsElement);
   const resources = element("resources", HTMLDetailsElement);
-  const panels = [rendering, cheats, input, resources, element("mods", HTMLDetailsElement)];
+  const panels = [
+    element("troubleshoot", HTMLDetailsElement),
+    rendering,
+    cheats,
+    input,
+    resources,
+    element("mods", HTMLDetailsElement),
+  ];
   const closePanels = () => {
     for (const panel of panels) panel.open = false;
   };

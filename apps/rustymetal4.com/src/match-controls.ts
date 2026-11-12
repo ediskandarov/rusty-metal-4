@@ -20,6 +20,8 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
   const start = el<HTMLButtonElement>("start-match");
   const cancel = el<HTMLButtonElement>("cancel-preparation");
   const reconnect = el<HTMLButtonElement>("reconnect-match");
+  const journal = el<HTMLButtonElement>("download-server-journal");
+  let downloading = false;
   let current: RoomSnapshot | undefined;
   let compatibility: Compatibility | null = null;
   let cars: string[] = [];
@@ -76,6 +78,8 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
     const self = room.participants.find((member) => member.id === room.you)!;
     const host = room.you === room.hostId;
     const match = room.match;
+    journal.hidden = !host || !(match || room.journal);
+    journal.disabled = downloading;
     const locked =
       !!match && ["starting", "connecting", "playing", "stopping"].includes(match.stage);
     el("match-status").textContent =
@@ -119,6 +123,32 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
       if (!runtimeAvailable)
         el("player-status").textContent = "The game player is unavailable in this build.";
     });
+  journal.onclick = async () => {
+    const matchId = current?.match?.id ?? current?.journal?.matchId;
+    if (!matchId || downloading) return;
+    downloading = true;
+    journal.disabled = true;
+    const status = el("server-journal-status");
+    status.textContent = "Downloading server journal…";
+    try {
+      const result = await rooms.journal(id, matchId);
+      const url = URL.createObjectURL(result.bytes);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "rustymetal4-server-" + matchId + ".tm4j";
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      status.textContent =
+        "Journal saved through " +
+        new Date(result.savedAt).toLocaleTimeString() +
+        ". Archives remain available for 24 hours while this room exists.";
+    } catch (error) {
+      status.textContent = String(error);
+    } finally {
+      downloading = false;
+      if (current) render(current);
+    }
+  };
   car.addEventListener("change", () => action(() => player(false)));
   ready.onclick = () =>
     action(() => player(!current?.participants.find((member) => member.id === current.you)?.ready));

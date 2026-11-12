@@ -89,6 +89,7 @@ export const roomSnapshotSchema = roomSummarySchema.extend({
     )
     .max(8),
   match: matchSnapshotSchema.nullable(),
+  journal: z.object({ matchId: matchIdSchema, expiresAt: count }).nullable().optional(),
   notice: z.string(),
   emptyUntil: count.nullable(),
   closed: z.boolean(),

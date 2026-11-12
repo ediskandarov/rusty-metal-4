@@ -207,6 +207,8 @@ export class Room extends DurableObject<Env> {
       const response = await this.server("/_server/stop", { method: "POST" });
       if (!response.ok) throw new Error("Container stop failed");
       await this.env.DIRECTORY.getByName("public").releaseMatch(state.id, match.id);
+      const expiresAt = Number(response.headers.get("X-Journal-Expires-At"));
+      if (expiresAt > Date.now()) state.journal = { matchId: match.id, expiresAt };
       resetMatch(state, message, Date.now());
       await this.commit();
     } catch {
@@ -326,6 +328,31 @@ export class Room extends DurableObject<Env> {
     const state = this.state!;
     const match = state.match;
     const parts = new URL(request.url).pathname.split("/");
+    if (parts[3] === "journal" && parts.length === 4 && request.method === "GET") {
+      requireHost(state, key);
+      const id = parts[2];
+      if (
+        id !== match?.id &&
+        (!state.journal || id !== state.journal.matchId || state.journal.expiresAt <= Date.now())
+      )
+        throw new RoomError(404, "This match journal is no longer available.");
+      const response = await this.env.SERVER.getByName(state.id + ":" + id).fetch(
+        "https://server/_server/journal",
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new RoomError(
+          response.status,
+          "No server journal is available yet, or it has expired.",
+        );
+      }
+      const headers = new Headers(response.headers);
+      headers.set(
+        "Content-Disposition",
+        'attachment; filename="rustymetal4-server-' + id + '.tm4j"',
+      );
+      return new Response(response.body, { headers });
+    }
     if (!match || parts[2] !== match.id)
       throw new RoomError(409, "This match has ended. Return to the room.");
     const member = memberFor(state, key);

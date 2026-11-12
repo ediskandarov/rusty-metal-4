@@ -15,6 +15,7 @@ import { initializeMods } from "./ui/mods.ts";
 import { initializePopups } from "./ui/popups.ts";
 import { initializeResources } from "./ui/resources.ts";
 import { initializeSettings } from "./ui/settings.ts";
+import { initializeTroubleshoot } from "./ui/troubleshoot.ts";
 
 const startup = element("startup", HTMLElement);
 const progress = element("startup-progress", HTMLElement);
@@ -22,6 +23,7 @@ const warnings = element("startup-warnings", HTMLElement);
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
 initializePopups();
+initializeTroubleshoot();
 const resources = initializeResources();
 const mods = initializeMods();
 let starting = false;

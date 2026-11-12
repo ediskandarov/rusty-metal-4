@@ -14,6 +14,8 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
+    fn journal_authority_frame(json: &str);
+    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn retain_live_tick(tick: u32) -> u32;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn restore_live_tick(tick: u32) -> bool;
@@ -129,6 +131,14 @@ impl LivePrediction {
             .map(|(_, buffer)| buffer.last_remote_tick)
             .collect::<Vec<_>>();
         let mut state = world.resource_mut::<Self>();
+        // Observe accepted inputs before verification can reject the update.
+        for message in &inbox {
+            if matches!(message, Message::Frame { .. }) {
+                if let Ok(json) = serde_json::to_string(message) {
+                    journal_authority_frame(&json);
+                }
+            }
+        }
         if let Some(error) = &state.error {
             return Err(error.clone());
         }

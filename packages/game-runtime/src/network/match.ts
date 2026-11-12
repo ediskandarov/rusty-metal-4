@@ -1,5 +1,6 @@
 import type { LobbyState, Request, SnapshotBegin } from "@tm4/lightyear-client/schemas";
 
+import { startClientJournal } from "./journal.ts";
 import { attachLivePrediction } from "./livePrediction.ts";
 import type { NetworkEngine, NetworkPort, RoundState } from "./protocol.ts";
 import { configureMatch } from "./protocol.ts";
@@ -61,7 +62,22 @@ export async function joinMatch(
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
   show("lobby", "Connecting to Deathmatch…");
 
-  const socket = await connectNetwork(endpoint);
+  const journal = startClientJournal();
+  const path = new URL(endpoint, location.href).pathname;
+  const ids = /\/rooms\/([a-f0-9]{32})\/match\/([a-f0-9-]{36})\//.exec(path);
+  journal.identify({
+    roomId: ids?.[1] ?? null,
+    matchId: ids?.[2] ?? null,
+    compatibility: port.compatibility,
+    browser: navigator.userAgent,
+  });
+  let socket: Awaited<ReturnType<typeof connectNetwork>>;
+  try {
+    socket = await connectNetwork(endpoint);
+  } catch (error) {
+    journal.freeze(String(error), null);
+    throw error;
+  }
   let slot = -1;
   let players = 0;
   let closed = false;
@@ -88,6 +104,7 @@ export async function joinMatch(
   const send = (message: Request) => socket.send(message);
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (closed) return;
+    journal.freeze(message, diagnostics);
     closed = true;
     lobby(null);
     delete port.netMatchInput;
@@ -143,6 +160,7 @@ export async function joinMatch(
   port.netMatchInput = (buttons, axes, analog) => {
     if (closed || recovery || socket.readyState !== WebSocket.OPEN) return;
     try {
+      journal.record("controls", port.netMatch?.tick ?? null, { buttons, axes, analog });
       if (prediction) socket.predictionInput(buttons, axes, analog);
     } catch (error) {
       fail(error);
@@ -171,6 +189,7 @@ export async function joinMatch(
           if (!Number.isInteger(message.slot) || message.slot < 0 || message.slot >= 8)
             throw new Error("Invalid player slot");
           slot = message.slot;
+          journal.identify({ slot });
           show(
             "lobby",
             "Player " +
@@ -204,7 +223,15 @@ export async function joinMatch(
           show("lobby", "Loading Deathmatch…");
           if (prediction || slot < 0 || slot >= message.players)
             throw new Error("Invalid live prediction setup");
-          prediction = attachLivePrediction(engine, port);
+          journal.identify({
+            world: message.world,
+            cars: message.cars,
+            seed: message.seed,
+            players: message.players,
+            epoch: message.epoch,
+            compatibility: message.compatibility,
+          });
+          prediction = attachLivePrediction(engine, port, journal);
           socket.preparePrediction(message.players, message.type === "resume_prepare");
           if (!configureMatch(engine, message, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");

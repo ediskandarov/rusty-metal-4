@@ -111,6 +111,20 @@ export function createRoomsClient(options: RoomsClientOptions) {
     async cancel(id: string, session: string) {
       return mutate(match(id, session) + "/cancel");
     },
+    async journal(id: string, session: string) {
+      const response = await (options.fetch ?? fetch)(
+        new Request(url(match(id, session) + "/journal"), { cache: "no-store" }),
+      );
+      if (!response.ok)
+        throw new RoomsApiError(
+          response.status,
+          "Server journal unavailable (HTTP " + response.status + ")",
+        );
+      return {
+        bytes: await response.blob(),
+        savedAt: Number(response.headers.get("X-Journal-Saved-At")),
+      };
+    },
     resources(id: string, session: string) {
       return createResourceClient({ baseURL: url(match(id, session) + "/"), fetch: options.fetch });
     },

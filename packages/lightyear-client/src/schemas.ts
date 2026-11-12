@@ -54,6 +54,10 @@ export const frameSchema = z.object({
   state: roundStateSchema,
 });
 export type Frame = z.infer<typeof frameSchema>;
+// The direct Rust callback runs before the browser client's message normalization.
+export const journalAuthorityFrameSchema = z.object({
+  frame: frameSchema.omit({ type: true }),
+});
 export const snapshotBeginSchema = z.object({
   type: z.literal("snapshot_begin"),
   attempt: u32,

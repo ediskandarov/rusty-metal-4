@@ -4,6 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import { isolated } from "../assets.ts";
 import { exportHealth } from "../telemetry.ts";
+import { ServerJournal } from "./journal.ts";
 
 export interface ServerEnv {
   TM4_ADMIN_SECRET: string;
@@ -17,6 +18,32 @@ const matchPort = 8122;
 const metricsIntervalMs = 10_000;
 
 export class TestServer extends DurableObject<ServerEnv> {
+  private journal = new ServerJournal(this.ctx.storage);
+  private archiving: Promise<void> | undefined;
+
+  private archiveJournal() {
+    return (this.archiving ??= (async () => {
+      if (!this.ctx.container?.running) return;
+      const response = await this.ctx.container
+        .getTcpPort(httpPort)
+        .fetch("http://container/api/journal", {
+          headers: { Authorization: `Bearer ${this.env.TM4_ADMIN_SECRET}` },
+          signal: AbortSignal.timeout(5000),
+        });
+      if (response.status === 404) {
+        await response.body?.cancel();
+        return;
+      }
+      await this.journal.save(response);
+    })()
+      .catch((error) => {
+        console.error("Journal archive failed", String(error));
+      })
+      .finally(() => {
+        this.archiving = undefined;
+      }));
+  }
+
   private starting: Promise<void> | undefined;
   private previousHealth: HealthSnapshot | undefined;
   private lastExternalActivity = Date.now();
@@ -84,8 +111,14 @@ export class TestServer extends DurableObject<ServerEnv> {
     const container = this.ctx.container!;
     if (!container.running) {
       this.previousHealth = undefined;
+      await this.journal.expire();
+      const meta = await this.journal.metadata();
+      if (meta) await this.ctx.storage.setAlarm(meta.expiresAt);
+      else await this.ctx.storage.deleteAll();
       return;
     }
+    const saved = await this.journal.metadata();
+    if (!saved || Date.now() - saved.savedAt >= 30_000) await this.archiveJournal();
     try {
       const snapshot = await this.api().health(AbortSignal.timeout(3000));
       exportHealth(
@@ -117,7 +150,11 @@ export class TestServer extends DurableObject<ServerEnv> {
       // Monitoring must not keep an empty container alive indefinitely.
       if (connected === 0) {
         await container.setInactivityTimeout(Math.max(1, remaining));
-        if (remaining <= 0) return;
+        if (remaining <= 0) {
+          const meta = await this.journal.metadata();
+          if (meta) await this.ctx.storage.setAlarm(meta.expiresAt);
+          return;
+        }
       } else {
         await container.setInactivityTimeout(idleTimeoutMs);
       }
@@ -136,6 +173,8 @@ export class TestServer extends DurableObject<ServerEnv> {
         Date.now() - Math.max(this.lastExternalActivity, this.emptySince) >= idleTimeoutMs
       ) {
         // A monitoring failure must never actively terminate a match.
+        const meta = await this.journal.metadata();
+        if (meta) await this.ctx.storage.setAlarm(meta.expiresAt);
         return;
       }
     }
@@ -149,14 +188,24 @@ export class TestServer extends DurableObject<ServerEnv> {
       this.emptySince = undefined;
       await this.ctx.storage.delete("emptySince");
       await this.ctx.storage.delete("previousHealth");
+      await this.archiveJournal();
       if (this.ctx.container!.running) await this.ctx.container!.destroy();
-      await this.ctx.storage.deleteAll();
-      return new Response(null, { status: 204 });
+      const meta = await this.journal.metadata();
+      await this.ctx.storage.delete("lastExternalActivity");
+      if (meta) await this.ctx.storage.setAlarm(meta.expiresAt);
+      return new Response(null, {
+        status: 204,
+        headers: meta ? { "X-Journal-Expires-At": String(meta.expiresAt) } : {},
+      });
     }
     const path = new URL(request.url).pathname;
-    if (path === "/_server/measure" || path === "/_server/journal") {
+    if (path === "/_server/journal") {
+      await this.archiveJournal();
+      return this.journal.download();
+    }
+    if (path === "/_server/measure") {
       if (!this.ctx.container!.running) return new Response("Server not running", { status: 409 });
-      const endpoint = path === "/_server/measure" ? "system-metrics" : "journal";
+      const endpoint = "system-metrics";
       return this.ctx.container!.getTcpPort(httpPort).fetch(`http://container/api/${endpoint}`, {
         headers: { Authorization: `Bearer ${this.env.TM4_ADMIN_SECRET}` },
       });

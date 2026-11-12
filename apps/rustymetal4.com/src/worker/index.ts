@@ -94,7 +94,7 @@ export default {
         body = JSON.stringify(input);
       } else {
         const match =
-          /^\/api\/rooms\/([a-f0-9]{32})(\/(?:join|settings|leave|live|player|prepare|start|match\/[a-f0-9-]{36}\/(?:cancel|resources(?:\/DATA\/[A-Za-z0-9_./-]+)?|prepare|socket)))?$/.exec(
+          /^\/api\/rooms\/([a-f0-9]{32})(\/(?:join|settings|leave|live|player|prepare|start|match\/[a-f0-9-]{36}\/(?:journal|cancel|resources(?:\/DATA\/[A-Za-z0-9_./-]+)?|prepare|socket)))?$/.exec(
             url.pathname,
           );
         if (!match) throw new RoomError(404, "Unknown room endpoint.");
