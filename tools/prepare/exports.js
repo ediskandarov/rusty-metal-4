@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 
 import { $ } from "bun";
 
+import { runCli } from "../cli.js";
 import { json, options, root, write } from "../common.js";
 import { findDefinitions, planExports, selectExports, validateExports } from "../exports/model.js";
 import { renderAccessor, renderRegistry } from "../exports/templates.js";
@@ -68,27 +69,36 @@ async function check({ manifestFile, stamp }) {
   console.log(`Checked native exports for ${Object.keys(manifest.modules).length} modules`);
 }
 
-const [action, ...args] = process.argv.slice(2);
-const separator = args.indexOf("--");
-const compiler = separator < 0 ? [] : args.slice(separator + 1);
-const commandArgs = separator < 0 ? args : args.slice(0, separator);
-const flags = options(["sources", "output", "game-root", "manifest", "unit", "stamp"], commandArgs);
+await runCli(async () => {
+  const [action, ...args] = process.argv.slice(2);
+  const separator = args.indexOf("--");
+  const compiler = separator < 0 ? [] : args.slice(separator + 1);
+  const commandArgs = separator < 0 ? args : args.slice(0, separator);
+  const flags = options(
+    ["sources", "output", "game-root", "manifest", "unit", "stamp"],
+    commandArgs,
+  );
 
-switch (action) {
-  case "plan":
-    await plan({ gameRoot: flags["game-root"], sourcesFile: flags.sources, output: flags.output });
-    break;
-  case "generate":
-    await generate({
-      manifestFile: flags.manifest,
-      unitId: flags.unit,
-      output: flags.output,
-      compiler,
-    });
-    break;
-  case "check":
-    await check({ manifestFile: flags.manifest, stamp: flags.stamp });
-    break;
-  default:
-    throw new Error(`Unknown export command: ${action}`);
-}
+  switch (action) {
+    case "plan":
+      await plan({
+        gameRoot: flags["game-root"],
+        sourcesFile: flags.sources,
+        output: flags.output,
+      });
+      break;
+    case "generate":
+      await generate({
+        manifestFile: flags.manifest,
+        unitId: flags.unit,
+        output: flags.output,
+        compiler,
+      });
+      break;
+    case "check":
+      await check({ manifestFile: flags.manifest, stamp: flags.stamp });
+      break;
+    default:
+      throw new Error(`Unknown export command: ${action}`);
+  }
+});
