@@ -307,7 +307,8 @@ if(TM4_STANDALONE)
         list(APPEND exports _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget
             _WebTestAimAtWeakDestroyable _WebTestAimAtDestroyable _WebTestPlaceProjectileTarget
-            _WebTestPlacePlayerTarget _WebTestPreparePlayerDuel _WebTestPlacePlayerProjectileTarget)
+            _WebTestPlacePlayerTarget _WebTestPreparePlayerDuel _WebTestPlacePlayerProjectileTarget
+            _WebTestSpawnMotionFireball _WebTestFireballCount _WebTestOffsetReplayHeap)
     endif()
     list(JOIN exports "," exports)
     target_link_options(tm4_web PRIVATE --no-entry -sPURE_WASI=1 "-sEXPORTED_FUNCTIONS=${exports}")

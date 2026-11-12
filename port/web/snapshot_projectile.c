@@ -162,9 +162,50 @@ static int restore_projectile_type(
     return 1;
 }
 
+static const SnapshotField fireball_fields[] = {
+    SNAP_POD(WeaponFireball, previous.vx),
+    SNAP_POD(WeaponFireball, previous.vy),
+    SNAP_POD(WeaponFireball, previous.vz),
+    SNAP_TRANSIENT(WeaponFireball, previous.pad),
+    SNAP_POD(WeaponFireball, position),
+    SNAP_POD(WeaponFireball, velocity.vx),
+    SNAP_POD(WeaponFireball, velocity.vy),
+    SNAP_POD(WeaponFireball, velocity.vz),
+    SNAP_TRANSIENT(WeaponFireball, velocity.pad),
+    SNAP_POD(WeaponFireball, gravity),
+    SNAP_POD(WeaponFireball, size),
+    SNAP_DERIVED(WeaponFireball, color),
+    SNAP_DERIVED(WeaponFireball, texture),
+    SNAP_DERIVED(WeaponFireball, explosion),
+    SNAP_POD(WeaponFireball, age),
+    { 0 },
+};
+
+static int fireball_valid(const void* payload)
+{
+    const WeaponFireball* fireball = payload;
+    return fireball->color == WeapFireballType.color
+        && fireball->texture == WeapFireballType.texture
+        && fireball->explosion == WeapFireballType.explosion;
+}
+
+static int restore_fireball_type(
+    void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
+{
+    if (length)
+        return 0;
+    WeaponFireball* fireball = payload;
+    fireball->color = WeapFireballType.color;
+    fireball->texture = WeapFireballType.texture;
+    fireball->explosion = WeapFireballType.explosion;
+    return 1;
+}
+
 const SnapshotType WebSnapshotProjectileTypes[] = {
     { "bullet", sizeof(Bullet), bullet_fields, bullet_valid, NULL, restore_bullet_type },
     { "weaponProjectile", sizeof(WeaponProjectile), projectile_fields, projectile_valid, NULL,
         restore_projectile_type },
+    { "weaponFireball", sizeof(WeaponFireball), fireball_fields, fireball_valid, NULL,
+        restore_fireball_type, .hash_fields = 1 },
     { 0 },
 };

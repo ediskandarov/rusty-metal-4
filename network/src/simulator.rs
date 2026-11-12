@@ -759,6 +759,92 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
+    fn fireball_portable_transfer_and_local_rollback() -> Result<()> {
+        let (wasm, resources) = paths()?;
+        let setup = session();
+        let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+        world.start(&setup)?;
+        ensure!(
+            world.call::<(), u32>("WebTestSpawnMotionFireball", ())? != 0,
+            "Fireball creation failed"
+        );
+        let inputs = vec![Input::default(); setup.players as usize];
+        let mut rows = Vec::new();
+        let mut snapshot = Vec::new();
+        let mut counts = Vec::new();
+        for tick in 0..180 {
+            let state = world.step(tick, &inputs)?;
+            ensure!(
+                state.unsupported.is_none(),
+                "Unsupported state: {:?}",
+                state.unsupported
+            );
+            counts.push(world.call::<(), i32>("WebTestFireballCount", ())?);
+            let length = world.call::<(), u32>("HeadlessCapture", ())?;
+            ensure!(length > 0, "Canonical capture refused");
+            let address = world.call::<(), u32>("HeadlessCanonical", ())?;
+            let mut canonical = vec![0; length as usize];
+            world
+                .memory
+                .read(&world.store, address as usize, &mut canonical)?;
+            rows.push(Row {
+                tick: tick + 1,
+                digest: state.digest,
+                sections: state.sections,
+                canonical: STANDARD.encode(canonical),
+            });
+            if tick == 0 {
+                ensure!(counts[0] == 1, "Save must contain a live fireball");
+                snapshot = world.snapshot()?;
+                ensure!(
+                    world.call::<(), u32>("WebNetCaptureLocalCheckpoint", ())? > 0,
+                    "Local checkpoint refused"
+                );
+            }
+        }
+        ensure!(
+            counts.last() == Some(&0),
+            "Fireball never reached a collision"
+        );
+        let mut restored = Simulator::new(&wasm, &resources, compatibility())?;
+        // Portable references must survive a different destination heap layout.
+        ensure!(
+            restored.call::<(), i32>("WebTestOffsetReplayHeap", ())? == 1,
+            "Heap perturbation failed"
+        );
+        restored.start(&setup)?;
+        restored.restore_portable(&snapshot)?;
+        compare(&mut restored, &rows[0])?;
+        for tick in 1..180 {
+            restored.step(tick, &inputs)?;
+            compare(&mut restored, &rows[tick as usize])?;
+            ensure!(
+                restored.call::<(), i32>("WebTestFireballCount", ())? == counts[tick as usize],
+                "Fireball lifetime changed after transfer"
+            );
+        }
+        restored.call::<(), ()>("WebNetEndReplay", ())?;
+        for _ in 0..2 {
+            ensure!(
+                world.call::<(), i32>("WebNetRestoreLocalCheckpoint", ())? == 1,
+                "Local restore refused"
+            );
+            compare(&mut world, &rows[0])?;
+            for tick in 1..180 {
+                world.step(tick, &inputs)?;
+                compare(&mut world, &rows[tick as usize])?;
+            }
+            ensure!(
+                world.call::<(), i32>("WebNetFinishLocalReplay", ())? == 1,
+                "Replay finish refused"
+            );
+        }
+        eprintln!("PASS fireball flight, collision, portable transfer and two local rollbacks");
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "requires the Road Rage death journal in TM4_TEST_JOURNAL and private resources"]
     fn destroyed_targets_after_portable_restore_and_rollback() -> Result<()> {
         use tm4_network::protocol::{JOURNAL_FRAME_PREFIX, JOURNAL_INPUT_BYTES};

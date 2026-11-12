@@ -920,7 +920,22 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestSpawnMotionFireball(void)
     SVECTOR position = { transform->t[0] + forward_x / 16, transform->t[1] - 160,
         transform->t[2] + forward_z / 16, 0 };
     SVECTOR velocity = { forward_x / 2, -1024, forward_z / 2, 0 };
-    return (u32)ObjectCreate("weaponFireball", 0, &position, &velocity);
+    if (WebNetMatchActive())
+        WebCheckpointArenaSelect(1);
+    void* fireball = ObjectCreate("weaponFireball", 0, &position, &velocity);
+    if (WebNetMatchActive())
+        WebCheckpointArenaSelect(0);
+    return (u32)fireball;
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestFireballCount(void)
+{
+    s32 count = 0;
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list)
+        for (const Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next)
+            if (!strcmp(header->name, "weaponFireball"))
+                ++count;
+    return count;
 }
 
 void WebTestMotionInput(void)
