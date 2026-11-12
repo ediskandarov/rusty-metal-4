@@ -54,7 +54,8 @@ static void bullet_state(NetStateOutput* hash, const Bullet* bullet)
     VALUE(bullet->motion.fields.world_impact);
     VALUE(bullet->motion.fields.collide_world);
     VALUE(handle(bullet->hit_object));
-    if (bullet->hit_object) {
+    VALUE(bullet->hit_pending);
+    if (bullet->hit_pending) {
         XYZ(bullet->impact.fields.world_position);
         VALUE(bullet->impact.fields.damage);
     }

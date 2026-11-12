@@ -11,7 +11,7 @@ extern char BulletWeaponName[];
 static const SnapshotField hit_fields[] = {
     SNAP_POD(Tm4WorldHit, position),
     SNAP_POD(Tm4WorldHit, surface),
-    SNAP_REF(Tm4WorldHit, owner, NULL),
+    SNAP_WEAK_REF(Tm4WorldHit, owner, NULL),
     SNAP_INDEX(Tm4WorldHit, polygon, &WebSnapshotCollisionPolygons),
     { 0 },
 };
@@ -36,14 +36,16 @@ static const SnapshotField bullet_fields[] = {
     SNAP_TRANSIENT(Bullet, current_world.pad),
     SNAP_POD(Bullet, motion),
     SNAP_GROUP(Bullet, collision, &hit),
-    SNAP_REF(Bullet, hit_object, NULL),
+    SNAP_WEAK_REF(Bullet, hit_object, NULL),
+    SNAP_POD(Bullet, hit_pending),
     SNAP_POD(Bullet, impact),
     { 0 },
 };
 
 static int bullet_motion_valid(const Bullet* bullet)
 {
-    return bullet->motion.fields.world_impact <= 1 && bullet->motion.fields.collide_world <= 1;
+    return bullet->motion.fields.world_impact <= 1 && bullet->motion.fields.collide_world <= 1
+        && (u32)bullet->hit_pending <= 1 && (!bullet->hit_object || bullet->hit_pending);
 }
 
 static int bullet_valid(const void* payload)

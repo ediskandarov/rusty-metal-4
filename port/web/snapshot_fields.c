@@ -341,6 +341,20 @@ void WebSnapshotFieldsRelease(const SnapshotType* type, void* object)
         type->release(object);
 }
 
+static int references_target(const SnapshotField* fields, const void* object, const void* target)
+{
+    for (const SnapshotField* field = fields; field && field->kind; ++field) {
+        if (field->kind != SnapshotRequiredRef && field->kind != SnapshotObjectRef
+            && field->kind != SnapshotWeakObjectRef && field->kind != SnapshotHeaderRef)
+            continue;
+        const void* expected = field->kind == SnapshotHeaderRef ? ObjectGetHeader(target) : target;
+        for (size_t i = 0; i < field->size; i += sizeof(void*))
+            if (read_pointer((const u8*)object + field->offset + i) == expected)
+                return 1;
+    }
+    return 0;
+}
+
 static void forget_weak_references(const SnapshotField* fields, void* object, const void* target)
 {
     for (const SnapshotField* field = fields; field && field->kind; ++field) {
@@ -353,6 +367,21 @@ static void forget_weak_references(const SnapshotField* fields, void* object, co
             const SnapshotGroupFields* group = field->binding;
             if (!group->active || group->active(object))
                 forget_weak_references(group->fields, member, target);
+        } else if (field->kind == SnapshotOwnedList) {
+            const SnapshotList* list = field->binding;
+            void* link = member;
+            void* node;
+            while ((node = read_pointer(link))) {
+                void* next = (u8*)node + list->next;
+                if (list->discard_on_target_destroy
+                    && references_target(list->fields, node, target)) {
+                    write_pointer(link, read_pointer(next));
+                    MemFree(node);
+                } else {
+                    forget_weak_references(list->fields, node, target);
+                    link = next;
+                }
+            }
         }
     }
 }

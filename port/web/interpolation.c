@@ -183,7 +183,7 @@ static SVECTOR fireball_position(const WeaponFireball* fireball)
 
 static int bullet_in_flight(const Bullet* bullet)
 {
-    return !bullet->hit_object && !bullet->motion.fields.world_impact;
+    return !bullet->hit_pending && !bullet->motion.fields.world_impact;
 }
 
 static int trail_tip(const WeaponProjectile* projectile, SVECTOR tip[4])

@@ -100,7 +100,7 @@ static s32 construct(void* object, va_list args)
 static void process(void* object)
 {
     WeaponProjectile* projectile = object;
-    if (projectile->bullet.hit_object || projectile->bullet.motion.fields.world_impact)
+    if (projectile->bullet.hit_pending || projectile->bullet.motion.fields.world_impact)
         WEB_BROWSER_REPORT({ tm4Port.projectileImpacts = (tm4Port.projectileImpacts || 0) + 1; });
     WeaponProjectileProcess(object);
 }

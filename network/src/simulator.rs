@@ -759,6 +759,118 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires the Road Rage death journal in TM4_TEST_JOURNAL and private resources"]
+    fn destroyed_targets_after_portable_restore_and_rollback() -> Result<()> {
+        use tm4_network::protocol::{JOURNAL_FRAME_PREFIX, JOURNAL_INPUT_BYTES};
+
+        const JOIN: u32 = 3009;
+        const DEATH: u32 = 4048;
+        const END: u32 = 4060;
+        let (wasm, resources) = paths()?;
+        let path = PathBuf::from(env::var("TM4_TEST_JOURNAL")?);
+        let summary = crate::journal::inspect(&path)?;
+        ensure!(summary.ticks >= END, "Incomplete death journal");
+        let bytes = fs::read(path)?;
+        let header_bytes = u32::from_le_bytes(bytes[8..12].try_into()?) as usize;
+        let tape: Vec<Vec<Input>> = (0..END as usize)
+            .map(|tick| {
+                let start = 16 + header_bytes + tick * (summary.bytes_per_tick + 5) + 1;
+                bytes[start + JOURNAL_FRAME_PREFIX..start + summary.bytes_per_tick]
+                    .chunks_exact(JOURNAL_INPUT_BYTES)
+                    .map(|input| Input {
+                        buttons: u16::from_le_bytes(input[..2].try_into().unwrap()),
+                        axes: u32::from_le_bytes(input[2..6].try_into().unwrap()),
+                        analog: input[6] != 0,
+                    })
+                    .collect()
+            })
+            .collect();
+        let mut world = Simulator::new(
+            &wasm,
+            &resources,
+            summary.header.start.compatibility.clone(),
+        )?;
+        world.start(&summary.header.start)?;
+        let mut snapshot = Vec::new();
+        let mut rows = Vec::new();
+        for tick in 0..END {
+            let state = world.step(tick, &tape[tick as usize])?;
+            ensure!(
+                state.unsupported.is_none(),
+                "Unsupported state at {}: {:?}",
+                tick + 1,
+                state.unsupported
+            );
+            ensure!(
+                state.round_finished == (tick + 1 >= DEATH),
+                "Death moved to another tick"
+            );
+            if tick + 1 >= DEATH {
+                ensure!(
+                    state.winner == 1 && state.remaining == 1,
+                    "Round outcome changed"
+                );
+            }
+            if tick + 1 == JOIN {
+                snapshot = world.snapshot()?;
+            }
+            if tick + 1 == DEATH - 1 {
+                ensure!(
+                    world.call::<(), u32>("WebNetCaptureLocalCheckpoint", ())? > 0,
+                    "Local checkpoint refused"
+                );
+            }
+            if tick + 1 >= JOIN {
+                let length = world.call::<(), u32>("HeadlessCapture", ())?;
+                ensure!(length > 0, "Canonical capture refused");
+                let address = world.call::<(), u32>("HeadlessCanonical", ())?;
+                let mut canonical = vec![0; length as usize];
+                world
+                    .memory
+                    .read(&world.store, address as usize, &mut canonical)?;
+                rows.push(Row {
+                    tick: tick + 1,
+                    digest: state.digest,
+                    sections: state.sections,
+                    canonical: STANDARD.encode(canonical),
+                });
+            }
+        }
+        let mut restored = Simulator::new(
+            &wasm,
+            &resources,
+            summary.header.start.compatibility.clone(),
+        )?;
+        restored.start(&summary.header.start)?;
+        restored.restore_portable(&snapshot)?;
+        compare(&mut restored, &rows[0])?;
+        for tick in JOIN..END {
+            if tick == 3037 {
+                restored.call::<(), ()>("WebNetEndReplay", ())?;
+            }
+            restored.step(tick, &tape[tick as usize])?;
+            compare(&mut restored, &rows[(tick + 1 - JOIN) as usize])?;
+        }
+        for _ in 0..2 {
+            ensure!(
+                world.call::<(), i32>("WebNetRestoreLocalCheckpoint", ())? == 1,
+                "Local restore refused"
+            );
+            compare(&mut world, &rows[(DEATH - 1 - JOIN) as usize])?;
+            for tick in DEATH - 1..END {
+                world.step(tick, &tape[tick as usize])?;
+                compare(&mut world, &rows[(tick + 1 - JOIN) as usize])?;
+            }
+            ensure!(
+                world.call::<(), i32>("WebNetFinishLocalReplay", ())? == 1,
+                "Replay finish refused"
+            );
+        }
+        eprintln!("PASS portable replay and two local rollbacks through death at tick {DEATH}");
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "requires the private local resources, diagnostic Wasm, and Bun browser recording"]
     fn browser_parity_local_replay_and_distinct_instance_transfer() -> Result<()> {
         let (bytes, resources) = paths()?;

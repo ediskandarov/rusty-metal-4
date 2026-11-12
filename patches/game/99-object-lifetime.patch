@@ -1,0 +1,180 @@
+--- a/include/tm4/modules/bullet.h
++++ b/include/tm4/modules/bullet.h
+@@ -29,6 +29,7 @@
+     BulletMotion motion;
+     Tm4WorldHit collision;
+     void* hit_object;
++    s32 hit_pending; /* Impact survives destruction of its target. */
+     BulletImpact impact;
+ } Bullet;
+ 
+--- a/src/modules/bullet/bullet.c
++++ b/src/modules/bullet/bullet.c
+@@ -86,6 +86,7 @@
+     }
+     object->motion.fields.world_impact = 0;
+     object->hit_object = NULL;
++    object->hit_pending = 0;
+     object->motion.fields.collide_world = 1;
+     va_end(arguments);
+     return 1;
+@@ -123,7 +124,7 @@
+     VECTOR hit_delta;
+     SVECTOR *current_world, *previous_world;
+     Tm4WorldHit* collision;
+-    if (object->hit_object && object->motion.fields.world_impact) {
++    if (object->hit_pending && object->motion.fields.world_impact) {
+         s32 object_distance_squared, world_distance_squared;
+         {
+             const Tm4ShortVectorXYZ* a = &object->impact.fields.world_position;
+@@ -149,8 +150,9 @@
+         }
+         world_distance_squared = hit_delta.vx * hit_delta.vx + hit_delta.vy * hit_delta.vy
+             + hit_delta.vz * hit_delta.vz;
+-        if (object_distance_squared >= world_distance_squared)
++        if (object_distance_squared >= world_distance_squared) {
+             object->hit_object = NULL;
++            object->hit_pending = 0;
+-        else
++        } else
+             object->motion.fields.world_impact = 0;
+     }
+@@ -162,10 +164,10 @@
+                 ObjectGetHeader(payload), ObjectGetHeader(object->collision.owner));
+         return 0;
+     }
+-    if (object->hit_object) {
++    if (object->hit_pending) {
+         Tm4ShortVectorXYZ* position = &object->impact.fields.world_position;
+         CopyVectorToShortVectorXYZ(&object->current_world, position);
+         object->collision.surface.fields.material = 0;
+-        if (!ObjectValidObject(object->hit_object))
++        if (!object->hit_object || !ObjectValidObject(object->hit_object))
+             return 0;
+         if (!strcmp(ObjectGetHeader(object->hit_object)->name, BulletCarClassName)) {
+@@ -235,7 +238,7 @@
+     material = WorldTrackData[object->collision.surface.fields.material].kind;
+     Import_SpawnExplosion(
+         &object->current_world, BulletSmokeName, BulletSmokeSize, material, NULL, -2);
+-    if (object->hit_object) {
++    if (object->hit_pending) {
+         x = object->impact.fields.world_position.vx;
+         y = object->impact.fields.world_position.vy;
+         z = object->impact.fields.world_position.vz;
+--- a/src/modules/interact/collision.c
++++ b/src/modules/interact/collision.c
+@@ -24,7 +24,7 @@
+     start_world = &bullet->previous_world;
+     if (!IntersectBoxWithSegment(box, box_to_world, start_world, &bullet->current_world, result))
+         return;
+-    if (bullet->hit_object) {
++    if (bullet->hit_pending) {
+         {
+             const Tm4ShortVectorXYZ* old = &bullet->impact.fields.world_position;
+             s32 dx = old->vx, dy = old->vy, dz = old->vz;
+@@ -48,6 +48,7 @@
+             return;
+     }
+     bullet->hit_object = object;
++    bullet->hit_pending = 1;
+     x = result->vx;
+     y = (u16)result->vy;
+     z = (u16)result->vz;
+@@ -75,6 +76,7 @@
+             Tm4ShortVectorXYZ* v;
+ 
+             projectile->bullet.hit_object = object;
++            projectile->bullet.hit_pending = 1;
+             x = result->vx;
+             y = (u16)result->vy;
+             z = (u16)result->vz;
+--- a/src/modules/weap/physics.c
++++ b/src/modules/weap/physics.c
+@@ -210,9 +210,11 @@
+     }
+     projectile->bullet.motion.fields.world_impact = 0;
+     projectile->bullet.hit_object = NULL;
++    projectile->bullet.hit_pending = 0;
+     ProjectilePhysics(projectile);
+     projectile->bullet.motion.fields.world_impact = 0;
+     projectile->bullet.hit_object = NULL;
++    projectile->bullet.hit_pending = 0;
+ }
+ 
+ void TeleorbProjectilePhysics(WeaponProjectile* projectile)
+@@ -224,6 +226,7 @@
+ {
+     projectile->bullet.motion.fields.world_impact = 0;
+     projectile->bullet.hit_object = NULL;
++    projectile->bullet.hit_pending = 0;
+     ProjectilePhysics(projectile);
+ }
+ 
+--- a/src/modules/weap/effects.c
++++ b/src/modules/weap/effects.c
+@@ -79,7 +79,7 @@
+ void ProjectileApplyImpact(WeaponProjectile* projectile)
+ {
+     Bullet* bullet = &projectile->bullet;
+-    if (projectile->bullet.hit_object) {
++    if (projectile->bullet.hit_pending) {
+-        if (GameIsCarRegistered(projectile->bullet.hit_object)) {
++        if (projectile->bullet.hit_object && GameIsCarRegistered(projectile->bullet.hit_object)) {
+             SVECTOR position, forward;
+             VECTOR force;
+--- a/src/modules/weap/fireball.c
++++ b/src/modules/weap/fireball.c
+@@ -141,11 +141,11 @@
+     SVECTOR direction;
+     VECTOR velocity;
+     s32 collisions, dot, speed;
+-    if (projectile->bullet.hit_object) {
++    if (projectile->bullet.hit_pending) {
+         Tm4ShortVectorXYZ* hit_position = &projectile->bullet.impact.fields.world_position;
+         s32 x = hit_position->vx, y = hit_position->vy, z = hit_position->vz;
+         SVECTOR* current = &projectile->bullet.current_world;
+         setVector(current, x, y, z);
+         projectile->bullet.collision.surface.fields.material = 0;
+-        if (GameIsCarRegistered(projectile->bullet.hit_object))
++        if (projectile->bullet.hit_object && GameIsCarRegistered(projectile->bullet.hit_object))
+             WeapImports.car_apply_damage(projectile->bullet.hit_object,
+--- a/src/main/object/object.c
++++ b/src/main/object/object.c
+@@ -1,6 +1,7 @@
+ 
+ #include "private.h"
+ #include "port/web/net_match.h"
++#include "port/web/snapshot_types.h"
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -23,7 +24,10 @@
+     u32 i;
+     Tm4ObjectHeader** resized_resume_stack;
+     Tm4ObjectCallback destructor;
++    WebObjectDestruction destruction;
+ 
++    WebSnapshotBeginDestruction(&destruction, ObjectGetPayload(header));
++
+     if (header == ObjectNextSound)
+         ObjectNextSound = header->next;
+     if (header == ObjectNextDestroy)
+@@ -95,6 +99,7 @@
+     }
+     if (header->class_index == -1)
+         MemFree(header->name);
++    WebSnapshotEndDestruction(&destruction);
+     MemFree(header);
+ }
+ #endif
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -565,8 +565,6 @@
+     }
+     if (GameInfo.cars[index] != car)
+         return;
+-    if (WebNetMatchActive())
+-        WebNetForgetCarReferences(car);
+     for (player = 0; player < ArrayCount(GameInfo.players); ++player) {
+         Camera* camera = GameInfo.players[player].camera;
+         if (camera && car == camera->object) {

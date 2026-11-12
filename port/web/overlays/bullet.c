@@ -25,7 +25,7 @@ static s32 construct(void* object, va_list args)
 static void process(void* object)
 {
     Bullet* bullet = object;
-    if (bullet->motion.fields.world_impact || bullet->hit_object)
+    if (bullet->motion.fields.world_impact || bullet->hit_pending)
         WEB_BROWSER_REPORT({ tm4Port.bulletImpacts = (tm4Port.bulletImpacts || 0) + 1; });
     BulletProcess(bullet);
 }

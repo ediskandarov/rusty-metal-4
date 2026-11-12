@@ -39,6 +39,7 @@ typedef struct {
     const SnapshotField* fields;
     size_t node_size, next;
     u8 limit;
+    u8 discard_on_target_destroy;
 } SnapshotList;
 
 typedef struct {

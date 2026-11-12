@@ -33,6 +33,7 @@ const SnapshotList WebSnapshotInteractionHistory = {
     sizeof(Tm4InteractionNode),
     offsetof(Tm4InteractionNode, next),
     64,
+    .discard_on_target_destroy = 1,
 };
 
 static const SnapshotField seen_fields[] = {
@@ -45,6 +46,7 @@ static const SnapshotList seen = {
     sizeof(Tm4ExtenderSeen),
     offsetof(Tm4ExtenderSeen, next),
     64,
+    .discard_on_target_destroy = 1,
 };
 
 RegistryDirectory* WebPowerupBindType(PowerupState* power, char* type);

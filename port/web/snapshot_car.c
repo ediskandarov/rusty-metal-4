@@ -229,6 +229,7 @@ static const SnapshotList contacts = {
     sizeof(CarCollisionHistory),
     offsetof(CarCollisionHistory, next),
     32,
+    .discard_on_target_destroy = 1,
 };
 
 static const SnapshotField driver_location_fields[] = {
@@ -501,20 +502,3 @@ const SnapshotType WebSnapshotCarTypes[] = {
         .needs_template = 1 },
     { 0 },
 };
-
-void WebNetForgetCarReferences(const Car* car)
-{
-    for (s32 i = 0; i < GameInfo.car_count; ++i) {
-        Car* other = GameInfo.cars[i];
-        if (other != car)
-            WebSnapshotForgetWeakReferences(WebSnapshotCarCallbackType(other),
-                other->callback_context, car);
-    }
-    for (s32 i = 0; i < OBJECT_LIST_COUNT; ++i) {
-        for (Tm4ObjectHeader* object = ObjectLists[i].first; object; object = object->next) {
-            void* payload = ObjectGetPayload(object);
-            if (payload != car)
-                WebSnapshotForgetWeakReferences(WebSnapshotObjectType(object), payload, car);
-        }
-    }
-}
