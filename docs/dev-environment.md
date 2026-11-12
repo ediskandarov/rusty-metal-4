@@ -98,6 +98,12 @@ origin. Build the release bundle with `bun run build`, set Worker secrets
 `TEST_ACCESS_CODE` and `TM4_ADMIN_SECRET` with Wrangler, then run
 `bun run --cwd apps/cloudflare deploy`. Worker Assets serves the separate frontend without starting the container.
 Only authenticated host setup starts a sleeping server; status polling does not.
+Docker cross-compiles a static Linux x64 server into `scratch`, running as UID 65532
+with writable `/tmp`. The image contains no website, shell or disc resources.
+The image build precompiles its trusted simulation with the same pinned Wasmtime
+and baseline CPU target used at runtime. Cranelift remains available for Wasm mods.
+`TM4_SIMULATION_PRECOMPILED` accepts only deployment-owned native cache files,
+never uploads. Wasm and frontend updates do not invalidate the Rust compilation layer.
 
 The access code admits test players; the separate administrator secret authorizes
 resource upload and match setup. Enter each in the browser when prompted. Local

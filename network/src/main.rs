@@ -1219,6 +1219,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         .into()
     });
+    if first == "--precompile-simulation" {
+        let input = args.next().ok_or("Expected source Wasm path")?;
+        let output = args.next().ok_or("Expected compiled module path")?;
+        if args.next().is_some() {
+            return Err("Unexpected precompile argument".into());
+        }
+        simulator::precompile(Path::new(&input), Path::new(&output))?;
+        return Ok(());
+    }
     let serve = first == "--serve";
     if serve {
         first = args.next().unwrap_or_else(|| "2".into());
