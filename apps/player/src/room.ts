@@ -18,6 +18,7 @@ let stop: (() => void) | undefined;
 let active: string | null = null;
 let connecting = false;
 let uploading = false;
+let preparationStatus: string | undefined;
 const status = (message: string, state: "lobby" | "playing" | "error" = "lobby") => {
   matchStatus(document.getElementById("status")!)(state, message);
   notify({ status: message });
@@ -42,6 +43,7 @@ type RoomCommand = { type: "rm4-room"; roomId: string } & (
   | { action: "stop"; message?: string }
   | { action: "join"; sessionId: string; endpoint: string; credential: string }
   | { action: "upload"; sessionId: string }
+  | { action: "status"; message: string }
 );
 if (inRoom) {
   window.addEventListener("message", (event: MessageEvent<RoomCommand | null>) => {
@@ -53,7 +55,10 @@ if (inRoom) {
     )
       return;
     const message = event.data;
-    if (message.action === "stop") {
+    if (message.action === "status") {
+      preparationStatus = message.message;
+      if (sources && !uploading && !active) status(message.message);
+    } else if (message.action === "stop") {
       active = null;
       stop?.();
       stop = undefined;
@@ -94,6 +99,7 @@ if (inRoom) {
       /^[a-f0-9-]{36}$/.test(message.sessionId)
     ) {
       uploading = true;
+      preparationStatus = undefined;
       const resources = createRoomsClient({ baseURL: new URL("/api/", location.href) }).resources(
         roomId,
         message.sessionId,
@@ -118,12 +124,17 @@ if (inRoom) {
         }
         assets.files.clear();
         await resources.prepare();
-        status("Server upload complete. Waiting for validation…");
-      })()
-        .catch((error) => status(String(error)))
-        .finally(() => {
+      })().then(
+        () => {
           uploading = false;
-        });
+            if (!active)
+              status(preparationStatus ?? "Server upload complete. Waiting for validation…");
+        },
+        (error) => {
+          uploading = false;
+          status(String(error));
+        },
+      );
     }
   });
   notify({ loaded: false });

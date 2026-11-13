@@ -84,6 +84,11 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
       !!match && ["starting", "connecting", "playing", "stopping"].includes(match.stage);
     el("match-status").textContent =
       match?.message || room.notice || "Load your disc, then the host can prepare the server.";
+    if (compatibility && !match?.endpoint)
+      send({
+        action: "status",
+        message: match?.message || room.notice || "Disc loaded. Choose your car in the room.",
+      });
     if (
       car.options.length !== cars.length ||
       cars.some((name, index) => car.options[index]?.value !== name)
