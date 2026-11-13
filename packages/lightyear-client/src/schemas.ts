@@ -78,6 +78,11 @@ export const catchupChunkSchema = z.object({
 });
 export type CatchupChunk = z.infer<typeof catchupChunkSchema>;
 export const messageSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("prediction_recovery_required"),
+    reason: z.enum(["clock_shift", "history_expired"]),
+    message: z.string(),
+  }),
   lobbySchema.extend({ type: z.literal("lobby") }),
   startSchema.extend({ type: z.literal("prediction_prepare") }),
   startSchema.extend({ type: z.literal("resume_prepare") }),
@@ -130,7 +135,7 @@ export const diagnosticsSchema = z.object({
     rollbacks: count,
     windowWaits: count,
     waitingForInput: z.boolean(),
-    acceptedDepth: count,
+    acceptedDepth: i32,
     confirmedNativeTick: u32.nullable(),
     resumePreparing: z.boolean(),
     replayed: count,

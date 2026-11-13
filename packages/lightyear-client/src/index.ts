@@ -108,6 +108,8 @@ export async function connectNetwork(endpoint: string) {
     onopen: (() => {}) as () => void,
     onmessage: ((_message: Message) => {}) as (message: Message) => void,
     onerror: ((_error: unknown) => {}) as (error: unknown) => void,
+    // Give the game a chance to replace an expired prediction timeline before Rust advances it.
+    beforeUpdate: ((_gapMs: number) => true) as (gapMs: number) => boolean,
     send(message: Request) {
       if (closed || !opened) throw new Error("Lightyear connection is not open");
       return client.send(JSON.stringify(requestSchema.parse(message)));
@@ -125,11 +127,13 @@ export async function connectNetwork(endpoint: string) {
     },
   };
   const timer = setInterval(() => {
+    if (closed) return;
     const now = performance.now();
     pollGapMs = now - lastPoll;
     maxPollGapMs = Math.max(maxPollGapMs, pollGapMs);
     lastPoll = now;
     try {
+      if (!transport.beforeUpdate(pollGapMs) || closed) return;
       const messages = z.array(messageSchema).parse(JSON.parse(client.update()));
       maxUpdateMs = Math.max(maxUpdateMs, performance.now() - now);
       const connected = client.connected();
@@ -142,7 +146,10 @@ export async function connectNetwork(endpoint: string) {
       } else if (!opened && performance.now() - started > 10_000) {
         throw new Error("Lightyear connection timed out");
       }
-      for (const message of messages) transport.onmessage(message);
+      for (const message of messages) {
+        if (closed) break;
+        transport.onmessage(message);
+      }
     } catch (error) {
       maxUpdateMs = Math.max(maxUpdateMs, performance.now() - now);
       console.error("Lightyear runtime failure", error);

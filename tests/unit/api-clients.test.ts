@@ -213,27 +213,32 @@ test("Lightyear bridge schemas reject malformed envelopes and accept disconnecte
     expect(messageSchema.safeParse(value).success).toBe(false);
   expect(requestSchema.safeParse({ type: "progress", tick: -1 }).success).toBe(false);
   expect(roomEventSchema.safeParse({ type: "room", room: room() }).success).toBe(true);
+  const diagnostics = diagnosticsSchema.parse({
+    rttMs: null,
+    jitterMs: null,
+    queuedPackets: null,
+    nativeTick: 0,
+    prediction: {
+      head: 0,
+      confirmed: 0,
+      rollbacks: 0,
+      windowWaits: 0,
+      waitingForInput: false,
+      acceptedDepth: 0,
+      confirmedNativeTick: null,
+      resumePreparing: false,
+      replayed: 0,
+      maxDepth: 0,
+      historyBytes: 0,
+      peakBytes: 0,
+      buttonEdges: 0,
+    },
+  });
+  expect(diagnostics.rttMs).toBeNull();
   expect(
     diagnosticsSchema.parse({
-      rttMs: null,
-      jitterMs: null,
-      queuedPackets: null,
-      nativeTick: 0,
-      prediction: {
-        head: 0,
-        confirmed: 0,
-        rollbacks: 0,
-        windowWaits: 0,
-        waitingForInput: false,
-        acceptedDepth: 0,
-        confirmedNativeTick: null,
-        resumePreparing: false,
-        replayed: 0,
-        maxDepth: 0,
-        historyBytes: 0,
-        peakBytes: 0,
-        buttonEdges: 0,
-      },
-    }).rttMs,
-  ).toBeNull();
+      ...diagnostics,
+      prediction: { ...diagnostics.prediction, acceptedDepth: -14 },
+    }).prediction.acceptedDepth,
+  ).toBe(-14);
 });

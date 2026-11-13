@@ -1,4 +1,4 @@
-import type { LobbyState, Request, SnapshotBegin } from "@tm4/lightyear-client/schemas";
+import type { LobbyState, Message, Request, SnapshotBegin } from "@tm4/lightyear-client/schemas";
 
 import { startClientJournal } from "./journal.ts";
 import { attachLivePrediction } from "./livePrediction.ts";
@@ -24,12 +24,18 @@ type SnapshotDownload = {
 };
 
 type Recovery = {
+  stage: "downloading" | "catchup" | "handoff" | "activating";
   abort: AbortController;
   requestedAt: number;
+  download?: SnapshotDownload;
   replay?: SnapshotReplay;
   applied?: Promise<void>;
-  offered?: boolean;
 };
+
+type SessionState =
+  | { phase: "connecting" | "lobby" | "playing" | "suspended" | "reconnecting" | "closed" }
+  | { phase: "preparing"; offeredAnchor?: number }
+  | { phase: "recovering"; recovery: Recovery };
 
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
   return (
@@ -80,15 +86,11 @@ export async function joinMatch(
   }
   let slot = -1;
   let players = 0;
-  let closed = false;
   let epoch = 0;
-  let recovery: Recovery | undefined;
+  let session: SessionState = { phase: "connecting" };
   let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
   let prediction: ReturnType<typeof attachLivePrediction> | undefined;
-  let predictionStarted = false;
-  let offeredAnchor: number | undefined;
-  let resume: SnapshotDownload | undefined;
-  let resumePending = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   const credentialKey = "tm4.resume." + endpoint;
   let credential: string | null = null;
   try {
@@ -102,19 +104,31 @@ export async function joinMatch(
   });
 
   const send = (message: Request) => socket.send(message);
+  const stopAttempt = (phase: "closed" | "suspended") => {
+    const previous = session;
+    session = { phase };
+    socket.close();
+    prediction?.close();
+    prediction = undefined;
+    clearTimeout(recoveryDeadline);
+    if (previous.phase === "recovering") previous.recovery.abort.abort();
+    players = 0;
+    epoch = 0;
+    slot = -1;
+    // Teardown must happen after the current C/wasm callback has returned.
+    queueMicrotask(() => engine._WebNetCancelMatch());
+  };
   const cleanup = (message: string, state: "lobby" | "error") => {
-    if (closed) return;
+    if (session.phase === "closed") return;
     journal.freeze(message, diagnostics);
-    closed = true;
+    clearTimeout(reconnectTimer);
+    document.removeEventListener("visibilitychange", visibilityChanged);
+    window.removeEventListener("pagehide", pageHidden);
+    window.removeEventListener("pageshow", pageShown);
     lobby(null);
     delete port.netMatchInput;
-    prediction?.close();
-    clearTimeout(recoveryDeadline);
-    recovery?.abort.abort();
-    recovery = undefined;
-    queueMicrotask(() => engine._WebNetCancelMatch());
+    stopAttempt("closed");
     show(state, message);
-    socket.close();
   };
   const fail = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -123,6 +137,53 @@ export async function joinMatch(
   const armResumeTimeout = () => {
     clearTimeout(recoveryDeadline);
     recoveryDeadline = setTimeout(() => fail("Reconnect progress timed out"), resumeIdleMs);
+  };
+
+  const reconnect = async () => {
+    if (session.phase !== "suspended" || document.hidden) return;
+    const attempt: SessionState = { phase: "reconnecting" };
+    session = attempt;
+    show("lobby", "Reconnecting to the current match…");
+    try {
+      const next = await connectNetwork(endpoint);
+      if (session !== attempt || document.hidden) {
+        next.close();
+        if (session === attempt) session = { phase: "suspended" };
+        return;
+      }
+      socket = next;
+      session = { phase: "connecting" };
+      bindSocket();
+    } catch (error) {
+      if (session === attempt) fail(error);
+    } finally {
+      if (session.phase === "suspended" && !document.hidden) scheduleReconnect();
+    }
+  };
+  const scheduleReconnect = () => {
+    clearTimeout(reconnectTimer);
+    // Let the old transport close on the server before reclaiming its slot.
+    reconnectTimer = setTimeout(() => void reconnect(), 500);
+  };
+  const suspend = (reason: string) => {
+    if (session.phase === "closed" || !credential) return false;
+    if (session.phase !== "suspended") {
+      journal.record("suspend", port.netMatch?.tick ?? null, { reason });
+      stopAttempt("suspended");
+      lobby(null);
+      show("lobby", "Game paused in this tab. The match continues on the server.");
+    }
+    clearTimeout(reconnectTimer);
+    if (!document.hidden) scheduleReconnect();
+    return true;
+  };
+  const visibilityChanged = () => {
+    if (document.hidden) suspend("hidden");
+    else if (session.phase === "suspended") scheduleReconnect();
+  };
+  const pageHidden = () => suspend("pagehide");
+  const pageShown = () => {
+    if (session.phase === "suspended" && !document.hidden) scheduleReconnect();
   };
 
   const displayOutcome = (state: RoundState) => {
@@ -136,7 +197,7 @@ export async function joinMatch(
     }
   };
 
-  socket.onopen = () => {
+  const onopen = () => {
     const token = credential ?? admission;
     if (!port.compatibility) throw new Error("Local resource compatibility is unavailable");
     send(
@@ -145,7 +206,7 @@ export async function joinMatch(
         : { type: "join", compatibility: port.compatibility },
     );
   };
-  socket.onerror = (error) => {
+  const onerror = (error: unknown) => {
     try {
       diagnostics.transport = socket.diagnostics();
       console.error("Match clock at disconnect", diagnostics.transport);
@@ -158,10 +219,14 @@ export async function joinMatch(
   };
 
   port.netMatchInput = (buttons, axes, analog) => {
-    if (closed || recovery || socket.readyState !== WebSocket.OPEN) return;
+    if (
+      (session.phase !== "preparing" && session.phase !== "playing") ||
+      socket.readyState !== WebSocket.OPEN
+    )
+      return;
     try {
       journal.record("controls", port.netMatch?.tick ?? null, { buttons, axes, analog });
-      if (prediction) socket.predictionInput(buttons, axes, analog);
+      socket.predictionInput(buttons, axes, analog);
     } catch (error) {
       fail(error);
     }
@@ -181,14 +246,24 @@ export async function joinMatch(
     armResumeTimeout();
   };
 
-  socket.onmessage = (message) => {
-    if (closed) return;
+  const onmessage = (message: Message) => {
+    if (session.phase === "closed") return;
     try {
       switch (message.type) {
+        case "prediction_recovery_required":
+          diagnostics.transport = socket.diagnostics();
+          journal.record("recovery-required", port.netMatch?.tick ?? null, {
+            ...message,
+            transport: diagnostics.transport,
+          });
+          if (port.netMatch?.unsupported || !suspend(message.message))
+            throw new Error(port.netMatch?.unsupported ?? message.message);
+          break;
         case "welcome":
           if (!Number.isInteger(message.slot) || message.slot < 0 || message.slot >= 8)
             throw new Error("Invalid player slot");
           slot = message.slot;
+          session = { phase: "lobby" };
           journal.identify({ slot });
           show(
             "lobby",
@@ -205,17 +280,19 @@ export async function joinMatch(
             ...message,
             slot,
             select: (car, ready) => {
-              if (!closed && !prediction) send({ type: "select_car", car, ready });
+              if (session.phase === "lobby") send({ type: "select_car", car, ready });
             },
           });
           break;
         case "resume_credential":
           if (!/^[0-9a-f]{64}$/.test(message.token)) throw new Error("Invalid match credential");
+          credential = message.token;
           try {
             sessionStorage.setItem(credentialKey, message.token);
           } catch {
             // Playing without session storage is still supported.
           }
+          if (document.hidden) suspend("hidden");
           break;
         case "resume_prepare":
         case "prediction_prepare": {
@@ -245,20 +322,28 @@ export async function joinMatch(
             );
           if (message.type === "resume_prepare") {
             if (!message.portable || !credential) throw new Error("This match cannot resume");
-            resumePending = true;
-            recovery = { abort: new AbortController(), requestedAt: performance.now() };
+            diagnostics.resumeRetargets = 0;
+            session = {
+              phase: "recovering",
+              recovery: {
+                stage: "downloading",
+                abort: new AbortController(),
+                requestedAt: performance.now(),
+              },
+            };
             show("lobby", "Downloading the current match state…");
             armResumeTimeout();
           } else {
+            session = { phase: "preparing" };
             send({ type: "ready", epoch, digest: port.netMatch.digest });
             show("lobby", "Waiting for all players to finish loading…");
           }
           break;
         }
         case "prediction_offer":
-          if (!prediction || predictionStarted || !players)
+          if (!prediction || session.phase !== "preparing" || !players)
             throw new Error("Unexpected live prediction clock offer");
-          offeredAnchor = message.anchor;
+          session.offeredAnchor = message.anchor;
           diagnostics.clockOffers = (diagnostics.clockOffers ?? 0) + 1;
           show("lobby", "Synchronizing match clocks…");
           send({
@@ -269,17 +354,23 @@ export async function joinMatch(
           });
           break;
         case "prediction_begin":
-          if (!prediction || predictionStarted || !players || message.anchor !== offeredAnchor)
+          if (
+            !prediction ||
+            session.phase !== "preparing" ||
+            !players ||
+            message.anchor !== session.offeredAnchor
+          )
             throw new Error("Unexpected live prediction clock anchor");
           socket.beginPrediction(message.anchor, epoch, players, slot, prediction.depth);
-          predictionStarted = true;
+          session = { phase: "playing" };
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
-        case "snapshot_begin":
+        case "snapshot_begin": {
+          const active = session.phase === "recovering" ? session.recovery : undefined;
           if (
-            !resumePending ||
-            !recovery ||
-            resume ||
+            !active ||
+            active.stage !== "downloading" ||
+            active.download ||
             !Number.isInteger(message.total) ||
             message.total <= 0 ||
             message.total > maxSnapshotBytes ||
@@ -288,16 +379,18 @@ export async function joinMatch(
             message.state.unsupported
           )
             throw new Error("Invalid reconnect snapshot header");
-          resume = { header: message, bytes: new Uint8Array(message.total), received: 0 };
+          active.download = { header: message, bytes: new Uint8Array(message.total), received: 0 };
           diagnostics.snapshotTick = message.tick;
           diagnostics.snapshotBytes = message.total;
           armResumeTimeout();
           break;
+        }
         case "snapshot_chunk": {
-          const active = recovery;
-          const download = resume;
+          const active = session.phase === "recovering" ? session.recovery : undefined;
+          const download = active?.download;
           if (
             !active ||
+            active.stage !== "downloading" ||
             !download ||
             download.header.attempt !== message.attempt ||
             message.offset !== download.received ||
@@ -330,54 +423,59 @@ export async function joinMatch(
           } finally {
             delete port.portableCheckpoint;
           }
+          active.stage = "catchup";
           show("lobby", "Catching up with the current match…");
           void targetResumeClock(download, active).catch((error) => {
             if (!active.abort.signal.aborted) fail(error);
           });
           break;
         }
-        case "resume_catchup":
+        case "resume_catchup": {
+          const active = session.phase === "recovering" ? session.recovery : undefined;
+          const download = active?.download;
           if (
-            !recovery ||
-            !resume ||
-            message.attempt !== resume.header.attempt ||
-            message.head !== resume.target ||
-            message.start !== (recovery.replay ? port.netMatch?.tick : resume.header.tick) ||
+            !active ||
+            active.stage !== "catchup" ||
+            !download ||
+            message.attempt !== download.header.attempt ||
+            message.head !== download.target ||
+            message.start !== (active.replay ? port.netMatch?.tick : download.header.tick) ||
             message.digest !==
-              (recovery.replay ? port.netMatch?.digest : resume.header.state.digest)
+              (active.replay ? port.netMatch?.digest : download.header.state.digest)
           )
             throw new Error("Invalid reconnect catch-up boundary");
-          if (recovery.replay) recovery.replay.extend(message.start, message.head, message.digest);
+          if (active.replay) active.replay.extend(message.start, message.head, message.digest);
           else {
-            recovery.replay = new SnapshotReplay(
+            active.replay = new SnapshotReplay(
               message.start,
               message.head,
               message.digest,
               players,
               engine,
               port,
-              recovery.abort.signal,
+              active.abort.signal,
             );
           }
           armResumeTimeout();
           break;
+        }
         case "resume_live": {
-          const active = recovery;
+          const active = session.phase === "recovering" ? session.recovery : undefined;
           const replay = active?.replay;
+          const download = active?.download;
           const controller = prediction;
           if (
             !controller ||
-            predictionStarted ||
             !active ||
             !replay ||
-            active.offered ||
-            !resume ||
-            message.attempt !== resume.header.attempt ||
-            message.anchor !== resume.header.anchor ||
-            message.head !== resume.target
+            active.stage !== "catchup" ||
+            !download ||
+            message.attempt !== download.header.attempt ||
+            message.anchor !== download.header.anchor ||
+            message.head !== download.target
           )
             throw new Error("Invalid reconnect prediction boundary");
-          active.offered = true;
+          active.stage = "handoff";
           const start = async () => {
             const { anchor, head, sequence, attempt } = message;
             while (((socket.predictionClock() - anchor - head) | 0) < 0) {
@@ -392,8 +490,8 @@ export async function joinMatch(
               if (retargets >= 2)
                 throw new Error("Reconnect handoff could not keep up with the native clock");
               diagnostics.resumeRetargets = retargets + 1;
-              active.offered = false;
-              await targetResumeClock(resume!, active);
+              active.stage = "catchup";
+              await targetResumeClock(download, active);
               return;
             }
             replay.finish(head);
@@ -406,7 +504,7 @@ export async function joinMatch(
               head,
               sequence,
             );
-            predictionStarted = true;
+            active.stage = "activating";
             port.netConfirmedTick = head;
             diagnostics.recoveredTick = head;
             diagnostics.replayMs = performance.now() - active.requestedAt;
@@ -419,17 +517,24 @@ export async function joinMatch(
           break;
         }
         case "resume_active":
-          if (!resumePending || !predictionStarted || !resume || message.head !== resume.target)
+          if (
+            session.phase !== "recovering" ||
+            session.recovery.stage !== "activating" ||
+            message.head !== session.recovery.download?.target
+          )
             throw new Error("Unexpected reconnect acknowledgement");
-          resumePending = false;
-          resume = undefined;
-          recovery = undefined;
+          session = { phase: "playing" };
           clearTimeout(recoveryDeadline);
+          journal.record("resumed", message.head, { snapshotTick: diagnostics.snapshotTick });
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "catchup_frames": {
-          const active = recovery;
-          if (!active?.replay || !resume || message.attempt !== resume.header.attempt)
+          const active = session.phase === "recovering" ? session.recovery : undefined;
+          if (
+            !active?.replay ||
+            active.stage !== "catchup" ||
+            message.attempt !== active.download?.header.attempt
+          )
             throw new Error("Unexpected reconnect replay block");
           diagnostics.replayBytes = (diagnostics.replayBytes ?? 0) + message.data.length;
           diagnostics.replayChunks = (diagnostics.replayChunks ?? 0) + 1;
@@ -444,7 +549,7 @@ export async function joinMatch(
           break;
         }
         case "frame":
-          if (!prediction || !predictionStarted || resumePending)
+          if (!prediction || session.phase !== "playing")
             throw new Error("Unexpected live confirmation before prediction starts");
           diagnostics.receivedFrames++;
           diagnostics.transport = socket.diagnostics();
@@ -461,5 +566,38 @@ export async function joinMatch(
       fail(error);
     }
   };
+  const bindSocket = () => {
+    const active = socket;
+    const current = () =>
+      session.phase !== "closed" &&
+      session.phase !== "suspended" &&
+      session.phase !== "reconnecting" &&
+      active === socket;
+    active.onopen = () => {
+      if (current()) onopen();
+    };
+    active.onerror = (error) => {
+      if (current()) onerror(error);
+    };
+    active.onmessage = (message) => {
+      if (current()) onmessage(message);
+    };
+    active.beforeUpdate = (gapMs) => {
+      if (!current()) return false;
+      if (document.hidden && suspend("hidden")) return false;
+      const predicting =
+        session.phase === "playing" ||
+        (session.phase === "recovering" && session.recovery.stage === "activating");
+      if (predicting && prediction && gapMs >= (prediction.depth * 1000) / 30 / 2) {
+        if (suspend("event-loop gap: " + Math.round(gapMs) + " ms")) return false;
+      }
+      return true;
+    };
+  };
+  bindSocket();
+  document.addEventListener("visibilitychange", visibilityChanged);
+  window.addEventListener("pagehide", pageHidden);
+  window.addEventListener("pageshow", pageShown);
+  if (document.hidden) suspend("hidden");
   return () => cleanup("Returned to room", "lobby");
 }

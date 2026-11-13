@@ -268,8 +268,19 @@ impl NetworkClient {
             ));
         }
         let messages: Vec<_> = inbox.messages.drain(..).collect();
-        let messages = LivePrediction::drain_confirmed(self.app.world_mut(), messages)
-            .map_err(|error| JsValue::from_str(&error))?;
+        let messages = match LivePrediction::drain_confirmed(self.app.world_mut(), messages) {
+            Ok(messages) => messages,
+            Err(live_prediction::PredictionFailure::Fatal(message)) => {
+                return Err(JsValue::from_str(&message));
+            }
+            Err(live_prediction::PredictionFailure::Recoverable { reason, message }) => {
+                // Local browser control event, not a message on the game wire protocol.
+                return Ok(serde_json::json!([{
+                    "type": "prediction_recovery_required", "reason": reason, "message": message
+                }])
+                .to_string());
+            }
+        };
         let values: Vec<_> = messages
             .into_iter()
             .map(|message| {

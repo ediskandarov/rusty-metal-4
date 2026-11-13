@@ -36,6 +36,43 @@ const MAX_EDGES: usize = 16;
 type Digests = [u32; 6];
 type VerifiedRow = (u32, Digests, [Input; MAX_SLOTS]);
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecoveryReason {
+    ClockShift,
+    HistoryExpired,
+}
+
+#[derive(Clone, Debug)]
+pub enum PredictionFailure {
+    Fatal(String),
+    Recoverable {
+        reason: RecoveryReason,
+        message: String,
+    },
+}
+
+impl From<String> for PredictionFailure {
+    fn from(message: String) -> Self {
+        Self::Fatal(message)
+    }
+}
+
+impl From<&str> for PredictionFailure {
+    fn from(message: &str) -> Self {
+        Self::Fatal(message.into())
+    }
+}
+
+impl PredictionFailure {
+    fn expired(message: impl Into<String>) -> Self {
+        Self::Recoverable {
+            reason: RecoveryReason::HistoryExpired,
+            message: message.into(),
+        }
+    }
+}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(crate) struct CheckpointTick(pub(crate) u32);
 
@@ -80,7 +117,7 @@ pub struct LivePrediction {
     depth: u32,
     bytes: u32,
     peak_bytes: u32,
-    error: Option<String>,
+    error: Option<PredictionFailure>,
 }
 
 impl LivePrediction {
@@ -113,7 +150,10 @@ impl LivePrediction {
         Ok(())
     }
 
-    pub fn drain_confirmed(world: &mut World, inbox: Vec<Message>) -> Result<Vec<Message>, String> {
+    pub fn drain_confirmed(
+        world: &mut World,
+        inbox: Vec<Message>,
+    ) -> Result<Vec<Message>, PredictionFailure> {
         let session = world.resource::<Self>().session;
         let Some(session) = session else {
             return Ok(inbox);
@@ -139,17 +179,22 @@ impl LivePrediction {
                 }
             }
         }
+        state.verify_confirmations(session, &frontier, inbox)
+    }
+
+    fn verify_confirmations(
+        &mut self,
+        session: Session,
+        frontier: &[Option<Tick>],
+        inbox: Vec<Message>,
+    ) -> Result<Vec<Message>, PredictionFailure> {
+        let state = self;
         if let Some(error) = &state.error {
             return Err(error.clone());
         }
         let mut ready = Vec::with_capacity(inbox.len());
         for message in inbox {
             if matches!(message, Message::Frame { .. }) {
-                if state.confirmations.len() >= HISTORY {
-                    return Err(
-                        "Authority confirmation exceeded the retained prediction window".into(),
-                    );
-                }
                 state.confirmations.push_back(message);
             } else {
                 ready.push(message);
@@ -177,9 +222,9 @@ impl LivePrediction {
             let Some((_, local, applied)) =
                 state.checksums.iter().find(|(saved, _, _)| *saved == tick)
             else {
-                return Err(
-                    "Authority confirmation is older than retained simulation history".into(),
-                );
+                return Err(PredictionFailure::expired(
+                    "Authority confirmation is older than retained simulation history",
+                ));
             };
             if authority.unsupported.is_some()
                 || local[0] != authority.digest
@@ -191,11 +236,18 @@ impl LivePrediction {
                     authority.digest,
                     authority.sections,
                     &applied[..usize::from(session.slots)],
-                ));
+                ).into());
             }
             state.confirmed = tick;
             state.local_inputs.discard_confirmed(tick);
             ready.push(state.confirmations.pop_front().unwrap());
+        }
+        // A received batch can be larger than the rollback window. Bound only the
+        // confirmations still waiting for accepted inputs or local simulation.
+        if state.confirmations.len() > HISTORY {
+            return Err(PredictionFailure::expired(
+                "Authority confirmation exceeded the retained prediction window",
+            ));
         }
         Ok(ready)
     }
@@ -241,8 +293,14 @@ pub fn install(app: &mut App) {
 }
 
 fn reject_clock_shift(shift: On<LocalTimelineShift>, mut state: ResMut<LivePrediction>) {
-    if shift.delta != 0 && state.session.is_some() {
-        state.error = Some("Lightyear resynchronized the live prediction clock".into());
+    if shift.delta != 0 && state.session.is_some() && state.error.is_none() {
+        state.error = Some(PredictionFailure::Recoverable {
+            reason: RecoveryReason::ClockShift,
+            message: format!(
+                "Lightyear resynchronized the live prediction clock by {} ticks",
+                shift.delta
+            ),
+        });
     }
 }
 
@@ -514,14 +572,14 @@ fn step_world(
         }
         let frontier = buffer.last_remote_tick.unwrap_or(session.anchor);
         if native_tick - frontier > i32::from(PREDICTION_DEPTH) {
-            state.error = Some(format!(
+            state.error = Some(PredictionFailure::expired(format!(
                 "Accepted inputs fell outside the retained prediction window (slot {slot}, native {}, accepted through {}, buffered {:?}..{:?}, C head {tick}, confirmed {})",
                 native_tick.0,
                 frontier.0,
                 buffer.start_tick.map(|t| t.0),
                 buffer.end_tick().map(|t| t.0),
                 state.confirmed,
-            ));
+            )));
             return;
         }
         let input = if native_tick <= frontier {
@@ -529,7 +587,7 @@ fn step_world(
                 state.error = Some(format!(
                     "The native accepted input history has a missing tick (slot {slot}, {native_tick:?}, start {:?}, frontier {frontier:?})",
                     buffer.start_tick
-                ));
+                ).into());
                 return;
             };
             input.0
@@ -542,14 +600,14 @@ fn step_world(
             {
                 Ok(input) => input,
                 Err(error) => {
-                    state.error = Some(error);
+                    state.error = Some(error.into());
                     return;
                 }
             }
         };
         if slot == session.local_slot && state.resume_warmup {
             if let Err(error) = state.local_inputs.remember_warmup(tick, input) {
-                state.error = Some(error);
+                state.error = Some(error.into());
                 return;
             }
         }
@@ -668,9 +726,13 @@ fn observe_mismatch(mut state: ResMut<LivePrediction>, manager: Option<Res<Predi
 }
 
 fn reject_unhandled(mut state: ResMut<LivePrediction>, manager: Option<Res<PredictionManager>>) {
-    if state.received_mismatch && manager.is_some_and(|manager| !manager.is_rollback()) {
-        state.error =
-            Some("Lightyear refused a correction outside the retained prediction window".into());
+    if state.error.is_none()
+        && state.received_mismatch
+        && manager.is_some_and(|manager| !manager.is_rollback())
+    {
+        state.error = Some(PredictionFailure::expired(
+            "Lightyear refused a correction outside the retained prediction window",
+        ));
     }
 }
 
@@ -691,7 +753,7 @@ fn restore_world(
         state.error = Some(format!(
             "Lightyear selected an invalid C rollback boundary (native {tick:?}, C {}, confirmed {}, anchor {:?})",
             checkpoint.0, state.confirmed, session.anchor
-        ));
+        ).into());
         return;
     }
     if !restore_live_tick(checkpoint.0) {
@@ -708,5 +770,126 @@ fn end_replay(mut state: ResMut<LivePrediction>) {
     state.resume_warmup = false;
     if std::mem::take(&mut state.restoring) && !finish_live_replay() && state.error.is_none() {
         state.error = Some("The game refused to end Lightyear rollback".into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::RoundState;
+
+    fn session() -> Session {
+        Session {
+            epoch: 1,
+            slots: 2,
+            local_slot: 0,
+            anchor: Tick(267),
+        }
+    }
+
+    fn row(tick: u32) -> VerifiedRow {
+        (tick, [tick, 1, 2, 3, 4, 5], [Input::default(); MAX_SLOTS])
+    }
+
+    fn frame(tick: u32) -> Message {
+        Message::Frame {
+            tick: tick - 1,
+            inputs: vec![Input::default(); 2],
+            state: RoundState {
+                remaining: 2,
+                winner: -1,
+                round_finished: false,
+                accepts_continue: false,
+                next_mode: 0,
+                digest: tick,
+                sections: [1, 2, 3, 4, 5],
+                unsupported: None,
+                scores: vec![],
+            },
+        }
+    }
+
+    fn state() -> LivePrediction {
+        LivePrediction {
+            session: Some(session()),
+            confirmed: 31,
+            head: 48,
+            checksums: (32..=48).map(row).collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn delayed_batch_verifies_before_applying_the_pending_queue_limit() {
+        // Safari journal: confirmed 31, local head 48, then frames 32..49 arrive together.
+        let mut state = state();
+        let frontier = [Some(session().anchor + 49); 2];
+        let ready = state
+            .verify_confirmations(session(), &frontier, (32..=49).map(frame).collect())
+            .unwrap();
+        assert_eq!(ready.len(), 17);
+        assert_eq!(state.confirmed, 48);
+        assert_eq!(state.confirmations.len(), 1);
+        state.head = 49;
+        state.checksums.push_back(row(49));
+        assert_eq!(
+            state
+                .verify_confirmations(session(), &frontier, vec![])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(state.confirmed, 49);
+        assert!(state.confirmations.is_empty());
+    }
+
+    #[test]
+    fn expired_state_or_accepted_input_history_requests_a_snapshot() {
+        let mut state = state();
+        state.checksums.pop_front();
+        assert!(matches!(
+            state.verify_confirmations(session(), &[Some(Tick(400)); 2], vec![frame(32)]),
+            Err(PredictionFailure::Recoverable {
+                reason: RecoveryReason::HistoryExpired,
+                ..
+            })
+        ));
+        let mut state = self::state();
+        assert!(matches!(
+            state.verify_confirmations(session(), &[None; 2], (32..=49).map(frame).collect()),
+            Err(PredictionFailure::Recoverable {
+                reason: RecoveryReason::HistoryExpired,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn a_real_divergence_in_a_large_batch_remains_fatal() {
+        let mut state = state();
+        state.checksums[5].1[3] ^= 1;
+        assert!(
+            matches!(state.verify_confirmations(session(), &[Some(Tick(400)); 2], (32..=49).map(frame).collect()),
+            Err(PredictionFailure::Fatal(message)) if message.contains("diverged at confirmed tick 37"))
+        );
+    }
+
+    #[test]
+    fn clock_shift_requests_recovery_without_overwriting_a_game_failure() {
+        let mut world = World::new();
+        world.insert_resource(state());
+        world.add_observer(reject_clock_shift);
+        world.trigger(LocalTimelineShift { delta: 36 });
+        assert!(matches!(
+            world.resource::<LivePrediction>().error,
+            Some(PredictionFailure::Recoverable {
+                reason: RecoveryReason::ClockShift,
+                ..
+            })
+        ));
+        world.resource_mut::<LivePrediction>().error = Some("C simulation refused a tick".into());
+        world.trigger(LocalTimelineShift { delta: -2 });
+        assert!(matches!(&world.resource::<LivePrediction>().error,
+            Some(PredictionFailure::Fatal(message)) if message == "C simulation refused a tick"));
     }
 }
