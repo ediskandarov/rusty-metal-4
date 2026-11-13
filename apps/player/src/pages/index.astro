@@ -3,6 +3,7 @@ import Page from "../layouts/Page.astro";
 import Startup from "../components/Startup.astro";
 import GameStage from "../components/GameStage.astro";
 import Rendering from "../components/Rendering.astro";
+import Fullscreen from "../components/Fullscreen.astro";
 import Controls from "../components/Controls.astro";
 import Cheats from "../components/Cheats.astro";
 import Troubleshoot from "../components/Troubleshoot.astro";
@@ -14,12 +15,36 @@ import Mods from "../components/Mods.astro";
   <Startup />
   <GameStage />
   <div id="video-controls" hidden>
-    <Rendering />
-    <Controls />
-    <Cheats />
-    <Resources />
-    <Troubleshoot />
-    <Mods />
+    <button
+      id="settings-toggle"
+      type="button"
+      aria-label="Settings"
+      title="Settings"
+      aria-expanded="false"
+      aria-controls="settings-menu"
+    >
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        aria-hidden="true"
+      >
+        <path d="m9 3-.5 2-2 1.2-2-.6-3 5.2L3 12l-1.5 1.2 3 5.2 2-.6 2 1.2.5 2h6l.5-2 2-1.2 2 .6 3-5.2L21 12l1.5-1.2-3-5.2-2 .6-2-1.2L15 3Z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    </button>
+    <div id="settings-menu" hidden>
+      <Fullscreen />
+      <Rendering />
+      <Controls />
+      <Cheats />
+      <Resources />
+      <Troubleshoot />
+      <Mods />
+    </div>
   </div>
   <div id="mod-drop-hint" role="status" hidden></div>
 </Page>

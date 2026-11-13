@@ -286,3 +286,59 @@ body {
 #car-lobby p {
   color: #aeb7c7;
 }
+
+#fullscreen-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+#fullscreen-toggle:hover,
+#fullscreen-toggle:focus-visible {
+  color: #fff;
+}
+#fullscreen-toggle:focus-visible {
+  outline: 2px solid #a9caff;
+  outline-offset: 2px;
+}
+#fullscreen-toggle[hidden],
+#fullscreen-toggle[aria-pressed="false"] .fullscreen-exit,
+#fullscreen-toggle[aria-pressed="true"] .fullscreen-enter {
+  display: none;
+}
+#fullscreen-error {
+  max-width: 230px;
+  color: #ffb8a7;
+}
+
+#settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+#settings-toggle:hover,
+#settings-toggle[aria-expanded="true"] {
+  color: #fff;
+  background: #ffffff18;
+}
+#settings-toggle:focus-visible {
+  outline: 2px solid #a9caff;
+  outline-offset: 2px;
+}
+#settings-menu:not([hidden]) {
+  min-width: 135px;
+  padding: 4px 0;
+}
