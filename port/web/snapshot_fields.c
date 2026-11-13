@@ -234,6 +234,17 @@ static int transfer_fields(Cursor* io, const SnapshotField* fields, void* payloa
     for (const SnapshotField* field = fields; field && field->kind; ++field) {
         u8* member = (u8*)payload + field->offset;
         switch (field->kind) {
+        case SnapshotConstruction: {
+            const SnapshotConstructionBinding* binding = field->binding;
+            u8 record[binding->size];
+            memset(record, 0, sizeof(record));
+            if (io->input) {
+                if (!transfer(io, record, sizeof(record)) || !binding->restore(payload, record))
+                    return 0;
+            } else if (!binding->capture(payload, record) || !transfer(io, record, sizeof(record)))
+                return 0;
+            break;
+        }
         case SnapshotPod:
             if (!transfer(io, member, field->size))
                 return 0;

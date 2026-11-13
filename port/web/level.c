@@ -7,6 +7,7 @@
 #include "loading.h"
 #include "movie.h"
 #include "net_match.h"
+#include "participant.h"
 #include "render_sync.h"
 #include "rollback_audio.h"
 #include "snapshot_world.h"
@@ -253,6 +254,7 @@ static void process_level_step(void)
     WebTestMotionInput();
 #endif
 #endif
+    WebParticipantProcessRespawns();
     WebCarStep();
     ++simulation_steps;
     if (WebSimulationOnly())

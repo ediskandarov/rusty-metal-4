@@ -182,6 +182,30 @@ static Tm4MemoryBlock* simulation_free;
 static int simulation_active;
 static u32 resource_revision;
 static uintptr_t resource_heap_start, resource_heap_end;
+#ifdef TM4_WEB_TEST_HOOKS
+static s32 fail_allocation_after = -1;
+static u32 allocation_sizes[64], allocation_count;
+static int trace_allocations;
+void WebTestFailSimulationAllocation(s32 after)
+{
+    fail_allocation_after = after;
+    allocation_count = 0;
+    trace_allocations = 1;
+}
+u32 WebTestSimulationAllocationSize(s32 index)
+{
+    return index >= 0 && (u32)index < allocation_count && (u32)index < ArrayCount(allocation_sizes)
+        ? allocation_sizes[index]
+        : 0;
+}
+u32 WebTestSimulationFreeBytes(void)
+{
+    u32 units = 0;
+    for (const Tm4MemoryBlock* block = simulation_free; block; block = block->next_free)
+        units += block->unit_count;
+    return MemUnitsToBytes(units);
+}
+#endif
 
 int WebCheckpointArenaOpen(void)
 {
@@ -253,6 +277,17 @@ u32 MemGetBlockSize(const void* allocation)
 
 void* MemAllocInternal(u32 bytes, s32 from_tail)
 {
+#ifdef TM4_WEB_TEST_HOOKS
+    if (simulation_active && trace_allocations) {
+        if (allocation_count < ArrayCount(allocation_sizes))
+            allocation_sizes[allocation_count] = bytes;
+        ++allocation_count;
+    }
+    if (simulation_active && fail_allocation_after >= 0 && !fail_allocation_after--) {
+        fail_allocation_after = -1;
+        return NULL;
+    }
+#endif
     if (!simulation_active && bytes)
         ++resource_revision;
     void* result = WebMemoryAllocInternal(bytes, from_tail);

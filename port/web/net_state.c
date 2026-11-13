@@ -21,7 +21,7 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(9); /* State record schema. */
+    VALUE(10); /* State record schema. */
     const Tm4GameInfo* game = &GameInfo;
     WebParticipantState participants;
     WebParticipantCapture(&participants);
@@ -54,6 +54,11 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
         VALUE(participants.slots[actual_slot].id.high);
         VALUE(participants.slots[actual_slot].frags);
         VALUE(participants.slots[actual_slot].deaths);
+        VALUE(participants.respawns[actual_slot].state);
+        VALUE(participants.respawns[actual_slot].due_tick);
+        VALUE(participants.respawns[actual_slot].retry_ticks);
+        VALUE(participants.respawns[actual_slot].remaining);
+        VALUE(participants.respawns[actual_slot].attempts);
         VALUE(player->lives);
         VALUE(player->wins);
         VALUE(player->losses);

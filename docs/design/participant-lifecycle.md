@@ -40,11 +40,9 @@ replacement, and general transformation policies are deferred. The broader FSMs
 below retain those future cases as design constraints, not first-FFA acceptance.
 Tournament compatibility is not a requirement for network FFA.
 
-This requires a change to the current portable boundary: it binds cars and cameras
-to tick-zero serials and accepts only a fully living fixed roster. A new car lifetime
-needs resource-backed reconstruction independently of its tick-zero object. Removing
-that restriction and recording authoritative membership events are implementation
-work; the FSMs alone do not provide either mechanism.
+Portable car recovery now reconstructs runtime resources from the configured model
+and registered callback descriptors, independently of the tick-zero car serial.
+Authoritative live membership events remain future work.
 
 ## Relationships
 
@@ -124,9 +122,27 @@ attacker argument. The participant-aware raw damage export has a distinct name;
 the old calling convention is not silently accepted. Original Deathmatch still owns
 its round wins/losses and victory rules.
 
-This boundary does not implement FFA rules, respawn, live admission, departure,
-running slot reuse or car replacement. Those require the timeline and lifetime rules
-below.
+### Same-participant respawn foundation
+
+Removal clears the current car and its weak references while retaining the participant,
+lease and combat results. A mode may request a fixed-model respawn at a simulation tick,
+with an explicit retry interval and attempt budget (at most eight attempts). A failed
+attempt leaves no active car binding; exhaustion retains a terminal waiting state until teardown.
+Both collision polyhedra and successful camera attachment are mandatory before publication.
+Optional turbo visuals or engine audio may be absent without disabling simulation. Successful
+creation registers a fresh object serial and rebinds the existing player and camera roots. No car-local health, inventory, capture state or burning interval transfers.
+Old detached damage effects retain their copied participant provenance.
+
+Waiting, scheduled and exhausted requests are C-owned canonical state, included in local
+checkpoints and portable session roots. Portable recovery supports dead/waiting participants,
+new car lifetimes and their debris; resource preparation creates no duplicate runtime children.
+Constructor RNG consumption is deterministic and restored through the existing state paths.
+
+Automatic production respawn policy is deliberately unwired pending the network round-policy
+decision. Original Deathmatch can still finish when only one car remains; focused fixtures
+keep enough other cars alive and request respawns at explicit deterministic tick boundaries.
+There is no new network event protocol, complete FFA, live admission/departure, running slot
+reuse or live replacement. Offline round rules are unchanged.
 
 ## Slot FSM
 
@@ -363,7 +379,7 @@ a rollback boundary, and after portable snapshot recovery in another instance.
 | Deferred: live replacement fails | Original car, binding and gameplay RNG state are unchanged |
 | Match ends during reservation, creation or recovery | Pending operations are cancelled, teardown frees slots, the next match starts cleanly |
 | Respawn chooses a random car, including the same model | Replay selects the same model, starts a new car lifetime and preserves participant results |
-| Fixed-car FFA or Tournament respawn | Assigned model remains fixed under mode rules |
+| Implemented foundation: fixed-model respawn | Same identity/results/lease, fresh serial; rollback and portable continuation across death, waiting and respawn |
 | Deferred: a mod replaces a living car | Participant stays Playing with the same lease and results, car-local state follows replacement policy |
 | Deferred: live replacement occurs while the client is disconnected | Recovery restores the actual replacement rather than the client's previous model |
 | Requested model is unavailable or incompatible on a peer | Admission or pool extension is rejected before activation without stopping existing players |

@@ -22,6 +22,7 @@
 #include "src/modules/menu/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
+#include "tm4/main/memory.h"
 #include "tm4/main/pad.h"
 #include "tm4/main/screen.h"
 #include "tm4/main/sound.h"
@@ -1764,8 +1765,146 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestAttributedWaves(u32 low, u32 high)
     return count;
 }
 
+static s32 respawn_request_slot = -1, respawn_request_failure = -1;
+static u32 respawn_request_delay, respawn_request_retry, respawn_request_attempts;
+void WebTestFailSimulationAllocation(s32 after);
+
+EMSCRIPTEN_KEEPALIVE int WebTestScheduleRespawn(
+    s32 slot, u32 delay, u32 retry, u32 attempts, s32 fail_allocation)
+{
+    WebParticipantState state;
+    WebParticipantCapture(&state);
+    if (!WebNetSlotOccupied(slot) || GameInfo.players[slot].car
+        || state.respawns[slot].state != WebCarWaiting || respawn_request_slot >= 0)
+        return 0;
+    respawn_request_slot = slot;
+    respawn_request_delay = delay;
+    respawn_request_retry = retry;
+    respawn_request_attempts = attempts;
+    respawn_request_failure = fail_allocation;
+    return 1;
+}
+
+/* Allocation order for the stock Crusher fixture: three display resolutions,
+ * two box polyhedra, pinchers/treads, optional engine audio, then the camera. */
+EMSCRIPTEN_KEEPALIVE u32 WebTestCrusherRespawnAllocationBytes(s32 index)
+{
+    const Car* car = GameInfo.players[0].car;
+    if (!car || strcmp(car->character_name, "Crusher") || car->display_list_count != 3)
+        return 0;
+    switch (index) {
+    case 0:
+        return sizeof(Tm4ObjectHeader) + sizeof(Car);
+    case 1:
+        return strlen(car->filename) + 1;
+    case 2:
+        return ArrayCount(CarWeaponDescriptors) * sizeof(CarWeaponInstance);
+    case 3:
+        return sizeof(*car->weapons[0].descriptor);
+    case 4:
+        return GameInfo.entrant_count * sizeof(*car->ai.attacker_damage);
+    case 5:
+        return GameInfo.entrant_count * sizeof(*car->ai.nearby_records);
+    case 6:
+        return car->turbo_emitter_count * sizeof(*car->turbo_emitters);
+    case 7:
+        return car->normal_count * sizeof(*car->colors);
+    case 8:
+        return car->display_list_count * sizeof(*car->display_lists);
+    case 9:
+    case 10:
+    case 11:
+        return car->display_lists[index - 9].group_count * sizeof(CarRenderGroupEntry);
+    case 12:
+    case 13: {
+        const Polyhedron* shape
+            = index == 12 ? car->collision_box.polyhedron : car->physics_box.polyhedron;
+        if (!shape)
+            return 0;
+        return MemGetBlockSize(shape);
+    }
+    case 14:
+        return sizeof(CrusherPinchers);
+    case 15: {
+        u32 faces = 0;
+        for (s32 i = 0; i < car->display_list_count; ++i)
+            faces += car->display_lists[i].face_count;
+        return faces * sizeof(CarRenderFace);
+    }
+    case 16:
+        return sizeof(Tm4ObjectHeader) + sizeof(SoundEmitter);
+    case 17:
+        return car->engine_sound ? car->engine_sound->voice_count * sizeof(SoundEmitterVoice) : 0;
+    case 18:
+        return sizeof(CarCameraState);
+    default:
+        return 0;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestCarResource(s32 slot, s32 field)
+{
+    const Car* car = WebNetSlotOccupied(slot) ? GameInfo.players[slot].car : NULL;
+    if (!car)
+        return 0;
+    switch (field) {
+    case 0:
+        return !!car->collision_box.polyhedron | (!!car->physics_box.polyhedron << 1);
+    case 1:
+        return car->engine_sound != NULL;
+    case 2:
+        return car->turbo_emitter_count;
+    case 3:
+        return car->transform.t[0];
+    case 4:
+        return car->transform.t[2];
+    case 5:
+        return car->controls.throttle_input;
+    case 6:
+        return car->controls.steering_input;
+    case 7:
+        return car->controls.machine_gun_active;
+    default:
+        return 0;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestCarHandle(s32 slot)
+{
+    return WebNetSlotOccupied(slot) ? WebSnapshotLiveHandle(GameInfo.players[slot].car) : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestRespawnState(s32 slot, s32 field)
+{
+    WebParticipantState state;
+    WebParticipantCapture(&state);
+    if (!WebNetSlotOccupied(slot))
+        return UINT32_MAX;
+    const WebParticipantRespawn* pending = &state.respawns[slot];
+    switch (field) {
+    case 0:
+        return pending->state;
+    case 1:
+        return pending->due_tick;
+    case 2:
+        return pending->attempts;
+    case 3:
+        return pending->remaining;
+    default:
+        return UINT32_MAX;
+    }
+}
+
 static void test_participant_actions(void)
 {
+    if (respawn_request_slot >= 0) {
+        WebParticipantScheduleRespawn(respawn_request_slot,
+            (u32)MainFrameCount + respawn_request_delay, respawn_request_retry,
+            respawn_request_attempts);
+        WebTestFailSimulationAllocation(respawn_request_failure);
+        respawn_request_slot = -1;
+        respawn_request_failure = -1;
+    }
     const s32 kill = participant_kill_slot;
     const s32 hit = participant_hit_slot;
     const u32 handle = participant_hit_projectile;

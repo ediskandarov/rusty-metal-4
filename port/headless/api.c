@@ -93,12 +93,12 @@ const char* HeadlessCarName(u32 index)
 {
     return index < HeadlessCarCount() ? RegGetDirectoryNameSN("/objects/car/characters", index) : NULL;
 }
-_Static_assert(sizeof(WebParticipantState) == 128, "headless participant state ABI");
+_Static_assert(sizeof(WebParticipantResult) == 16, "headless participant result ABI");
 static WebParticipantState participant_state;
-const WebParticipantState* HeadlessParticipants(void)
+const WebParticipantResult* HeadlessParticipants(void)
 {
     WebParticipantCapture(&participant_state);
-    return &participant_state;
+    return participant_state.slots;
 }
 const char* HeadlessError(void) { return last_error; }
 u8* HeadlessPortableBuffer(void) { return portable_bytes; }

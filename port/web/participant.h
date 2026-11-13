@@ -14,13 +14,23 @@ typedef struct WebParticipantResult {
     s32 frags, deaths;
 } WebParticipantResult;
 
+enum { WebCarActive, WebCarWaiting, WebCarScheduled, WebCarSpawnFailed };
+typedef struct WebParticipantRespawn {
+    u32 state, due_tick, retry_ticks, remaining, attempts;
+} WebParticipantRespawn;
+
 typedef struct WebParticipantState {
     WebParticipantResult slots[8];
+    WebParticipantRespawn respawns[8];
 } WebParticipantState;
 
 struct Car;
 WebParticipantId WebParticipantIdentity(s32 slot);
 WebParticipantId WebParticipantObjectIdentity(const void* object);
+void WebParticipantCarRemoved(const struct Car* car);
+/* Mode policies call this at deterministic tick boundaries, only after removal. */
+int WebParticipantScheduleRespawn(s32 slot, u32 due_tick, u32 retry_ticks, u32 attempts);
+void WebParticipantProcessRespawns(void);
 void WebParticipantRecordDeath(const struct Car* victim, WebParticipantId source);
 struct Anim;
 struct Tm4CollisionPolygon;

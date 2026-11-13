@@ -7,6 +7,7 @@
 #include "src/modules/cars/c_toy/private.h"
 #include "src/modules/cars/shovel.h"
 #include "tm4/main/game.h"
+#include "tm4/main/memory.h"
 #include "tm4/modules/auger.h"
 
 #include <stdint.h>
@@ -26,6 +27,9 @@ s32 CarCrusherProcess(Car* car, void* state);
 void CarCrusherDestructor(Car* car, void* state);
 u32 InteractCarCrusherWithCar(Car* car, void* state, Car* other);
 void Web_cars_c_crush_TreadPolysProcess(Car* car);
+s32 CarTankConstructor(Car*, void*);
+s32 CarMinionConstructor(Car*, void*);
+s32 CarCrusherConstructor(Car*, void*);
 s32 WebAugerProcess(Car* car, void* state);
 
 static const SnapshotField windup_fields[] = {
@@ -87,18 +91,21 @@ typedef struct {
     CarCollisionCallback collision;
     void (*destroy)(Car*, void*);
     s32 (*refresh)(Car*, void*);
+    s32 (*resources)(Car*, void*);
 } CarCallbackBinding;
 
 static const CarCallbackBinding callback_types[] = {
     { &no_callbacks },
     { &windup, CarToyProcess },
     { &pirate, CarPirateProcess },
-    { &treads, CarTankProcess, .destroy = CarTankDestructor, .refresh = CarTankProcess },
-    { &treads, CarMinionProcess, .destroy = CarMinionDestructor, .refresh = CarMinionProcess },
+    { &treads, CarTankProcess, .destroy = CarTankDestructor, .refresh = CarTankProcess,
+        .resources = CarTankConstructor },
+    { &treads, CarMinionProcess, .destroy = CarMinionDestructor, .refresh = CarMinionProcess,
+        .resources = CarMinionConstructor },
     { &shovel, CarTrashProcess, InteractCarTrashWithCar },
     { &shovel, CarSlamProcess, InteractCarSlamWithCar },
     { &pinchers, CarCrusherProcess, InteractCarCrusherWithCar, CarCrusherDestructor,
-        refresh_crusher_treads },
+        refresh_crusher_treads, CarCrusherConstructor },
     { &drill, WebAugerProcess, InteractCarAugerWithCar },
 };
 
@@ -252,9 +259,67 @@ static const SnapshotField driver_location_fields[] = {
 };
 static const SnapshotGroupFields driver_location = { driver_location_fields, NULL };
 
+typedef struct {
+    char model[64];
+    s32 entrant, slot;
+} CarConstruction;
+
+static int capture_construction(const void* payload, void* output)
+{
+    const Car* car = payload;
+    CarConstruction* record = output;
+    const size_t length = strlen(car->character_name);
+    if (length >= sizeof(record->model))
+        return 0;
+    memcpy(record->model, car->character_name, length + 1);
+    record->entrant = car->index;
+    record->slot = car->controller_index;
+    return 1;
+}
+
+static int restore_construction(void* payload, const void* input)
+{
+    Car* car = payload;
+    const CarConstruction* record = input;
+    if (!memchr(record->model, 0, sizeof(record->model)) || record->entrant < 0
+        || record->entrant >= GameInfo.player_car_count
+        || WebNetParticipantSlot(record->entrant) != record->slot
+        || strcmp(record->model, GameInfo.character_names[record->entrant]))
+        return 0;
+    if (car->character_name)
+        return car->index == record->entrant && car->controller_index == record->slot
+            && !strcmp(car->character_name, record->model);
+    SVECTOR position = { 0 }, heading = { .vz = ONE };
+    if (!CarPrepareResources(car, (char*)record->model, record->entrant, record->slot,
+            CAR_CONTROL_PLAYER, &position, &heading))
+        return 0;
+    const CarCallbackBinding* callbacks = find_callbacks(car);
+    if (!callbacks)
+        return 0;
+    if (callbacks->resources && !callbacks->resources(car, car->callback_context)) {
+        car->destructor_callback = NULL;
+        return 0;
+    }
+    return 1;
+}
+
+static const SnapshotConstructionBinding construction
+    = { sizeof(CarConstruction), capture_construction, restore_construction };
+
+/* Removed templates are no longer in session roots. Do not detonate their devices
+ * or unregister against the newly restored roster. */
+static void release_car(void* payload)
+{
+    Car* car = payload;
+    for (s32 i = 0; car->weapons && i < CarWeaponCount; ++i)
+        car->weapons[i].active = 0;
+    CarReleaseResources(car);
+}
+
 /* Bot steering, plans and target lists are inactive with CarPlayerInput. The
  * common navigation probe still runs for human cars when the map has AI data. */
 static const SnapshotField car_fields[] = {
+    { SnapshotConstruction, .binding = &construction },
     SNAP_LOCAL(Car, display_list_count),
     SNAP_LOCAL(Car, display_lists),
     SNAP_LOCAL(Car, faces),
@@ -270,7 +335,7 @@ static const SnapshotField car_fields[] = {
     SNAP_TRANSIENT(Car, original_faces),
     SNAP_TRANSIENT(Car, original_colors),
     SNAP_TRANSIENT(Car, invisibility_hidden),
-    SNAP_LOCAL(Car, turbo_emitter_count),
+    SNAP_POD(Car, turbo_emitter_count),
     SNAP_LOCAL(Car, turbo_emitters),
     SNAP_POD(Car, turbo_amount),
     SNAP_LOCAL(Car, turbo_light_offset),
@@ -391,23 +456,33 @@ static int has_freeze_display(const Car* car)
     return car->freeze_ticks > 0 && !car->shield_ticks && !car->invisibility_ticks;
 }
 
+static int turbo_resources_valid(const Car* car)
+{
+    if (!car->turbo_emitter_count)
+        return !car->turbo_emitters;
+    RegistryDirectory* models = RegGetDirectoryPtrPS(CarClassDirectory, CarTextCharacters);
+    RegistryDirectory* model = RegGetDirectoryPtrPS(models, car->character_name);
+    RegistryDirectory* emitters = RegGetDirectoryPtrPS(model, CarDisplayTurboName);
+    return emitters && car->turbo_emitters
+        && car->turbo_emitter_count == RegGetNumberOfDirectoriesP(emitters);
+}
+
 static int car_valid(const void* payload)
 {
     const Car* car = payload;
-    if (car->control_kind != CAR_CONTROL_PLAYER || !car->weapons || !car->character_name
+    if (car->control_kind != CAR_CONTROL_PLAYER || !CarPhysicsResourcesValid(car) || !car->weapons
+        || !car->character_name || !turbo_resources_valid(car)
         || !((car->ai_input_callback == CarPlayerInput && !car->ai_saved_input_callback)
             || (!car->ai_input_callback && car->ai_saved_input_callback == CarPlayerInput))
         || car->ai_state_callback != CarAiApproachTarget || car->ai_saved_state_callback
         || !WebSnapshotCarCallbackType(car) || car->active_collision_particle
-        || car->active_collision_hit
-        || (car->original_faces && !has_freeze_display(car))
-        || car->original_colors || car->invisibility_hidden
-        || car->ai.target_entry || car->ai.nearby_list || car->ai.targeting_count
-        || car->health <= 0 || car->health > car->maximum_health
-        || car->controls.gear < CAR_GEAR_REVERSE || car->controls.gear > CAR_GEAR_FOURTH
-        || car->controls.action < CarActionNone || car->controls.action >= CarActionCount
-        || car->controls.selected_weapon < 0 || car->controls.selected_weapon >= CarWeaponCount
-        || car->controls.selected_weapon_slot < 0
+        || car->active_collision_hit || (car->original_faces && !has_freeze_display(car))
+        || car->original_colors || car->invisibility_hidden || car->ai.target_entry
+        || car->ai.nearby_list || car->ai.targeting_count || car->health <= 0
+        || car->health > car->maximum_health || car->controls.gear < CAR_GEAR_REVERSE
+        || car->controls.gear > CAR_GEAR_FOURTH || car->controls.action < CarActionNone
+        || car->controls.action >= CarActionCount || car->controls.selected_weapon < 0
+        || car->controls.selected_weapon >= CarWeaponCount || car->controls.selected_weapon_slot < 0
         || car->controls.selected_weapon_slot >= CarWeaponCount
         || (car->frame != CAR_RENDER_FRAME_INTACT && car->frame != CAR_RENDER_FRAME_DAMAGED)
         || CarWeaponCount <= 0 || (u32)CarWeaponCount > weapons.limit || !wheel_count(car)
@@ -490,6 +565,10 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
     car->ai.spatial_node = binding.node ? &area->nodes[binding.node - 1] : NULL;
     car->ai_input_callback = binding.suspended ? NULL : CarPlayerInput;
     car->ai_saved_input_callback = binding.suspended ? CarPlayerInput : NULL;
+    if (!car->turbo_emitter_count) {
+        MemFree(car->turbo_emitters);
+        car->turbo_emitters = NULL;
+    }
     const CarCallbackBinding* callbacks = find_callbacks(car);
     return callbacks
         && WebSnapshotFieldsRestore(callbacks->type, car->callback_context, input + sizeof(binding),
@@ -500,6 +579,6 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
 
 const SnapshotType WebSnapshotCarTypes[] = {
     { "car", sizeof(Car), car_fields, car_valid, capture_driver, restore_driver,
-        .needs_template = 1 },
+        .baseline_removable = 1, .release = release_car },
     { 0 },
 };

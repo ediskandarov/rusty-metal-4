@@ -1,0 +1,409 @@
+--- a/include/tm4/main/game.h
++++ b/include/tm4/main/game.h
+@@ -201,7 +201,7 @@
+ void GameDrawTextLinesAtY(Tm4RenderBuffer* display, char* font, char** lines, s32 count, s32 y);
+ void GameDrawTextLines(Tm4RenderBuffer* display, char* font, char** lines, s32 count);
+ void GameDisplayMode(Tm4RenderBuffer* display);
+-void GameRegisterCar(struct Car* car);
++s32 GameRegisterCar(struct Car* car);
+ void GameUnregisterCar(struct Car* incoming_car);
+ s32 GameIsCarRegistered(struct Car* car);
+ void GamePadVibrateS(s32 player, char* path);
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -6,8 +6,9 @@
+ #include "tm4_scalar.h"
+
+ /* Shared game/session services; mode-specific rules remain separate. */
+-#include "tm4/main/game.h"
+ #include "port/web/net_match.h"
++#include "port/web/participant.h"
++#include "tm4/main/game.h"
+ #include "tm4/modules/car.h"
+
+ #include "tm4/main/deathmatch.h"
+@@ -389,8 +390,8 @@
+             }
+         }
+     }
+-    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index, WebNetParticipantSlot(object_index),
+-        kind, &position, &rotation);
++    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index,
++        WebNetParticipantSlot(object_index), kind, &position, &rotation);
+ }
+ #endif
+
+@@ -535,21 +536,38 @@
+ #endif
+
+ #if !defined(TM4_GAME_FUNCTION) || TM4_GAME_FUNCTION == 0x80038038
+-void GameRegisterCar(Car* car)
++s32 GameRegisterCar(Car* car)
+ {
+     Tm4GameInfo* game = &GameInfo;
++    const s32 network = WebNetMatchActive();
++    if (network
++        && (car->index < 0 || car->index >= game->player_car_count
++            || !WebNetSlotOccupied(car->controller_index)
++            || game->car_count >= game->player_car_count))
++        return 0;
++    const s32 player_car = car->index < game->player_car_count;
++    Camera* camera = player_car ? game->players[car->controller_index].camera : NULL;
++    if (network && (!player_car || !camera || game->players[car->controller_index].car))
++        return 0;
++    if (camera) {
++        CameraSetObjectFunction* attach = OSSymbolGetAddressAssert(GAME_CAMERA_SET_OBJECT);
++        s32 attached = attach(camera, car);
++        if (!attached || camera->object != car || !camera->process || !camera->data) {
++            attach(camera, NULL);
++            return 0;
++        }
++    }
++    /* Publish only after mandatory bindings are complete. Failed attachment has
++     * no roster, player-root or mode-policy side effects. */
+     game->cars[game->car_count] = car;
+     ++game->car_count;
+-    if (car->index < game->player_car_count) {
++    if (player_car) {
+         ++game->active_player_count;
+-        if (game->players[car->controller_index].camera) {
+-            CameraSetObjectFunction* attach;
++        if (camera)
+             game->players[car->controller_index].car = car;
+-            attach = OSSymbolGetAddressAssert(GAME_CAMERA_SET_OBJECT);
+-            attach(game->players[car->controller_index].camera, car);
+-        }
+     } else
+         ++game->active_computer_count;
++    return 1;
+ }
+ #endif
+
+@@ -563,7 +581,7 @@
+         if (GameInfo.cars[index] == car)
+             break;
+     }
+-    if (GameInfo.cars[index] != car)
++    if (index == GameInfo.car_count)
+         return;
+     for (player = 0; player < ArrayCount(GameInfo.players); ++player) {
+         Camera* camera = GameInfo.players[player].camera;
+@@ -601,6 +619,7 @@
+         }
+     } else
+         --GameInfo.active_computer_count;
++    WebParticipantCarRemoved(car);
+ }
+ #endif
+
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -167,6 +167,7 @@
+     if (!car->ai.nearby_records) {
+         if (car->ai.attacker_damage)
+             MemFree(car->ai.attacker_damage);
++        car->ai.attacker_damage = NULL;
+         return 0;
+     }
+     car->control_kind = type;
+@@ -291,8 +292,13 @@
+
+ void CarAiDestructor(Car* car)
+ {
+-    CarAiSetTarget(car, NULL, NULL);
+-    CarAiAssignUpdateSlots(car);
++    /* Human weapon targeting borrows ai.target without acquiring an AI target count. */
++    if (car->control_kind != CAR_CONTROL_PLAYER && car->ai.attacker_damage)
++        CarAiSetTarget(car, NULL, NULL);
++    else
++        car->ai.target = NULL;
++    if (GameIsCarRegistered(car))
++        CarAiAssignUpdateSlots(car);
+     if (car->ai.attacker_damage)
+         MemFree(car->ai.attacker_damage);
+     if (car->ai.nearby_records)
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -2,9 +2,9 @@
+ #include "private.h"
+ #include "tm4_scalar.h"
+
++#include "port/web/net_match.h"
+ #include "tm4/fixed.h"
+ #include "tm4/main/game.h"
+-#include "port/web/net_match.h"
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/memory.h"
+ #include "tm4/main/object.h"
+@@ -105,32 +105,20 @@
+     return OSSymbolGetAddress(symbol);
+ }
+
+-s32 CarConstructor(Car* car, va_list args)
++s32 CarPrepareResources(
++    Car* car, char* character, s32 player, s32 index, s32 type, SVECTOR* position, SVECTOR* heading)
+ {
+-    char* character;
+     RegistryDirectory* directory;
+-    s32 player;
+-    s32 index;
+-    s32 type;
+     s32 turbo, energy, health;
+-    SVECTOR *position, *heading;
+     char* filename;
+     s32* value;
+     CVECTOR* color;
+     s32* size;
+-    s32 (*constructor)(Car*, void*);
+     if (CarInitializeScales) {
+         CarInitializeScales = 0;
+         CarTurboScale = ONE;
+         CarEnergyScale = ONE;
+     }
+-    character = va_arg(args, char*);
+-    player = va_arg(args, s32);
+-    index = va_arg(args, s32);
+-    type = va_arg(args, s32);
+-    position = va_arg(args, SVECTOR*);
+-    heading = va_arg(args, SVECTOR*);
+-    va_end(args);
+     MemSet(car, 0, sizeof(*car));
+     directory = CarClassDirectory;
+     car->index = player;
+@@ -138,12 +126,12 @@
+     if (WebNetMatchActive())
+         ObjectGetHeader(car)->participant = WebParticipantIdentity(index);
+     if (RegChangeCurrentDirectoryPS(directory, CarTextCharacters) != 1)
+-        return 0;
++        goto failed;
+     if (RegChangeCurrentDirectoryS(character) != 1)
+-        return 0;
++        goto failed;
+     car->character_name = RegGetCurrentDirectoryName();
+     if (!car->character_name)
+-        return 0;
++        goto failed;
+     car->name = RegGetFileDataS(CarTextRealname);
+     if (!car->name)
+         car->name = car->character_name;
+@@ -151,27 +139,27 @@
+     if (!filename)
+         filename = RegGetFileDataS(CarTextFilename);
+     if (!filename)
+-        return 0;
++        goto failed;
+     car->filename = MemAlloc(strlen(filename) + 1);
+-    if (car->filename) {
+-        strcpy(car->filename, filename);
+-        car->filename[0] = toupper((u8)car->filename[0]);
+-    }
++    if (!car->filename)
++        goto failed;
++    strcpy(car->filename, filename);
++    car->filename[0] = toupper((u8)car->filename[0]);
+     if (!CarControlsConstructor(car, type))
+-        return 0;
++        goto failed;
+     color = CarGetFileData(CarTextRadarDotColor);
+     if (!color)
+-        return 0;
++        goto failed;
+     car->radar_color = *color;
+     car->engine_sound_name = CarGetFileData(CarTextEngineSoundName);
+     if (!car->engine_sound_name)
+-        return 0;
++        goto failed;
+     car->special_sound_name = CarGetFileData(CarTextSpecialSoundName);
+     if (!car->special_sound_name)
+-        return 0;
++        goto failed;
+     value = CarGetFileData(CarTextHealthEnergyMax);
+     if (!value)
+-        return 0;
++        goto failed;
+     car->maximum_health = *value;
+     car->muzzle_records = RegGetFileDataS(CarTextMachineGuns);
+     if (!car->muzzle_records)
+@@ -189,35 +177,66 @@
+     if (!CarWeaponConstructor(car, type) || !CarPhysicsConstructor(car, position, heading)
+         || !CarAiConstructor(car, type) || !CarDisplayConstructor(car)
+         || !CarPhysicsConstructorPostDisplayConstructor(car, 0)) {
+-        CarDestructor(car);
+-        return 0;
++        goto failed;
+     }
+-    ObjectSetPosition(car, car->position.vx, car->position.vy, car->position.vz);
+-    if (!SoundIsLooping(car->engine_sound_name))
+-        car->engine_sound = 0;
+-    else
+-        car->engine_sound = ObjectCreate(
+-            CarSoundEmitterClassName, OBJECT_FOLLOW_OWNER, car, car->engine_sound_name, 0);
+-    GameRegisterCar(car);
+     size = (s32*)CarFindNamedFunction(car, CarSizeofFormat);
+     if (size) {
+         car->callback_context = MemCalloc(1, *size);
+         if (!car->callback_context) {
+-            CarDestructor(car);
+-            return 0;
++            goto failed;
+         }
+     } else {
+         car->callback_context = 0;
+     }
+-    constructor = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarConstructorFormat);
++    car->process_callback = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarProcessFormat);
++    car->destructor_callback
++        = (void (*)(Car*, void*))CarFindNamedFunction(car, CarDestructorFormat);
++    car->collision_callback = (CarCollisionCallback)CarFindNamedFunction(car, CarInteractionFormat);
++    return 1;
++failed:
++    CarReleaseResources(car);
++    return 0;
++}
++
++s32 CarConstructor(Car* car, va_list args)
++{
++    char* character = va_arg(args, char*);
++    s32 player = va_arg(args, s32);
++    s32 index = va_arg(args, s32);
++    s32 type = va_arg(args, s32);
++    SVECTOR* position = va_arg(args, SVECTOR*);
++    SVECTOR* heading = va_arg(args, SVECTOR*);
++    va_end(args);
++    if (!CarPrepareResources(car, character, player, index, type, position, heading))
++        return 0;
++    ObjectSetPosition(car, car->position.vx, car->position.vy, car->position.vz);
++    if (!WebNetMatchActive()) {
++        if (SoundIsLooping(car->engine_sound_name))
++            car->engine_sound = ObjectCreate(
++                CarSoundEmitterClassName, OBJECT_FOLLOW_OWNER, car, car->engine_sound_name, 0);
++        if (!GameRegisterCar(car)) {
++            car->destructor_callback = NULL;
++            CarDestructor(car);
++            return 0;
++        }
++    }
++    s32 (*constructor)(Car*, void*)
++        = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarConstructorFormat);
+     if (constructor && constructor(car, car->callback_context) != 1) {
++        /* A failed model constructor has not acquired its destructor-owned resources. */
++        car->destructor_callback = NULL;
+         CarDestructor(car);
+         return 0;
+     }
+-    car->process_callback = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarProcessFormat);
+-    car->destructor_callback
+-        = (void (*)(Car*, void*))CarFindNamedFunction(car, CarDestructorFormat);
+-    car->collision_callback = (CarCollisionCallback)CarFindNamedFunction(car, CarInteractionFormat);
++    if (WebNetMatchActive()) {
++        if (SoundIsLooping(car->engine_sound_name))
++            car->engine_sound = ObjectCreate(
++                CarSoundEmitterClassName, OBJECT_FOLLOW_OWNER, car, car->engine_sound_name, 0);
++        if (!GameRegisterCar(car)) {
++            CarDestructor(car);
++            return 0;
++        }
++    }
+     return 1;
+ }
+
+@@ -464,7 +483,7 @@
+     }
+ }
+
+-void CarDestructor(Car* car)
++void CarReleaseResources(Car* car)
+ {
+     void (*destructor)(Car*, void*);
+     CarCollisionHistory *node, *next;
+@@ -490,6 +509,11 @@
+         node = next;
+     }
+     car->collision_history = 0;
++}
++
++void CarDestructor(Car* car)
++{
++    CarReleaseResources(car);
+     if (car->fire_effect)
+         ObjectDestroy(car->fire_effect);
+     GameUnregisterCar(car);
+--- a/src/modules/car/physics.c
++++ b/src/modules/car/physics.c
+@@ -366,6 +366,11 @@
+
+ #define VECTOR_DIFFERS(a, b) ((a).vx != (b).vx || (a).vy != (b).vy || (a).vz != (b).vz)
+
++s32 CarPhysicsResourcesValid(const Car* car)
++{
++    return car->collision_box.polyhedron && car->physics_box.polyhedron;
++}
++
+ s32 CarPhysicsConstructorPostDisplayConstructor(Car* car, s32 existing)
+ {
+     register s32 inverse_mass_unit TM4_BIND_REGISTER("$20");
+@@ -526,7 +531,7 @@
+         }
+     }
+     car->angle_constraint_end = car->angle_constraints + constraint_count;
+-    return 1;
++    return CarPhysicsResourcesValid(car);
+ }
+
+ static inline void load_physics_setting(RegistryDirectory* physics, char* name, s32* setting)
+--- a/src/modules/car/private.h
++++ b/src/modules/car/private.h
+@@ -122,6 +122,7 @@
+ /* physics.c */
+ s32 CarPhysicsConstructor(Car* car, SVECTOR* position, SVECTOR* heading);
+ s32 CarPhysicsConstructorPostDisplayConstructor(Car* car, s32 existing);
++s32 CarPhysicsResourcesValid(const Car* car);
+ void CarPhysicsClassConstructor(RegistryDirectory* directory);
+ void CarPhysicsClassDestructor(RegistryDirectory* registry);
+
+@@ -570,4 +571,8 @@
+ void CarProcess(Car* car);
+ s32 CarConstructor(Car* car, va_list args);
+
++/* Shared resource phase; it does not register a car or create runtime children. */
++s32 CarPrepareResources(Car*, char*, s32, s32, s32, SVECTOR*, SVECTOR*);
++void CarReleaseResources(Car*);
++
+ #endif
+--- a/src/modules/car/weapon.c
++++ b/src/modules/car/weapon.c
+@@ -110,12 +110,14 @@
+     car->special_regeneration_interval = 300;
+     car->controls.selected_weapon = selected;
+     car->weapons = MemCalloc(weapon_count, sizeof(*car->weapons));
++    if (!car->weapons)
++        return 0;
+     for (i = 0; i < weapon_count; i++) {
+         if (i <= 0) {
+             char symbol[strlen(car->filename) + sizeof(CAR_SPECIAL_CONSTRUCTOR_FORMAT)];
+             car->weapons[i].descriptor = MemAlloc(sizeof(*car->weapons[i].descriptor));
+             if (!car->weapons[i].descriptor) {
+-                car->weapons[i].descriptor = &CarWeaponDescriptors[1];
++                return 0;
+             } else {
+                 saved = RegGetCurrentDirectoryPtr();
+                 RegChangeCurrentDirectoryS(CarTextSpecial);
+@@ -194,13 +196,17 @@
+ {
+     s32 i;
+     const s32 weapon_count = ArrayCount(CarWeaponDescriptors);
++    if (!car->weapons)
++        return;
+     for (i = 0; i < weapon_count; i++) {
+-        if (car->weapons[i].descriptor->detonate && car->weapons[i].active)
++        if (car->weapons[i].descriptor && car->weapons[i].descriptor->detonate
++            && car->weapons[i].active)
+             CarDetonateWeaponDevices(&car->weapons[i]);
+     }
+     for (i = 0; i <= 0; i++)
+         MemFree(car->weapons[i].descriptor);
+     MemFree(car->weapons);
++    car->weapons = NULL;
+ }
+
+ void CarWeaponProcess(Car* car)

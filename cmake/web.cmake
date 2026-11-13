@@ -235,6 +235,7 @@ option(TM4_WEB_TEST_HOOKS "Expose browser integration-test entry points" OFF)
 if(TM4_WEB_TEST_HOOKS)
     target_sources(tm4_web PRIVATE "${TM4_WEB}/test_hooks.c")
     target_compile_definitions(tm4_web PRIVATE TM4_WEB_TEST_HOOKS=1)
+    set_property(SOURCE "${TM4_WEB}/memory.c" APPEND PROPERTY COMPILE_DEFINITIONS TM4_WEB_TEST_HOOKS=1)
 endif()
 target_link_libraries(tm4_web PRIVATE tm4_core psyz)
 target_link_options(tm4_web PRIVATE -sUSE_ZLIB=1 -sASSERTIONS=1 -Wl,--error-limit=0
@@ -305,7 +306,7 @@ if(TM4_STANDALONE)
         _HeadlessCarCount _HeadlessCarName _HeadlessPortableBuffer _HeadlessPortableCapture
         _HeadlessPortableRestore _WebNetEndReplay)
     if(TM4_WEB_TEST_HOOKS)
-        list(APPEND exports _WebTestCreateParticipantWaveTimer _WebTestFlameContact _WebTestBurnIdentity _WebTestBurnOwnContact _WebTestParticipantDamageContract
+        list(APPEND exports _WebTestSimulationAllocationSize _WebTestCrusherRespawnAllocationBytes _WebTestCarResource _WebTestRestartNetworkReplay _WebTestSimulationFreeBytes _WebTestScheduleRespawn _WebTestCarHandle _WebTestRespawnState _WebTestCreateParticipantWaveTimer _WebTestFlameContact _WebTestBurnIdentity _WebTestBurnOwnContact _WebTestParticipantDamageContract
             _WebTestCreateParticipantProjectile _WebTestSetParticipantResults _WebTestKillParticipant
             _WebTestHitParticipant _WebTestBindCaptureTarget _WebTestCaptureTarget _WebTestProjectileProvenance _WebTestAttributedWaves _WebTestTeleportCamera _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget

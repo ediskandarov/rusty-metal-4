@@ -1,3 +1,4 @@
+#include "carpart.h"
 #include "snapshot_types.h"
 
 #include "snapshot_world.h"
@@ -538,7 +539,63 @@ static int restore_timer_binding(
     return 1;
 }
 
+static void* carpart_model(char* key)
+{
+    RegistryDirectory* models = RegGetDirectoryPtrS("/objects/car/characters");
+    for (s32 i = 0; i < RegGetNumberOfDirectoriesP(models); ++i) {
+        char* name = RegGetDirectoryNamePN(models, i);
+        if (!strcmp(name, key))
+            return name;
+    }
+    return NULL;
+}
+static const SnapshotKeyBinding carpart_models = { .resolve = carpart_model };
+static u32 carpart_face_count(const void* payload)
+{
+    return ((const WebCarpart*)payload)->group.frames[CAR_RENDER_FRAME_DAMAGED].face_count;
+}
+static const SnapshotField carpart_face_fields[]
+    = { { SnapshotPod, 0, sizeof(CarRenderFace) }, { 0 } };
+static const SnapshotArray carpart_faces
+    = { carpart_face_fields, sizeof(CarRenderFace), carpart_face_count, 8192 };
+static const SnapshotField carpart_fields[] = {
+    SNAP_RESOURCE_STRING(WebCarpart, model, &carpart_models),
+    SNAP_POD(WebCarpart, group),
+    SNAP_OWNED_ARRAY(WebCarpart, faces, &carpart_faces),
+    SNAP_POD(WebCarpart, part.collision_origin),
+    SNAP_POD(WebCarpart, part.world_position_q12),
+    SNAP_POD(WebCarpart, part.frame_displacement_q12),
+    SNAP_POD(WebCarpart, part.gravity_step_q12),
+    SNAP_POD(WebCarpart, part.rotation_step),
+    SNAP_POD(WebCarpart, part.local_to_world),
+    SNAP_POD(WebCarpart, part.collision_countdown),
+    { 0 },
+};
+static int carpart_valid(const void* payload)
+{
+    const WebCarpart* debris = payload;
+    return debris->model && debris->part.group == &debris->group
+        && debris->part.faces == debris->faces && debris->part.local_vertices
+        && !debris->group.frames[CAR_RENDER_FRAME_DAMAGED].first_face
+        && carpart_face_count(debris) <= carpart_faces.limit;
+}
+static int restore_carpart(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
+{
+    WebCarpart* debris = payload;
+    WebCarpartPrepareResources();
+    if (length)
+        return 0;
+    RegistryDirectory* models = RegGetDirectoryPtrS("/objects/car/characters");
+    RegistryDirectory* model = RegGetDirectoryPtrPS(models, debris->model);
+    debris->part.group = &debris->group;
+    debris->part.faces = debris->faces;
+    debris->part.local_vertices = RegGetFileDataPS(model, "display/resolution/VertexList");
+    return debris->part.local_vertices != NULL;
+}
+
 const SnapshotType WebSnapshotEffectTypes[] = {
+    { "carpart", sizeof(WebCarpart), carpart_fields, carpart_valid, NULL, restore_carpart,
+        .hash_fields = 1 },
     { "fireRing", sizeof(FireRing), fire_ring_fields, fire_ring_valid, .hash_fields = 1 },
     { "anim", sizeof(Anim), anim_fields, anim_valid, capture_anim_sound, restore_anim_sound },
     { "afc", sizeof(Afc), flare_fields, flare_valid, NULL, restore_flare_quad,

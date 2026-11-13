@@ -36,6 +36,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(car->frame);
     VALUE(car->index);
     VALUE(car->controller_index);
+    VALUE(car->turbo_emitter_count);
     VALUE(car->health);
     VALUE(car->energy);
     VALUE(car->turbo_fuel);

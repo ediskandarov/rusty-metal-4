@@ -7,6 +7,7 @@
 
 typedef enum {
     SnapshotFieldEnd,
+    SnapshotConstruction,
     SnapshotPod,
     SnapshotObjectRef,
     SnapshotWeakObjectRef,
@@ -76,6 +77,13 @@ typedef struct {
     Tm4ObjectCallback destructor;
     Tm4ObjectInteractionCallback interact;
 } SnapshotCustomClass;
+
+/* A resource prelude runs before fields whose storage it prepares. */
+typedef struct {
+    size_t size;
+    int (*capture)(const void* object, void* record);
+    int (*restore)(void* object, const void* record);
+} SnapshotConstructionBinding;
 
 typedef struct {
     const char* name;

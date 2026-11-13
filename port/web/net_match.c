@@ -221,6 +221,7 @@ static void start_session(void)
     for (s32 slot = 0; slot < 8; ++slot) {
         participants.slots[slot].frags = 0;
         participants.slots[slot].deaths = 0;
+        participants.respawns[slot] = (WebParticipantRespawn) { 0 };
     }
     WebParticipantRestore(&participants);
     WebLevelStart();

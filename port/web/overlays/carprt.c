@@ -1,28 +1,37 @@
-#include "src/modules/carprt/private.h"
+#include "../carpart.h"
 #include "../overlays.h"
+#include "port/web/browser_report.h"
 #include "tm4/gpu.h"
 #include "tm4/main/memory.h"
-#include "port/web/browser_report.h"
 #include <string.h>
 s32 CarpartConstructor(Carpart*, va_list);
 void CarpartProcess(Carpart*);
 void CarpartDisplay(Carpart*, Tm4OrderingTag*, u8**, u8*, MATRIX*);
 /* Tank, Minion and Crusher free their private tread faces when the car dies.
  * Debris retains the damaged frame's appearance until its own destruction. */
-typedef struct WebCarpart {
-    Carpart part;
-    CarRenderGroup group;
-    CarRenderFace* faces;
-} WebCarpart;
 static u32 native_size = sizeof(WebCarpart);
-static s32 construct(void* object, va_list args)
+void WebCarpartPrepareResources(void)
 {
     OSRegisterCarPhysics();
     OSRegisterExplosion();
+}
+static s32 construct(void* object, va_list args)
+{
+    WebCarpartPrepareResources();
     WebCarpart* debris = object;
     debris->faces = NULL;
+    debris->model = NULL;
     if (!CarpartConstructor(&debris->part, args))
         return 0;
+    RegistryDirectory* models = RegGetDirectoryPtrS("/objects/car/characters");
+    for (s32 i = 0; i < RegGetNumberOfDirectoriesP(models); ++i) {
+        RegistryDirectory* model = RegGetDirectoryPtrPN(models, i);
+        if (RegGetFileDataPS(model, "display/resolution/VertexList")
+            == debris->part.local_vertices) {
+            debris->model = RegGetDirectoryNamePN(models, i);
+            break;
+        }
+    }
     debris->group = *debris->part.group;
     CarRenderFrame* frame = &debris->group.frames[CAR_RENDER_FRAME_DAMAGED];
     if (frame->face_count > 0) {
