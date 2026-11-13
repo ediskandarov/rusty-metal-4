@@ -26,7 +26,6 @@ OSWord WebExplExport(const char* name);
 OSWord WebPirateExport(const char* name);
 OSWord WebAugerExport(const char* name);
 void WebInteractCarWithPowerup(void* car, void* powerup);
-void WebInteractCarWithBullet(void* car, void* bullet);
 OSWord WebYardExport(const char* name);
 #endif
 

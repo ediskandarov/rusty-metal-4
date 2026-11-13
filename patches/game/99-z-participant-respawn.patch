@@ -307,23 +307,25 @@
      return 1;
  }
 
-@@ -464,7 +483,7 @@
+@@ -465,8 +484,7 @@
      }
  }
 
--void CarDestructor(Car* car)
+-void CarDestructor(void* payload)
 +void CarReleaseResources(Car* car)
  {
+-    Car* car = payload;
      void (*destructor)(Car*, void*);
      CarCollisionHistory *node, *next;
-@@ -490,6 +509,11 @@
+@@ -492,6 +509,12 @@
          node = next;
      }
      car->collision_history = 0;
 +}
 +
-+void CarDestructor(Car* car)
++void CarDestructor(void* payload)
 +{
++    Car* car = payload;
 +    CarReleaseResources(car);
      if (car->fire_effect)
          ObjectDestroy(car->fire_effect);
@@ -361,8 +363,7 @@
  void CarPhysicsClassConstructor(RegistryDirectory* directory);
  void CarPhysicsClassDestructor(RegistryDirectory* registry);
 
-@@ -570,4 +571,8 @@
- void CarProcess(Car* car);
+@@ -570,3 +571,7 @@
  s32 CarConstructor(Car* car, va_list args);
 
 +/* Shared resource phase; it does not register a car or create runtime children. */

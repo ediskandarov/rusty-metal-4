@@ -9,10 +9,9 @@ diff --git a/include/tm4/modules/car.h b/include/tm4/modules/car.h
  #include "tm4_scalar.h"
  #include "tm4_types.h"
  
-@@ -402,6 +403,7 @@
- } CarCameraState;
- 
- void CarDestructor(Car* car);
+@@ -406,5 +407,6 @@
+ void CarDestructor(void* payload);
+ void InteractCarWithCar(void* first, void* second);
 +void CarDisplay(Car* car, Tm4OrderingTag* ordering, u8** packets, u8* end, MATRIX* world_to_camera);
  void CarAiDestructor(Car* car);
  void CarWeaponDestructor(Car* car);
@@ -370,12 +369,11 @@ diff --git a/src/modules/car/private.h b/src/modules/car/private.h
  void CarPlayerInput(Car* car);
  
  /* ai.c */
-@@ -563,4 +566,8 @@
+@@ -563,4 +566,7 @@
  extern CarAiHealthEntry CarHealthPickups[32];
  extern char CarEmptySuffix[];
  
 +void CarClassConstructor(RegistryDirectory* registry);
-+void CarProcess(Car* car);
 +s32 CarConstructor(Car* car, va_list args);
 +
  #endif

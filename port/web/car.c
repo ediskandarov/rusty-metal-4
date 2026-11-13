@@ -15,6 +15,7 @@
 #include "tm4/main/sound.h"
 #include "tm4/main/world.h"
 #include "tm4/modules/car_scratch.h"
+#include "tm4/modules/interact.h"
 #include "tm4/modules/sound.h"
 #include "tm4/vector.h"
 #include <assert.h>
@@ -32,16 +33,6 @@ static unsigned int simulation_ticks;
 static s32 construct_car(void* object, va_list args)
 {
     return CarConstructor(object, args);
-}
-
-static void process_car(void* object)
-{
-    CarProcess(object);
-}
-
-static void destroy_car(void* object)
-{
-    CarDestructor(object);
 }
 
 static void display_car(void* object, Tm4OrderingTag* ordering, u8** cursor, u8* end, MATRIX* view)
@@ -91,11 +82,6 @@ void WebCarEnable(void)
 }
 
 void CarClassDestructor(RegistryDirectory*);
-void InteractCarWithCar(Car*, Car*);
-static void interact_cars(void* first, void* second)
-{
-    InteractCarWithCar(first, second);
-}
 extern u32 CarSizeof;
 
 OSWord WebCarObjectExport(const char* name)
@@ -109,11 +95,11 @@ OSWord WebCarObjectExport(const char* name)
     EXPORT("CarClassConstructor", CarClassConstructor);
     EXPORT("CarClassDestructor", CarClassDestructor);
     EXPORT("CarConstructor", construct_car);
-    EXPORT("CarProcess", process_car);
+    EXPORT("CarProcess", CarProcess);
     EXPORT("CarDisplay", display_car);
-    EXPORT("CarDestructor", destroy_car);
-    EXPORT("InteractCarWithCar", interact_cars);
-    EXPORT("InteractCarWithBullet", WebInteractCarWithBullet);
+    EXPORT("CarDestructor", CarDestructor);
+    EXPORT("InteractCarWithCar", InteractCarWithCar);
+    EXPORT("InteractCarWithBullet", InteractCarWithBullet);
 #undef EXPORT
     return 0;
 }

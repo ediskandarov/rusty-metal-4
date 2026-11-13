@@ -8,14 +8,8 @@
 #include "port/web/browser_report.h"
 #include "port/web/net_match.h"
 #include <string.h>
-void InteractCarWithBullet(Car* car, Bullet* bullet);
 void InteractCarWithAnim(Car*, Anim*);
 void InteractWeaponRayBeamWithWeaponBomb(RayBeam*, WeaponBomb*);
-void WebInteractCarWithBullet(void* car, void* bullet)
-{
-    InteractCarWithBullet(car, bullet);
-}
-
 void InteractCarWithPowerup(Car*, PowerupState*);
 void WebInteractCarWithPowerup(void* car, void* object)
 {
@@ -27,11 +21,6 @@ void WebInteractCarWithPowerup(void* car, void* object)
         WEB_BROWSER_REPORT({ tm4Port.pickupCollections = (tm4Port.pickupCollections || 0) + 1; });
 }
 
-void InteractCarWithWeaponProjectile(Car*, WeaponProjectile*);
-void WebInteractCarWithWeaponProjectile(void* car, void* projectile)
-{
-    InteractCarWithWeaponProjectile(car, projectile);
-}
 void InteractCarWithAnim_fire(Car*, Anim*);
 void InteractWithFlammableTerrainPoly(Tm4CollisionPolygon*, SVECTOR*);
 static void car_shockwave(Car* car, ExplosionWave* wave)
@@ -95,26 +84,6 @@ static void car_jumppad(void* object, void* pad)
             after->vx - before.vx, after->vy - before.vy, after->vz - before.vz);
     }
 }
-static void bullet_destroyable(void* weapon, void* object)
-{
-    InteractBulletWithDestroyable(weapon, object);
-}
-static void projectile_destroyable(void* weapon, void* object)
-{
-    InteractWeaponProjectileWithDestroyable(weapon, object);
-}
-static void car_destroyable(void* car, void* object)
-{
-    InteractCarWithDestroyable(car, object);
-}
-static void wave_destroyable(void* wave, void* object)
-{
-    InteractExplosionShockWaveWithDestroyable(wave, object);
-}
-static void ray_destroyable(void* ray, void* object)
-{
-    InteractWeaponRayBeamWithDestroyable(ray, object);
-}
 OSWord WebInteractExport(const char* name)
 {
     if (strstr(name, "WithDestroyable")) {
@@ -122,11 +91,11 @@ OSWord WebInteractExport(const char* name)
 #define INTERACTION(key, callback)                                                                 \
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(callback)
-        INTERACTION("InteractBulletWithDestroyable", bullet_destroyable);
-        INTERACTION("InteractWeaponProjectileWithDestroyable", projectile_destroyable);
-        INTERACTION("InteractCarWithDestroyable", car_destroyable);
-        INTERACTION("InteractExplosionShockWaveWithDestroyable", wave_destroyable);
-        INTERACTION("InteractWeaponRayBeamWithDestroyable", ray_destroyable);
+        INTERACTION("InteractBulletWithDestroyable", InteractBulletWithDestroyable);
+        INTERACTION("InteractWeaponProjectileWithDestroyable", InteractWeaponProjectileWithDestroyable);
+        INTERACTION("InteractCarWithDestroyable", InteractCarWithDestroyable);
+        INTERACTION("InteractExplosionShockWaveWithDestroyable", InteractExplosionShockWaveWithDestroyable);
+        INTERACTION("InteractWeaponRayBeamWithDestroyable", InteractWeaponRayBeamWithDestroyable);
 #undef INTERACTION
     }
     if (!strcmp(name, "InteractCarWithTeleporter")) {
@@ -137,7 +106,7 @@ OSWord WebInteractExport(const char* name)
     if (!strcmp(name, "InteractCarWithJumppad"))
         return (OSWord)car_jumppad;
     if (!strcmp(name, "InteractCarWithWeaponProjectile"))
-        return (OSWord)WebInteractCarWithWeaponProjectile;
+        return (OSWord)InteractCarWithWeaponProjectile;
     if (!strcmp(name, "InteractCarWithAnim_fire")) {
         Import_CarAiInteractedWithFire = CarAiInteractedWithFire;
         return (OSWord)InteractCarWithAnim_fire;

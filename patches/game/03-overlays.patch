@@ -392,7 +392,7 @@ diff --git a/src/modules/interact/damage.c b/src/modules/interact/damage.c
  #include <STRINGS.H>
 +#include <string.h>
  
- void InteractBulletWithDestroyable(Bullet* bullet, Destroyable* destroyable)
+ void InteractBulletWithDestroyable(void* first, void* second)
  {
 diff --git a/src/modules/interact/interact.c b/src/modules/interact/interact.c
 --- a/src/modules/interact/interact.c
