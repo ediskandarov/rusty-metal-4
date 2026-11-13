@@ -19,7 +19,11 @@ const commit = import.meta.env.PUBLIC_BUILD_COMMIT;
   </head>
   <body>
     <main>
-      <p class="eyebrow">Rusty Metal 4</p>
+      <header class="site-header">
+        <a class="site-title" href="/">
+          Rusty Metal 4
+        </a>
+      </header>
       <slot />
     </main>
     <footer class="build-version">

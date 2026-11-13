@@ -38,11 +38,23 @@ h2 {
   margin-top: 0;
   font-size: 1.3rem;
 }
-.eyebrow {
+.site-header {
+  margin-bottom: 32px;
+}
+.site-title {
+  display: inline-block;
   color: #edb36e;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  font-size: 0.8rem;
+  font-size: clamp(2.5rem, 8vw, 4.5rem);
+  font-weight: 850;
+  letter-spacing: -0.04em;
+  line-height: 1.05;
+  text-decoration: none;
+}
+.single-player {
+  margin-bottom: 48px;
+}
+.single-player p {
+  margin: 12px 0 0;
 }
 section {
   background: #1d232c;

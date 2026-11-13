@@ -3,8 +3,14 @@ import Page from "../layouts/Page.astro";
 import { Content as RoomHelp } from "../content/rooms.md";
 ---
 
-<Page title="Rooms">
-  <h1>Rooms</h1>
+<Page title="Play">
+  <div class="single-player">
+    <a class="button" href="/play/">
+      Play Disk
+    </a>
+    <p>Play single-player using your own game disc.</p>
+  </div>
+  <h1>Network Play</h1>
   <RoomHelp />
   <section data-page="directory" aria-labelledby="directory-heading">
     <h2 id="directory-heading">
