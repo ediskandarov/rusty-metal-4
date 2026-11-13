@@ -777,6 +777,33 @@ EMSCRIPTEN_KEEPALIVE unsigned WebTestNetworkSlotBindings(s32 slot)
         | ((player->camera && player->car && player->camera->object == player->car) << 3);
 }
 
+/* Exercise the actual teleport paths before the next camera process consumes snap. */
+EMSCRIPTEN_KEEPALIVE int WebTestTeleportCamera(s32 slot, s32 hyperspace)
+{
+    if (slot < 0 || slot >= ArrayCount(GameInfo.players))
+        return -1;
+    Tm4GamePlayer* player = &GameInfo.players[slot];
+    if (!player->car || !player->camera || player->camera->object != player->car)
+        return -1;
+    CarCameraState* state = player->camera->data;
+    state->snap = 0;
+    if (hyperspace) {
+        CarAiInputCallback input = player->car->ai_input_callback;
+        player->car->ai_input_callback = NULL;
+        player->car->controls.action = CarActionHyperspace;
+        CarProcess(player->car);
+        player->car->ai_input_callback = input;
+    } else {
+        Teleporter portal = { 0 };
+        portal.destination_world = player->car->position;
+        portal.destination_world.vx += 1024;
+        portal.destination_forward_world.vz = ONE;
+        void (*interact)(void*, void*) = (void*)WebInteractExport("InteractCarWithTeleporter");
+        interact(player->car, &portal);
+    }
+    return state->snap;
+}
+
 EMSCRIPTEN_KEEPALIVE void WebTestReadNetworkCombat(void)
 {
     u32 objects = 0, projectiles = 0;

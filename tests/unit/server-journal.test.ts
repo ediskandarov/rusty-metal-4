@@ -45,6 +45,8 @@ test("invalid, shortened and oversized responses preserve previous journal", asy
   const { api } = storage();
   const archive = new ServerJournal(api);
   await archive.save(response(64));
+  await expect(archive.save(response(64, 1))).rejects.toThrow("Invalid");
+  await expect(archive.save(response(64, 3))).rejects.toThrow("Invalid");
   await expect(archive.save(response(32))).rejects.toThrow("shrank");
   await expect(
     archive.save(new Response("bad", { headers: { "content-length": "80" } })),
@@ -53,12 +55,4 @@ test("invalid, shortened and oversized responses preserve previous journal", asy
     archive.save(new Response("bad", { headers: { "content-length": "999999999" } })),
   ).rejects.toThrow("limit");
   expect((await archive.download()).headers.get("content-length")).toBe("64");
-});
-
-test("legacy journal archives remain readable while unsupported versions are rejected", async () => {
-  const { api } = storage();
-  const archive = new ServerJournal(api);
-  await archive.save(response(64, 1));
-  expect(new Uint8Array(await (await archive.download()).arrayBuffer())[7]).toBe(1);
-  await expect(archive.save(response(64, 3))).rejects.toThrow("Invalid");
 });

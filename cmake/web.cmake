@@ -304,7 +304,7 @@ if(TM4_STANDALONE)
         _HeadlessCarCount _HeadlessCarName _HeadlessPortableBuffer _HeadlessPortableCapture
         _HeadlessPortableRestore _WebNetEndReplay)
     if(TM4_WEB_TEST_HOOKS)
-        list(APPEND exports _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
+        list(APPEND exports _WebTestTeleportCamera _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget
             _WebTestAimAtWeakDestroyable _WebTestAimAtDestroyable _WebTestPlaceProjectileTarget
             _WebTestPlacePlayerTarget _WebTestPreparePlayerDuel _WebTestPlacePlayerProjectileTarget

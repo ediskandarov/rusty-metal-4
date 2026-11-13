@@ -103,3 +103,51 @@
              y = DeathmatchDrawTextLines(
                  display, score_font, lines0, 1, 240, y, flags | FONT_PRINT_CENTER);
          }
+--- a/src/modules/interact/interact.c
++++ b/src/modules/interact/interact.c
+@@ -5,3 +5,4 @@
+ #include "tm4/main/game.h"
++#include "port/web/net_match.h"
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/object.h"
+@@ -95,7 +96,7 @@
+     NormalizeMatrixWithBasis(&car_to_world, 2, 0);
+     Import_CarOrientWithMatrix(car, &car_to_world);
+     number = car->controller_index;
+-    if (number < GameInfo.player_count) {
++    if (WebNetMatchActive() ? WebNetSlotOccupied(number) : number < GameInfo.player_count) {
+         camera = GameInfo.players[number].camera;
+         if (camera->object == car)
+             ((CarCameraState*)camera->data)->snap = 1;
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -6,3 +6,4 @@
+ #include "tm4/main/game.h"
++#include "port/web/net_match.h"
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/memory.h"
+@@ -407,7 +408,7 @@
+             temp.matrix.m[2][2] = destination->heading_q12.vz;
+             CarOrientWithMatrix(car, &temp.matrix);
+             i = car->controller_index;
+-            if (i < GameInfo.player_count) {
++            if (WebNetMatchActive() ? WebNetSlotOccupied(i) : i < GameInfo.player_count) {
+                 Camera* camera = GameInfo.players[i].camera;
+                 if (camera->object == car)
+                     ((CarCameraState*)camera->data)->snap = 1;
+--- a/src/modules/car/collision.c
++++ b/src/modules/car/collision.c
+@@ -13,3 +13,4 @@
+ #include "tm4/main/game.h"
++#include "port/web/net_match.h"
+ #include "tm4/main/geometry.h"
+ #include "tm4/main/math3d.h"
+@@ -438,6 +439,7 @@
+ void CarVibrateForImpact(s32 player, s32 magnitude)
+ {
+-    if (player < GameInfo.player_count && magnitude >= 6) {
++    if ((WebNetMatchActive() ? WebNetSlotOccupied(player) : player < GameInfo.player_count)
++        && magnitude >= 6) {
+         s32 index = 0;
+         const s32 threshold_count = ArrayCount(CarImpactThresholds);
+         while (index < threshold_count - 1 && magnitude >= CarImpactThresholds[index])

@@ -1,4 +1,4 @@
-/* global tm4Port, setTestGamepad */
+/* global tm4Port, setTestGamepad, Module */
 const { chromium } = require("playwright");
 const assert = require("node:assert/strict");
 
@@ -81,10 +81,18 @@ const assert = require("node:assert/strict");
     await page.waitForFunction(() => tm4Port.carThrottle > 0 && tm4Port.carSteering > 10000);
     await page.keyboard.up("x");
     await page.keyboard.up("ArrowRight");
+    assert.deepEqual(
+      await page.evaluate(() => [
+        Module._WebTestTeleportCamera(0, 0),
+        Module._WebTestTeleportCamera(0, 1),
+      ]),
+      [1, 1],
+      "Offline teleporter and hyperspace still snap the player's camera",
+    );
     assert.deepEqual(errors, []);
     await page.screenshot({ path: "build/checks/gamepad-driving.png" });
     console.log(
-      "PASS browser gamepad -> PsyZ -> menu, analog car steering/throttle, unplug -> keyboard",
+      "PASS browser gamepad -> PsyZ -> menu, analog steering/throttle, unplug -> keyboard, offline teleporter/hyperspace cameras",
     );
   } finally {
     await browser.close();

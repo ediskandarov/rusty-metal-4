@@ -786,6 +786,35 @@ mod tests {
 
     #[test]
     #[ignore = "requires private resources and diagnostic Wasm"]
+    fn sparse_teleports_snap_every_owned_camera() -> Result<()> {
+        let (wasm, resources) = paths()?;
+        let setup = SessionStart {
+            capacity: 8,
+            slots: vec![3, 6],
+            ..session()
+        };
+        for hyperspace in [0, 1] {
+            let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+            world.start(&setup)?;
+            for slot in 0..8 {
+                let snap =
+                    world.call::<(i32, i32), i32>("WebTestTeleportCamera", (slot, hyperspace))?;
+                ensure!(
+                    snap == if setup.slots.contains(&(slot as u8)) {
+                        1
+                    } else {
+                        -1
+                    },
+                    "Teleport {hyperspace} did not respect camera ownership at slot {slot}: {snap}"
+                );
+            }
+            world.step(0, &[Input::default(); 8])?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
     fn sparse_slots_start_rollback_and_portable_continuation() -> Result<()> {
         let (wasm, resources) = paths()?;
         for slots in [vec![0, 3, 7], vec![0, 3], vec![3, 6]] {

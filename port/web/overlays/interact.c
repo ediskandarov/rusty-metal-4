@@ -6,6 +6,7 @@
 #include "tm4/modules/car.h"
 #include "tm4/modules/ray.h"
 #include "port/web/browser_report.h"
+#include "port/web/net_match.h"
 #include <string.h>
 void InteractCarWithBullet(Car* car, Bullet* bullet);
 void InteractCarWithAnim(Car*, Anim*);
@@ -45,7 +46,8 @@ static void car_teleporter(void* object, void* portal)
     Car* car = object;
     Teleporter* teleporter = portal;
     InteractCarWithTeleporter(car, teleporter);
-    Camera* camera = car->controller_index < GameInfo.player_count
+    Camera* camera = (WebNetMatchActive() ? WebNetSlotOccupied(car->controller_index)
+                                        : car->controller_index < GameInfo.player_count)
         ? GameInfo.players[car->controller_index].camera
         : NULL;
     WEB_BROWSER_REPORT(

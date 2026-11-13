@@ -84,6 +84,7 @@ struct Admission {
 const START_LEAD_TICKS: i32 = 12;
 const MAX_START_LEAD_TICKS: i32 = 180;
 const MAX_START_ATTEMPTS: u8 = 5;
+const MIN_PARTICIPANTS: usize = 2;
 
 struct ClockOffer {
     anchor: Tick,
@@ -1020,10 +1021,12 @@ fn update(
     }
     if game.ended
         || (!game.started
-            && game.controls.iter().enumerate().any(|(slot, player)| {
-                game.participants.contains(slot)
-                    && (player.connection.is_none() || !game.participants.at_slot(slot).lobby_ready)
-            }))
+            && (game.participants.count() < MIN_PARTICIPANTS
+                || game.controls.iter().enumerate().any(|(slot, player)| {
+                    game.participants.contains(slot)
+                        && (player.connection.is_none()
+                            || !game.participants.at_slot(slot).lobby_ready)
+                })))
     {
         return;
     }
@@ -1489,7 +1492,7 @@ fn run_match(
 ) -> Result<(), Box<dyn Error>> {
     let count = participants.count();
     let capacity = participants.capacity();
-    if !(2..=capacity).contains(&count) {
+    if !(MIN_PARTICIPANTS..=capacity).contains(&count) {
         return Err("Deathmatch needs at least two prepared participants".into());
     }
     let compatibility = simulator.compatibility.clone();
@@ -1974,6 +1977,101 @@ mod participant_control_tests {
             }),
         );
         buffer
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
+    fn preparation_cancellation_waits_for_replacement_before_starting() -> anyhow::Result<()> {
+        let mut world = World::new();
+        let mut game = game();
+        game.started = false;
+        game.tick = 0;
+        game.session = None;
+        game.initial_digest = None;
+        game.last_state = None;
+        game.prediction = Default::default();
+        let compatibility = game.compatibility.clone().unwrap();
+        let wasm = std::fs::read(env::var("TM4_SIMULATION_WASM")?)?;
+        let resources = PathBuf::from(env::var("TM4_RESOURCE_DIR")?);
+        let simulator = simulator::Simulator::new(&wasm, &resources, compatibility.clone())?;
+        world.insert_non_send(simulator);
+        world.insert_resource(LocalTimeline::default());
+        world.insert_resource(game);
+        world
+            .run_system_once(|mut game: ResMut<Match>, mut commands: Commands| {
+                for slot in [0, 1] {
+                    let binding = game.participants.binding(slot);
+                    game.release_preparation(binding, &mut commands).unwrap();
+                }
+            })
+            .unwrap();
+        world.run_system_once(update).unwrap();
+        assert!(!world.resource::<Match>().started);
+        assert!(!world.resource::<Match>().ended);
+        assert!(world.resource::<Match>().session.is_none());
+
+        // Two reservations exist, but cancelling one must not start the ready survivor.
+        for slot in [0, 1] {
+            world
+                .resource_mut::<Match>()
+                .reserve_preparation(slot)
+                .unwrap();
+        }
+        let first = connection(&mut world, 71);
+        request(
+            &mut world,
+            first,
+            Request::Join {
+                compatibility: compatibility.clone(),
+            },
+        );
+        request(
+            &mut world,
+            first,
+            Request::SelectCar {
+                car: "Orbital".into(),
+                ready: true,
+            },
+        );
+        world
+            .run_system_once(|mut game: ResMut<Match>, mut commands: Commands| {
+                let binding = game.participants.binding(1);
+                game.release_preparation(binding, &mut commands).unwrap();
+            })
+            .unwrap();
+        world.run_system_once(update).unwrap();
+        assert!(!world.resource::<Match>().started);
+        assert!(!world.resource::<Match>().ended);
+        assert!(world.resource::<Match>().session.is_none());
+
+        // This operation also proves the preceding updates did not freeze preparation.
+        world
+            .resource_mut::<Match>()
+            .reserve_preparation(1)
+            .unwrap();
+        let replacement = connection(&mut world, 72);
+        request(&mut world, replacement, Request::Join { compatibility });
+        request(
+            &mut world,
+            replacement,
+            Request::SelectCar {
+                car: "Pizza Boy".into(),
+                ready: true,
+            },
+        );
+        world.run_system_once(update).unwrap();
+        let game = world.resource::<Match>();
+        assert!(game.started && !game.ended);
+        assert_eq!(game.session.as_ref().unwrap().slots, vec![0, 1]);
+        assert!(game.initial_digest.is_some());
+        assert_eq!(
+            world
+                .non_send_mut::<simulator::Simulator>()
+                .state()?
+                .remaining,
+            2
+        );
+        Ok(())
     }
 
     #[test]

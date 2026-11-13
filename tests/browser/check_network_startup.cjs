@@ -114,8 +114,40 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
     for (const [slot, cars] of controls.entries())
       for (const car of cars)
         assert.equal(car.throttle !== 0, car.slot === slot, `control ownership for slot ${slot}`);
+    const teleports = await page.evaluate(() => {
+      const states = [];
+      for (const view of [-1, 3, 6]) {
+        for (const hyperspace of [0, 1]) {
+          if (
+            !Module.ccall(
+              "WebNetStartMatch",
+              "number",
+              ["number", "number", "number", "number", "number", "number", "string"],
+              [8, (1 << 3) | (1 << 6), 0, 12345, view, 0, "Orbital\nPizza Boy"],
+            )
+          )
+            throw new Error("Sparse teleport startup failed");
+          const snaps = Array.from({ length: 8 }, (_, slot) =>
+            Module._WebTestTeleportCamera(slot, hyperspace),
+          );
+          for (const slot of [3, 6]) Module._WebNetSetInput(0, slot, 0, 0, 0);
+          if (!Module._WebNetQueueTick(0)) throw new Error("Sparse teleport continuation failed");
+          states.push({ view, hyperspace, snaps, state: structuredClone(tm4Port.netMatch) });
+          Module._WebNetCancelMatch();
+        }
+      }
+      return states;
+    });
+    for (const row of teleports) {
+      assert.deepEqual(row.snaps, [-1, -1, -1, 1, -1, -1, 1, -1]);
+      assert.deepEqual(
+        row.state,
+        teleports[row.hyperspace].state,
+        "Locally viewed slot changed teleport simulation state",
+      );
+    }
     console.log(
-      "PASS: no-frame/no-menu startup, 60-step repeatability, slots 0–7, stop/start, missing-resource retry, cheat/input rejection",
+      "PASS: no-frame/no-menu startup, repeatability, slots 0–7, stop/start, resource retry, input rejection; sparse teleporter/hyperspace cameras are independent of local view",
     );
   } finally {
     await browser.close();
