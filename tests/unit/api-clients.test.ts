@@ -206,7 +206,11 @@ test("Lightyear bridge schemas reject malformed envelopes and accept disconnecte
   expect(messageSchema.parse({ type: "welcome", slot: 7 })).toEqual({ type: "welcome", slot: 7 });
   for (const value of [
     { type: "welcome", slot: 8 },
+    { type: "welcome", slot: 0.5 },
+    { type: "resume_credential", token: "invalid" },
+    { type: "snapshot_chunk", attempt: 1, offset: 0, data: [] },
     { type: "snapshot_chunk", attempt: 1, offset: 0, data: [256] },
+    { type: "snapshot_chunk", attempt: 1, offset: 0, data: new Array(8193).fill(0) },
     { type: "unknown" },
     { type: "frame", tick: 1, inputs: [], state: {} },
   ])
@@ -241,4 +245,29 @@ test("Lightyear bridge schemas reject malformed envelopes and accept disconnecte
       prediction: { ...diagnostics.prediction, acceptedDepth: -14 },
     }).prediction.acceptedDepth,
   ).toBe(-14);
+});
+
+test("snapshot header limits are enforced at the Lightyear boundary", () => {
+  const header = {
+    type: "snapshot_begin",
+    attempt: 1,
+    tick: 20,
+    anchor: 100,
+    total: 256 * 1024,
+    checksum: 0,
+    state: {
+      remaining: 2,
+      winner: -1,
+      roundFinished: false,
+      acceptsContinue: false,
+      nextMode: 0,
+      digest: 0,
+      sections: [0, 0, 0, 0, 0],
+      unsupported: null,
+      scores: [],
+    },
+  };
+  expect(messageSchema.safeParse(header).success).toBe(true);
+  for (const change of [{ tick: 0 }, { tick: 1.5 }, { total: 0 }, { total: 256 * 1024 + 1 }])
+    expect(messageSchema.safeParse({ ...header, ...change }).success).toBe(false);
 });

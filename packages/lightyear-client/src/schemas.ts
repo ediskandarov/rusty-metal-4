@@ -61,7 +61,7 @@ export const journalAuthorityFrameSchema = z.object({
 export const snapshotBeginSchema = z.object({
   type: z.literal("snapshot_begin"),
   attempt: u32,
-  tick: u32,
+  tick: u32.positive(),
   anchor: u32,
   total: u32.max(256 * 1024).positive(),
   checksum: u32,

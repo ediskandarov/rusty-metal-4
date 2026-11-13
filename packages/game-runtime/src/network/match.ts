@@ -13,8 +13,6 @@ export type LobbyView = (
 ) => void;
 
 const resumeIdleMs = 7_000;
-const maxSnapshotBytes = 256 * 1024;
-const snapshotChunkBytes = 8192;
 
 type SnapshotDownload = {
   header: SnapshotBegin;
@@ -24,6 +22,7 @@ type SnapshotDownload = {
 };
 
 type Recovery = {
+  phase: "recovering";
   stage: "downloading" | "catchup" | "handoff" | "activating";
   abort: AbortController;
   requestedAt: number;
@@ -35,7 +34,7 @@ type Recovery = {
 type SessionState =
   | { phase: "connecting" | "lobby" | "playing" | "suspended" | "reconnecting" | "closed" }
   | { phase: "preparing"; offeredAnchor?: number }
-  | { phase: "recovering"; recovery: Recovery };
+  | Recovery;
 
 function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
   return (
@@ -111,7 +110,7 @@ export async function joinMatch(
     prediction?.close();
     prediction = undefined;
     clearTimeout(recoveryDeadline);
-    if (previous.phase === "recovering") previous.recovery.abort.abort();
+    if (previous.phase === "recovering") previous.abort.abort();
     players = 0;
     epoch = 0;
     slot = -1;
@@ -247,7 +246,6 @@ export async function joinMatch(
   };
 
   const onmessage = (message: Message) => {
-    if (session.phase === "closed") return;
     try {
       switch (message.type) {
         case "prediction_recovery_required":
@@ -260,8 +258,6 @@ export async function joinMatch(
             throw new Error(port.netMatch?.unsupported ?? message.message);
           break;
         case "welcome":
-          if (!Number.isInteger(message.slot) || message.slot < 0 || message.slot >= 8)
-            throw new Error("Invalid player slot");
           slot = message.slot;
           session = { phase: "lobby" };
           journal.identify({ slot });
@@ -285,7 +281,6 @@ export async function joinMatch(
           });
           break;
         case "resume_credential":
-          if (!/^[0-9a-f]{64}$/.test(message.token)) throw new Error("Invalid match credential");
           credential = message.token;
           try {
             sessionStorage.setItem(credentialKey, message.token);
@@ -325,11 +320,9 @@ export async function joinMatch(
             diagnostics.resumeRetargets = 0;
             session = {
               phase: "recovering",
-              recovery: {
-                stage: "downloading",
-                abort: new AbortController(),
-                requestedAt: performance.now(),
-              },
+              stage: "downloading",
+              abort: new AbortController(),
+              requestedAt: performance.now(),
             };
             show("lobby", "Downloading the current match state…");
             armResumeTimeout();
@@ -341,7 +334,7 @@ export async function joinMatch(
           break;
         }
         case "prediction_offer":
-          if (!prediction || session.phase !== "preparing" || !players)
+          if (!prediction || session.phase !== "preparing")
             throw new Error("Unexpected live prediction clock offer");
           session.offeredAnchor = message.anchor;
           diagnostics.clockOffers = (diagnostics.clockOffers ?? 0) + 1;
@@ -357,7 +350,6 @@ export async function joinMatch(
           if (
             !prediction ||
             session.phase !== "preparing" ||
-            !players ||
             message.anchor !== session.offeredAnchor
           )
             throw new Error("Unexpected live prediction clock anchor");
@@ -366,18 +358,8 @@ export async function joinMatch(
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "snapshot_begin": {
-          const active = session.phase === "recovering" ? session.recovery : undefined;
-          if (
-            !active ||
-            active.stage !== "downloading" ||
-            active.download ||
-            !Number.isInteger(message.total) ||
-            message.total <= 0 ||
-            message.total > maxSnapshotBytes ||
-            !Number.isInteger(message.tick) ||
-            message.tick <= 0 ||
-            message.state.unsupported
-          )
+          const active = session.phase === "recovering" ? session : undefined;
+          if (active?.stage !== "downloading" || active.download || message.state.unsupported)
             throw new Error("Invalid reconnect snapshot header");
           active.download = { header: message, bytes: new Uint8Array(message.total), received: 0 };
           diagnostics.snapshotTick = message.tick;
@@ -386,19 +368,14 @@ export async function joinMatch(
           break;
         }
         case "snapshot_chunk": {
-          const active = session.phase === "recovering" ? session.recovery : undefined;
+          const active = session.phase === "recovering" ? session : undefined;
           const download = active?.download;
           if (
-            !active ||
-            active.stage !== "downloading" ||
+            active?.stage !== "downloading" ||
             !download ||
             download.header.attempt !== message.attempt ||
             message.offset !== download.received ||
-            !Array.isArray(message.data) ||
-            message.data.length <= 0 ||
-            message.data.length > snapshotChunkBytes ||
-            download.received + message.data.length > download.bytes.length ||
-            !message.data.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+            download.received + message.data.length > download.bytes.length
           )
             throw new Error("Invalid reconnect snapshot block");
           download.bytes.set(message.data, download.received);
@@ -431,11 +408,10 @@ export async function joinMatch(
           break;
         }
         case "resume_catchup": {
-          const active = session.phase === "recovering" ? session.recovery : undefined;
+          const active = session.phase === "recovering" ? session : undefined;
           const download = active?.download;
           if (
-            !active ||
-            active.stage !== "catchup" ||
+            active?.stage !== "catchup" ||
             !download ||
             message.attempt !== download.header.attempt ||
             message.head !== download.target ||
@@ -460,15 +436,14 @@ export async function joinMatch(
           break;
         }
         case "resume_live": {
-          const active = session.phase === "recovering" ? session.recovery : undefined;
+          const active = session.phase === "recovering" ? session : undefined;
           const replay = active?.replay;
           const download = active?.download;
           const controller = prediction;
           if (
             !controller ||
-            !active ||
+            active?.stage !== "catchup" ||
             !replay ||
-            active.stage !== "catchup" ||
             !download ||
             message.attempt !== download.header.attempt ||
             message.anchor !== download.header.anchor ||
@@ -519,8 +494,8 @@ export async function joinMatch(
         case "resume_active":
           if (
             session.phase !== "recovering" ||
-            session.recovery.stage !== "activating" ||
-            message.head !== session.recovery.download?.target
+            session.stage !== "activating" ||
+            message.head !== session.download?.target
           )
             throw new Error("Unexpected reconnect acknowledgement");
           session = { phase: "playing" };
@@ -529,7 +504,7 @@ export async function joinMatch(
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "catchup_frames": {
-          const active = session.phase === "recovering" ? session.recovery : undefined;
+          const active = session.phase === "recovering" ? session : undefined;
           if (
             !active?.replay ||
             active.stage !== "catchup" ||
@@ -587,7 +562,7 @@ export async function joinMatch(
       if (document.hidden && suspend("hidden")) return false;
       const predicting =
         session.phase === "playing" ||
-        (session.phase === "recovering" && session.recovery.stage === "activating");
+        (session.phase === "recovering" && session.stage === "activating");
       if (predicting && prediction && gapMs >= (prediction.depth * 1000) / 30 / 2) {
         if (suspend("event-loop gap: " + Math.round(gapMs) + " ms")) return false;
       }
