@@ -1,3 +1,4 @@
+import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
 import type { RoomSummary } from "@tm4/rooms-client/schemas";
 import { DurableObject } from "cloudflare:workers";
 
@@ -167,7 +168,11 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
         required: 1,
         sessionId: this.sessionId,
         cars: ["Orbital", "Pizza Boy"],
-        compatibility: { protocol: 9, build: "a".repeat(64), content: "b".repeat(64) },
+        compatibility: {
+          protocol: networkProtocolVersion,
+          build: "a".repeat(64),
+          content: "b".repeat(64),
+        },
         message: "Native fixture status",
       });
     }

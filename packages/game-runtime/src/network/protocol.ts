@@ -1,4 +1,5 @@
 import type { NetworkDiagnostics } from "@tm4/lightyear-client";
+import { startSchema } from "@tm4/lightyear-client/schemas";
 import type { Compatibility, RoundState, Start } from "@tm4/lightyear-client/schemas";
 export type {
   Input,
@@ -11,7 +12,6 @@ export type {
 export const stateSections = ["session", "cars", "objects", "world", "sound"] as const;
 export interface NetworkEngine {
   ccall(name: string, result: string, types: string[], values: (string | number)[]): number;
-  _WebNetRequestMatch(players: number, world: number, seed: number, viewSlot: number): number;
   _WebNetSetInput(
     tick: number,
     slot: number,
@@ -22,14 +22,13 @@ export interface NetworkEngine {
   _WebNetQueueTick(tick: number): number;
   _WebNetCancelMatch(): void;
   _WebNetEndReplay(): void;
-  _WebNetEnablePortableCheckpoint?(): number;
   _WebNetCapturePortableCheckpoint?(): number;
   _WebNetBeginPortableReplay?(): number;
 }
 
 export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is NetworkEngine {
   return (
-    typeof runtime._WebNetRequestMatch === "function" &&
+    typeof runtime.ccall === "function" &&
     typeof runtime._WebNetSetInput === "function" &&
     typeof runtime._WebNetQueueTick === "function" &&
     typeof runtime._WebNetCancelMatch === "function" &&
@@ -76,15 +75,23 @@ export interface NetworkPort {
   };
 }
 
-export function configureMatch(engine: NetworkEngine, start: Start, view: number) {
+export function configureMatch(engine: NetworkEngine, proposed: Start, view: number) {
+  const start = startSchema.parse(proposed);
+  if (!start.slots.includes(view)) throw new Error("Invalid local gameplay slot");
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
-  if (world < 0 || start.cars.length !== start.players)
-    throw new Error("Session resources are missing locally");
-  for (const [slot, car] of start.cars.entries()) {
-    if (!engine.ccall("WebNetSelectCar", "number", ["number", "string"], [slot, car]))
-      throw new Error("Missing local car: " + car);
-  }
-  if (start.portable && !engine._WebNetEnablePortableCheckpoint?.())
-    throw new Error("Portable checkpoints are unavailable for this match");
-  return engine._WebNetRequestMatch(start.players, world, start.seed, view);
+  if (world < 0) throw new Error("Session map is missing locally");
+  return engine.ccall(
+    "WebNetStartMatch",
+    "number",
+    ["number", "number", "number", "number", "number", "number", "string"],
+    [
+      start.capacity,
+      start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
+      world,
+      start.seed,
+      view,
+      2 | (start.portable ? 1 : 0),
+      start.cars.join("\n"),
+    ],
+  );
 }

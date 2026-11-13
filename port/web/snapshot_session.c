@@ -1,4 +1,5 @@
 #include "snapshot_session.h"
+#include "net_match.h"
 
 #include "interpolation.h"
 #include "src/main/object/private.h"
@@ -12,7 +13,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 2,
+    SessionVersion = 4,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -42,7 +43,7 @@ typedef struct {
 } SquareRecord;
 
 typedef struct {
-    u32 version, player_count, tick, serial, random, effect_random;
+    u32 version, participant_count, capacity, slot_mask, tick, serial, random, effect_random;
     u16 path_generation, random_generation, health_generation;
     u8 registry_depth, device_count, health_count;
     u16 registry_path[RegistryDepth];
@@ -70,8 +71,9 @@ static int supported_session(void)
         || GameInfo.car_count != count || !WorldSquares)
         return 0;
     for (s32 i = 0; i < count; ++i) {
-        if (!GameInfo.cars[i] || !GameInfo.players[i].car || !GameInfo.players[i].camera
-            || GameInfo.players[i].eliminated)
+        if (!GameInfo.cars[i] || !GameInfo.players[WebNetParticipantSlot(i)].car
+            || !GameInfo.players[WebNetParticipantSlot(i)].camera
+            || GameInfo.players[WebNetParticipantSlot(i)].eliminated)
             return 0;
     }
     return 1;
@@ -153,7 +155,9 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     SessionRecord record;
     memset(&record, 0, sizeof(record));
     record.version = SessionVersion;
-    record.player_count = GameInfo.player_car_count;
+    record.participant_count = GameInfo.player_car_count;
+    record.capacity = WebNetSlotCapacity();
+    record.slot_mask = WebNetSlotMask();
     record.squares = square_count();
     const u32 length = sizeof(record) + record.squares * sizeof(SquareRecord);
     if (!record.squares || length > capacity || !save_devices(&record) || CarHealthPickupCount < 0
@@ -179,10 +183,11 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     record.deathmatch_accept_input = GameInfo.deathmatch_accept_input;
     record.deathmatch_rounds = GameInfo.deathmatch_rounds;
     record.active_cells = square_handle(ObjectActiveInteractionCells, record.squares);
-    for (u32 i = 0; i < record.player_count; ++i) {
-        const Tm4GamePlayer* player = &GameInfo.players[i];
+    for (u32 i = 0; i < record.participant_count; ++i) {
+        const int slot = WebNetParticipantSlot(i);
+        const Tm4GamePlayer* player = &GameInfo.players[slot];
         record.car_order[i] = WebSnapshotLiveHandle(GameInfo.cars[i]);
-        record.players[i] = (PlayerRecord) {
+        record.players[slot] = (PlayerRecord) {
             .car = WebSnapshotLiveHandle(player->car),
             .camera = WebSnapshotLiveHandle(player->camera),
             .lives = player->lives,
@@ -190,7 +195,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
             .losses = player->losses,
             .eliminated = player->eliminated,
             .camera_distance_preset = player->camera_distance_preset,
-            .input = PadJpad[i],
+            .input = PadJpad[slot],
         };
     }
     for (unsigned i = 0; i < OBJECT_LIST_COUNT; ++i)
@@ -290,8 +295,9 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         return 0;
     memcpy(&record, input, sizeof(record));
     u8 current_gte[sizeof(record.gte)];
-    if (record.version != SessionVersion || record.player_count != GameInfo.player_car_count
-        || record.player_count < 2 || record.player_count > MaxPlayers || !record.serial
+    if (record.version != SessionVersion || record.participant_count != GameInfo.player_car_count
+        || record.capacity != WebNetSlotCapacity() || record.slot_mask != WebNetSlotMask()
+        || record.participant_count < 2 || record.participant_count > MaxPlayers || !record.serial
         || record.tick >= INT32_MAX || record.registry_depth > RegistryDepth
         || record.device_count > MaxDevices || record.health_count > ArrayCount(record.health)
         || !record.squares || record.squares != square_count()
@@ -307,32 +313,35 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     if (!directory)
         return 0;
     Car* cars[MaxPlayers];
-    Car* player_cars[MaxPlayers];
-    Camera* cameras[MaxPlayers];
-    for (u32 i = 0; i < record.player_count; ++i) {
+    Car* player_cars[MaxPlayers] = { 0 };
+    Camera* cameras[MaxPlayers] = { 0 };
+    for (u32 i = 0; i < record.participant_count; ++i) {
         cars[i] = find_class(find_object, record.car_order[i], "car");
-        player_cars[i] = find_class(find_object, record.players[i].car, "car");
-        cameras[i] = find_class(find_object, record.players[i].camera, "camera");
-        if (!cars[i] || !player_cars[i] || !cameras[i] || player_cars[i]->controller_index != i
-            || record.players[i].eliminated || record.players[i].input.has_analog > 1
-            || (u32)record.players[i].camera_distance_preset >= 3)
+        const int slot = WebNetParticipantSlot(i);
+        player_cars[slot] = find_class(find_object, record.players[slot].car, "car");
+        cameras[slot] = find_class(find_object, record.players[slot].camera, "camera");
+        if (!cars[i] || !player_cars[slot] || !cameras[slot] || player_cars[slot]->controller_index != slot
+            || record.players[slot].eliminated || record.players[slot].input.has_analog > 1
+            || (u32)record.players[slot].camera_distance_preset >= 3)
             return 0;
     }
-    for (u32 i = 0; i < record.player_count; ++i) {
+    for (u32 i = 0; i < record.participant_count; ++i) {
         int member = 0;
-        for (u32 j = 0; j < record.player_count; ++j) {
-            member |= cars[i] == player_cars[j];
+        for (u32 j = 0; j < record.participant_count; ++j) {
+            int slot_i = WebNetParticipantSlot(i), slot_j = WebNetParticipantSlot(j);
+            member |= cars[i] == player_cars[slot_j];
             if (i != j
-                && (cars[i] == cars[j] || player_cars[i] == player_cars[j]
-                    || cameras[i] == cameras[j]))
+                && (cars[i] == cars[j] || player_cars[slot_i] == player_cars[slot_j]
+                    || cameras[slot_i] == cameras[slot_j]))
                 return 0;
         }
         if (!member)
             return 0;
     }
-    for (u32 i = record.player_count; i < MaxPlayers; ++i) {
+    for (u32 i = 0; i < MaxPlayers; ++i) {
         const PlayerRecord empty = { 0 };
-        if (record.car_order[i] || memcmp(&record.players[i], &empty, sizeof(empty)))
+        if ((i >= record.participant_count && record.car_order[i])
+            || (!WebNetSlotOccupied(i) && memcmp(&record.players[i], &empty, sizeof(empty))))
             return 0;
     }
     Tm4ObjectHeader* lists[OBJECT_LIST_COUNT];
@@ -378,7 +387,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     for (u32 i = 0; i < record.device_count; ++i) {
         const DeviceRecord* saved = &record.devices[i];
         void* object = saved->object ? find_object(saved->object) : NULL;
-        if (!object || saved->car_index < 0 || saved->car_index >= record.player_count
+        if (!object || saved->car_index < 0 || saved->car_index >= record.participant_count
             || saved->weapon_index < 0 || saved->weapon_index >= CarWeaponCount) {
             free_devices(devices);
             return 0;
@@ -411,17 +420,18 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     }
     ObjectActiveInteractionCells
         = record.active_cells ? &WorldSquares[record.active_cells - 1] : NULL;
-    for (u32 i = 0; i < record.player_count; ++i) {
-        const PlayerRecord* player = &record.players[i];
+    for (u32 i = 0; i < record.participant_count; ++i) {
+        const int slot = WebNetParticipantSlot(i);
+        const PlayerRecord* player = &record.players[slot];
         GameInfo.cars[i] = cars[i];
-        GameInfo.players[i].car = player_cars[i];
-        GameInfo.players[i].camera = cameras[i];
-        GameInfo.players[i].lives = player->lives;
-        GameInfo.players[i].wins = player->wins;
-        GameInfo.players[i].losses = player->losses;
-        GameInfo.players[i].eliminated = player->eliminated;
-        GameInfo.players[i].camera_distance_preset = player->camera_distance_preset;
-        PadJpad[i] = player->input;
+        GameInfo.players[slot].car = player_cars[slot];
+        GameInfo.players[slot].camera = cameras[slot];
+        GameInfo.players[slot].lives = player->lives;
+        GameInfo.players[slot].wins = player->wins;
+        GameInfo.players[slot].losses = player->losses;
+        GameInfo.players[slot].eliminated = player->eliminated;
+        GameInfo.players[slot].camera_distance_preset = player->camera_distance_preset;
+        PadJpad[slot] = player->input;
     }
     GameInfo.games_completed = record.games_completed;
     GameInfo.deathmatch_winner = record.deathmatch_winner;

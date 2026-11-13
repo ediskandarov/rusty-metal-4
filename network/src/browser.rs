@@ -128,7 +128,7 @@ impl NetworkClient {
                 .app
                 .world()
                 .resource::<LivePrediction>()
-                .expected_slots
+                .expected_slot_mask
                 .is_some()
         {
             self.prediction_ready = Some(request);
@@ -142,8 +142,8 @@ impl NetworkClient {
         Ok(())
     }
 
-    pub fn prepare_prediction(&mut self, slots: u8, resuming: bool) {
-        live_prediction::prepare(self.app.world_mut(), slots, resuming);
+    pub fn prepare_prediction(&mut self, slot_mask: u8, resuming: bool) {
+        live_prediction::prepare(self.app.world_mut(), slot_mask, resuming);
     }
 
     pub fn prediction_clock(&self) -> u32 {
@@ -154,7 +154,7 @@ impl NetworkClient {
         &mut self,
         anchor: u32,
         epoch: u32,
-        players: u8,
+        capacity: u8,
         slot: u8,
         checkpoint_depth: u16,
     ) -> Result<(), JsValue> {
@@ -162,7 +162,7 @@ impl NetworkClient {
             self.app.world_mut(),
             anchor,
             epoch,
-            players,
+            capacity,
             slot,
             checkpoint_depth,
         )
@@ -181,7 +181,7 @@ impl NetworkClient {
         &mut self,
         anchor: u32,
         epoch: u32,
-        players: u8,
+        capacity: u8,
         slot: u8,
         checkpoint_depth: u16,
         head: u32,
@@ -191,7 +191,7 @@ impl NetworkClient {
             self.app.world_mut(),
             anchor,
             epoch,
-            players,
+            capacity,
             slot,
             checkpoint_depth,
             head,

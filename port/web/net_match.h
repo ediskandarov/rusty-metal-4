@@ -1,6 +1,10 @@
 #ifndef TM4_WEB_NET_MATCH_H
 #define TM4_WEB_NET_MATCH_H
 
+int WebNetSlotCapacity(void);
+int WebNetSlotMask(void);
+int WebNetParticipantSlot(int index);
+int WebNetSlotOccupied(int slot);
 int WebNetLocalViewCount(void);
 int WebNetGameplaySlot(int view);
 int WebNetLocalView(int slot);

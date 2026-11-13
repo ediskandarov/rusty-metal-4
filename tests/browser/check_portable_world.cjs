@@ -25,7 +25,15 @@ const { chromium } = require("playwright");
       const initial = await page.evaluate((shift) => {
         if (shift && !Module._malloc(shift))
           throw new Error("Could not shift simulation allocator");
-        if (!Module._WebNetRequestMatch(2, 0, 12345, -1)) throw new Error("Match refused");
+        if (
+          !Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy"],
+          )
+        )
+          throw new Error("Match refused");
         if (!Module._WebTestPortableWorldOpen()) throw new Error("World layout refused");
         if (!Module._WebTestAimAtDestroyable()) throw new Error("Missing destroyable");
         return {

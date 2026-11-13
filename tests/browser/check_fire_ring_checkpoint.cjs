@@ -35,8 +35,23 @@ const { chromium } = require("playwright");
         };
         if (shift) check(Module._malloc(2 * 1024 * 1024), "arena shift failed");
         const world = Module.ccall("WebNetWorldIndex", "number", ["string"], ["The Oil Rig"]);
-        check(Module._WebNetEnablePortableCheckpoint(), "portable setup failed");
-        check(Module._WebNetRequestMatch(8, world, 12345, -1), "match start failed");
+        check(
+          Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [
+              8,
+              255,
+              world,
+              12345,
+              -1,
+              1,
+              ["Orbital", "Pizza Boy", ...Array(6).fill("Orbital")].join("\n"),
+            ],
+          ),
+          "match start failed",
+        );
         tm4Port.rings = () => {
           Module._WebTestReadFireRings();
           return tm4Port.testFireRings;

@@ -17,12 +17,12 @@ interface RustClient {
   send(json: string): void;
   update(): string;
   diagnostics(): string;
-  prepare_prediction(players: number, resuming: boolean): void;
+  prepare_prediction(slotMask: number, resuming: boolean): void;
   prediction_clock(): number;
   begin_prediction(
     anchor: number,
     epoch: number,
-    players: number,
+    capacity: number,
     slot: number,
     depth: number,
   ): void;
@@ -31,7 +31,7 @@ interface RustClient {
   begin_resumed_prediction(
     anchor: number,
     epoch: number,
-    players: number,
+    capacity: number,
     slot: number,
     depth: number,
     head: number,
@@ -76,17 +76,17 @@ export async function connectNetwork(endpoint: string) {
       ...diagnosticsSchema.parse(JSON.parse(client.diagnostics())),
       pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
     }),
-    preparePrediction: (players: number, resuming: boolean) =>
-      client.prepare_prediction(players, resuming),
+    preparePrediction: (slotMask: number, resuming: boolean) =>
+      client.prepare_prediction(slotMask, resuming),
     predictionClock: () => client.prediction_clock(),
     beginPrediction: (
       anchor: number,
       epoch: number,
-      players: number,
+      capacity: number,
       slot: number,
       depth: number,
     ) => {
-      client.begin_prediction(anchor, epoch, players, slot, depth);
+      client.begin_prediction(anchor, epoch, capacity, slot, depth);
       lastPoll = performance.now();
       maxPollGapMs = maxUpdateMs = 0;
     },
@@ -95,13 +95,13 @@ export async function connectNetwork(endpoint: string) {
     beginResumedPrediction: (
       anchor: number,
       epoch: number,
-      players: number,
+      capacity: number,
       slot: number,
       depth: number,
       head: number,
       sequence: number,
     ) => {
-      client.begin_resumed_prediction(anchor, epoch, players, slot, depth, head, sequence);
+      client.begin_resumed_prediction(anchor, epoch, capacity, slot, depth, head, sequence);
       lastPoll = performance.now();
       maxPollGapMs = maxUpdateMs = 0;
     },

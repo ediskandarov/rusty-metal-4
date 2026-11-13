@@ -1,6 +1,6 @@
 # Network implementation audit
 
-Updated 2026-11-11 for the experimental networking implementation.
+Updated 2026-11-13 for the experimental networking implementation.
 The [v0.1 requirements](network-requirements-v0.1.md) remain the acceptance contract;
 this page records actual coverage and limitations, not revised requirements.
 
@@ -148,7 +148,16 @@ and resets the destination on failure. Interaction extenders must share their
 owner's root. Only that root may own the collision `seen` list.
 
 Portable session roots support 2–8 active human participants without mods or
-eliminated players. Capture records the actual count; restore checks distinct
+eliminated players, including holes in the gameplay-slot range. Startup carries
+capacity separately from the occupied slots; protocol 12 and portable session
+record version 4 bind both values. Native journals use version 2 for the
+new startup header; room archival still retains opaque version-1 journals.
+Slots 0/3/7, 0/3 with a free tail, and 3/6 without slot zero pass same-instance
+rollback and fresh-instance portable continuation at declared capacity eight.
+The open-lobby 0/3/7 browser fixture and authenticated room 3/6 fixture exercise
+native control, camera/HUD ownership and reload recovery. Vacancies have no car or camera,
+provide no clock/readiness vote or accepted-input frontier, and receive no result.
+The public match flow still prepares a dense fixed roster. Capture records the actual count; restore checks distinct
 player/car/camera bindings and the car-order permutation before committing.
 Fresh-instance and in-place replay checks cover 3, 4 and 8 participants on
 Construction Yard. Rendered Wasmtime reconnect covers two, four and eight active
@@ -337,7 +346,21 @@ sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` a
 
 Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
 site. Run `bun tests/browser/check_fire_ring_checkpoint.cjs` on the same site for
-terrain-bound and radius-limited fire rings. Set `TM4_PORTABLE_PLAYERS` to 2–8
+terrain-bound and radius-limited fire rings. The sparse preparation fixture uses the ordinary match path without a production
+roster override. With matching diagnostic build/resources, start
+`cargo +1.95.0 test --manifest-path network/Cargo.toml --features rollback_probe sparse_match_browser_fixture -- --ignored --nocapture`
+from the pinned Rust environment, supplying `TM4_MATCH_LISTEN` and the usual
+simulation/resource paths and an absolute checkout-local `TM4_JOURNAL_DIR`. Then run `bun tests/browser/check_sparse_slots.cjs`
+with that endpoint and site URL. Stop the fixture process afterwards.
+For authenticated room coverage, start `sparse_room_match_browser_fixture` instead
+and set `TM4_SPARSE_ROOM=1` on the browser command. The focused Wasmtime test is
+`sparse_slots_start_rollback_and_portable_continuation`; it also verifies capacity
+mismatch rejection and sparse Deathmatch winner/loss attribution.
+`explicit_startup_rejects_missing_or_malformed_configuration_without_sticky_state`
+checks rejection, cancellation and a later startup with different slots/capacity. Generated results
+remain under ignored build output.
+
+Set `TM4_PORTABLE_PLAYERS` to 2–8
 for participant-root coverage.
 Set `TM4_PORTABLE_SCENERY=1` for destroyed scenery or
 `TM4_PORTABLE_EXTENDERS=1` for a cross-owner reference rejection and retry.

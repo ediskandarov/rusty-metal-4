@@ -1,4 +1,5 @@
 import { getBuildManifest } from "@tm4/lightyear-client";
+import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
 import type { DiscAssets } from "@tm4/resources/loader/types";
 
 import { type GameModule, requireRuntime } from "./module.ts";
@@ -72,7 +73,11 @@ export async function startGame(
             globalThis as typeof globalThis & {
               tm4Port: import("../network/protocol.ts").NetworkPort;
             }
-          ).tm4Port.compatibility = { protocol: 10, build: build.sha256, content };
+          ).tm4Port.compatibility = {
+            protocol: networkProtocolVersion,
+            build: build.sha256,
+            content,
+          };
           resolve(module);
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)));

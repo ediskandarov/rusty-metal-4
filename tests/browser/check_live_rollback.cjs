@@ -679,8 +679,12 @@ const summary = (page) =>
     await stalled.bringToFront();
     const restart = await stalled.evaluate(async () => {
       const retained = Module._WebNetLocalCheckpointStorageBytes();
-      const ready =
-        Module._WebNetEnableRenderedPrediction() && Module._WebNetRequestMatch(2, 0, 12345, 0);
+      const ready = Module.ccall(
+        "WebNetStartMatch",
+        "number",
+        ["number", "number", "number", "number", "number", "number", "string"],
+        [2, 3, 0, 12345, 0, 2, "Orbital\nPizza Boy"],
+      );
       if (!ready) throw new Error("Could not restart rendered C fixture");
       globalThis.tm4LiveTrace.fixtures = {};
       globalThis.tm4LiveTrace.world = false;

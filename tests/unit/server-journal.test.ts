@@ -20,10 +20,10 @@ function storage() {
   };
   return { map, api: api as unknown as JournalStorage };
 }
-function response(size: number) {
+function response(size: number, version = 2) {
   const bytes = new Uint8Array(size).fill(42);
   bytes.set(new TextEncoder().encode("TM4JRNL"));
-  bytes[7] = 1;
+  bytes[7] = version;
   return new Response(bytes, { headers: { "Content-Length": String(size) } });
 }
 test("archive grows across chunks, survives recreation and expires", async () => {
@@ -53,4 +53,12 @@ test("invalid, shortened and oversized responses preserve previous journal", asy
     archive.save(new Response("bad", { headers: { "content-length": "999999999" } })),
   ).rejects.toThrow("limit");
   expect((await archive.download()).headers.get("content-length")).toBe("64");
+});
+
+test("legacy journal archives remain readable while unsupported versions are rejected", async () => {
+  const { api } = storage();
+  const archive = new ServerJournal(api);
+  await archive.save(response(64, 1));
+  expect(new Uint8Array(await (await archive.download()).arrayBuffer())[7]).toBe(1);
+  await expect(archive.save(response(64, 3))).rejects.toThrow("Invalid");
 });

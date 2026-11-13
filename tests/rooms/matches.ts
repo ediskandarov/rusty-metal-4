@@ -6,7 +6,12 @@ import { monitoringGrace, type RoomMatch } from "../../apps/rustymetal4.com/src/
 import { eventually, runtime } from "./runtime.ts";
 const mf = await runtime();
 const origin = (await mf.ready).origin;
-const compatibility = { protocol: 9, build: "a".repeat(64), content: "b".repeat(64) };
+import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
+const compatibility = {
+  protocol: networkProtocolVersion,
+  build: "a".repeat(64),
+  content: "b".repeat(64),
+};
 const sockets: { close(): void }[] = [];
 const browsers = Array.from({ length: 3 }, () => {
   let cookie = "";

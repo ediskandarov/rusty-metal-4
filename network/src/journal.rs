@@ -15,7 +15,7 @@ use tm4_network::{
     },
 };
 
-const MAGIC: &[u8; 8] = b"TM4JRNL\x01";
+const MAGIC: &[u8; 8] = b"TM4JRNL\x02";
 const HEADER_LIMIT: usize = 4096;
 const CACHE_LIMIT: usize = 8 * 1024 * 1024;
 const MAX_FRAME_BYTES: usize = journal_frame_bytes(MAX_PLAYERS);
@@ -31,8 +31,7 @@ pub struct Header {
 impl Header {
     fn valid(&self) -> bool {
         let start = &self.start;
-        (2..=MAX_PLAYERS).contains(&start.players)
-            && start.cars.len() == start.players
+        start.valid_slots()
             && start.epoch == 1
             && !start.world.is_empty()
             && start.cars.iter().all(|car| !car.is_empty())
@@ -138,7 +137,7 @@ impl Journal {
         writer.write_all(&bytes)?;
         writer.write_all(&rolling.to_le_bytes())?;
         writer.flush()?;
-        let width = journal_frame_bytes(header.start.players);
+        let width = journal_frame_bytes(header.start.capacity);
         Ok(Self {
             path,
             writer,
@@ -284,7 +283,7 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
         return Err(invalid("Invalid journal startup"));
     }
     let mut summary = Summary {
-        bytes_per_tick: journal_frame_bytes(header.start.players),
+        bytes_per_tick: journal_frame_bytes(header.start.capacity),
         header,
         ticks: 0,
         first_unsupported_tick: None,
@@ -371,7 +370,8 @@ mod tests {
     fn header(players: usize) -> Header {
         Header {
             start: SessionStart {
-                players,
+                capacity: players,
+                slots: (0..players).map(|slot| slot as u8).collect(),
                 world: "Construction Yard".into(),
                 cars: vec!["Orbital".into(); players],
                 compatibility: Compatibility {

@@ -121,11 +121,11 @@ void WebLevelStart(void)
     ObjectConstructor();
     checkpoint_arena = WebNetLocalCheckpointSupported() && WebCheckpointArenaOpen();
     WebCheckpointArenaSelect(checkpoint_arena);
-    s32 camera_count
-        = GameInfo.player_count + (WebNetMatchActive() ? GameInfo.extra_player_count : 0);
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i) {
-        GameInfo.players[i].camera = i < camera_count ? ObjectCreate("camera", 0, NULL) : NULL;
-        assert(i >= camera_count || GameInfo.players[i].camera);
+        const int needs_camera
+            = WebNetMatchActive() ? WebNetSlotOccupied(i) : i < GameInfo.player_count;
+        GameInfo.players[i].camera = needs_camera ? ObjectCreate("camera", 0, NULL) : NULL;
+        assert(!needs_camera || GameInfo.players[i].camera);
     }
     WEB_BROWSER_REPORT({ tm4Port.cameraSlots = []; });
     for (s32 i = 0; i < ArrayCount(GameInfo.players); ++i)

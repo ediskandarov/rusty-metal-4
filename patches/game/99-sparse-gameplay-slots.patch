@@ -1,0 +1,105 @@
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -389,7 +389,7 @@
+             }
+         }
+     }
+-    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index, object_index,
++    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index, WebNetParticipantSlot(object_index),
+         kind, &position, &rotation);
+ }
+ #endif
+--- a/src/main/deathmatch.c
++++ b/src/main/deathmatch.c
+@@ -7,6 +7,7 @@
+ /* Deathmatch rules and score display. Names other than the MAIN.MR export
+  * GameGetFirstDeathmatchWorldName describe inferred behavior. */
+ #include "tm4/main/deathmatch.h"
++#include "port/web/net_match.h"
+ #include "tm4/modules/car.h"
+ 
+ #include "tm4/main/font.h"
+@@ -98,12 +99,12 @@
+     s32 index;
+     game->resume_tournament = 0;
+     for (index = 0; index < game->player_car_count; ++index)
+-        game->players[index].lives = 0;
++        game->players[WebNetParticipantSlot(index)].lives = 0;
+     if (new_match) {
+         game->unknownEC = 1;
+         for (index = 0; index < game->player_car_count; ++index) {
+-            game->players[index].wins = 0;
+-            game->players[index].losses = 0;
++            game->players[WebNetParticipantSlot(index)].wins = 0;
++            game->players[WebNetParticipantSlot(index)].losses = 0;
+         }
+         game->deathmatch_rounds = 0;
+     }
+@@ -178,7 +179,7 @@
+             register s32 pressed TM4_BIND_REGISTER("$5") = 0;
+             s32 player;
+             for (player = pressed; player < game->player_car_count; ++player) {
+-                if (PadJpad[player].pressed_buttons & PADRdown)
++                if (PadJpad[WebNetParticipantSlot(player)].pressed_buttons & PADRdown)
+                     pressed = 1;
+             }
+             if (pressed) {
+@@ -207,16 +208,10 @@
+         game->deathmatch_winner = winner;
+         ++game->players[winner].wins;
+     }
+-    {
+-        s32 player = 0;
+-        if (game->player_car_count > 0) {
+-            register s32* scores TM4_BIND_REGISTER("$4") = (s32*)game;
+-            do {
+-                if (player != winner)
+-                    ++scores[offsetof(Tm4GameInfo, players[0].losses) / sizeof(*scores)];
+-                scores += sizeof(Tm4GamePlayer) / sizeof(s32);
+-            } while (++player < game->player_car_count);
+-        }
++    for (s32 participant = 0; participant < game->player_car_count; ++participant) {
++        s32 slot = WebNetParticipantSlot(participant);
++        if (slot != winner)
++            ++game->players[slot].losses;
+     }
+     game->deathmatch_finished = 1;
+     ++game->deathmatch_rounds;
+@@ -233,7 +228,7 @@
+     } else {
+         s32 index;
+         for (index = 0; index < game->player_car_count; ++index) {
+-            if (game->players[index].wins == game->deathmatch_limit)
++            if (game->players[WebNetParticipantSlot(index)].wins == game->deathmatch_limit)
+                 game->deathmatch_next_mode = GAME_MODE_MENU;
+         }
+     }
+@@ -319,8 +314,8 @@
+             leader = -1;
+             score = leader;
+             for (index = 0; index < game->player_car_count; ++index) {
+-                if (score < game->players[index].wins)
+-                    leader = index;
++                if (score < game->players[WebNetParticipantSlot(index)].wins)
++                    leader = WebNetParticipantSlot(index);
+             }
+         }
+         for (index = 0; index < game->player_car_count; ++index) {
+@@ -328,14 +323,14 @@
+             if (game->player_car_count == 1)
+                 memcpy(buffer, "YOU", sizeof("YOU"));
+             else
+-                sprintf(buffer, "PLAYER %d", index + 1);
+-            if (index == leader) {
++                sprintf(buffer, "PLAYER %d", WebNetParticipantSlot(index) + 1);
++            if (WebNetParticipantSlot(index) == leader) {
+                 flags = DEATHMATCH_TEXT_PULSE;
+                 DeathmatchTextIntensity = rsin((GetCurrentTime() & 4095) << 8) / 2 + ONE;
+             } else
+                 flags = 0;
+             DeathmatchDrawTextLines(display, score_font, lines0, 1, 16, y, flags);
+-            sprintf(buffer, "%d", game->players[index].wins);
++            sprintf(buffer, "%d", game->players[WebNetParticipantSlot(index)].wins);
+             y = DeathmatchDrawTextLines(
+                 display, score_font, lines0, 1, 240, y, flags | FONT_PRINT_CENTER);
+         }

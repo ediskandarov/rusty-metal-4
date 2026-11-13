@@ -14,7 +14,7 @@ use std::{
 };
 use tm4_network::{
     input::Input,
-    protocol::{Catalog, Compatibility, RoundState, Score, SessionStart},
+    protocol::{Catalog, Compatibility, PROTOCOL_VERSION, RoundState, Score, SessionStart},
 };
 use wasmtime::{
     Config, Engine, Instance, Linker, Memory, Module, Store, TypedFunc, WasmParams, WasmResults,
@@ -30,6 +30,8 @@ const LOADING_DEADLINE_EPOCHS: u64 = 900; // The existing 45-second session load
 const CALL_DEADLINE_EPOCHS: u64 = 60; // Preserve the previous authority's three-second tick deadline.
 
 pub struct Simulator {
+    capacity: usize,
+    slots: Vec<u8>,
     store: Store<WasiP1Ctx>,
     instance: Instance,
     memory: Memory,
@@ -190,7 +192,7 @@ impl Simulator {
             "Standalone simulation does not match its build manifest"
         );
         let compatibility = Compatibility {
-            protocol: 10,
+            protocol: PROTOCOL_VERSION,
             build: build.sha256,
             content: resource_content(resources)?,
         };
@@ -308,6 +310,8 @@ impl Simulator {
             }
         });
         let mut result = Self {
+            capacity: 0,
+            slots: Vec::new(),
             store,
             instance,
             memory,
@@ -392,30 +396,30 @@ impl Simulator {
         result
     }
     pub fn start(&mut self, session: &SessionStart) -> Result<(RoundState, bool)> {
+        ensure!(self.capacity == 0, "A simulation is already running");
+        ensure!(session.valid_slots(), "Invalid slot assignment");
         self.deadline_epochs = LOADING_DEADLINE_EPOCHS;
-        if session.portable {
-            ensure!(
-                self.call::<(), i32>("WebNetEnablePortableCheckpoint", ())? == 1,
-                "Portable mode rejected"
-            );
-        }
-        for (slot, car) in session.cars.iter().enumerate() {
-            let accepted = self.with_string(car, |world, address| {
-                world.call::<(i32, u32), i32>("WebNetSelectCar", (slot as i32, address))
-            })?;
-            ensure!(accepted == 1, "Stock car selection rejected: {car}");
-        }
         let world = self.with_string(&session.world, |world, address| {
             world.call::<u32, i32>("WebNetWorldIndex", address)
         })?;
-        ensure!(
-            world >= 0
-                && self.call::<(i32, i32, u32, i32), i32>(
-                    "WebNetRequestMatch",
-                    (session.players as i32, world, session.seed, -1)
-                )? == 1,
-            "Match setup rejected"
-        );
+        let names = session.cars.join("\n");
+        let accepted = self.with_string(&names, |simulator, address| {
+            simulator.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+                "WebNetStartMatch",
+                (
+                    session.capacity as i32,
+                    u32::from(session.slot_mask()),
+                    world,
+                    session.seed,
+                    -1,
+                    u32::from(session.portable),
+                    address,
+                ),
+            )
+        })?;
+        ensure!(accepted == 1, "Match setup rejected");
+        self.capacity = session.capacity;
+        self.slots = session.slots.clone();
         let state = self.state()?;
         let portable = if session.portable {
             match self.snapshot() {
@@ -549,7 +553,10 @@ impl Simulator {
     }
 
     pub fn finish(&mut self) -> Result<()> {
-        self.call::<(), ()>("WebNetCancelMatch", ())
+        self.call::<(), ()>("WebNetCancelMatch", ())?;
+        self.capacity = 0;
+        self.slots.clear();
+        Ok(())
     }
 
     pub fn state(&mut self) -> Result<RoundState> {
@@ -562,7 +569,10 @@ impl Simulator {
             .chunks_exact(4)
             .map(|word| u32::from_le_bytes(word.try_into().unwrap()))
             .collect();
-        ensure!(words[1] <= 8, "Invalid C player count");
+        ensure!(
+            (2..=8).contains(&words[1]) && words[1] as usize == self.capacity,
+            "Invalid C slot capacity"
+        );
         let unsupported = if words[29] == 0 {
             None
         } else {
@@ -586,9 +596,24 @@ impl Simulator {
         })
     }
     pub fn step(&mut self, tick: u32, inputs: &[Input]) -> Result<RoundState> {
+        ensure!(
+            inputs.len() == self.capacity && self.capacity != 0,
+            "Input row does not match slot capacity"
+        );
+        ensure!(
+            inputs
+                .iter()
+                .enumerate()
+                .all(|(slot, input)| self.slots.contains(&(slot as u8))
+                    || *input == Input::default()),
+            "Vacant slot contains input"
+        );
         #[cfg(feature = "rollback_probe")]
         self.apply_fixture(tick)?;
         for (slot, input) in inputs.iter().enumerate() {
+            if !self.slots.contains(&(slot as u8)) {
+                continue;
+            }
             ensure!(
                 self.call::<(u32, i32, u32, u32, i32), i32>(
                     "WebNetSetInput",
@@ -694,14 +719,15 @@ mod tests {
     }
     fn compatibility() -> Compatibility {
         Compatibility {
-            protocol: 10,
+            protocol: PROTOCOL_VERSION,
             build: "local parity test".into(),
             content: "local stock resources".into(),
         }
     }
     fn session() -> SessionStart {
         SessionStart {
-            players: 2,
+            capacity: 2,
+            slots: (0..2).map(|slot| slot as u8).collect(),
             world: "Construction Yard".into(),
             cars: vec!["Orbital".into(), "Pizza Boy".into()],
             seed: 12345,
@@ -760,6 +786,222 @@ mod tests {
 
     #[test]
     #[ignore = "requires private resources and diagnostic Wasm"]
+    fn sparse_slots_start_rollback_and_portable_continuation() -> Result<()> {
+        let (wasm, resources) = paths()?;
+        for slots in [vec![0, 3, 7], vec![0, 3], vec![3, 6]] {
+            let count = slots.len();
+            let winner = i32::from(*slots.last().unwrap());
+            let setup = SessionStart {
+                capacity: 8,
+                slots,
+                cars: ["Orbital", "Pizza Boy", "Crusher"][..count]
+                    .iter()
+                    .map(|car| (*car).into())
+                    .collect(),
+                ..session()
+            };
+            let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+            let (state, portable) = world.start(&setup)?;
+            ensure!(
+                portable
+                    && usize::from(state.remaining) == count
+                    && state.scores.len() == setup.capacity,
+                "Sparse startup or portable capability"
+            );
+            for slot in 0..8 {
+                ensure!(
+                    world.call::<i32, u32>("WebTestNetworkSlotBindings", slot)?
+                        == if setup.slots.contains(&(slot as u8)) {
+                            15
+                        } else {
+                            0
+                        },
+                    "Phantom or incorrect binding at {slot}"
+                );
+            }
+            ensure!(
+                world.call::<(u32, i32, u32, u32, i32), i32>("WebNetSetInput", (0, 1, 0, 0, 0))?
+                    == 0,
+                "Vacancy accepted input"
+            );
+            let inputs = vec![Input::default(); 8];
+            let mut expected = Vec::new();
+            let mut snapshot = Vec::new();
+            for tick in 0..90 {
+                let state = world.step(tick, &inputs)?;
+                ensure!(
+                    usize::from(state.remaining) == count
+                        && state.scores.len() == setup.capacity
+                        && state.unsupported.is_none(),
+                    "Sparse continuation"
+                );
+                let length = world.call::<(), u32>("HeadlessCapture", ())?;
+                ensure!(length > 0, "Canonical capture refused");
+                let address = world.call::<(), u32>("HeadlessCanonical", ())?;
+                let mut canonical = vec![0; length as usize];
+                world
+                    .memory
+                    .read(&world.store, address as usize, &mut canonical)?;
+                expected.push(Row {
+                    tick: tick + 1,
+                    digest: state.digest,
+                    sections: state.sections,
+                    canonical: STANDARD.encode(canonical),
+                });
+                if tick == 29 {
+                    snapshot = world.snapshot()?;
+                    ensure!(
+                        world.call::<(), u32>("WebNetCaptureLocalCheckpoint", ())? > 0,
+                        "Checkpoint capture"
+                    );
+                }
+            }
+            ensure!(
+                world.call::<(), i32>("WebNetRestoreLocalCheckpoint", ())? == 1,
+                "Local restore"
+            );
+            for tick in 30..90 {
+                world.step(tick, &inputs)?;
+                compare(&mut world, &expected[tick as usize])?;
+            }
+            ensure!(
+                world.call::<(), i32>("WebNetFinishLocalReplay", ())? == 1,
+                "End replay"
+            );
+            let mut fresh = Simulator::new(&wasm, &resources, compatibility())?;
+            fresh.start(&setup)?;
+            fresh.restore_portable(&snapshot)?;
+            for tick in 30..90 {
+                fresh.step(tick, &inputs)?;
+                compare(&mut fresh, &expected[tick as usize])?;
+            }
+            if winner < 7 {
+                let mut mismatched = Simulator::new(&wasm, &resources, compatibility())?;
+                mismatched.start(&SessionStart {
+                    capacity: 7,
+                    ..setup.clone()
+                })?;
+                ensure!(
+                    mismatched.restore_portable(&snapshot).is_err(),
+                    "Snapshot accepted a different declared capacity"
+                );
+                ensure!(
+                    mismatched.state()?.scores.len() == 7,
+                    "Rejected restore corrupted destination capacity"
+                );
+            }
+            ensure!(
+                world.call::<i32, i32>("WebTestDefeatOtherSlots", winner)? == 1,
+                "Victory fixture refused"
+            );
+            let mut state = world.state()?;
+            for tick in 90..150 {
+                state = world.step(tick, &inputs)?;
+                if state.round_finished {
+                    break;
+                }
+            }
+            ensure!(
+                state.round_finished && i32::from(state.winner) == winner && state.remaining == 1,
+                "Sparse victory counted vacancies or changed winner: {:?}",
+                state
+            );
+            ensure!(
+                state.scores[winner as usize].wins == 1
+                    && setup
+                        .slots
+                        .iter()
+                        .filter(|slot| i32::from(**slot) != winner)
+                        .all(|slot| state.scores[usize::from(*slot)].losses == 1),
+                "Sparse results attribution"
+            );
+            for slot in (0..setup.capacity).filter(|slot| !setup.slots.contains(&(*slot as u8))) {
+                ensure!(
+                    state.scores[slot].wins == 0 && state.scores[slot].losses == 0,
+                    "Vacancy scored"
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
+    fn explicit_startup_rejects_missing_or_malformed_configuration_without_sticky_state()
+    -> Result<()> {
+        let (wasm, resources) = paths()?;
+        let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+        for (capacity, mask, flags, names) in [
+            (8, 0, 0, "Orbital\nPizza Boy"),
+            (3, 0x09, 0, "Orbital\nPizza Boy"),
+            (8, 0x09, 0, ""),
+            (8, 0x09, 0, "Orbital"),
+            (8, 0x09, 0, "Orbital\nPizza Boy\nCrusher"),
+            (8, 0x09, 0, "Orbital\nUNKNOWN"),
+            (8, 0x09, 4, "Orbital\nPizza Boy"),
+        ] {
+            let accepted = world.with_string(names, |simulator, address| {
+                simulator.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+                    "WebNetStartMatch",
+                    (capacity, mask, 0, 12345, -1, flags, address),
+                )
+            })?;
+            ensure!(accepted == 0, "Invalid configuration accepted");
+            ensure!(
+                world.call::<(), u32>("HeadlessState", ())? == 0,
+                "Failed start left an active match"
+            );
+        }
+        ensure!(
+            world.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+                "WebNetStartMatch",
+                (8, 9, 0, 12345, -1, 0, 0)
+            )? == 0,
+            "Missing roster accepted"
+        );
+        let setup = SessionStart {
+            capacity: 8,
+            slots: vec![0, 3],
+            ..session()
+        };
+        let (state, portable) = world.start(&setup)?;
+        ensure!(
+            portable && state.scores.len() == 8 && state.remaining == 2,
+            "Free tail lost capacity"
+        );
+        let rejected = world.with_string("Orbital\nPizza Boy", |simulator, address| {
+            simulator.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+                "WebNetStartMatch",
+                (4, 10, 0, 77, -1, 0, address),
+            )
+        })?;
+        ensure!(
+            rejected == 0 && world.state()?.digest == state.digest,
+            "An overlapping startup changed the active configuration"
+        );
+        ensure!(
+            world.step(0, &vec![Input::default(); 4]).is_err(),
+            "Short input row accepted"
+        );
+        world.step(0, &vec![Input::default(); 8])?;
+        world.finish()?;
+        let (state, _) = world.start(&SessionStart {
+            capacity: 4,
+            slots: vec![1, 3],
+            portable: false,
+            ..session()
+        })?;
+        ensure!(
+            state.scores.len() == 4
+                && state.remaining == 2
+                && world.call::<(), u32>("HeadlessTick", ())? == 0,
+            "Cancellation retained old configuration"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
     fn fireball_portable_transfer_and_local_rollback() -> Result<()> {
         let (wasm, resources) = paths()?;
         let setup = session();
@@ -769,7 +1011,7 @@ mod tests {
             world.call::<(), u32>("WebTestSpawnMotionFireball", ())? != 0,
             "Fireball creation failed"
         );
-        let inputs = vec![Input::default(); setup.players as usize];
+        let inputs = vec![Input::default(); setup.capacity as usize];
         let mut rows = Vec::new();
         let mut snapshot = Vec::new();
         let mut counts = Vec::new();

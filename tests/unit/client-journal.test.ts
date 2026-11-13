@@ -43,7 +43,6 @@ describe("client diagnostic journal", () => {
       netMatch: { tick: 0, digest: 10, sections: [1, 2, 3, 4, 5], unsupported: null },
     };
     const engine = {
-      _WebNetEnableRenderedPrediction: () => 1,
       _WebNetLocalRollbackDepth: () => 30,
       _WebNetRestoreLocalTick: (tick: number) => {
         port.netMatch!.tick = tick;

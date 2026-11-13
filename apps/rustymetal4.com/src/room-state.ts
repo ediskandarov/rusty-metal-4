@@ -1,3 +1,4 @@
+import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
 import {
   type Compatibility,
   maps,
@@ -294,7 +295,7 @@ export function updatePlayer(state: RoomState, key: string, value: unknown): voi
   let compatibility: Compatibility | null = null;
   if (raw) {
     if (
-      raw.protocol !== 9 ||
+      raw.protocol !== networkProtocolVersion ||
       typeof raw.build !== "string" ||
       !/^[a-f0-9]{64}$/.test(raw.build) ||
       typeof raw.content !== "string" ||

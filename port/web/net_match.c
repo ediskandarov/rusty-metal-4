@@ -29,15 +29,21 @@ typedef struct NetPadInput {
     u8 analog;
 } NetPadInput;
 
-static struct {
-    NetPadInput inputs[8];
+typedef struct NetMatchSetup {
+    s32 capacity;
+    u32 slots;
     char* cars[8];
     char* world;
     u32 seed;
+    s32 view_slot;
+    u32 flags;
+} NetMatchSetup;
+
+static struct {
+    NetMatchSetup setup;
+    NetPadInput inputs[8];
     u32 tick;
     u32 input_mask;
-    s32 players;
-    s32 view_slot;
     PadCache physical_pad;
     int tick_pending;
     int stepping;
@@ -46,25 +52,7 @@ static struct {
     u32 checkpoint_tick;
 } match;
 
-static char* configured_cars[8];
-static int rendered_prediction;
-static int portable_checkpoint;
 static void start_session(void);
-
-EMSCRIPTEN_KEEPALIVE int WebNetSelectCar(s32 slot, const char* name)
-{
-    if (match.players || slot < 0 || slot >= 8 || !name)
-        return 0;
-    const s32 count = RegGetNumberOfDirectoriesS("/objects/car/characters");
-    for (s32 i = 0; i < count; ++i) {
-        char* candidate = RegGetDirectoryNameSN("/objects/car/characters", i);
-        if (candidate && !strcmp(candidate, name)) {
-            configured_cars[slot] = candidate;
-            return 1;
-        }
-    }
-    return 0;
-}
 
 EMSCRIPTEN_KEEPALIVE int WebNetWorldIndex(const char* name)
 {
@@ -93,16 +81,16 @@ static int reject_start(const char* message)
     return 0;
 }
 
-static int session_resources_present(s32 players)
+static int session_resources_present(const NetMatchSetup* setup)
 {
     /* Validate file presence before mutating session state; a rejected start is retryable. */
     const char* common[] = { "/DATA/GAME.MR", "/DATA/GAME.IMG", "/DATA/GAME.VAB" };
     for (unsigned i = 0; i < ArrayCount(common); ++i)
         if (access(common[i], R_OK))
             return reject_start(common[i]);
-    for (s32 i = -1; i < players; ++i) {
-        RegistryDirectory* directory = i < 0 ? GameGetWorldNameDirectoryPtr(match.world)
-                                             : GetMatchingCarDirectory(match.cars[i], NULL);
+    for (s32 i = -1; i < __builtin_popcount(setup->slots); ++i) {
+        RegistryDirectory* directory = i < 0 ? GameGetWorldNameDirectoryPtr(setup->world)
+                                             : GetMatchingCarDirectory(setup->cars[i], NULL);
         const char* name = directory ? RegGetFileDataPS(directory, "filename") : NULL;
         char path[128];
         if (!name || snprintf(path, sizeof(path), "/DATA/%s.MR", name) >= sizeof(path))
@@ -124,35 +112,69 @@ static int session_resources_present(s32 players)
     return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebNetRequestMatch(s32 players, s32 world, u32 seed, s32 view_slot)
+int WebNetSlotCapacity(void) { return match.setup.capacity; }
+int WebNetSlotMask(void) { return match.setup.slots; }
+int WebNetSlotOccupied(int slot)
 {
-    static char characters[] = "/objects/car/characters";
-    if (match.players || WebLevelActive() || players < 2 || players > ArrayCount(match.cars)
-        || view_slot < -1 || view_slot >= players || world < 0 || world >= GameGetNumberOfWorlds())
-        return reject_start("Invalid match configuration or session already running");
+    return slot >= 0 && slot < match.setup.capacity && (match.setup.slots & (1u << slot));
+}
+/* The live car list is dense; player roots and controller indices are actual slots. */
+int WebNetParticipantSlot(int index)
+{
+    if (!WebNetMatchActive())
+        return index;
+    for (int slot = 0; slot < match.setup.capacity; ++slot)
+        if (WebNetSlotOccupied(slot) && index-- == 0)
+            return slot;
+    return -1;
+}
 
-    s32 count = RegGetNumberOfDirectoriesS(characters);
-    s32 slot = 0;
-    for (s32 index = 0; index < count && slot < players; ++index) {
-        char* name = RegGetDirectoryNameSN(characters, index);
-        if (name && !GameIsBossCar(name))
-            match.cars[slot++] = name;
+/* All startup data is mandatory and validated in a local candidate. No prior
+ * selection, failed request or cancelled match can contribute configuration. */
+EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u32 seed,
+    s32 view_slot, u32 flags, const char* car_names)
+{
+    if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8
+        || !slots || (slots & ~((1u << capacity) - 1)) || __builtin_popcount(slots) < 2
+        || view_slot < -1 || view_slot >= capacity
+        || (view_slot >= 0 && !(slots & (1u << view_slot)))
+        || world < 0 || world >= GameGetNumberOfWorlds() || flags > 3 || !car_names
+        || ((flags & 2) && (view_slot < 0 || WebSimulationOnly())))
+        return reject_start("Invalid explicit match configuration or session already running");
+#ifndef TM4_STANDALONE
+    if (flags && EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
+        return reject_start("Checkpoint mode is unavailable with resource or code mods");
+#endif
+    const size_t length = strnlen(car_names, 1024);
+    if (!length || length >= 1024)
+        return reject_start("Missing or oversized mode car roster");
+    NetMatchSetup candidate = { .capacity = capacity, .slots = slots,
+        .world = GameGetWorldName(world), .seed = seed, .view_slot = view_slot, .flags = flags };
+    const char* cursor = car_names;
+    const s32 count = __builtin_popcount(slots);
+    for (s32 car = 0; car < count; ++car) {
+        const char* end = strchr(cursor, '\n');
+        if (!end)
+            end = car_names + length;
+        if (end == cursor || (car == count - 1 ? *end != 0 : *end != '\n'))
+            return reject_start("Mode car roster does not match occupied slots");
+        const s32 available = RegGetNumberOfDirectoriesS("/objects/car/characters");
+        for (s32 i = 0; i < available; ++i) {
+            char* name = RegGetDirectoryNameSN("/objects/car/characters", i);
+            if (name && strlen(name) == (size_t)(end - cursor)
+                && !strncmp(name, cursor, end - cursor)) {
+                candidate.cars[car] = name;
+                break;
+            }
+        }
+        if (!candidate.cars[car])
+            return reject_start("Mode car is unavailable");
+        cursor = end + 1;
     }
-    if (slot != players)
+    if (!session_resources_present(&candidate))
         return 0;
-    for (s32 i = 0; i < players; ++i)
-        if (configured_cars[i])
-            match.cars[i] = configured_cars[i];
-
-    match.world = GameGetWorldName(world);
-    if (!match.world)
-        return reject_start("Invalid match map");
-    if (!session_resources_present(players))
-        return 0;
-    match.seed = seed;
+    match.setup = candidate;
     match.tick = 0;
-    match.players = players;
-    match.view_slot = view_slot;
     WEB_BROWSER_REPORT({
         tm4Port.networkSynchronous = true;
         tm4Port.renderLimit = 30;
@@ -171,22 +193,22 @@ static void start_session(void)
     GameInitialize();
     WebResetNetworkCheats();
     GameInfo.player_count = 1;
-    GameInfo.extra_player_count = match.players - 1;
+    GameInfo.extra_player_count = __builtin_popcount(match.setup.slots) - 1;
     GameInfo.computer_count = 0;
     GameInfo.ally_count = 0;
     GameInfo.pause_player = 0;
     GameInfo.intro_character = NULL;
-    GameInfo.world_name = match.world;
+    GameInfo.world_name = match.setup.world;
     GameInfo.game_type = GAME_TYPE_DEATHMATCH;
     GameInfo.deathmatch_world_selection = DEATHMATCH_WORLD_REPEAT;
     GameInfo.deathmatch_car_selection = DEATHMATCH_OPPONENTS_PLAYER_CHOSEN;
     GameInfo.deathmatch_limit_is_wins = 0;
     GameInfo.deathmatch_limit = 1;
     GameInfo.view_layouts[0] = 0;
-    for (s32 slot = 0; slot < match.players; ++slot) {
-        GameInfo.character_names[slot] = match.cars[slot];
-        GameSetControllerConfigDefault(&GameInfo, slot, 0);
-        GameSetControllerConfigDefault(&GameInfo, slot, 1);
+    for (s32 slot = 0; slot < __builtin_popcount(match.setup.slots); ++slot) {
+        GameInfo.character_names[slot] = match.setup.cars[slot];
+        GameSetControllerConfigDefault(&GameInfo, WebNetParticipantSlot(slot), 0);
+        GameSetControllerConfigDefault(&GameInfo, WebNetParticipantSlot(slot), 1);
     }
     GameInfo.next_mode = GAME_MODE_PLAY;
     WebLevelStart();
@@ -195,9 +217,9 @@ static void start_session(void)
     WEB_BROWSER_REPORT(
         {
             tm4Port.netSession = ({ status : "ready" });
-            tm4Port.netMatch = ({ players : $0, tick : 0, status : "ready" });
+            tm4Port.netMatch = ({ capacity : $0, tick : 0, status : "ready" });
         },
-        match.players);
+        match.setup.capacity);
     WebNetMatchPublishTick();
 }
 
@@ -213,35 +235,13 @@ static const char* checkpoint_resource_blocker(void)
     return NULL;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebNetEnableRenderedPrediction(void)
-{
-    if (match.players || WebLevelActive() || WebSimulationOnly()
-        || EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
-        return 0;
-    rendered_prediction = 1;
-    return 1;
-}
-
 int WebNetRenderedPrediction(void)
 {
-    return rendered_prediction && match.players && match.view_slot >= 0;
+    return WebNetMatchActive() && (match.setup.flags & 2) && match.setup.view_slot >= 0;
 }
-
-EMSCRIPTEN_KEEPALIVE int WebNetEnablePortableCheckpoint(void)
-{
-    if (match.players || WebLevelActive())
-        return 0;
-#ifndef TM4_STANDALONE
-    if (EM_ASM_INT({ return !!Module.tm4ResourceMods || !!Module.tm4CodeMods?.size; }))
-        return 0;
-#endif
-    portable_checkpoint = 1;
-    return 1;
-}
-
 int WebNetPortableCheckpointEnabled(void)
 {
-    return portable_checkpoint;
+    return WebNetMatchActive() && (match.setup.flags & 1);
 }
 
 int WebNetLocalCheckpointSupported(void)
@@ -252,9 +252,9 @@ int WebNetLocalCheckpointSupported(void)
     const int host_checkpoint
         = EM_ASM_INT({ return Module.tm4LocalCheckpoint && !Module.tm4ResourceMods; });
 #endif
-    return match.players && !checkpoint_resource_blocker()
-        && (WebNetRenderedPrediction() || (match.view_slot < 0 && WebSimulationOnly()
-            && (portable_checkpoint || host_checkpoint)));
+    return match.setup.capacity && !checkpoint_resource_blocker()
+        && (WebNetRenderedPrediction() || (match.setup.view_slot < 0 && WebSimulationOnly()
+            && (WebNetPortableCheckpointEnabled() || host_checkpoint)));
 }
 
 static int local_checkpoint_boundary(void)
@@ -359,7 +359,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetCaptureState(void)
 const char* WebNetCapturePortableInto(u8* output, u32 capacity, u32* length)
 {
     *length = 0;
-    if (!portable_checkpoint || !local_checkpoint_boundary() || match.local_replaying)
+    if (!WebNetPortableCheckpointEnabled() || !local_checkpoint_boundary() || match.local_replaying)
         return "portable capture requires a supported live tick boundary";
     const char* blocker = NULL;
     *length = WebSnapshotCapture(output, capacity, &blocker);
@@ -368,7 +368,7 @@ const char* WebNetCapturePortableInto(u8* output, u32 capacity, u32* length)
 
 const char* WebNetRestorePortableFrom(const u8* input, u32 length)
 {
-    if (!portable_checkpoint || !local_checkpoint_boundary() || match.tick || match.local_replaying)
+    if (!WebNetPortableCheckpointEnabled() || !local_checkpoint_boundary() || match.tick || match.local_replaying)
         return "portable restore requires a fresh supported match";
     const char* blocker = NULL;
     if (!WebSnapshotRestore(input, length, &blocker))
@@ -381,7 +381,7 @@ const char* WebNetRestorePortableFrom(const u8* input, u32 length)
 
 EMSCRIPTEN_KEEPALIVE u32 WebNetCapturePortableCheckpoint(void)
 {
-    if (!portable_checkpoint || !local_checkpoint_boundary() || match.local_replaying)
+    if (!WebNetPortableCheckpointEnabled() || !local_checkpoint_boundary() || match.local_replaying)
         return 0;
     u8* bytes = malloc(WebSnapshotMaxBytes);
     if (!bytes)
@@ -402,7 +402,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebNetCapturePortableCheckpoint(void)
 
 EMSCRIPTEN_KEEPALIVE int WebNetBeginPortableReplay(void)
 {
-    if (!portable_checkpoint || !local_checkpoint_boundary() || match.tick || match.local_replaying)
+    if (!WebNetPortableCheckpointEnabled() || !local_checkpoint_boundary() || match.tick || match.local_replaying)
         return 0;
     const u32 length = EM_ASM_INT({
         return (tm4Port.portableCheckpoint && tm4Port.portableCheckpoint.length) || 0;
@@ -432,7 +432,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestRestartNetworkReplay(void)
         return 0;
 
     RegistryDirectory* directory = RegGetCurrentDirectoryPtr();
-    int resources_present = session_resources_present(match.players);
+    int resources_present = session_resources_present(&match.setup);
     RegChangeCurrentDirectoryP(directory);
     if (!resources_present)
         return 0;
@@ -454,42 +454,40 @@ EMSCRIPTEN_KEEPALIVE void WebNetEndReplay(void)
 
 int WebNetMatchActive(void)
 {
-    return match.players != 0;
+    return match.setup.capacity != 0;
 }
 
 EMSCRIPTEN_KEEPALIVE void WebNetCancelMatch(void)
 {
-    if (match.players) {
+    if (match.setup.capacity) {
         WebLevelStop();
         WebNetMatchEnd();
-    } else {
-        rendered_prediction = 0;
     }
 }
 
 int WebNetLocalViewCount(void)
 {
-    return WebNetMatchActive() ? (match.view_slot >= 0) : GameInfo.player_count;
+    return WebNetMatchActive() ? (match.setup.view_slot >= 0) : GameInfo.player_count;
 }
 
 int WebNetGameplaySlot(int view)
 {
-    return WebNetMatchActive() ? match.view_slot : view;
+    return WebNetMatchActive() ? match.setup.view_slot : view;
 }
 
 int WebNetLocalView(int slot)
 {
-    return WebNetMatchActive() ? (slot == match.view_slot ? 0 : -1) : slot;
+    return WebNetMatchActive() ? (slot == match.setup.view_slot ? 0 : -1) : slot;
 }
 
 int WebNetMatchViewSlot(void)
 {
-    return match.view_slot;
+    return match.setup.view_slot;
 }
 
 void WebNetMatchPollInput(void)
 {
-    if (match.view_slot < 0)
+    if (match.setup.view_slot < 0)
         return;
 
     /* The physical controller has separate history from the server's slot inputs. */
@@ -510,9 +508,9 @@ void WebNetMatchPollInput(void)
 void WebNetMatchSeed(void)
 {
     if (WebNetMatchActive()) {
-        GameInfo.random_seed = match.seed;
-        srand(match.seed);
-        srandrand(match.seed);
+        GameInfo.random_seed = match.setup.seed;
+        srand(match.setup.seed);
+        srandrand(match.setup.seed);
     }
 }
 
@@ -520,7 +518,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetSetInput(u32 tick, s32 slot, u32 buttons, u32 axe
 {
     if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.stepping
         || match.tick_pending
-        || slot < 0 || slot >= match.players || buttons > 0xffff || (analog != 0 && analog != 1))
+        || !WebNetSlotOccupied(slot) || buttons > 0xffff || (analog != 0 && analog != 1))
         return 0;
 
     match.inputs[slot] = (NetPadInput) {
@@ -536,7 +534,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetQueueTick(u32 tick)
 {
     if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.stepping
         || match.tick_pending
-        || match.input_mask != (1u << match.players) - 1)
+        || match.input_mask != match.setup.slots)
         return 0;
 
     match.tick_pending = 1;
@@ -551,7 +549,9 @@ int WebNetMatchTakeInput(void)
     if (!match.tick_pending)
         return 0;
 
-    for (s32 slot = 0; slot < match.players; ++slot) {
+    for (s32 slot = 0; slot < 8; ++slot) {
+        if (!WebNetSlotOccupied(slot))
+            continue;
         const NetPadInput* input = &match.inputs[slot];
         PadCache* pad = &PadJpad[slot];
         pad->device_type = input->analog ? PSYZ_CTRL_ANALOG_PAD : PSYZ_CTRL_DIGITAL_PAD;
@@ -605,7 +605,7 @@ void WebNetMatchPublishTick(void)
         match.tick, GameInfo.active_player_count, GameInfo.deathmatch_winner,
         GameInfo.deathmatch_finished, GameInfo.deathmatch_accept_input, GameInfo.next_mode,
         digest, state.session, state.cars, state.objects, state.world, state.sound, unsupported);
-    for (s32 slot = 0; slot < match.players; ++slot) {
+    for (s32 slot = 0; slot < match.setup.capacity; ++slot) {
         const Tm4GamePlayer* player = &GameInfo.players[slot];
         WEB_BROWSER_REPORT(
             { tm4Port.netMatch.scores.push({ wins : $0, losses : $1 }); }, player->wins,
@@ -614,16 +614,13 @@ void WebNetMatchPublishTick(void)
 #if defined(TM4_WEB_TEST_HOOKS) && !defined(TM4_STANDALONE)
     if (match.tick && !WebNetReplaying())
         EM_ASM({ tm4Port.testSimulationTick ?.(); });
-#endif
 
+#endif
 }
 
 void WebNetMatchEnd(void)
 {
-    rendered_prediction = 0;
-    portable_checkpoint = 0;
     memset(&match, 0, sizeof(match));
-    memset(configured_cars, 0, sizeof(configured_cars));
     WEB_BROWSER_REPORT({
         delete tm4Port.netMatch;
         delete tm4Port.netCapturedState;

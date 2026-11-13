@@ -297,14 +297,14 @@ if(TM4_STANDALONE)
     list(FILTER options EXCLUDE REGEX "^-s(ASYNCIFY|ENVIRONMENT|PTHREAD|MODULARIZE|EXPORT_NAME|EXPORTED_RUNTIME_METHODS|EXPORTED_FUNCTIONS)")
     set_property(TARGET tm4_web PROPERTY LINK_OPTIONS "${options}")
     set(exports _malloc _free _HeadlessInitialize _HeadlessCapture _HeadlessCanonical
-        _HeadlessDigest _HeadlessTick _WebNetSelectCar _WebNetWorldIndex _WebNetRequestMatch
+        _HeadlessDigest _HeadlessTick _WebNetWorldIndex _WebNetStartMatch
         _WebNetSetInput _WebNetQueueTick _WebNetCaptureLocalCheckpoint
         _WebNetRestoreLocalCheckpoint _WebNetFinishLocalReplay _WebNetCancelMatch
         _HeadlessState _HeadlessError _HeadlessWorldCount _HeadlessWorldName
         _HeadlessCarCount _HeadlessCarName _HeadlessPortableBuffer _HeadlessPortableCapture
-        _HeadlessPortableRestore _WebNetEnablePortableCheckpoint _WebNetEndReplay)
+        _HeadlessPortableRestore _WebNetEndReplay)
     if(TM4_WEB_TEST_HOOKS)
-        list(APPEND exports _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
+        list(APPEND exports _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget
             _WebTestAimAtWeakDestroyable _WebTestAimAtDestroyable _WebTestPlaceProjectileTarget
             _WebTestPlacePlayerTarget _WebTestPreparePlayerDuel _WebTestPlacePlayerProjectileTarget

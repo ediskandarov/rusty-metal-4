@@ -36,16 +36,18 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
         const cars = firstCar
           ? [firstCar, firstCar === "Pizza Boy" ? "Orbital" : "Pizza Boy"]
           : ["Orbital", "Pizza Boy"];
-        cars.forEach((name, slot) =>
-          assert(
-            Module.ccall("WebNetSelectCar", "number", ["number", "string"], [slot, name]),
-            "car " + name,
-          ),
-        );
         const world = Module.ccall("WebNetWorldIndex", "number", ["string"], [worldName]);
         assert(world >= 0, "world " + worldName);
         const started = performance.now();
-        assert(Module._WebNetRequestMatch(2, world, 12345, -1), "start");
+        assert(
+          Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, world, 12345, -1, 0, cars.join("\n")],
+          ),
+          "start",
+        );
         const startupMs = performance.now() - started;
         rows.push(read());
         const stepMs = [];

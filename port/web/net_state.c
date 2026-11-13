@@ -1,4 +1,5 @@
 #include "net_state.h"
+#include "net_match.h"
 #include "interpolation.h"
 #include "net_state_fields.h"
 #include "tm4/main/game.h"
@@ -19,7 +20,7 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(6); /* State record schema. */
+    VALUE(7); /* State record schema. */
     const Tm4GameInfo* game = &GameInfo;
     VALUE(randseed());
     VALUE(WebRenderEffectRandomState());
@@ -29,6 +30,8 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     VALUE(game->active);
     VALUE(game->game_type);
     VALUE(game->player_car_count);
+    VALUE(WebNetSlotCapacity());
+    VALUE(WebNetSlotMask());
     VALUE(game->computer_count);
     VALUE(game->mode);
     VALUE(game->next_mode);
@@ -40,8 +43,10 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     VALUE(game->deathmatch_accept_input);
     VALUE(game->deathmatch_rounds);
     for (s32 slot = 0; slot < game->player_car_count; ++slot) {
-        const Tm4GamePlayer* player = &game->players[slot];
-        const PadCache* pad = &PadJpad[slot];
+        const s32 actual_slot = WebNetParticipantSlot(slot);
+        VALUE(actual_slot);
+        const Tm4GamePlayer* player = &game->players[actual_slot];
+        const PadCache* pad = &PadJpad[actual_slot];
         VALUE(player->lives);
         VALUE(player->wins);
         VALUE(player->losses);

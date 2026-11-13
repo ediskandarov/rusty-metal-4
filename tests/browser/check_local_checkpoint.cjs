@@ -49,7 +49,16 @@ const { chromium } = require("playwright");
           "canonical bytes differ at " + actual.tick,
         );
       };
-      const start = () => check(Module._WebNetRequestMatch(2, 0, 12345, -1), "match start refused");
+      const start = () =>
+        check(
+          Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy"],
+          ),
+          "match start refused",
+        );
       const projectiles = () => {
         Module._WebTestLocalCheckpointProjectiles();
         return tm4Port.testLiveProjectiles;

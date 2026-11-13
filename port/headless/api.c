@@ -42,7 +42,7 @@ EMSCRIPTEN_KEEPALIVE u32 HeadlessTick(void)
 }
 /* Fixed wasm32 wire layout; all scalar members occupy four bytes. */
 typedef struct {
-    u32 tick, players;
+    u32 tick, capacity;
     s32 remaining, winner, round_finished, accepts_continue, next_mode;
     u32 digest, sections[5];
     s32 scores[8][2];
@@ -62,7 +62,7 @@ const HeadlessRoundState* HeadlessState(void)
     digest = WebNetCaptureDigest(1);
     round_state = (HeadlessRoundState) {
         .tick = MainFrameCount,
-        .players = GameInfo.player_count + GameInfo.extra_player_count,
+        .capacity = WebNetSlotCapacity(),
         .remaining = GameInfo.active_player_count,
         .winner = GameInfo.deathmatch_winner,
         .round_finished = GameInfo.deathmatch_finished,
@@ -74,7 +74,7 @@ const HeadlessRoundState* HeadlessState(void)
     round_state.digest = round_state.sections[0];
     for (u32 i = 1; i < 5; ++i)
         round_state.digest = (round_state.digest ^ round_state.sections[i]) * 16777619u;
-    for (u32 i = 0; i < round_state.players; ++i) {
+    for (u32 i = 0; i < round_state.capacity; ++i) {
         round_state.scores[i][0] = GameInfo.players[i].wins;
         round_state.scores[i][1] = GameInfo.players[i].losses;
     }

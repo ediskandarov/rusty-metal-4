@@ -18,12 +18,13 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
+pub const PROTOCOL_VERSION: u16 = 12;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 29;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
 
-pub const fn journal_frame_bytes(players: usize) -> usize {
-    JOURNAL_FRAME_PREFIX + JOURNAL_INPUT_BYTES * players
+pub const fn journal_frame_bytes(capacity: usize) -> usize {
+    JOURNAL_FRAME_PREFIX + JOURNAL_INPUT_BYTES * capacity
 }
 
 pub fn checksum(seed: u32, bytes: &[u8]) -> u32 {
@@ -38,7 +39,8 @@ pub const CHECKSUM_SEED: u32 = 2_166_136_261;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
 pub struct ParticipantId(pub u64);
 
-/// Fixed-roster binding replicated on the native Lightyear controller.
+/// The participant ID is never reused or rebound: it also identifies this ownership lease.
+/// Binding replicated on the native Lightyear controller.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ControllerIdentity {
     pub participant: ParticipantId,
@@ -92,6 +94,7 @@ pub struct Catalog {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LobbyPlayer {
+    pub slot: usize,
     pub connected: bool,
     pub car: Option<String>,
     pub ready: bool,
@@ -119,7 +122,10 @@ pub struct RoundState {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionStart {
-    pub players: usize,
+    /// Width of slot-addressed input/result rows; independent of participant count.
+    pub capacity: usize,
+    /// Occupied gameplay slots, in the same order as the mode-selected cars.
+    pub slots: Vec<u8>,
     pub world: String,
     pub cars: Vec<String>,
     pub compatibility: Compatibility,
@@ -127,6 +133,28 @@ pub struct SessionStart {
     pub epoch: u32,
     #[serde(default)]
     pub portable: bool,
+}
+
+impl SessionStart {
+    pub fn valid_slots(&self) -> bool {
+        (2..=MAX_PLAYERS).contains(&self.capacity)
+            && (2..=self.capacity).contains(&self.slots.len())
+            && self.slots.len() == self.cars.len()
+            && self
+                .cars
+                .iter()
+                .all(|car| !car.is_empty() && !car.contains(['\0', '\n']))
+            && !self.world.is_empty()
+            && !self.world.contains('\0')
+            && self.slots.windows(2).all(|pair| pair[0] < pair[1])
+            && self
+                .slots
+                .iter()
+                .all(|slot| usize::from(*slot) < self.capacity)
+    }
+    pub fn slot_mask(&self) -> u8 {
+        self.slots.iter().fold(0, |mask, slot| mask | (1 << slot))
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

@@ -22,8 +22,15 @@ const { chromium } = require("playwright");
       const check = (condition, message) => {
         if (!condition) throw new Error(message);
       };
-      check(Module._WebNetEnableRenderedPrediction(), "Could not enable rendered checkpoints");
-      check(Module._WebNetRequestMatch(2, 0, 12345, 0), "Could not start match");
+      check(
+        Module.ccall(
+          "WebNetStartMatch",
+          "number",
+          ["number", "number", "number", "number", "number", "number", "string"],
+          [2, 3, 0, 12345, 0, 2, "Orbital\nPizza Boy"],
+        ),
+        "Could not start match",
+      );
       tm4Port.testMixerStarts = [];
       const step = (tick, mask = 0) => {
         if (mask) Module._WebTestScheduleRollbackAudio(mask);

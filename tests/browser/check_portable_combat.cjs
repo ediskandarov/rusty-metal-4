@@ -20,7 +20,15 @@ const { chromium } = require("playwright");
       });
       const initial = await page.evaluate((shift) => {
         if (shift && !Module._malloc(shift)) throw new Error("Could not shift allocator");
-        if (!Module._WebNetRequestMatch(2, 0, 12345, -1)) throw new Error("Match refused");
+        if (
+          !Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy"],
+          )
+        )
+          throw new Error("Match refused");
         tm4Port.step = (tick) => {
           if (tick === 60 && !Module._WebTestPlaceWeaponTarget(128)) throw new Error("No target");
           if (tick === 110 && !Module._WebTestPlaceWeaponTarget(500)) throw new Error("No target");
@@ -261,7 +269,15 @@ const { chromium } = require("playwright");
     for (const { page } of [source, destination]) {
       await page.evaluate(() => {
         Module._WebNetCancelMatch();
-        if (!Module._WebNetRequestMatch(2, 0, 12345, -1)) throw new Error("Restart refused");
+        if (
+          !Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy"],
+          )
+        )
+          throw new Error("Restart refused");
         Module._WebNetCancelMatch();
       });
     }

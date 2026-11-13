@@ -42,7 +42,23 @@ that distinction by themselves.
 The authority keeps match-local participant IDs and their unique gameplay-slot
 bindings separately from connection, recovery and command-acceptance state.
 Unauthenticated open-lobby re-entry gets a fresh participant ID; authenticated
-room recovery keeps its ID. During the running Deathmatch the binding is fixed:
+room recovery keeps its ID.
+
+Capacity is independent of participant count. Free slots are explicit; preparation
+reservations may be cancelled and reused without renumbering other slots. The
+never-reused participant ID also identifies its lease. Cancelling a reservation or
+open-lobby re-entry allocates a new ID. Starting freezes all prepared bindings;
+reserve/release then reject changes. This stage has no simultaneous live
+reservations and occupied seats.
+
+Preparation changes belong to the Match: retiring a binding removes its native
+controller, connection authorization, credentials and input state before reuse.
+The retired link closes; queued admission requests from it cannot reclaim the new
+reservation while the transport finishes unlinking.
+Room credentials are associated with explicit participant bindings during setup;
+admission does not interpret the room member's list position as a gameplay slot.
+
+During the running Deathmatch the binding is fixed:
 authenticated recovery replaces the connection while retaining the participant,
 slot, C-owned results and input sequence watermark. Credentials
 authenticate an existing participant; they are not its identity.
@@ -56,9 +72,18 @@ and that its controlled slot matches its local view before prediction starts.
 
 C simulation state, results, accepted frames and portable snapshots remain
 slot-addressed under the immutable running roster. The server retains the binding
-through recovery; a separate participant-results copy or C snapshot format change
-is unnecessary here. This boundary does not implement live admission, departure,
-slot reuse or car replacement. Those require the timeline and lifetime rules
+through recovery without a separate participant-results copy. Startup carries
+capacity and actual occupied slots separately. C player roots, pads, camera/HUD
+ownership and results use those actual slots. The existing dense car list and car
+entrant index describe simulation objects, independently of controller slots.
+Vacancies create no car or camera and take no part in readiness, native input
+frontiers or Deathmatch results. Portable session roots validate the occupied-slot
+mask and declared capacity before restoration. The C startup call requires the
+complete capacity, occupied-slot and mode-car configuration; failed or cancelled
+startup contributes no configuration to a later attempt.
+
+This boundary does not implement live admission, departure,
+running slot reuse or car replacement. Those require the timeline and lifetime rules
 below.
 
 ## Slot FSM

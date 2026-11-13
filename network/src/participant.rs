@@ -1,4 +1,4 @@
-//! Fixed-roster participant data and its explicit gameplay-slot bindings.
+//! Capacity, reservations and immutable running participant data and its explicit gameplay-slot bindings.
 //! Connections and input history live separately in the match's control records.
 use std::collections::HashMap;
 
@@ -9,6 +9,7 @@ pub(crate) struct Participant {
     pub car: Option<String>,
     pub lobby_ready: bool,
     pub credential: Option<String>,
+    pub room_credential: Option<String>,
 }
 
 impl Participant {
@@ -30,25 +31,26 @@ impl Participant {
 pub(crate) struct ParticipantRoster {
     participants: HashMap<ParticipantId, Participant>,
     // Slots are simulation capacity; these IDs are never array indices.
-    slots: Vec<ParticipantId>,
+    slots: Vec<Option<ParticipantId>>,
+    frozen: bool,
     next_id: u64,
 }
 
 impl ParticipantRoster {
-    pub fn new(count: usize) -> Self {
-        assert!(count <= MAX_PLAYERS);
+    pub fn new(capacity: usize, reservations: &[usize]) -> Result<Self, &'static str> {
+        if !(2..=MAX_PLAYERS).contains(&capacity) {
+            return Err("invalid capacity");
+        }
         let mut roster = Self {
             participants: HashMap::new(),
-            slots: Vec::new(),
+            slots: vec![None; capacity],
+            frozen: false,
             next_id: 1,
         };
-        // The fixed roster starts with one participant record per lobby seat.
-        // Open-lobby re-entry allocates anew; authenticated recovery does not.
-        for _ in 0..count {
-            let id = roster.allocate();
-            roster.slots.push(id);
+        for &slot in reservations {
+            roster.reserve(slot)?;
         }
-        roster
+        Ok(roster)
     }
 
     fn allocate(&mut self) -> ParticipantId {
@@ -65,40 +67,141 @@ impl ParticipantRoster {
         id
     }
 
+    pub fn capacity(&self) -> usize {
+        self.slots.len()
+    }
+    pub fn count(&self) -> usize {
+        self.participants.len()
+    }
+    pub fn contains(&self, slot: usize) -> bool {
+        self.slots.get(slot).is_some_and(Option::is_some)
+    }
+    pub fn slots(&self) -> impl Iterator<Item = usize> + '_ {
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(slot, id)| id.map(|_| slot))
+    }
+    // These operations are preparation-only. Running membership needs a future deterministic event path.
+    fn reserve(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
+        if self.frozen || slot >= self.capacity() || self.contains(slot) {
+            return Err("slot unavailable");
+        }
+        let id = self.allocate();
+        self.slots[slot] = Some(id);
+        Ok(self.binding(slot))
+    }
+    fn release(&mut self, binding: ControllerIdentity) -> Result<(), &'static str> {
+        if self.frozen || self.resolve(&binding).is_none() {
+            return Err("stale or running binding");
+        }
+        self.slots[usize::from(binding.slot)] = None;
+        self.participants.remove(&binding.participant);
+        Ok(())
+    }
+    pub fn freeze(&mut self) {
+        self.frozen = true;
+    }
+
     pub fn binding(&self, slot: usize) -> ControllerIdentity {
         ControllerIdentity {
-            participant: self.slots[slot],
+            participant: self.slots[slot].expect("free slot has no controller"),
             slot: slot as u8,
         }
     }
 
     pub fn resolve(&self, binding: &ControllerIdentity) -> Option<usize> {
         let slot = usize::from(binding.slot);
-        (self.slots.get(slot) == Some(&binding.participant)).then_some(slot)
+        (self.slots.get(slot) == Some(&Some(binding.participant))).then_some(slot)
     }
 
     pub fn at_slot(&self, slot: usize) -> &Participant {
-        &self.participants[&self.slots[slot]]
+        &self.participants[&self.slots[slot].unwrap()]
     }
 
     pub fn at_slot_mut(&mut self, slot: usize) -> &mut Participant {
-        self.participants.get_mut(&self.slots[slot]).unwrap()
+        self.participants
+            .get_mut(&self.slots[slot].unwrap())
+            .unwrap()
     }
 
     pub fn find_credential(&self, token: &str) -> Option<usize> {
         self.slots.iter().position(|id| {
-            self.participants[id]
-                .credential
-                .as_deref()
-                .is_some_and(|expected| crate::resume::matches_credential(expected, token))
+            id.and_then(|id| {
+                self.participants[&id]
+                    .credential
+                    .as_deref()
+                    .map(|expected| crate::resume::matches_credential(expected, token))
+            })
+            .unwrap_or(false)
         })
     }
 
-    pub fn replace_lobby_participant(&mut self, slot: usize) {
-        let old = self.slots[slot];
-        let new = self.allocate();
-        self.slots[slot] = new;
-        self.participants.remove(&old);
+    pub fn find_room_credential(&self, token: &str) -> Option<ControllerIdentity> {
+        self.slots().find_map(|slot| {
+            self.at_slot(slot)
+                .room_credential
+                .as_deref()
+                .filter(|expected| crate::resume::matches_credential(expected, token))
+                .map(|_| self.binding(slot))
+        })
+    }
+}
+
+// A preparation binding is changed only together with its connection and native
+// controller. Keeping these operations here makes raw roster mutation private.
+impl crate::Match {
+    pub fn reserve_preparation(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
+        if self.started || self.ended {
+            return Err("match membership is frozen");
+        }
+        if self
+            .controls
+            .get(slot)
+            .is_none_or(|control| control.controller.is_some() || control.connection.is_some())
+        {
+            return Err("slot control has not been retired");
+        }
+        let binding = self.participants.reserve(slot)?;
+        self.controls[slot] = crate::ControllerState::default();
+        self.prediction.accepted[slot] = Default::default();
+        Ok(binding)
+    }
+    pub fn release_preparation(
+        &mut self,
+        binding: ControllerIdentity,
+        commands: &mut bevy_ecs::prelude::Commands,
+    ) -> Result<(), &'static str> {
+        if self.started || self.ended {
+            return Err("match membership is frozen");
+        }
+        self.participants.release(binding)?;
+        let slot = usize::from(binding.slot);
+        let retired = std::mem::take(&mut self.controls[slot]);
+        self.prediction.accepted[slot] = Default::default();
+        if let Some(controller) = retired.controller {
+            commands.entity(controller).try_despawn();
+        }
+        if let Some(connection) = retired.connection {
+            self.retired_connections.insert(connection);
+            commands.trigger(lightyear::prelude::Unlink {
+                entity: connection,
+                reason: lightyear::prelude::UnlinkReason::UserRequested(Some(
+                    "Gameplay binding retired".into(),
+                )),
+            });
+        }
+        // The old connection is no longer associated with any participant. A new
+        // reservation never inherits it, its authorization, credential or inputs.
+        Ok(())
+    }
+    pub fn replace_preparation(
+        &mut self,
+        binding: ControllerIdentity,
+        commands: &mut bevy_ecs::prelude::Commands,
+    ) -> Result<ControllerIdentity, &'static str> {
+        self.release_preparation(binding, commands)?;
+        self.reserve_preparation(usize::from(binding.slot))
     }
 }
 
@@ -107,8 +210,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn capacity_vacancy_reuse_and_running_fence() {
+        let mut roster = ParticipantRoster::new(8, &[0, 3, 7]).unwrap();
+        assert_eq!(roster.capacity(), 8);
+        assert_eq!(roster.count(), 3);
+        assert_eq!(roster.slots().collect::<Vec<_>>(), [0, 3, 7]);
+        let old = roster.binding(3);
+        let last = roster.binding(7);
+        assert!(roster.reserve(3).is_err());
+        roster.release(old).unwrap();
+        assert!(!roster.contains(3));
+        assert!(roster.release(old).is_err());
+        let new = roster.reserve(3).unwrap();
+        assert_ne!(old.participant, new.participant);
+        assert_eq!(roster.resolve(&old), None);
+        assert_eq!(roster.binding(7), last);
+        roster.freeze();
+        assert!(roster.release(new).is_err());
+        assert!(roster.reserve(1).is_err());
+        assert_eq!(roster.resolve(&new), Some(3));
+        assert_eq!(roster.count(), 3);
+    }
+
+    #[test]
     fn bindings_are_unique_and_reject_unknown_or_wrong_participants() {
-        let roster = ParticipantRoster::new(8);
+        let roster = ParticipantRoster::new(8, &(0..8).collect::<Vec<_>>()).unwrap();
         let mut seen = std::collections::HashSet::new();
         for slot in 0..8 {
             let binding = roster.binding(slot);
@@ -139,21 +265,16 @@ mod tests {
     }
 
     #[test]
-    fn lobby_reentry_has_a_new_identity_without_reassigning_other_slots() {
-        let mut roster = ParticipantRoster::new(2);
-        let old = roster.binding(0);
-        let other = roster.binding(1);
-        roster.at_slot_mut(0).credential = Some("ab".repeat(32));
-        roster.at_slot_mut(0).car = Some("Orbital".into());
-        assert_eq!(roster.find_credential(&"ab".repeat(32)), Some(0));
-        roster.replace_lobby_participant(0);
-        let current = roster.binding(0);
-        assert_ne!(current.participant, old.participant);
-        assert_eq!(current.slot, old.slot);
-        assert_eq!(roster.resolve(&old), None);
-        assert_eq!(roster.resolve(&current), Some(0));
-        assert_eq!(roster.binding(1), other);
-        assert_eq!(roster.find_credential(&"ab".repeat(32)), None);
-        assert!(roster.at_slot(0).car.is_none());
+    fn empty_capacity_and_initial_reservations_are_explicit() {
+        assert_eq!(ParticipantRoster::new(8, &[]).unwrap().count(), 0);
+        assert!(ParticipantRoster::new(8, &[3, 3]).is_err());
+        assert!(ParticipantRoster::new(8, &[8]).is_err());
+        assert_eq!(
+            ParticipantRoster::new(8, &[3, 6])
+                .unwrap()
+                .slots()
+                .collect::<Vec<_>>(),
+            [3, 6]
+        );
     }
 }

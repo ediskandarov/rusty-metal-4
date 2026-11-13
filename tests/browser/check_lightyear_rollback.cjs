@@ -23,7 +23,16 @@ const { chromium } = require("playwright");
       const check = (condition, message) => {
         if (!condition) throw new Error(message);
       };
-      const start = () => check(Module._WebNetRequestMatch(2, 0, 12345, -1), "C startup refused");
+      const start = () =>
+        check(
+          Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy"],
+          ),
+          "C startup refused",
+        );
       const { attachRollbackProbe } = await import("/rollback-probe.js");
       const contactCorrection = { from: 59, through: 69, buttons: 0x8040 };
       const spawnCorrection = { from: 70, through: 78, buttons: 0x40 };

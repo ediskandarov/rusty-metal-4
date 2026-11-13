@@ -1,4 +1,5 @@
 import type { CatchupChunk } from "@tm4/lightyear-client/schemas";
+import { type SlotConfiguration, slotConfigurationSchema } from "@tm4/lightyear-client/schemas";
 
 import type { NetworkEngine, NetworkPort } from "./protocol.ts";
 import { stateSections } from "./protocol.ts";
@@ -25,7 +26,8 @@ export class SnapshotReplay {
   readonly #engine: NetworkEngine;
   readonly #port: NetworkPort;
   readonly #signal: AbortSignal;
-  readonly #players: number;
+  readonly #capacity: number;
+  readonly #slotMask: number;
   readonly #width: number;
   readonly #start: number;
   #head: number;
@@ -37,14 +39,13 @@ export class SnapshotReplay {
     start: number,
     head: number,
     digest: number,
-    players: number,
+    configuration: SlotConfiguration,
     engine: NetworkEngine,
     port: NetworkPort,
     signal: AbortSignal,
   ) {
+    const { capacity, slots } = slotConfigurationSchema.parse(configuration);
     if (
-      !integer(players, 8) ||
-      players < 2 ||
       !integer(head, 0xffffffff) ||
       !integer(start, head) ||
       start === 0 ||
@@ -56,8 +57,9 @@ export class SnapshotReplay {
     this.#engine = engine;
     this.#port = port;
     this.#signal = signal;
-    this.#players = players;
-    this.#width = framePrefix + inputBytes * players;
+    this.#capacity = capacity;
+    this.#slotMask = slots.reduce((mask, slot) => mask | (1 << slot), 0);
+    this.#width = framePrefix + inputBytes * capacity;
     this.#start = start;
     this.#head = head;
     this.#applied = start;
@@ -153,7 +155,8 @@ export class SnapshotReplay {
       do {
         const tick = this.#applied;
         let input = row + framePrefix;
-        for (let slot = 0; slot < this.#players; slot++, input += inputBytes) {
+        for (let slot = 0; slot < this.#capacity; slot++, input += inputBytes) {
+          if (!(this.#slotMask & (1 << slot))) continue;
           if (
             !engine._WebNetSetInput(
               tick,

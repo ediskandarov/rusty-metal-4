@@ -110,17 +110,22 @@ const { chromium } = require("playwright");
           neon,
           carnival,
         }) => {
-          const select = (slot, name) =>
-            Module.ccall("WebNetSelectCar", "number", ["number", "string"], [slot, name]);
-          if (car && (!select(0, car) || (car === "Pizza Boy" && !select(1, "Orbital"))))
-            throw new Error("Stock car selection refused");
+          const cars = [
+            car || "Orbital",
+            car === "Pizza Boy" ? "Orbital" : "Pizza Boy",
+            ...Array(players - 2).fill("Orbital"),
+          ];
           const worldIndex = Module.ccall("WebNetWorldIndex", "number", ["string"], [world]);
           if (worldIndex < 0) throw new Error("Unknown stock world");
           if (shift && !Module._malloc(2 * 1024 * 1024))
             throw new Error("Simulation arena shift refused");
           if (
-            !Module._WebNetEnablePortableCheckpoint() ||
-            !Module._WebNetRequestMatch(players, worldIndex, 12345, -1)
+            !Module.ccall(
+              "WebNetStartMatch",
+              "number",
+              ["number", "number", "number", "number", "number", "number", "string"],
+              [players, (1 << players) - 1, worldIndex, 12345, -1, 1, cars.join("\n")],
+            )
           )
             throw new Error("Match refused");
           tm4Port.step = (tick) => {
@@ -589,7 +594,22 @@ const { chromium } = require("playwright");
           Module._WebTestPortableWorldClose();
           Module._WebNetCancelMatch();
           const index = Module.ccall("WebNetWorldIndex", "number", ["string"], [world]);
-          if (!Module._WebNetRequestMatch(players, index, 12345, -1))
+          if (
+            !Module.ccall(
+              "WebNetStartMatch",
+              "number",
+              ["number", "number", "number", "number", "number", "number", "string"],
+              [
+                players,
+                (1 << players) - 1,
+                index,
+                12345,
+                -1,
+                0,
+                ["Orbital", "Pizza Boy", ...Array(players - 2).fill("Orbital")].join("\n"),
+              ],
+            )
+          )
             throw new Error("Restart refused");
           Module._WebNetCancelMatch();
         },

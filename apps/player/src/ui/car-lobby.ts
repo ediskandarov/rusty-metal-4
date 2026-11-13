@@ -21,7 +21,7 @@ export function carLobby(): LobbyView {
   choice.addEventListener("change", () => select(false));
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    select(!current?.players[current.slot]?.ready);
+    select(!current?.players.find((player) => player.slot === current?.slot)?.ready);
   });
   // Keep menu controls out of SDL's keyboard input without blocking their defaults.
   for (const name of ["keydown", "keyup"])
@@ -42,14 +42,15 @@ export function carLobby(): LobbyView {
       state.cars.some((car, index) => choice.options[index]?.value !== car)
     )
       choice.replaceChildren(...state.cars.map((car) => new Option(car, car)));
-    const local = state.players[state.slot];
+    const local = state.players.find((player) => player.slot === state.slot);
     if (pending?.car === local?.car && pending?.ready === local?.ready) pending = null;
     choice.value = pending?.car ?? local?.car ?? state.cars[0] ?? "";
     choice.disabled = button.disabled = pending !== null;
     button.textContent = local?.ready ? "Not ready" : "Ready";
     playerLabel.textContent = "Player " + (state.slot + 1);
     roster.replaceChildren(
-      ...state.players.map((player, slot) => {
+      ...state.players.map((player) => {
+        const slot = player.slot;
         const row = document.createElement("li");
         row.textContent =
           "Player " +

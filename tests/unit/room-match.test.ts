@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
+
 import {
   beginPreparation,
   connect,
@@ -13,7 +15,11 @@ import {
   updatePlayer,
 } from "../../apps/rustymetal4.com/src/room-state.ts";
 
-const compatibility = { protocol: 9, build: "a".repeat(64), content: "b".repeat(64) };
+const compatibility = {
+  protocol: networkProtocolVersion,
+  build: "a".repeat(64),
+  content: "b".repeat(64),
+};
 const selected = { car: "Orbital", compatibility, ready: false };
 function fixture() {
   const state = createState("room", "host", { name: "Crew", playerName: "Host" }, 100);

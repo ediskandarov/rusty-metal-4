@@ -89,14 +89,21 @@ impl CheckpointTick {
 #[derive(Clone, Copy)]
 struct Session {
     epoch: u32,
-    slots: u8,
+    capacity: u8,
+    mask: u8,
     local_slot: u8,
     anchor: Tick,
 }
 
+impl Session {
+    fn contains(self, slot: u8) -> bool {
+        slot < self.capacity && self.mask & (1 << slot) != 0
+    }
+}
+
 #[derive(Resource, Default)]
 pub struct LivePrediction {
-    pub expected_slots: Option<u8>,
+    pub expected_slot_mask: Option<u8>,
     session: Option<Session>,
     resume_preparing: bool,
     resume_warmup: bool,
@@ -167,7 +174,7 @@ impl LivePrediction {
         let frontier = world
             .query::<(&ControllerIdentity, &NativeBuffer<Input>)>()
             .iter(world)
-            .filter(|(identity, _)| identity.slot < session.slots)
+            .filter(|(identity, _)| session.contains(identity.slot))
             .map(|(_, buffer)| buffer.last_remote_tick)
             .collect::<Vec<_>>();
         let mut state = world.resource_mut::<Self>();
@@ -211,7 +218,7 @@ impl LivePrediction {
             if tick != state.confirmed + 1 {
                 return Err("Authority sent an out-of-order confirmation".into());
             }
-            if frontier.len() != usize::from(session.slots)
+            if frontier.len() != session.mask.count_ones() as usize
                 || frontier
                     .iter()
                     .any(|end| end.is_none_or(|end| end < session.anchor + tick as i32))
@@ -229,13 +236,13 @@ impl LivePrediction {
             if authority.unsupported.is_some()
                 || local[0] != authority.digest
                 || local[1..] != authority.sections
-                || applied[..usize::from(session.slots)] != inputs[..]
+                || applied[..usize::from(session.capacity)] != inputs[..]
             {
                 return Err(format!(
                     "Predicted simulation diverged at confirmed tick {tick}: local {local:?}, authority {} {:?}, applied {:?}, accepted {inputs:?}",
                     authority.digest,
                     authority.sections,
-                    &applied[..usize::from(session.slots)],
+                    &applied[..usize::from(session.capacity)],
                 ).into());
             }
             state.confirmed = tick;
@@ -304,10 +311,10 @@ fn reject_clock_shift(shift: On<LocalTimelineShift>, mut state: ResMut<LivePredi
     }
 }
 
-pub fn prepare(world: &mut World, slots: u8, resuming: bool) {
+pub fn prepare(world: &mut World, slot_mask: u8, resuming: bool) {
     {
         let mut state = world.resource_mut::<LivePrediction>();
-        state.expected_slots = Some(slots);
+        state.expected_slot_mask = Some(slot_mask);
         state.resume_preparing = resuming;
     }
     if resuming {
@@ -333,7 +340,7 @@ pub fn prepare(world: &mut World, slots: u8, resuming: bool) {
 }
 
 pub fn ready(world: &mut World) -> bool {
-    let Some(expected) = world.resource::<LivePrediction>().expected_slots else {
+    let Some(expected) = world.resource::<LivePrediction>().expected_slot_mask else {
         return false;
     };
     if !world.resource::<LocalTimelineSync>().is_synced() {
@@ -343,7 +350,7 @@ pub fn ready(world: &mut World) -> bool {
         .query::<(&ControllerIdentity, &NativeBuffer<Input>)>()
         .iter(world)
         .count()
-        == usize::from(expected)
+        == expected.count_ones() as usize
         && world
             .query_filtered::<Entity, With<InputMarker<ControllerCommand>>>()
             .iter(world)
@@ -355,7 +362,7 @@ pub fn begin(
     world: &mut World,
     anchor: u32,
     epoch: u32,
-    slots: u8,
+    capacity: u8,
     local_slot: u8,
     checkpoint_depth: u16,
 ) -> Result<(), &'static str> {
@@ -366,7 +373,11 @@ pub fn begin(
         world,
         Session {
             epoch,
-            slots,
+            capacity,
+            mask: world
+                .resource::<LivePrediction>()
+                .expected_slot_mask
+                .unwrap_or(0),
             local_slot,
             anchor: Tick(anchor),
         },
@@ -389,7 +400,7 @@ pub fn begin_resume(
     world: &mut World,
     anchor: u32,
     epoch: u32,
-    slots: u8,
+    capacity: u8,
     local_slot: u8,
     checkpoint_depth: u16,
     head: u32,
@@ -406,7 +417,11 @@ pub fn begin_resume(
         world,
         Session {
             epoch,
-            slots,
+            capacity,
+            mask: world
+                .resource::<LivePrediction>()
+                .expected_slot_mask
+                .unwrap_or(0),
             local_slot,
             anchor,
         },
@@ -444,7 +459,7 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
         .iter(world)
     {
         let slot = usize::from(identity.slot);
-        if slot >= usize::from(session.slots)
+        if !session.contains(identity.slot)
             || present[slot]
             || !participants.insert(identity.participant)
             || (local && identity.slot != session.local_slot)
@@ -454,7 +469,12 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
         present[slot] = true;
         local_present |= local;
     }
-    if present[..usize::from(session.slots)].contains(&false) || !local_present {
+    if present
+        .iter()
+        .enumerate()
+        .any(|(slot, present)| *present != session.contains(slot as u8))
+        || !local_present
+    {
         return Err("A native controller slot was not replicated before play");
     }
     Ok(())
@@ -469,9 +489,9 @@ fn start_at(
 ) -> Result<(), &'static str> {
     if !ready(world)
         || world.resource::<LivePrediction>().session.is_some()
-        || world.resource::<LivePrediction>().expected_slots != Some(session.slots)
-        || !(2..=8).contains(&session.slots)
-        || session.local_slot >= session.slots
+        || world.resource::<LivePrediction>().expected_slot_mask != Some(session.mask)
+        || !(2..=8).contains(&session.capacity)
+        || !session.contains(session.local_slot)
         || checkpoint_depth != PREDICTION_DEPTH
     {
         return Err("Invalid prediction start");
@@ -583,7 +603,7 @@ fn step_world(
     let mut inputs = [None; MAX_SLOTS];
     for (identity, accepted, mut buffer) in &mut slots {
         let slot = identity.slot;
-        if slot >= session.slots || inputs[slot as usize].is_some() {
+        if !session.contains(slot) || inputs[slot as usize].is_some() {
             state.error = Some("Invalid native controller slot".into());
             return;
         }
@@ -634,13 +654,21 @@ fn step_world(
         }
         inputs[slot as usize] = Some(input);
     }
-    let inputs = &inputs[..usize::from(session.slots)];
-    if inputs.iter().any(Option::is_none) {
+    let inputs = &inputs[..usize::from(session.capacity)];
+    if inputs
+        .iter()
+        .enumerate()
+        .any(|(slot, input)| session.contains(slot as u8) != input.is_some())
+    {
         state.error = Some("A native controller slot was not replicated before play".into());
         return;
     }
     let mut applied = [Input::default(); MAX_SLOTS];
-    for (slot, input) in inputs.iter().flatten().enumerate() {
+    for (slot, input) in inputs
+        .iter()
+        .enumerate()
+        .filter_map(|(slot, input)| input.as_ref().map(|input| (slot, input)))
+    {
         applied[slot] = *input;
         if !stage_live_input(tick, slot as u8, input.buttons, input.axes, input.analog) {
             state.error = Some("The game refused a Lightyear controller sample".into());
@@ -680,9 +708,9 @@ fn update_prediction_wait(
         if tick <= session.anchor {
             return;
         }
-        (session.slots, Some(session.anchor))
+        (session.mask, Some(session.anchor))
     } else if state.resume_preparing {
-        let Some(slots) = state.expected_slots else {
+        let Some(slots) = state.expected_slot_mask else {
             return;
         };
         (slots, None)
@@ -692,12 +720,12 @@ fn update_prediction_wait(
     if state.restoring || state.error.is_some() {
         return;
     }
-    let mut count = 0;
+    let mut count: u32 = 0;
     let mut complete = true;
     let mut frontier = None;
     for (_, buffer) in slots_query
         .iter()
-        .filter(|(identity, _)| identity.slot < slots)
+        .filter(|(identity, _)| identity.slot < 8 && slots & (1 << identity.slot) != 0)
     {
         count += 1;
         if let Some(last) = buffer.last_remote_tick.or(anchor) {
@@ -707,7 +735,7 @@ fn update_prediction_wait(
             complete = false;
         }
     }
-    if count != slots || !complete {
+    if count != slots.count_ones() || !complete {
         frontier = anchor;
     }
     if wait.update(tick, frontier, PREDICTION_DEPTH) && wait.is_waiting() {
@@ -798,7 +826,8 @@ mod tests {
     fn session() -> Session {
         Session {
             epoch: 1,
-            slots: 2,
+            capacity: 2,
+            mask: 3,
             local_slot: 0,
             anchor: Tick(267),
         }
@@ -908,6 +937,53 @@ mod tests {
         world.trigger(LocalTimelineShift { delta: -2 });
         assert!(matches!(&world.resource::<LivePrediction>().error,
             Some(PredictionFailure::Fatal(message)) if message == "C simulation refused a tick"));
+    }
+
+    #[test]
+    fn sparse_native_roster_uses_real_local_slot_and_rejects_vacancies() {
+        use crate::protocol::ParticipantId;
+        let mut world = World::new();
+        for slot in [0, 3, 7] {
+            let mut entity = world.spawn((
+                ControllerIdentity {
+                    participant: ParticipantId(100 + slot as u64),
+                    slot,
+                },
+                NativeBuffer::<Input>::default(),
+            ));
+            if slot == 7 {
+                entity.insert(InputMarker::<ControllerCommand>::default());
+            }
+        }
+        let session = Session {
+            capacity: 8,
+            mask: 0x89,
+            local_slot: 7,
+            ..session()
+        };
+        assert!(validate_native_roster(&mut world, session).is_ok());
+        let ghost = world
+            .spawn((
+                ControllerIdentity {
+                    participant: ParticipantId(999),
+                    slot: 2,
+                },
+                NativeBuffer::<Input>::default(),
+            ))
+            .id();
+        assert!(validate_native_roster(&mut world, session).is_err());
+        world.despawn(ghost);
+        assert!(validate_native_roster(&mut world, session).is_ok());
+        assert!(
+            validate_native_roster(
+                &mut world,
+                Session {
+                    local_slot: 0,
+                    ..session
+                }
+            )
+            .is_err()
+        );
     }
 
     #[test]

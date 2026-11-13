@@ -57,9 +57,10 @@ afterEach(async () => {
   connectionPending = undefined;
 });
 
-const compatibility = { protocol: 9, build: "build", content: "content" };
+const compatibility = { protocol: 12, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
-  players: 2,
+  capacity: 2,
+  slots: [0, 1],
   world: "Road Rage",
   cars: ["Crusher", "Trash Man"],
   seed: 12345,
@@ -102,18 +103,19 @@ async function setup(diagnostics?: Connection["diagnostics"]) {
   let cancellations = 0;
   let loads = 0;
   const engine = {
-    ccall: (name: string) => (name === "WebNetWorldIndex" ? 0 : 1),
-    _WebNetRequestMatch() {
-      loads++;
-      port.netMatch = { tick: 0, ...state };
-      return 1;
+    ccall(name: string) {
+      if (name === "WebNetWorldIndex") return 0;
+      if (name === "WebNetStartMatch") {
+        loads++;
+        port.netMatch = { tick: 0, ...state };
+        return 1;
+      }
+      return 0;
     },
     _WebNetCancelMatch() {
       cancellations++;
       delete port.netMatch;
     },
-    _WebNetEnableRenderedPrediction: () => 1,
-    _WebNetEnablePortableCheckpoint: () => 1,
     _WebNetLocalRollbackDepth: () => 12,
     _WebNetSetInput: () => 1,
     _WebNetQueueTick: () => 1,

@@ -4,7 +4,6 @@ import type { ClientJournal } from "./journal.ts";
 import type { NetworkEngine, NetworkPort } from "./protocol.ts";
 
 interface PredictionEngine extends NetworkEngine {
-  _WebNetEnableRenderedPrediction(): number;
   _WebNetRetainLocalCheckpoint(tick: number): number;
   _WebNetLocalCheckpointStorageBytes(): number;
   _WebNetLocalRollbackDepth(): number;
@@ -39,7 +38,7 @@ export function attachLivePrediction(
   journal?: ClientJournal,
 ) {
   const engine = runtime as PredictionEngine;
-  if (globalThis.tm4LivePrediction || !engine._WebNetEnableRenderedPrediction?.())
+  if (globalThis.tm4LivePrediction)
     throw new Error("Live rollback is unavailable for this game or its mods");
 
   delete port.netConfirmedTick;

@@ -1,4 +1,5 @@
 import { z } from "zod";
+export const networkProtocolVersion = 12;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -30,20 +31,56 @@ export const roundStateSchema = z.object({
   scores: z.array(scoreSchema).max(8),
 });
 export type RoundState = z.infer<typeof roundStateSchema>;
-export const startSchema = z.object({
-  players: z.number().int().min(2).max(8),
-  world: z.string(),
-  cars: z.array(z.string()).min(2).max(8),
-  seed: u32,
-  epoch: u32,
-  compatibility: compatibilitySchema,
-  portable: z.boolean().optional(),
-});
+export const slotConfigurationSchema = z
+  .object({
+    capacity: z.number().int().min(2).max(8),
+    slots: z.array(z.number().int().min(0).max(7)).min(2).max(8),
+  })
+  .refine(
+    (start) =>
+      start.slots.length <= start.capacity &&
+      start.slots.every(
+        (slot, index) => slot < start.capacity && (index === 0 || slot > start.slots[index - 1]!),
+      ),
+    "Invalid occupied gameplay slots",
+  );
+export type SlotConfiguration = z.infer<typeof slotConfigurationSchema>;
+export const startSchema = slotConfigurationSchema
+  .safeExtend({
+    world: z
+      .string()
+      .min(1)
+      .regex(/^[^\0]+$/),
+    cars: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .regex(/^[^\0\n]+$/),
+      )
+      .min(2)
+      .max(8),
+    seed: u32,
+    epoch: u32,
+    compatibility: compatibilitySchema,
+    portable: z.boolean().optional(),
+  })
+  .refine(
+    (start) => start.cars.length === start.slots.length,
+    "One mode car is required per occupied slot",
+  );
 export type Start = z.infer<typeof startSchema>;
 export const lobbySchema = z.object({
   cars: z.array(z.string()),
   players: z
-    .array(z.object({ connected: z.boolean(), car: z.string().nullable(), ready: z.boolean() }))
+    .array(
+      z.object({
+        slot: z.number().int().min(0).max(7),
+        connected: z.boolean(),
+        car: z.string().nullable(),
+        ready: z.boolean(),
+      }),
+    )
     .max(8),
 });
 export type LobbyState = z.infer<typeof lobbySchema>;
@@ -84,8 +121,8 @@ export const messageSchema = z.discriminatedUnion("type", [
     message: z.string(),
   }),
   lobbySchema.extend({ type: z.literal("lobby") }),
-  startSchema.extend({ type: z.literal("prediction_prepare") }),
-  startSchema.extend({ type: z.literal("resume_prepare") }),
+  startSchema.safeExtend({ type: z.literal("prediction_prepare") }),
+  startSchema.safeExtend({ type: z.literal("resume_prepare") }),
   z.object({ type: z.literal("resume_credential"), token: sha256Schema }),
   z.object({ type: z.literal("resume_pending") }),
   snapshotBeginSchema,

@@ -87,7 +87,8 @@ export async function joinMatch(
     throw error;
   }
   let slot = -1;
-  let players = 0;
+  let capacity = 0;
+  let slotConfiguration: { capacity: number; slots: number[] } | undefined;
   let epoch = 0;
   let session: SessionState = { phase: "connecting" };
   let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
@@ -123,7 +124,8 @@ export async function joinMatch(
     prediction = undefined;
     clearTimeout(recoveryDeadline);
     if (previous.phase === "recovering") previous.abort.abort();
-    players = 0;
+    capacity = 0;
+    slotConfiguration = undefined;
     epoch = 0;
     slot = -1;
     // Teardown must happen after the current C/wasm callback has returned.
@@ -292,7 +294,7 @@ export async function joinMatch(
           );
           break;
         case "lobby":
-          if (slot < 0 || slot >= message.players.length || prediction)
+          if (slot < 0 || !message.players.some((player) => player.slot === slot) || prediction)
             throw new Error("Invalid lobby state");
           reconnectAttempts = 0;
           clearTimeout(recoveryDeadline);
@@ -318,21 +320,26 @@ export async function joinMatch(
         case "prediction_prepare": {
           lobby(null);
           show("lobby", "Loading Deathmatch…");
-          if (prediction || slot < 0 || slot >= message.players)
+          if (prediction || slot < 0 || !message.slots.includes(slot))
             throw new Error("Invalid live prediction setup");
           journal.identify({
             world: message.world,
             cars: message.cars,
             seed: message.seed,
-            players: message.players,
+            capacity: message.capacity,
+            slots: message.slots,
             epoch: message.epoch,
             compatibility: message.compatibility,
           });
           prediction = attachLivePrediction(engine, port, journal);
-          socket.preparePrediction(message.players, message.type === "resume_prepare");
+          slotConfiguration = { capacity: message.capacity, slots: message.slots };
+          socket.preparePrediction(
+            message.slots.reduce((mask, slot) => mask | (1 << slot), 0),
+            message.type === "resume_prepare",
+          );
           if (!configureMatch(engine, message, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");
-          players = message.players;
+          capacity = message.capacity;
           epoch = message.epoch;
           if (!port.netMatch || port.netMatch.digest === undefined)
             throw new Error("The game did not become ready at tick zero");
@@ -379,11 +386,11 @@ export async function joinMatch(
             message.anchor !== session.offeredAnchor
           )
             throw new Error("Unexpected live prediction clock anchor");
-          socket.beginPrediction(message.anchor, epoch, players, slot, prediction.depth);
+          socket.beginPrediction(message.anchor, epoch, capacity, slot, prediction.depth);
           session = { phase: "playing" };
           reconnectAttempts = 0;
           clearTimeout(recoveryDeadline);
-          show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
+          show("playing", "Player " + (slot + 1) + " · Live prediction");
           break;
         case "snapshot_begin": {
           const active = session.phase === "recovering" ? session : undefined;
@@ -454,7 +461,7 @@ export async function joinMatch(
               message.start,
               message.head,
               message.digest,
-              players,
+              slotConfiguration!,
               engine,
               port,
               active.abort.signal,
@@ -500,7 +507,7 @@ export async function joinMatch(
             socket.beginResumedPrediction(
               anchor,
               epoch,
-              players,
+              capacity,
               slot,
               controller.depth,
               head,
@@ -529,7 +536,7 @@ export async function joinMatch(
           session = { phase: "playing" };
           reconnectAttempts = 0;
           clearTimeout(recoveryDeadline);
-          show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
+          show("playing", "Player " + (slot + 1) + " · Live prediction");
           break;
         case "catchup_frames": {
           const active = session.phase === "recovering" ? session : undefined;

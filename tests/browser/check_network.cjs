@@ -119,7 +119,12 @@ const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.c
     for (const page of pages) {
       assert.equal(
         await page.evaluate(() => {
-          const started = Module._WebNetRequestMatch(2, 0, 54321, -1);
+          const started = Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 54321, -1, 0, "Orbital\nPizza Boy"],
+          );
           const tick = tm4Port.netMatch?.tick;
           Module._WebNetCancelMatch();
           return started === 1 && tick === 0;

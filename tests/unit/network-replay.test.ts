@@ -14,7 +14,6 @@ function setup() {
   const counts = { steps: 0, ends: 0 };
   const engine: NetworkEngine = {
     ccall: () => 0,
-    _WebNetRequestMatch: () => 0,
     _WebNetCancelMatch() {},
     _WebNetSetInput: () => 1,
     _WebNetQueueTick(tick: number) {
@@ -34,7 +33,15 @@ function setup() {
   };
   const abort = new AbortController();
   const open = (start = snapshot, target = head, digest = 42) =>
-    new SnapshotReplay(start, target, digest, 2, engine, port, abort.signal);
+    new SnapshotReplay(
+      start,
+      target,
+      digest,
+      { capacity: 2, slots: [0, 1] },
+      engine,
+      port,
+      abort.signal,
+    );
   return { abort, counts, open };
 }
 

@@ -767,6 +767,16 @@ EMSCRIPTEN_KEEPALIVE int WebTestPreparePlayerDuel(s32 source, s32 destination, s
     return 1;
 }
 
+EMSCRIPTEN_KEEPALIVE unsigned WebTestNetworkSlotBindings(s32 slot)
+{
+    if (slot < 0 || slot >= ArrayCount(GameInfo.players))
+        return 0;
+    const Tm4GamePlayer* player = &GameInfo.players[slot];
+    return !!player->camera | (!!player->car << 1)
+        | ((player->car && player->car->controller_index == slot) << 2)
+        | ((player->camera && player->car && player->camera->object == player->car) << 3);
+}
+
 EMSCRIPTEN_KEEPALIVE void WebTestReadNetworkCombat(void)
 {
     u32 objects = 0, projectiles = 0;
@@ -1424,6 +1434,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceAugerTarget(void)
 }
 
 static int defeat_opponents_pending;
+static int sparse_winner_pending;
 static int deathmatch_rules_pending;
 static int deathmatch_test_wins, deathmatch_test_limit, deathmatch_test_advance;
 
@@ -1437,6 +1448,14 @@ EMSCRIPTEN_KEEPALIVE void WebTestDeathmatchRules(s32 wins, s32 limit, s32 advanc
 EMSCRIPTEN_KEEPALIVE void WebTestLoseDeathmatchRound(void)
 {
     defeat_player_pending = 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestDefeatOtherSlots(s32 winner)
+{
+    if (!WebNetSlotOccupied(winner))
+        return 0;
+    sparse_winner_pending = winner + 1;
+    return 1;
 }
 
 EMSCRIPTEN_KEEPALIVE void WebTestDefeatOpponents(void)
@@ -1520,6 +1539,17 @@ void WebTestApplyPendingActions(void)
         if (player) {
             player->shield_ticks = 0;
             CarApplyDamage(player, NULL, 0x7fffffff, NULL, "DEATHMATCH TEST");
+        }
+    }
+    if (sparse_winner_pending) {
+        Car* winner = GameInfo.players[sparse_winner_pending - 1].car;
+        sparse_winner_pending = 0;
+        for (s32 i = GameInfo.car_count - 1; i >= 0; --i) {
+            Car* car = GameInfo.cars[i];
+            if (car == winner || car->health <= 0)
+                continue;
+            car->shield_ticks = 0;
+            CarApplyDamage(car, winner, 0x7fffffff, NULL, "SPARSE SLOT TEST");
         }
     }
     if (!defeat_opponents_pending)

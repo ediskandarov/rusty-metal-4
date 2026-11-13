@@ -1,4 +1,5 @@
 #include "car.h"
+#include "net_match.h"
 #include "src/main/object/private.h"
 #include "src/modules/car/private.h"
 #include "interpolation.h"
@@ -120,7 +121,7 @@ OSWord WebCarObjectExport(const char* name)
 void WebCarStart(void)
 {
     GameSpawnModeCars();
-    player = GameInfo.players[0].car;
+    player = GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].car;
     assert(player);
     printf("Match cars: %d (%d opponents), player %s\n", GameInfo.car_count,
         GameInfo.active_computer_count, player->character_name);
@@ -130,11 +131,11 @@ void WebCarStart(void)
 void WebCarStep(void)
 {
     ObjectProcess();
-    player = GameInfo.players[0].car;
+    player = GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].car;
     simulation_ticks++;
     WEB_BROWSER_REPORT(
         { tm4Port.controlBindings = Array.from(HEAPU16.subarray($0 >> 1, ($0 >> 1) + $1)); },
-        GameInfo.players[0].bindings[0].actions, GameControlCount);
+        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].bindings[0].actions, GameControlCount);
     WEB_BROWSER_REPORT(
         {
             tm4Port.cars = [];
@@ -194,7 +195,7 @@ void WebCarStep(void)
         car->engine_sound ? car->engine_sound->voices[0].pitch : 0,
         car->engine_sound ? car->engine_sound->voices[0].voice_id : -1, car->engine_sound_name,
         car->controls.gear, car->controls.brake_input, car->controls.ebrake_active,
-        GameInfo.players[0].bindings[0].actions[GameControlGas]);
+        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].bindings[0].actions[GameControlGas]);
     CarWeaponInstance* selected = &car->weapons[car->controls.selected_weapon];
     WEB_BROWSER_REPORT(
         {
@@ -212,5 +213,5 @@ void WebCarStep(void)
             });
         },
         car->health, car->weapons ? 20 : 0, car->controls.selected_weapon,
-        GameInfo.players[0].camera->object == car && GameInfo.players[0].camera->process != NULL);
+        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].camera->object == car && GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].camera->process != NULL);
 }

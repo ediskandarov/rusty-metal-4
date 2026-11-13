@@ -91,7 +91,15 @@ async function direct(browser) {
       page.evaluate((view) => {
         if (view >= 0 && !Module._WebTestOffsetReplayHeap())
           throw new Error("Could not offset the game's object heap");
-        if (!Module._WebNetRequestMatch(2, 0, 12345, view)) throw new Error("Could not initialize");
+        if (
+          !Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [2, 3, 0, 12345, view, 0, "Orbital\nPizza Boy"],
+          )
+        )
+          throw new Error("Could not initialize");
         return structuredClone(tm4Port.netMatch);
       }, view);
     const initial = await init(silent, -1);

@@ -27,10 +27,10 @@ NetworkClient.prototype.update = function() {
       const ccall = engine.ccall;
       engine.ccall = (name, ...args) => name === "WebNetWorldIndex" ? -1 : ccall(name, ...args);
     } else {
-      const start = engine._WebNetRequestMatch;
-      engine._WebNetRequestMatch = (...args) => {
-        const result = start(...args);
-        if (result && !engine._WebTestUnsupportedCarCallback()) throw new Error("Callback fixture rejected");
+      const ccall = engine.ccall;
+      engine.ccall = (name, ...args) => {
+        const result = ccall(name, ...args);
+        if (name === "WebNetStartMatch" && result && !engine._WebTestUnsupportedCarCallback()) throw new Error("Callback fixture rejected");
         return result;
       };
     }

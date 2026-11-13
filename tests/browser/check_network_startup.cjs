@@ -20,8 +20,16 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
     });
     const result = await page.evaluate(() => {
       const trials = [];
+      const rosterNames = ["Orbital", "Pizza Boy", ...Array(6).fill("Orbital")].join("\n");
       const run = (view) => {
-        if (!Module._WebNetRequestMatch(8, 0, 12345, view))
+        if (
+          !Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [8, 255, 0, 12345, view, 0, rosterNames],
+          )
+        )
           throw new Error("Direct initialization failed");
         const initial = structuredClone(tm4Port.netMatch);
         const duplicate = Module._WebNetQueueTick(0);
@@ -42,7 +50,12 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
       trials.push(run(-1));
       trials.push(run(7));
       Module.FS.rename("/DATA/GAME.MR", "/DATA/GAME.MR.missing");
-      const failed = Module._WebNetRequestMatch(8, 0, 12345, -1);
+      const failed = Module.ccall(
+        "WebNetStartMatch",
+        "number",
+        ["number", "number", "number", "number", "number", "number", "string"],
+        [8, 255, 0, 12345, -1, 0, rosterNames],
+      );
       const failedState = tm4Port.netMatch;
       Module.FS.rename("/DATA/GAME.MR.missing", "/DATA/GAME.MR");
       trials.push(run(6));
@@ -71,7 +84,22 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
     const controls = await page.evaluate(() => {
       const results = [];
       for (let view = 0; view < 8; ++view) {
-        if (!Module._WebNetRequestMatch(8, 0, 12345, view))
+        if (
+          !Module.ccall(
+            "WebNetStartMatch",
+            "number",
+            ["number", "number", "number", "number", "number", "number", "string"],
+            [
+              8,
+              255,
+              0,
+              12345,
+              view,
+              0,
+              ["Orbital", "Pizza Boy", ...Array(6).fill("Orbital")].join("\n"),
+            ],
+          )
+        )
           throw new Error("Slot initialization failed");
         for (let tick = 0; tick < 8; ++tick) {
           for (let slot = 0; slot < 8; ++slot)
