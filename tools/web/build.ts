@@ -2,6 +2,7 @@ import { cp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { build } from "astro";
+import { $ } from "bun";
 
 import { root } from "../common.js";
 
@@ -10,6 +11,7 @@ export async function buildSite(
   mode: "release" | "dev" | "diagnostic",
   site: string,
 ) {
+  const commit = (await $`git rev-parse HEAD`.cwd(root).text()).trim();
   const output = join(root, "build", mode, "astro", app);
   await build({
     root: join(root, "apps", app),
@@ -19,7 +21,10 @@ export async function buildSite(
     output: "static",
     build: { assetsPrefix: app === "rustymetal4.com" ? undefined : "." },
     vite: {
-      define: { TM4_DEV: JSON.stringify(mode !== "release") },
+      define: {
+        TM4_DEV: JSON.stringify(mode !== "release"),
+        "import.meta.env.PUBLIC_BUILD_COMMIT": JSON.stringify(commit),
+      },
       build: { target: "esnext", sourcemap: mode === "diagnostic", minify: mode !== "diagnostic" },
     },
   });

@@ -1,6 +1,21 @@
+---
+const commit = import.meta.env.PUBLIC_BUILD_COMMIT;
+---
+
 <details id="troubleshoot">
   <summary>Troubleshoot</summary>
   <aside class="settings-panel" aria-label="Troubleshoot">
+    <p class="build-version">
+      Build{" "}
+      <a
+        href={`https://github.com/ediskandarov/rusty-metal-4/commit/${commit}`}
+        title={commit}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <code>{commit.slice(0, 7)}</code>
+      </a>
+    </p>
     <p>
       Client journal keeps the last 300 simulation ticks (10 seconds), including rollbacks, within a
       2 MiB limit. It freezes when the match stops.

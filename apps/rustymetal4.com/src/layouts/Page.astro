@@ -4,6 +4,7 @@ interface Props {
   title: string;
 }
 const { title } = Astro.props;
+const commit = import.meta.env.PUBLIC_BUILD_COMMIT;
 ---
 
 <!doctype html>
@@ -21,6 +22,17 @@ const { title } = Astro.props;
       <p class="eyebrow">Rusty Metal 4</p>
       <slot />
     </main>
+    <footer class="build-version">
+      Build{" "}
+      <a
+        href={`https://github.com/ediskandarov/rusty-metal-4/commit/${commit}`}
+        title={commit}
+        target="_blank"
+        rel="noopener noreferrer"
+      >
+        <code>{commit.slice(0, 7)}</code>
+      </a>
+    </footer>
     <script>
       import "../client.ts";
     </script>

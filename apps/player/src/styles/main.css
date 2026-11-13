@@ -78,6 +78,9 @@ body {
   font-size: 11px;
   line-height: 1.5;
 }
+.build-version a {
+  color: #a9caff;
+}
 .settings-panel select {
   width: 100%;
 }
