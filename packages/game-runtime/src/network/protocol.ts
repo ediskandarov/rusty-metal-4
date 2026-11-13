@@ -71,7 +71,8 @@ export interface NetworkPort {
     replayChunks?: number;
     replayMs?: number;
     resumeRetargets?: number;
-    transport: NetworkDiagnostics;
+    transport?: NetworkDiagnostics;
+    transportError?: string;
   };
 }
 

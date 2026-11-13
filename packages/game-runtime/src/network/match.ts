@@ -26,6 +26,7 @@ type Recovery = {
   stage: "downloading" | "catchup" | "handoff" | "activating";
   abort: AbortController;
   requestedAt: number;
+  retargets: number;
   download?: SnapshotDownload;
   replay?: SnapshotReplay;
   applied?: Promise<void>;
@@ -99,8 +100,16 @@ export async function joinMatch(
   }
   const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
     receivedFrames: 0,
-    transport: socket.diagnostics(),
   });
+  const sampleTransportDiagnostics = () => {
+    try {
+      diagnostics.transport = socket.diagnostics();
+      delete diagnostics.transportError;
+    } catch (error) {
+      diagnostics.transportError = error instanceof Error ? error.message : String(error);
+    }
+  };
+  sampleTransportDiagnostics();
 
   const send = (message: Request) => socket.send(message);
   const stopAttempt = (phase: "closed" | "suspended") => {
@@ -206,15 +215,9 @@ export async function joinMatch(
     );
   };
   const onerror = (error: unknown) => {
-    try {
-      diagnostics.transport = socket.diagnostics();
-      console.error("Match clock at disconnect", diagnostics.transport);
-    } catch {
-      // The last verified frame still has transport diagnostics after a runtime trap.
-    } finally {
-      const unsupported = port.netMatch?.unsupported;
-      fail(unsupported ? "Live rollback cannot restore this state: " + unsupported : error);
-    }
+    sampleTransportDiagnostics();
+    const unsupported = port.netMatch?.unsupported;
+    fail(unsupported ? "Live rollback cannot restore this state: " + unsupported : error);
   };
 
   port.netMatchInput = (buttons, axes, analog) => {
@@ -249,10 +252,11 @@ export async function joinMatch(
     try {
       switch (message.type) {
         case "prediction_recovery_required":
-          diagnostics.transport = socket.diagnostics();
+          sampleTransportDiagnostics();
           journal.record("recovery-required", port.netMatch?.tick ?? null, {
             ...message,
             transport: diagnostics.transport,
+            transportError: diagnostics.transportError,
           });
           if (port.netMatch?.unsupported || !suspend(message.message))
             throw new Error(port.netMatch?.unsupported ?? message.message);
@@ -323,6 +327,7 @@ export async function joinMatch(
               stage: "downloading",
               abort: new AbortController(),
               requestedAt: performance.now(),
+              retargets: 0,
             };
             show("lobby", "Downloading the current match state…");
             armResumeTimeout();
@@ -461,10 +466,9 @@ export async function joinMatch(
             if (head !== port.netMatch?.tick) throw new Error("Incomplete reconnect replay");
             const depth = (socket.predictionClock() - anchor - head) | 0;
             if (depth > controller.depth) {
-              const retargets = diagnostics.resumeRetargets ?? 0;
-              if (retargets >= 2)
+              if (active.retargets >= 2)
                 throw new Error("Reconnect handoff could not keep up with the native clock");
-              diagnostics.resumeRetargets = retargets + 1;
+              diagnostics.resumeRetargets = ++active.retargets;
               active.stage = "catchup";
               await targetResumeClock(download, active);
               return;
@@ -498,9 +502,9 @@ export async function joinMatch(
             message.head !== session.download?.target
           )
             throw new Error("Unexpected reconnect acknowledgement");
+          journal.record("resumed", message.head, { snapshotTick: session.download.header.tick });
           session = { phase: "playing" };
           clearTimeout(recoveryDeadline);
-          journal.record("resumed", message.head, { snapshotTick: diagnostics.snapshotTick });
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "catchup_frames": {
@@ -527,7 +531,7 @@ export async function joinMatch(
           if (!prediction || session.phase !== "playing")
             throw new Error("Unexpected live confirmation before prediction starts");
           diagnostics.receivedFrames++;
-          diagnostics.transport = socket.diagnostics();
+          sampleTransportDiagnostics();
           if (message.tick % 15 === 0) send({ type: "progress", tick: message.tick });
           prediction.confirm(message.tick + 1);
           port.netConfirmedTick = message.tick + 1;

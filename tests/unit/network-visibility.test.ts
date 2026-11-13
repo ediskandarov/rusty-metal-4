@@ -81,7 +81,7 @@ const state = {
     { wins: 0, losses: 0 },
   ],
 };
-async function setup() {
+async function setup(diagnostics?: Connection["diagnostics"]) {
   const page = Object.assign(new EventTarget(), { hidden: false });
   const window = new EventTarget();
   global("document", page);
@@ -124,7 +124,7 @@ async function setup() {
     },
   };
   const statuses: [string, string][] = [];
-  stop = await joinMatch(
+  const joining = joinMatch(
     engine,
     "wss://game.test/match",
     (status, text) => {
@@ -132,6 +132,8 @@ async function setup() {
     },
     () => {},
   );
+  if (diagnostics) connections[0]!.diagnostics = diagnostics;
+  stop = await joining;
   const first = connections[0]!;
   first.onopen();
   first.onmessage({ type: "welcome", slot: 0 });
@@ -149,7 +151,7 @@ async function nextConnection() {
   expect(next.sent[0]).toEqual({ type: "resume", token, compatibility });
   return next;
 }
-async function restore(next: Connection) {
+async function downloadSnapshot(next: Connection) {
   next.onmessage({ type: "welcome", slot: 0 });
   next.onmessage({ type: "resume_prepare", ...start });
   const bytes = new Uint8Array([1, 2, 3]);
@@ -166,6 +168,9 @@ async function restore(next: Connection) {
   await Promise.resolve();
   expect(next.sent).toContainEqual({ type: "resume_clock", attempt: 1, target: 20 });
   next.onmessage({ type: "resume_catchup", attempt: 1, start: 20, head: 20, digest: 42 });
+}
+async function restore(next: Connection) {
+  await downloadSnapshot(next);
   next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 });
   await Promise.resolve();
   expect(next.sent).toContainEqual({ type: "resume_live_ack", attempt: 1, head: 20 });
@@ -308,4 +313,68 @@ test("real state divergence remains fatal rather than being hidden by resynchron
   expect(clientJournal()?.export().stopped).toContain("diverged");
   await Bun.sleep(550);
   expect(connections).toHaveLength(1);
+});
+
+const unavailableDiagnostics = () => {
+  throw new Error("diagnostics unavailable");
+};
+
+test("unavailable diagnostics do not prevent joining or confirming frames", async () => {
+  const { first, port, statuses } = await setup(unavailableDiagnostics);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+  first.onmessage({ type: "frame", tick: 0, inputs: [], state });
+  expect(port.netConfirmedTick).toBe(1);
+  expect(first.readyState).toBe(WebSocket.OPEN);
+  expect(port.netDiagnostics?.transportError).toBe("diagnostics unavailable");
+  expect(port.netDiagnostics?.transport).toBeUndefined();
+
+  first.diagnostics = () => ({});
+  first.onmessage({ type: "frame", tick: 1, inputs: [], state });
+  expect(port.netConfirmedTick).toBe(2);
+  expect(port.netDiagnostics?.transportError).toBeUndefined();
+});
+
+test("diagnostic failures do not block snapshot recovery or replace transport errors", async () => {
+  const { first, port, statuses } = await setup();
+  first.diagnostics = unavailableDiagnostics;
+  first.onmessage({
+    type: "prediction_recovery_required",
+    reason: "history_expired",
+    message: "history expired",
+  });
+  const next = await nextConnection();
+  next.diagnostics = unavailableDiagnostics;
+  await restore(next);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+  expect(port.netConfirmedTick).toBe(20);
+  next.onerror(new Error("connection lost"));
+  expect(statuses.at(-1)).toEqual(["error", "connection lost"]);
+  expect(clientJournal()?.export().stopped).toBe("connection lost");
+});
+
+test("recovery owns its retarget limit independently of diagnostic counters", async () => {
+  const { first, port, statuses } = await setup();
+  first.beforeUpdate(1500);
+  const next = await nextConnection();
+  await downloadSnapshot(next);
+  next.predictionClock = () => 140;
+  const handoff = { type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 } as const;
+  // An inflated diagnostic counter cannot reject the first retarget.
+  port.netDiagnostics!.resumeRetargets = 999;
+  next.onmessage(handoff);
+  await Bun.sleep(0);
+  expect(port.netDiagnostics!.resumeRetargets).toBe(1);
+  expect(next.readyState).toBe(WebSocket.OPEN);
+  // Resetting diagnostics cannot grant additional retargets either.
+  port.netDiagnostics!.resumeRetargets = 0;
+  next.onmessage(handoff);
+  await Bun.sleep(0);
+  expect(port.netDiagnostics!.resumeRetargets).toBe(2);
+  port.netDiagnostics!.resumeRetargets = 0;
+  next.onmessage(handoff);
+  await Bun.sleep(0);
+  expect(statuses.at(-1)).toEqual([
+    "error",
+    "Reconnect handoff could not keep up with the native clock",
+  ]);
 });
