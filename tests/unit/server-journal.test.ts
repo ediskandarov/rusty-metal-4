@@ -9,14 +9,16 @@ import {
 function storage() {
   const map = new Map<string, unknown>();
   const api = {
-    get: async (k: string) => structuredClone(map.get(k)),
-    put: async (k: string, v: unknown) => {
+    get: (k: string) => Promise.resolve(structuredClone(map.get(k))),
+    put: (k: string, v: unknown) => {
       map.set(k, structuredClone(v));
+      return Promise.resolve();
     },
-    delete: async (keys: string | string[]) => {
+    delete: (keys: string | string[]) => {
       for (const k of typeof keys === "string" ? [keys] : keys) map.delete(k);
+      return Promise.resolve();
     },
-    transaction: async (fn: (tx: unknown) => Promise<void>) => fn(api),
+    transaction: (fn: (tx: unknown) => Promise<void>) => fn(api),
   };
   return { map, api: api as unknown as JournalStorage };
 }

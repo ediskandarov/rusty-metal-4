@@ -127,8 +127,8 @@ if (inRoom) {
       })().then(
         () => {
           uploading = false;
-            if (!active)
-              status(preparationStatus ?? "Server upload complete. Waiting for validation…");
+          if (!active)
+            status(preparationStatus ?? "Server upload complete. Waiting for validation…");
         },
         (error) => {
           uploading = false;

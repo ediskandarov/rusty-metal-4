@@ -35,8 +35,10 @@ export class ServerJournal {
     let offset = 0;
     try {
       for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        const value: unknown = chunk.value;
+        if (!(value instanceof Uint8Array)) throw new Error("Invalid journal chunk");
         if (offset + value.length > length) throw new Error("Journal length mismatch");
         bytes.set(value, offset);
         offset += value.length;

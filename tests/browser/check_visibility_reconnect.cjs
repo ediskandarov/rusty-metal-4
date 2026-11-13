@@ -93,12 +93,16 @@ target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
       );
     };
     await wait(client, recovered);
-    const firstRecovery = await client.evaluate(() => tm4Port.netDiagnostics.recoveredTick);
+    const firstRecovery = await client.evaluate(
+      () => globalThis.tm4Port.netDiagnostics.recoveredTick,
+    );
     // Simulate a frozen event loop without a visibility event (e.g. Safari suspension).
     await client.evaluate(() => {
-      globalThis.previousRecovery = tm4Port.netDiagnostics.recoveredTick;
+      globalThis.previousRecovery = globalThis.tm4Port.netDiagnostics.recoveredTick;
       const deadline = performance.now() + 1500;
-      while (performance.now() < deadline) {}
+      while (performance.now() < deadline) {
+        // Intentionally block the event loop to reproduce browser suspension.
+      }
     });
     await wait(client, () => {
       const port = globalThis.tm4Port;
@@ -112,7 +116,7 @@ target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
     // Keep JS/render/input running but delay the native network pump, so its stale
     // clock and message batch must request recovery rather than throw a fatal error.
     await client.evaluate(() => {
-      globalThis.previousRecovery = tm4Port.netDiagnostics.recoveredTick;
+      globalThis.previousRecovery = globalThis.tm4Port.netDiagnostics.recoveredTick;
       globalThis.testNetworkPauseUntil = performance.now() + 1700;
     });
     await wait(client, () => {
@@ -129,7 +133,7 @@ target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
       "Rust must explicitly request recovery after its timeline expires",
     );
     await client.evaluate(() => {
-      globalThis.previousRecovery = tm4Port.netDiagnostics.recoveredTick;
+      globalThis.previousRecovery = globalThis.tm4Port.netDiagnostics.recoveredTick;
     });
     const statusBefore = await client.locator("#status").textContent();
     const connectionsBefore = await client.evaluate(() => {

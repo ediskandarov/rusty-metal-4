@@ -28,7 +28,7 @@ class Connection {
 }
 let connections: Connection[] = [];
 let connectionPending: Promise<void> | undefined;
-mock.module("@tm4/lightyear-client", () => ({
+await mock.module("@tm4/lightyear-client", () => ({
   NetworkConnectionError,
   connectNetwork: async () => {
     const connection = new Connection();

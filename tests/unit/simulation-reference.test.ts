@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-const { observeAcceptedFrames } = require("../browser/simulation_reference.cjs");
+import { observeAcceptedFrames } from "../browser/simulation_reference.cjs";
 
 test("the browser oracle uses exact authority identities, including reused and high IDs", async () => {
   for (const participants of [
@@ -22,14 +22,17 @@ test("the browser oracle uses exact authority identities, including reused and h
     });
     try {
       const client = {
-        async exposeFunction(_name: string, callback: typeof receive) {
+        exposeFunction(_name: string, callback: typeof receive) {
           receive = callback;
+          return Promise.resolve();
         },
-        async route() {},
+        route() {
+          return Promise.resolve();
+        },
       };
       const reference = {
-        async evaluate(callback: (start: unknown) => unknown, start: unknown) {
-          return callback(start);
+        evaluate(callback: (start: unknown) => unknown, start: unknown) {
+          return Promise.resolve(callback(start));
         },
       };
       const observer = await observeAcceptedFrames(reference, [client]);
