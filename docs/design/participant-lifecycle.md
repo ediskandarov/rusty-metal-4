@@ -37,6 +37,30 @@ that reuse must distinguish the previous owner from the next one, even if both u
 the same numerical slot. Connection credentials and a car pointer cannot provide
 that distinction by themselves.
 
+## Current fixed-roster boundary
+
+The authority keeps match-local participant IDs and their unique gameplay-slot
+bindings separately from connection, recovery and command-acceptance state.
+Unauthenticated open-lobby re-entry gets a fresh participant ID; authenticated
+room recovery keeps its ID. During the running Deathmatch the binding is fixed:
+authenticated recovery replaces the connection while retaining the participant,
+slot, C-owned results and input sequence watermark. Credentials
+authenticate an existing participant; they are not its identity.
+
+The replicated native controller carries both participant ID and slot. Input
+acceptance also checks its current controller entity and connected owner, in
+addition to Lightyear's existing target authorization. Rebinding discards raw
+commands left by the previous connection, without clearing accepted input history
+or the sequence watermark. The client checks unique participant/slot bindings
+and that its controlled slot matches its local view before prediction starts.
+
+C simulation state, results, accepted frames and portable snapshots remain
+slot-addressed under the immutable running roster. The server retains the binding
+through recovery; a separate participant-results copy or C snapshot format change
+is unnecessary here. This boundary does not implement live admission, departure,
+slot reuse or car replacement. Those require the timeline and lifetime rules
+below.
+
 ## Slot FSM
 
 ```mermaid

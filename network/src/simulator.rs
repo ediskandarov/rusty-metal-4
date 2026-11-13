@@ -190,7 +190,7 @@ impl Simulator {
             "Standalone simulation does not match its build manifest"
         );
         let compatibility = Compatibility {
-            protocol: 9,
+            protocol: 10,
             build: build.sha256,
             content: resource_content(resources)?,
         };
@@ -694,7 +694,7 @@ mod tests {
     }
     fn compatibility() -> Compatibility {
         Compatibility {
-            protocol: 9,
+            protocol: 10,
             build: "local parity test".into(),
             content: "local stock resources".into(),
         }

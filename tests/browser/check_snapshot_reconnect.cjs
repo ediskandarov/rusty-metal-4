@@ -141,6 +141,8 @@ target.searchParams.set("match", endpoint);
               }
             }
             for (const message of messages) {
+              if (message.type === "resume_pending") globalThis.testResumePending = true;
+              if (message.type === "welcome") (globalThis.testWelcomeSlots ||= []).push(message.slot);
               if (message.type === "resume_live") {
                 const offers = globalThis.testResumeOffers ||= [];
                 if (offers.length < 4) offers.push({ head: message.head,
@@ -247,7 +249,9 @@ target.searchParams.set("match", endpoint);
     assert.match(credential, /^[a-f0-9]{64}$/);
 
     const duplicate = await open(credential);
-    await duplicate.locator("#status").filter({ hasText: "cannot resume" }).waitFor();
+    await duplicate.waitForFunction(() => globalThis.testResumePending === true);
+    assert.deepEqual(await duplicate.evaluate(() => globalThis.testWelcomeSlots ?? []), []);
+    await waitTick(first, (await confirmed(first)) + 30);
     await duplicate.close();
     await first.locator("canvas").focus();
     await first.keyboard.down("x");

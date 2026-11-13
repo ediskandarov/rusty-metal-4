@@ -34,8 +34,14 @@ pub fn checksum(seed: u32, bytes: &[u8]) -> u32 {
 
 pub const CHECKSUM_SEED: u32 = 2_166_136_261;
 
-#[derive(Component, Clone, Debug, PartialEq, Deserialize, Serialize)]
+/// Match-local participant identity, independent of connection and gameplay slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+pub struct ParticipantId(pub u64);
+
+/// Fixed-roster binding replicated on the native Lightyear controller.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ControllerIdentity {
+    pub participant: ParticipantId,
     pub slot: u8,
 }
 

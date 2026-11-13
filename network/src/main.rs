@@ -1,6 +1,7 @@
 mod assets;
 mod health;
 mod journal;
+mod participant;
 mod resume;
 mod simulator;
 mod system_metrics;
@@ -33,44 +34,42 @@ use tm4_network::{
     },
 };
 
+#[cfg(test)]
+use participant::Participant;
+use participant::ParticipantRoster;
+
 const TICK_RATE: u64 = 30;
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / TICK_RATE);
 const SIMULATOR_LAG_LIMIT: Duration = Duration::from_millis(250);
 
+// Connection, synchronization and command acceptance outlive individual links,
+// but are independent of participant data and its gameplay-slot binding.
 #[derive(Default)]
-struct Player {
-    entity: Option<Entity>,
+struct ControllerState {
+    connection: Option<Entity>,
     ready: bool,
-    car: Option<String>,
-    lobby_ready: bool,
     compatibility: Option<Compatibility>,
     initial_digest: Option<u32>,
     history: InputHistory,
     controller: Option<Entity>,
     received_sequence: u32,
     progress_tick: u32,
-    credential: Option<String>,
     resume: Option<resume::Attempt>,
-    reassign_controller: bool,
 }
 
-impl Player {
-    fn select_car(
-        &mut self,
-        catalog: &Catalog,
-        car: String,
-        ready: bool,
-    ) -> Result<(), &'static str> {
-        if !catalog.cars.contains(&car) {
-            return Err("This car is not available on the server.");
+impl ControllerState {
+    fn disconnect(&mut self, entity: Entity) -> bool {
+        if self.connection != Some(entity) {
+            return false;
         }
-        self.car = Some(car);
-        self.lobby_ready = ready;
-        Ok(())
+        self.connection = None;
+        self.history.disconnect();
+        self.resume = None;
+        true
     }
 
     fn receives_live(&self) -> bool {
-        self.resume.is_none() && self.entity.is_some()
+        self.resume.is_none() && self.connection.is_some()
     }
 }
 
@@ -162,13 +161,13 @@ impl AcceptedTimeline {
         &mut self,
         tick: u32,
         inputs: &[Input],
-        players: &[Player],
+        controls: &[ControllerState],
     ) -> game_protocol::AcceptedInputs {
         use lightyear::input::input_message::{ActionStateSequence, InputTarget, PerTargetData};
         let end = self.anchor.unwrap() + tick as i32 + 1;
         let mut packet = game_protocol::AcceptedInputs::new(end);
         packet.rebroadcast = true;
-        for (slot, player) in players.iter().enumerate() {
+        for (slot, player) in controls.iter().enumerate() {
             let buffer = &mut self.accepted[slot];
             buffer.set(end, ActionState(inputs[slot]));
             if buffer.len() > usize::from(game_protocol::PREDICTION_DEPTH + 1) {
@@ -188,7 +187,8 @@ impl AcceptedTimeline {
 
 #[derive(Resource)]
 struct Match {
-    players: Vec<Player>,
+    participants: ParticipantRoster,
+    controls: Vec<ControllerState>,
     authority_ready: bool,
     compatibility: Option<Compatibility>,
     catalog: Option<Catalog>,
@@ -229,7 +229,7 @@ impl Match {
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
         message: &Message,
     ) {
-        for entity in self.players.iter().filter_map(|player| player.entity) {
+        for entity in self.controls.iter().filter_map(|player| player.connection) {
             send(links, entity, message);
         }
     }
@@ -245,8 +245,8 @@ impl Match {
         let Some(anchor) = self.prediction.anchor else {
             return;
         };
-        for player in &mut self.players {
-            let (Some(entity), Some(attempt)) = (player.entity, player.resume.as_mut()) else {
+        for player in &mut self.controls {
+            let (Some(entity), Some(attempt)) = (player.connection, player.resume.as_mut()) else {
                 continue;
             };
             if attempt.failed {
@@ -456,7 +456,7 @@ impl Match {
             inputs,
             state: state.clone(),
         };
-        for player in &mut self.players {
+        for player in &mut self.controls {
             if let Some(attempt) = player.resume.as_mut() {
                 if attempt.target.is_some_and(|target| tick >= target) {
                     if attempt.frames.len() == usize::from(game_protocol::PREDICTION_DEPTH) {
@@ -465,7 +465,7 @@ impl Match {
                     attempt.frames.push_back(message.clone());
                 }
             } else if player.receives_live()
-                && let Some(entity) = player.entity
+                && let Some(entity) = player.connection
             {
                 send(links, entity, &message);
             }
@@ -489,9 +489,11 @@ impl Match {
         if let Some(session) = &mut self.session {
             session.portable &= portable;
             if session.portable {
-                for player in &mut self.players {
-                    player.credential = resume::credential();
-                    if let (Some(entity), Some(token)) = (player.entity, player.credential.clone())
+                for (slot, player) in self.controls.iter().enumerate() {
+                    let participant = self.participants.at_slot_mut(slot);
+                    participant.credential = resume::credential();
+                    if let (Some(entity), Some(token)) =
+                        (player.connection, participant.credential.clone())
                     {
                         send(links, entity, &Message::ResumeCredential { token });
                     }
@@ -509,12 +511,13 @@ impl Match {
             &Message::Lobby {
                 cars: self.catalog.as_ref().unwrap().cars.clone(),
                 players: self
-                    .players
+                    .controls
                     .iter()
-                    .map(|player| LobbyPlayer {
-                        connected: player.entity.is_some(),
-                        car: player.car.clone(),
-                        ready: player.lobby_ready,
+                    .enumerate()
+                    .map(|(slot, player)| LobbyPlayer {
+                        connected: player.connection.is_some(),
+                        car: self.participants.at_slot(slot).car.clone(),
+                        ready: self.participants.at_slot(slot).lobby_ready,
                     })
                     .collect(),
             },
@@ -527,10 +530,13 @@ impl Match {
         entity: Entity,
         request: Request,
     ) {
+        if !links.contains(entity) {
+            return;
+        }
         let slot = self
-            .players
+            .controls
             .iter()
-            .position(|player| player.entity == Some(entity));
+            .position(|player| player.connection == Some(entity));
         match request {
             Request::Join { compatibility }
                 if !self.started
@@ -551,13 +557,14 @@ impl Match {
                     return;
                 }
                 if let Some(slot) = self
-                    .players
+                    .controls
                     .iter()
-                    .position(|player| player.entity.is_none())
+                    .position(|player| player.connection.is_none())
                 {
-                    self.players[slot].entity = Some(entity);
-                    self.players[slot].compatibility = Some(compatibility);
-                    self.players[slot].car = self.catalog.as_ref().unwrap().cars.get(slot).cloned();
+                    self.controls[slot].connection = Some(entity);
+                    self.controls[slot].compatibility = Some(compatibility);
+                    self.participants.at_slot_mut(slot).car =
+                        self.catalog.as_ref().unwrap().cars.get(slot).cloned();
                     send(links, entity, &Message::Welcome { slot });
                     self.broadcast_lobby(links);
                 } else {
@@ -576,7 +583,7 @@ impl Match {
                     && slot.is_some()
                     && self.room_roster.is_empty() =>
             {
-                match self.players[slot.unwrap()].select_car(
+                match self.participants.at_slot_mut(slot.unwrap()).select_car(
                     self.catalog.as_ref().unwrap(),
                     car,
                     ready,
@@ -613,15 +620,16 @@ impl Match {
                     .room_roster
                     .iter()
                     .position(|member| resume::matches_credential(&member.credential, &token))
-                    && self.players[index].entity.is_none()
+                    && self.controls[index].connection.is_none()
                     && slot.is_none()
                     && Some(&compatibility) == self.compatibility.as_ref()
                 {
-                    let player = &mut self.players[index];
-                    player.entity = Some(entity);
+                    let player = &mut self.controls[index];
+                    player.connection = Some(entity);
                     player.compatibility = Some(compatibility);
-                    player.car = Some(self.room_roster[index].car.clone());
-                    player.lobby_ready = true;
+                    let participant = self.participants.at_slot_mut(index);
+                    participant.car = Some(self.room_roster[index].car.clone());
+                    participant.lobby_ready = true;
                     send(links, entity, &Message::Welcome { slot: index });
                     self.broadcast_lobby(links);
                 } else {
@@ -632,12 +640,7 @@ impl Match {
                 token,
                 compatibility,
             } if slot.is_none() => {
-                let requested = self.players.iter().position(|player| {
-                    player
-                        .credential
-                        .as_deref()
-                        .is_some_and(|expected| resume::matches_credential(expected, &token))
-                });
+                let requested = self.participants.find_credential(&token);
                 let session = self.session.as_ref().filter(|session| {
                     session.portable
                         && session.compatibility == compatibility
@@ -646,7 +649,7 @@ impl Match {
                         && self.tick > 0
                 });
                 if let (Some(slot), Some(session)) = (requested, session) {
-                    if self.players[slot].entity.is_some() {
+                    if self.controls[slot].connection.is_some() {
                         send(links, entity, &Message::ResumePending);
                         return;
                     }
@@ -655,11 +658,10 @@ impl Match {
                         .unwrap()
                         .event("rustymetal4_reconnections_accepted_total");
                     self.next_resume = self.next_resume.wrapping_add(1);
-                    let player = &mut self.players[slot];
-                    player.entity = Some(entity);
+                    let player = &mut self.controls[slot];
+                    player.connection = Some(entity);
                     player.history.disconnect();
                     player.resume = Some(resume::Attempt::new(self.next_resume));
-                    player.reassign_controller = true;
                     send(links, entity, &Message::Welcome { slot });
                     send(links, entity, &Message::ResumePrepare(session.clone()));
                 } else {
@@ -676,7 +678,7 @@ impl Match {
                 attempt: id,
                 offset,
             } if slot.is_some() => {
-                if let Some(attempt) = self.players[slot.unwrap()].resume.as_mut()
+                if let Some(attempt) = self.controls[slot.unwrap()].resume.as_mut()
                     && attempt.id == id
                     && attempt.announced
                     && !attempt.failed
@@ -694,7 +696,7 @@ impl Match {
                 attempt: id,
                 target,
             } if slot.is_some() => {
-                if let Some(attempt) = self.players[slot.unwrap()].resume.as_mut()
+                if let Some(attempt) = self.controls[slot.unwrap()].resume.as_mut()
                     && attempt.id == id
                     && !attempt.failed
                 {
@@ -727,7 +729,7 @@ impl Match {
                 }
             }
             Request::ResumeLiveAck { attempt: id, head } if slot.is_some() => {
-                let player = &mut self.players[slot.unwrap()];
+                let player = &mut self.controls[slot.unwrap()];
                 if let Some(attempt) = &player.resume
                     && attempt.id == id
                 {
@@ -761,8 +763,8 @@ impl Match {
                     return;
                 }
                 if let Some(slot) = slot {
-                    self.players[slot].ready = true;
-                    self.players[slot].initial_digest = Some(digest);
+                    self.controls[slot].ready = true;
+                    self.controls[slot].initial_digest = Some(digest);
                 }
             }
             Request::PredictionClock {
@@ -770,19 +772,19 @@ impl Match {
                 anchor,
                 tick,
             } if self.started && !self.ended => {
-                if let Some(slot) = slot.filter(|&slot| self.players[slot].ready) {
+                if let Some(slot) = slot.filter(|&slot| self.controls[slot].ready) {
                     self.prediction.vote(slot, Tick(anchor), Tick(tick));
                 }
             }
             Request::Progress { tick } if tick <= self.tick => {
-                if let Some(player) = slot.map(|slot| &mut self.players[slot])
+                if let Some(player) = slot.map(|slot| &mut self.controls[slot])
                     && player.receives_live()
                 {
                     player.progress_tick = player.progress_tick.max(tick);
                 }
             }
             Request::CatchupApplied { attempt: id, tick } if slot.is_some() => {
-                let player = &mut self.players[slot.unwrap()];
+                let player = &mut self.controls[slot.unwrap()];
                 if let Some(attempt) = &mut player.resume
                     && attempt.id == id
                 {
@@ -805,6 +807,71 @@ impl Match {
     }
 }
 
+fn detach_connection(
+    game: &mut Match,
+    slot: usize,
+    entity: Entity,
+    commands: &mut Commands,
+) -> bool {
+    let control = &mut game.controls[slot];
+    if !control.disconnect(entity) {
+        return false;
+    }
+    if !game.started && game.room_roster.is_empty() {
+        if let Some(controller) = control.controller {
+            commands.entity(controller).despawn();
+        }
+        *control = ControllerState::default();
+        // Open-lobby Join has no identity credential before the match starts.
+        // Authenticated room membership, like running-match recovery, survives.
+        game.participants.replace_lobby_participant(slot);
+    }
+    !game.started
+}
+
+fn bind_controllers(game: &mut Match, owners: &Query<&ControlledBy>, commands: &mut Commands) {
+    // Binding data and Lightyear ownership are independent. Replacing a link
+    // preserves the participant, accepted history and sequence watermark.
+    let Match {
+        participants,
+        controls,
+        ..
+    } = game;
+    for (slot, player) in controls.iter_mut().enumerate() {
+        let Some(owner) = player.connection else {
+            continue;
+        };
+        if let Some(controller) = player.controller {
+            if !owners
+                .get(controller)
+                .is_ok_and(|current| current.owner == owner)
+            {
+                commands.entity(controller).insert((
+                    ControlledBy {
+                        owner,
+                        lifetime: Lifetime::Persistent,
+                    },
+                    NativeBuffer::<ControllerCommand>::default(),
+                ));
+            }
+        } else {
+            player.controller = Some(
+                commands
+                    .spawn((
+                        participants.binding(slot),
+                        ActionState::<ControllerCommand>::default(),
+                        Replicate::to_clients(NetworkTarget::All),
+                        ControlledBy {
+                            owner,
+                            lifetime: Lifetime::Persistent,
+                        },
+                    ))
+                    .id(),
+            );
+        }
+    }
+}
+
 fn update(
     native_timeline: Res<LocalTimeline>,
     mut accepted_senders: Query<&mut MessageSender<game_protocol::AcceptedInputs>, With<Connected>>,
@@ -813,23 +880,16 @@ fn update(
     mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
     mut receivers: Query<(Entity, &mut MessageReceiver<Request>, &mut Admission)>,
     link_states: Query<Option<&Unlinked>, With<LinkOf>>,
+    owners: Query<&ControlledBy>,
     mut commands: Commands,
 ) {
-    let started = game.started;
     let mut lobby_changed = false;
-    for slot in 0..game.players.len() {
-        let player = &mut game.players[slot];
-        if player.entity.is_some_and(|entity| !links.contains(entity)) {
-            player.entity = None;
-            player.history.disconnect();
-            player.resume = None;
-            if !started {
-                if let Some(controller) = player.controller {
-                    commands.entity(controller).despawn();
-                }
-                *player = Player::default();
-                lobby_changed = true;
-            }
+    for slot in 0..game.controls.len() {
+        if let Some(entity) = game.controls[slot]
+            .connection
+            .filter(|entity| !links.contains(*entity))
+        {
+            lobby_changed |= detach_connection(&mut game, slot, entity, &mut commands);
         }
     }
 
@@ -848,11 +908,11 @@ fn update(
             admission.window = now;
             admission.messages = 0;
         }
-        let known = game.players.iter().any(|p| p.entity == Some(entity));
+        let known = game.controls.iter().any(|p| p.connection == Some(entity));
         let stalled = game
-            .players
+            .controls
             .iter()
-            .find(|p| p.entity == Some(entity))
+            .find(|p| p.connection == Some(entity))
             .and_then(|p| {
                 if let Some(attempt) = &p.resume {
                     return attempt
@@ -894,29 +954,14 @@ fn update(
         game.request(&mut links, entity, request);
     }
     game.pump_resume(&mut links, &mut simulator);
-    for (slot, player) in game.players.iter_mut().enumerate() {
-        if std::mem::take(&mut player.reassign_controller)
-            && let (Some(controller), Some(owner)) = (player.controller, player.entity)
-        {
-            commands.entity(controller).insert(ControlledBy {
-                owner,
-                lifetime: Lifetime::Persistent,
-            });
-        }
-        if let Some(owner) = player.entity
-            && player.controller.is_none()
-        {
-            player.controller = Some(commands.spawn((
-                ControllerIdentity { slot: slot as u8 },
-                lightyear::prelude::input::native::ActionState::<ControllerCommand>::default(),
-                Replicate::to_clients(NetworkTarget::All),
-                ControlledBy { owner, lifetime: Lifetime::Persistent },
-            )).id());
-        }
-    }
+    bind_controllers(&mut game, &owners, &mut commands);
 
     if !game.started && !game.ended {
-        if game.players.iter().any(|player| player.entity.is_some()) {
+        if game
+            .controls
+            .iter()
+            .any(|player| player.connection.is_some())
+        {
             if game.lobby_since.get_or_insert_with(Instant::now).elapsed()
                 > Duration::from_secs(300)
             {
@@ -931,16 +976,15 @@ fn update(
     }
     if game.ended
         || (!game.started
-            && game
-                .players
-                .iter()
-                .any(|player| player.entity.is_none() || !player.lobby_ready))
+            && game.controls.iter().enumerate().any(|(slot, player)| {
+                player.connection.is_none() || !game.participants.at_slot(slot).lobby_ready
+            }))
     {
         return;
     }
     if !game.started {
         if game
-            .players
+            .controls
             .iter()
             .any(|player| player.compatibility != game.compatibility)
         {
@@ -959,20 +1003,18 @@ fn update(
         game.started = true;
         game.loading_since = Instant::now();
         let start = SessionStart {
-            players: game.players.len(),
+            players: game.controls.len(),
             world: game
                 .selected_world
                 .clone()
                 .unwrap_or_else(|| game.catalog.as_ref().unwrap().worlds[0].clone()),
-            cars: game
-                .players
-                .iter()
-                .map(|player| player.car.clone().unwrap())
+            cars: (0..game.controls.len())
+                .map(|slot| game.participants.at_slot(slot).car.clone().unwrap())
                 .collect(),
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,
-            portable: (2..=8).contains(&game.players.len()),
+            portable: (2..=8).contains(&game.controls.len()),
         };
         game.session = Some(start.clone());
         match simulator.start(&start) {
@@ -995,7 +1037,11 @@ fn update(
     }
 
     let now = Instant::now();
-    if game.prediction.anchor.is_none() && game.players.iter().any(|player| player.entity.is_none())
+    if game.prediction.anchor.is_none()
+        && game
+            .controls
+            .iter()
+            .any(|player| player.connection.is_none())
     {
         game.fail(
             &mut links,
@@ -1003,7 +1049,7 @@ fn update(
         );
         return;
     }
-    if !game.authority_ready || game.players.iter().any(|player| !player.ready) {
+    if !game.authority_ready || game.controls.iter().any(|player| !player.ready) {
         if now.duration_since(game.loading_since) > Duration::from_secs(45) {
             game.fail(&mut links, "Session loading exceeded 45 seconds.");
         }
@@ -1011,7 +1057,7 @@ fn update(
     }
     if game.tick == 0
         && game
-            .players
+            .controls
             .iter()
             .any(|p| p.initial_digest != game.initial_digest)
     {
@@ -1043,7 +1089,7 @@ fn update(
             }
         }
     }
-    let players = game.players.len();
+    let players = game.controls.len();
     let loading_expired = now.duration_since(game.loading_since) > Duration::from_secs(45);
     if game.prediction.anchor.is_none() {
         if loading_expired {
@@ -1099,14 +1145,14 @@ fn update(
         let lateness = step_started.saturating_duration_since(scheduled);
         let tick = game.tick;
         let inputs: Vec<_> = game
-            .players
+            .controls
             .iter_mut()
             .map(|player| player.history.sample(tick))
             .collect();
         let game = &mut *game;
-        let packet = game.prediction.packet(tick, &inputs, &game.players);
-        for player in &game.players {
-            if let Some(entity) = player.entity
+        let packet = game.prediction.packet(tick, &inputs, &game.controls);
+        for player in &game.controls {
+            if let Some(entity) = player.connection
                 && let Ok(mut sender) = accepted_senders.get_mut(entity)
             {
                 sender.send::<lightyear::prelude::input::InputChannel>(packet.clone());
@@ -1205,19 +1251,34 @@ fn bound_reliable_history(
 // or trims it. Sampling only ActionState would lose transitions after a stalled frame.
 fn accept_native_inputs(
     mut game: ResMut<Match>,
-    controllers: Query<(&ControllerIdentity, &NativeBuffer<ControllerCommand>)>,
+    connections: Query<(), With<Connected>>,
+    controllers: Query<(
+        Entity,
+        &ControllerIdentity,
+        &ControlledBy,
+        &NativeBuffer<ControllerCommand>,
+    )>,
 ) {
     if !game.started || game.ended || game.prediction.anchor.is_none() {
         return;
     }
     let earliest = game.tick;
     let health = game.health.clone();
-    for (identity, buffer) in &controllers {
+    for (controller, identity, owner, buffer) in &controllers {
+        let Some(slot) = game.participants.resolve(identity) else {
+            continue;
+        };
+        let player = &mut game.controls[slot];
+        if player.controller != Some(controller)
+            || player.connection != Some(owner.owner)
+            || !connections.contains(owner.owner)
+        {
+            continue;
+        }
         let (Some(mut tick), Some((last, _))) = (buffer.start_tick, buffer.get_last_with_tick())
         else {
             continue;
         };
-        let player = &mut game.players[usize::from(identity.slot)];
         for _ in 0..buffer.len() {
             if tick > last {
                 break;
@@ -1412,7 +1473,8 @@ fn run_match(
         .id();
     app.world_mut().trigger(LinkStart { entity });
     app.insert_resource(Match {
-        players: (0..count).map(|_| Player::default()).collect(),
+        participants: ParticipantRoster::new(count),
+        controls: (0..count).map(|_| ControllerState::default()).collect(),
         authority_ready: false,
         compatibility: Some(compatibility),
         catalog: Some(catalog),
@@ -1485,17 +1547,17 @@ fn run_match(
                 let game = app.world().resource::<Match>();
                 let mut status = launcher.status.lock().unwrap();
                 status.connected = game
-                    .players
+                    .controls
                     .iter()
-                    .filter(|player| player.entity.is_some())
+                    .filter(|player| player.connection.is_some())
                     .count();
                 status.tick = game.tick;
                 let mut health = game.health.lock().unwrap();
-                for (slot, player) in game.players.iter().enumerate() {
+                for (slot, player) in game.controls.iter().enumerate() {
                     health.unacknowledged(
                         slot,
                         player
-                            .entity
+                            .connection
                             .and_then(|entity| app.world().get::<Admission>(entity))
                             .map_or(0, |admission| admission.unacknowledged.len()),
                     );
@@ -1624,7 +1686,7 @@ mod lobby_tests {
             cars: vec!["Orbital".into(), "Pizza Boy".into()],
             worlds: vec![],
         };
-        let mut player = Player::default();
+        let mut player = Participant::default();
         assert!(!player.lobby_ready);
         assert!(
             player
@@ -1645,8 +1707,391 @@ mod lobby_tests {
             .unwrap();
         assert!(!player.lobby_ready);
         assert_eq!(player.car.as_deref(), Some("Orbital"));
-        let mut other = Player::default();
+        let mut other = Participant::default();
         other.select_car(&catalog, "Orbital".into(), true).unwrap();
         assert_eq!(other.car, player.car);
+    }
+}
+
+#[cfg(test)]
+mod participant_control_tests {
+    use super::*;
+    use bevy_ecs::system::RunSystemOnce;
+    use tm4_network::protocol::{ParticipantId, Score};
+
+    fn game() -> Match {
+        let compatibility = Compatibility {
+            protocol: 10,
+            build: "test".into(),
+            content: "test".into(),
+        };
+        Match {
+            participants: ParticipantRoster::new(2),
+            controls: (0..2).map(|_| ControllerState::default()).collect(),
+            authority_ready: true,
+            compatibility: Some(compatibility.clone()),
+            catalog: Some(Catalog {
+                cars: vec!["Orbital".into(), "Pizza Boy".into()],
+                worlds: vec!["Construction Yard".into()],
+            }),
+            selected_world: None,
+            room_roster: Vec::new(),
+            initial_digest: Some(123),
+            started: true,
+            ended: false,
+            tick: 100,
+            lobby_since: None,
+            loading_since: Instant::now(),
+            last_step_duration: None,
+            session: Some(SessionStart {
+                players: 2,
+                world: "Construction Yard".into(),
+                cars: vec!["Orbital".into(), "Pizza Boy".into()],
+                compatibility,
+                seed: 12345,
+                epoch: 1,
+                portable: true,
+            }),
+            last_state: Some(RoundState {
+                remaining: 2,
+                winner: -1,
+                round_finished: false,
+                accepts_continue: false,
+                next_mode: 0,
+                digest: 123,
+                sections: [0; 5],
+                unsupported: None,
+                scores: vec![Score { wins: 3, losses: 1 }, Score { wins: 0, losses: 3 }],
+            }),
+            journal_directory: PathBuf::new(),
+            journal: None,
+            journal_sealed: false,
+            journal_export: Default::default(),
+            prediction: AcceptedTimeline {
+                anchor: Some(Tick(1)),
+                ..Default::default()
+            },
+            next_resume: 0,
+            health: Default::default(),
+            tick_schedule: None,
+        }
+    }
+
+    fn connection(world: &mut World, id: u64) -> Entity {
+        world
+            .spawn((
+                RemoteId(PeerId::Netcode(id)),
+                Connected,
+                MessageSender::<Message>::default(),
+            ))
+            .id()
+    }
+
+    fn request(world: &mut World, entity: Entity, request: Request) {
+        let mut request = Some(request);
+        world.run_system_once(move |mut game: ResMut<Match>, mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>| {
+            game.request(&mut links, entity, request.take().unwrap());
+        }).unwrap();
+    }
+
+    fn bind(world: &mut World) {
+        world
+            .run_system_once(
+                |mut game: ResMut<Match>, owners: Query<&ControlledBy>, mut commands: Commands| {
+                    bind_controllers(&mut game, &owners, &mut commands);
+                },
+            )
+            .unwrap();
+    }
+
+    fn buffer(sequence: u32, buttons: u16) -> NativeBuffer<ControllerCommand> {
+        let mut buffer = NativeBuffer::default();
+        buffer.set(
+            Tick(101),
+            ActionState(ControllerCommand {
+                epoch: 1,
+                sequence,
+                tick: 100,
+                input: Input {
+                    buttons,
+                    ..Default::default()
+                },
+            }),
+        );
+        buffer
+    }
+
+    #[test]
+    fn reconnect_keeps_binding_results_and_watermark_and_fences_the_old_connection() {
+        let mut world = World::new();
+        let old = connection(&mut world, 1);
+        let replacement = connection(&mut world, 2);
+        let duplicate = connection(&mut world, 3);
+        let mut game = game();
+        game.controls[0].connection = Some(old);
+        game.controls[0].received_sequence = 41;
+        let token = "ab".repeat(32);
+        game.participants.at_slot_mut(0).credential = Some(token.clone());
+        game.participants.at_slot_mut(0).car = Some("Orbital".into());
+        let binding = game.participants.binding(0);
+        let compatibility = game.compatibility.clone().unwrap();
+        world.insert_resource(game);
+        bind(&mut world);
+        let controller = world.resource::<Match>().controls[0].controller.unwrap();
+        // Native records not consumed before disconnect must not enter the new
+        // connection's command stream, even if they carry a larger sequence.
+        world.entity_mut(controller).insert(buffer(999, 99));
+        world.resource_mut::<Match>().controls[0].disconnect(old);
+        world.entity_mut(old).remove::<Connected>();
+        request(
+            &mut world,
+            old,
+            Request::Resume {
+                token: token.clone(),
+                compatibility: compatibility.clone(),
+            },
+        );
+        assert!(world.resource::<Match>().controls[0].connection.is_none());
+        request(
+            &mut world,
+            replacement,
+            Request::Resume {
+                token: "cd".repeat(32),
+                compatibility: compatibility.clone(),
+            },
+        );
+        assert!(world.resource::<Match>().controls[0].connection.is_none());
+        let mut incompatible = compatibility.clone();
+        incompatible.build = "other".into();
+        request(
+            &mut world,
+            replacement,
+            Request::Resume {
+                token: token.clone(),
+                compatibility: incompatible,
+            },
+        );
+        assert!(world.resource::<Match>().controls[0].connection.is_none());
+        request(
+            &mut world,
+            replacement,
+            Request::Resume {
+                token: token.clone(),
+                compatibility: compatibility.clone(),
+            },
+        );
+        bind(&mut world);
+        assert!(
+            world
+                .get::<NativeBuffer<ControllerCommand>>(controller)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            world.get::<ControlledBy>(controller).unwrap().owner,
+            replacement
+        );
+        {
+            let game = world.resource::<Match>();
+            assert_eq!(game.participants.binding(0), binding);
+            assert_eq!(game.controls[0].controller, Some(controller));
+            assert_eq!(game.controls[0].received_sequence, 41);
+            assert_eq!(game.participants.at_slot(0).car.as_deref(), Some("Orbital"));
+            assert_eq!(game.last_state.as_ref().unwrap().scores[0].wins, 3);
+        }
+        request(
+            &mut world,
+            duplicate,
+            Request::Resume {
+                token,
+                compatibility,
+            },
+        );
+        assert_eq!(
+            world.resource::<Match>().controls[0].connection,
+            Some(replacement)
+        );
+        // Delayed disconnect and session messages from the old link cannot
+        // evict or advance the replacement's recovery attempt.
+        assert!(!world.resource_mut::<Match>().controls[0].disconnect(old));
+        request(&mut world, old, Request::Progress { tick: 100 });
+        assert_eq!(world.resource::<Match>().controls[0].progress_tick, 0);
+        let server = world.spawn_empty().id();
+        world.entity_mut(old).insert((
+            LinkOf { server },
+            Unlinked {
+                reason: UnlinkReason::ByPeer("delayed close".into()),
+            },
+        ));
+        world.run_system_once(reap_closed_links).unwrap();
+        assert_eq!(
+            world.get::<ControlledBy>(controller).unwrap().owner,
+            replacement
+        );
+        // Restore activation is unchanged; the next command must still exceed
+        // the original participant's high-water mark.
+        world.resource_mut::<Match>().controls[0].resume = None;
+        world.entity_mut(controller).insert(buffer(41, 7));
+        world.run_system_once(accept_native_inputs).unwrap();
+        assert_eq!(
+            world.resource_mut::<Match>().controls[0]
+                .history
+                .sample(100),
+            Input::default()
+        );
+        world.entity_mut(controller).insert(buffer(42, 8));
+        world.run_system_once(accept_native_inputs).unwrap();
+        assert_eq!(
+            world.resource_mut::<Match>().controls[0]
+                .history
+                .sample(100)
+                .buttons,
+            8
+        );
+    }
+
+    #[test]
+    fn input_requires_the_current_participant_controller_and_connected_owner() {
+        let mut world = World::new();
+        let owner = connection(&mut world, 1);
+        let other = connection(&mut world, 2);
+        let mut game = game();
+        // Allocate a fresh lobby identity to prove this is not slot-as-identity.
+        game.participants.replace_lobby_participant(0);
+        game.controls[0].connection = Some(owner);
+        world.insert_resource(game);
+        bind(&mut world);
+        let controller = world.resource::<Match>().controls[0].controller.unwrap();
+        let identity = world.resource::<Match>().participants.binding(0);
+        let wrong = world
+            .resource::<Match>()
+            .participants
+            .binding(1)
+            .participant;
+        for invalid in [
+            ControllerIdentity {
+                participant: ParticipantId(999),
+                ..identity
+            },
+            ControllerIdentity {
+                participant: wrong,
+                ..identity
+            },
+            ControllerIdentity {
+                slot: 255,
+                ..identity
+            },
+        ] {
+            world.entity_mut(controller).insert((invalid, buffer(1, 9)));
+            world.run_system_once(accept_native_inputs).unwrap();
+            assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+        }
+        world.entity_mut(controller).insert((
+            identity,
+            ControlledBy {
+                owner: other,
+                lifetime: Lifetime::Persistent,
+            },
+        ));
+        world.run_system_once(accept_native_inputs).unwrap();
+        assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+        world.entity_mut(controller).insert(ControlledBy {
+            owner,
+            lifetime: Lifetime::Persistent,
+        });
+        // A second entity cannot borrow a valid participant binding.
+        let forged = world
+            .spawn((
+                identity,
+                ControlledBy {
+                    owner,
+                    lifetime: Lifetime::Persistent,
+                },
+                buffer(999, 9),
+            ))
+            .id();
+        world
+            .entity_mut(controller)
+            .insert(NativeBuffer::<ControllerCommand>::default());
+        world.run_system_once(accept_native_inputs).unwrap();
+        assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+        world.despawn(forged);
+        world.entity_mut(owner).remove::<Connected>();
+        world.entity_mut(controller).insert(buffer(1, 9));
+        world.run_system_once(accept_native_inputs).unwrap();
+        assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+        world.entity_mut(owner).insert(Connected);
+        world.run_system_once(accept_native_inputs).unwrap();
+        assert_eq!(
+            world.resource_mut::<Match>().controls[0]
+                .history
+                .sample(100)
+                .buttons,
+            9
+        );
+        assert_eq!(world.resource::<Match>().controls[1].received_sequence, 0);
+    }
+
+    #[test]
+    fn lobby_disconnect_preserves_authenticated_room_identity_but_not_an_open_seat() {
+        for room in [false, true] {
+            let mut world = World::new();
+            let old = connection(&mut world, 1);
+            let replacement = connection(&mut world, 2);
+            let mut game = game();
+            game.started = false;
+            game.controls[0].connection = Some(old);
+            game.controls[0].received_sequence = 41;
+            let token = "ab".repeat(32);
+            if room {
+                game.room_roster = vec![
+                    web::RosterMember {
+                        credential: token.clone(),
+                        car: "Orbital".into(),
+                    },
+                    web::RosterMember {
+                        credential: "cd".repeat(32),
+                        car: "Pizza Boy".into(),
+                    },
+                ];
+            }
+            let binding = game.participants.binding(0);
+            let other_binding = game.participants.binding(1);
+            let compatibility = game.compatibility.clone().unwrap();
+            world.insert_resource(game);
+            bind(&mut world);
+            let controller = world.resource::<Match>().controls[0].controller.unwrap();
+            world
+                .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
+                    assert!(detach_connection(&mut game, 0, old, &mut commands));
+                })
+                .unwrap();
+            world.entity_mut(old).remove::<Connected>();
+            let join = if room {
+                Request::Resume {
+                    token,
+                    compatibility,
+                }
+            } else {
+                Request::Join { compatibility }
+            };
+            request(&mut world, replacement, join);
+            bind(&mut world);
+            let game = world.resource::<Match>();
+            assert_eq!(game.controls[0].connection, Some(replacement));
+            assert_eq!(game.participants.binding(1), other_binding);
+            if room {
+                assert_eq!(game.participants.binding(0), binding);
+                assert_eq!(game.controls[0].controller, Some(controller));
+                assert_eq!(game.controls[0].received_sequence, 41);
+            } else {
+                assert_ne!(
+                    game.participants.binding(0).participant,
+                    binding.participant
+                );
+                assert_ne!(game.controls[0].controller, Some(controller));
+                assert_eq!(game.controls[0].received_sequence, 0);
+            }
+        }
     }
 }

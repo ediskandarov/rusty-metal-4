@@ -290,7 +290,9 @@ For a supported portable roster, the server assigns each participant a random
 bearer credential. The match page retains it for the tab session. Reloading the
 tab can reclaim only the corresponding disconnected slot while the match is
 active and the local build and content match. Live connections retain control
-and departed cars follow the existing missing-input policy.
+and disconnected cars follow the existing missing-input policy. Participant identity,
+slot binding and replaceable control ownership are separated as described in the
+[fixed-roster boundary](design/participant-lifecycle.md#current-fixed-roster-boundary).
 Any nonzero `next_mode` is treated as session completion. A second direct C
 initialization works, but this does not establish a second server-managed match.
 Tournament's seed order has been fixed at the common initialization point; its

@@ -435,6 +435,31 @@ pub fn begin_resume(
     Ok(())
 }
 
+fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'static str> {
+    let mut present = [false; MAX_SLOTS];
+    let mut participants = std::collections::HashSet::new();
+    let mut local_present = false;
+    for (identity, local) in world
+        .query_filtered::<(&ControllerIdentity, Has<InputMarker<ControllerCommand>>), With<NativeBuffer<Input>>>()
+        .iter(world)
+    {
+        let slot = usize::from(identity.slot);
+        if slot >= usize::from(session.slots)
+            || present[slot]
+            || !participants.insert(identity.participant)
+            || (local && identity.slot != session.local_slot)
+        {
+            return Err("Invalid native controller assignment");
+        }
+        present[slot] = true;
+        local_present |= local;
+    }
+    if present[..usize::from(session.slots)].contains(&false) || !local_present {
+        return Err("A native controller slot was not replicated before play");
+    }
+    Ok(())
+}
+
 fn start_at(
     world: &mut World,
     session: Session,
@@ -452,23 +477,15 @@ fn start_at(
         return Err("Invalid prediction start");
     }
     let boundary = session.anchor + head as i32;
-    let mut present = [false; MAX_SLOTS];
-    for (identity, mut buffer) in world
-        .query::<(&ControllerIdentity, &mut NativeBuffer<Input>)>()
+    validate_native_roster(world, session)?;
+    for mut buffer in world
+        .query_filtered::<&mut NativeBuffer<Input>, With<ControllerIdentity>>()
         .iter_mut(world)
     {
-        let slot = usize::from(identity.slot);
-        if slot >= usize::from(session.slots) || present[slot] {
-            return Err("Invalid native controller assignment");
-        }
-        present[slot] = true;
         if buffer.last_remote_tick.is_none_or(|tick| tick < boundary) {
             buffer.set(boundary, ActionState(Input::default()));
             buffer.last_remote_tick = Some(boundary);
         }
-    }
-    if present[..usize::from(session.slots)].contains(&false) {
-        return Err("A native controller slot was not replicated before play");
     }
     let bytes = retain_live_tick(head);
     if bytes == 0 {
@@ -891,5 +908,67 @@ mod tests {
         world.trigger(LocalTimelineShift { delta: -2 });
         assert!(matches!(&world.resource::<LivePrediction>().error,
             Some(PredictionFailure::Fatal(message)) if message == "C simulation refused a tick"));
+    }
+
+    #[test]
+    fn native_roster_requires_unique_participants_and_the_correct_local_binding() {
+        use crate::protocol::ParticipantId;
+        let mut world = World::new();
+        let local = world
+            .spawn((
+                ControllerIdentity {
+                    participant: ParticipantId(17),
+                    slot: 0,
+                },
+                NativeBuffer::<Input>::default(),
+                InputMarker::<ControllerCommand>::default(),
+            ))
+            .id();
+        let remote = world
+            .spawn((
+                ControllerIdentity {
+                    participant: ParticipantId(42),
+                    slot: 1,
+                },
+                NativeBuffer::<Input>::default(),
+            ))
+            .id();
+        assert!(validate_native_roster(&mut world, session()).is_ok());
+        for invalid in [
+            ControllerIdentity {
+                participant: ParticipantId(17),
+                slot: 1,
+            },
+            ControllerIdentity {
+                participant: ParticipantId(42),
+                slot: 0,
+            },
+            ControllerIdentity {
+                participant: ParticipantId(42),
+                slot: 255,
+            },
+        ] {
+            world.entity_mut(remote).insert(invalid);
+            assert!(validate_native_roster(&mut world, session()).is_err());
+        }
+        world.entity_mut(remote).insert(ControllerIdentity {
+            participant: ParticipantId(42),
+            slot: 1,
+        });
+        world
+            .entity_mut(local)
+            .remove::<InputMarker<ControllerCommand>>();
+        assert!(validate_native_roster(&mut world, session()).is_err());
+        world
+            .entity_mut(remote)
+            .insert(InputMarker::<ControllerCommand>::default());
+        assert!(validate_native_roster(&mut world, session()).is_err());
+        world
+            .entity_mut(remote)
+            .remove::<InputMarker<ControllerCommand>>();
+        world
+            .entity_mut(local)
+            .insert(InputMarker::<ControllerCommand>::default());
+        assert!(validate_native_roster(&mut world, session()).is_ok());
     }
 }
