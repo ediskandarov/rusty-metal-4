@@ -24,7 +24,7 @@ const warnings = element("startup-warnings", HTMLElement);
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
 initializeFullscreen(canvas);
-initializePopups();
+const popups = initializePopups();
 initializeTroubleshoot();
 const resources = initializeResources();
 const mods = initializeMods();
@@ -63,7 +63,6 @@ async function launch(resolveSources: () => DiscSources) {
     const showMatchStatus = matchStatus(status);
     if (endpoint || inRoom) {
       showMatchStatus("lobby", "Preparing Deathmatch…");
-      element("resources", HTMLDetailsElement).open = false;
     }
     // Hide before starting SDL so its initial viewport uses the final page layout.
     startup.hidden = true;
@@ -85,9 +84,11 @@ async function launch(resolveSources: () => DiscSources) {
     } else {
       status.textContent = "";
     }
+    popups.close();
     if (!new URLSearchParams(location.search).has("preview")) canvas.focus();
   } catch (error) {
     startup.hidden = false;
+    resources.show();
     const message = error instanceof Error ? error.message : String(error);
     progress.textContent = runtimeStarted ? `${message}\nReload the page to try again.` : message;
     console.error(error);

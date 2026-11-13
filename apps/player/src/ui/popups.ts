@@ -43,4 +43,5 @@ export function initializePopups() {
   window.addEventListener("resize", fitPopups);
   window.visualViewport?.addEventListener("resize", fitPopups);
   window.visualViewport?.addEventListener("scroll", fitPopups);
+  return { close: () => showSettings(false) };
 }

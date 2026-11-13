@@ -142,6 +142,12 @@ export function initializeResources() {
   >();
   const sections = new Map<string, HTMLDetailsElement>();
 
+  function show() {
+    element("video-controls", HTMLElement).hidden = false;
+    panel.hidden = false;
+    panel.open = true;
+  }
+
   function filter() {
     const query = search.value.trim().toLowerCase();
     for (const row of rows) {
@@ -261,6 +267,7 @@ export function initializeResources() {
   });
   panel.addEventListener("keyup", (event) => event.stopPropagation());
   return {
+    show,
     async inspect(sources: DiscSources) {
       controller.abort();
       controller = new AbortController();
@@ -271,9 +278,7 @@ export function initializeResources() {
       sections.clear();
       list.replaceChildren();
       running = false;
-      element("video-controls", HTMLElement).hidden = false;
-      panel.hidden = false;
-      panel.open = true;
+      show();
       search.value = "";
       issues.checked = false;
       action.disabled = true;
