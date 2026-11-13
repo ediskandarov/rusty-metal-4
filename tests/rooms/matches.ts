@@ -122,12 +122,35 @@ try {
   assert(pending.pending);
   await server().cancelAdmissionsForTest();
   await server().configureForTest({ lookupFailure: true });
+  const lookupOutage = (await room.checkMatchForTest())!;
+  const lookupDeadline = lookupOutage.monitoringUnavailableUntil;
+  assert(lookupDeadline !== null && lookupDeadline > Date.now());
   assert(
-    (await room.checkMatchForTest())!.roster.some((entry) => entry.id === lateMember),
+    lookupOutage.roster.some((entry) => entry.id === lateMember),
     "monitoring failure cannot establish cancellation",
   );
+  await Bun.sleep(30);
+  assert.equal(
+    (await room.checkMatchForTest())!.monitoringUnavailableUntil,
+    lookupDeadline,
+    "healthy general status cannot renew a failed membership lookup's deadline",
+  );
+  const reloadedLookupOutage = (await room.restoreMatchFromStorageForTest())!;
+  assert.equal(reloadedLookupOutage.monitoringUnavailableUntil, lookupDeadline);
+  await Bun.sleep(30);
+  assert.equal(
+    (await room.checkMatchForTest())!.monitoringUnavailableUntil,
+    lookupDeadline,
+    "partial monitoring failures retain the first deadline across durable reload",
+  );
   await server().configureForTest({ lookupFailure: false });
-  assert(!(await room.checkMatchForTest())!.roster.some((entry) => entry.id === lateMember));
+  const reconciled = (await room.checkMatchForTest())!;
+  assert.equal(
+    reconciled.monitoringUnavailableUntil,
+    null,
+    "successful reconciliation clears the outage deadline before its commit return",
+  );
+  assert(!reconciled.roster.some((entry) => entry.id === lateMember));
   let lateView = ((await (await stranger(path)).json()) as { room: RoomSnapshot }).room;
   assert.equal(lateView.match!.credential, null);
   assert.equal(lateView.participants.find((entry) => entry.id === lateMember)!.ready, false);
@@ -269,6 +292,44 @@ try {
   assert.equal(await directory.reservationForTest(initial.id), undefined);
   console.log(
     "PASS persisted monitoring grace expires under sustained unavailability and releases both container and reservation",
+  );
+  assert.equal((await host(path + "/prepare", {})).status, 200);
+  match = (await view()).match!;
+  assert.equal((await host(path + "/match/" + match.id + "/prepare", {})).status, 202);
+  await eventually(view, (state) => state.match?.stage === "ready");
+  for (const browser of [host, guest])
+    assert.equal(
+      (await browser(path + "/player", { car: "Orbital", compatibility, ready: true })).status,
+      200,
+    );
+  assert.equal((await host(path + "/start", {})).status, 200);
+  await eventually(view, (state) => state.match?.stage === "playing");
+  assert.equal((await stranger(path + "/join", { playerName: "Pending outage" })).status, 200);
+  assert.equal(
+    (await stranger(path + "/player", { car: "Orbital", compatibility, ready: false })).status,
+    200,
+  );
+  assert.equal(
+    (await stranger(path + "/player", { car: "Orbital", compatibility, ready: true })).status,
+    200,
+  );
+  const lookupUnavailableServer = server();
+  await lookupUnavailableServer.cancelAdmissionsForTest();
+  await lookupUnavailableServer.configureForTest({ lookupFailure: true });
+  const failedLookup = (await room.checkMatchForTest())!;
+  const failedLookupDeadline = failedLookup.monitoringUnavailableUntil;
+  assert(failedLookupDeadline !== null && failedLookupDeadline > Date.now());
+  await room.restoreMatchFromStorageForTest();
+  await Bun.sleep(30);
+  assert.equal((await room.checkMatchForTest())!.monitoringUnavailableUntil, failedLookupDeadline);
+  assert.equal((await lookupUnavailableServer.inspectForTest()).stops, 0);
+  assert.equal((await directory.reservationForTest(initial.id))?.session, match.id);
+  await eventually(view, (state) => state.match === null, monitoringGrace + 5000);
+  assert.equal((await lookupUnavailableServer.inspectForTest()).stops, 1);
+  assert.equal(await directory.reservationForTest(initial.id), undefined);
+  assert.equal((await stranger(path + "/leave", {})).status, 200);
+  console.log(
+    "PASS partial membership-monitoring outage keeps its persisted deadline and expires with bounded cleanup",
   );
   assert.equal((await host(path + "/prepare", {})).status, 200);
   match = (await view()).match!;

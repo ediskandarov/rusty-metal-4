@@ -279,6 +279,22 @@ export class Room extends DurableObject<Env> {
         await this.stopMatch("The match server session changed.");
         return;
       }
+      const inspections = [];
+      if (status.phase === "match" && match.stage === "playing") {
+        for (const entry of match.roster) {
+          if (!entry.pending) continue;
+          // Query the simulation thread after reservation, rather than infer loss
+          // from transport state or a periodically published status snapshot.
+          const lease = await this.api().membershipStatus({
+            sessionId: match.id,
+            credential: entry.credential,
+          });
+          inspections.push({ entry, lease });
+        }
+      }
+      // General status alone cannot recover a pending-lease monitoring outage.
+      // Clear the first deadline only after all required checks have succeeded,
+      // including before any state-transition or reconciliation commit returns.
       match.monitoringUnavailableUntil = null;
       if (status.phase === "results") {
         await this.stopMatch("Match finished. You are back in the same room.");
@@ -291,17 +307,6 @@ export class Room extends DurableObject<Env> {
         return;
       }
       if (status.phase === "match" && match.stage === "playing") {
-        const inspections = [];
-        for (const entry of match.roster) {
-          if (!entry.pending) continue;
-          // Query the simulation thread after reservation, rather than infer loss
-          // from transport state or a periodically published status snapshot.
-          const lease = await this.api().membershipStatus({
-            sessionId: match.id,
-            credential: entry.credential,
-          });
-          inspections.push({ entry, lease });
-        }
         let changed = false;
         for (const { entry, lease } of inspections) {
           if (lease.identity && !lease.pending) {
