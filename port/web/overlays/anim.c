@@ -69,7 +69,7 @@ OSWord WebAnimExport(const char* name)
     EXPORT("AnimDestructor", destroy);
     EXPORT("AnimDisplay", display);
     if (!strcmp(name, "InteractCarWithAnim_goggle")) {
-        Import_CarApplyDamage = CarApplyDamage;
+        Import_CarApplyParticipantDamage = CarApplyParticipantDamage;
         Import_InteractCarWithAnim_fire = OSSymbolGetAddressAssert("InteractCarWithAnim_fire");
         return (OSWord)goggle_contact;
     }

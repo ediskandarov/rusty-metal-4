@@ -11,7 +11,7 @@ extern u32 BulletSizeof;
 
 static void construct_class(RegistryDirectory* directory)
 {
-    Import_CarApplyDamage = CarApplyDamage;
+    Import_CarApplyParticipantDamage = CarApplyParticipantDamage;
     Import_SpawnExplosion = SpawnExplosion;
     BulletClassConstructor(directory);
 }

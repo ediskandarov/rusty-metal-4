@@ -142,8 +142,24 @@ impl NetworkClient {
         Ok(())
     }
 
-    pub fn prepare_prediction(&mut self, slot_mask: u8, resuming: bool) {
-        live_prediction::prepare(self.app.world_mut(), slot_mask, resuming);
+    pub fn prepare_prediction(
+        &mut self,
+        slot_mask: u8,
+        participants: &str,
+        resuming: bool,
+    ) -> Result<(), JsValue> {
+        let participants: Vec<crate::protocol::ParticipantId> = serde_json::from_str(participants)
+            .map_err(|_| JsValue::from_str("Invalid prediction participants"))?;
+        if participants.len() != slot_mask.count_ones() as usize
+            || participants
+                .iter()
+                .enumerate()
+                .any(|(index, id)| participants[..index].contains(id))
+        {
+            return Err(JsValue::from_str("Invalid prediction participant bindings"));
+        }
+        live_prediction::prepare(self.app.world_mut(), slot_mask, participants, resuming);
+        Ok(())
     }
 
     pub fn prediction_clock(&self) -> u32 {

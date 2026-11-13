@@ -54,8 +54,8 @@ const { chromium } = require("playwright");
           Module.ccall(
             "WebNetStartMatch",
             "number",
-            ["number", "number", "number", "number", "number", "number", "string"],
-            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy"],
+            ["number", "number", "number", "number", "number", "number", "string", "string"],
+            [2, 3, 0, 12345, -1, 0, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
           ),
           "match start refused",
         );

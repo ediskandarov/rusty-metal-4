@@ -434,7 +434,8 @@ static int restore_wave_resources(
     return 1;
 }
 
-void WeaponSpawnImpactObject(s32 x, s32 y, s32 z);
+void WeaponSpawnImpactObject(s32 x, s32 y, s32 z, u32 low, u32 high);
+void WeaponSpawnImpactEffects(s32 x, s32 y, s32 z, u32 low, u32 high);
 void WeaponSpawnMovingExplosion(s32 x, s32 y, s32 z, s32 scale, s32 speed);
 
 enum TimerKind {
@@ -442,6 +443,7 @@ enum TimerKind {
     TimerNextMode,
     TimerContinueMatch,
     TimerImpactWave,
+    TimerFunnyWave,
     TimerMovingExplosion,
 };
 
@@ -452,7 +454,8 @@ static const struct {
     [TimerDestroyObject] = { (TimerCallback)ObjectDestroy, 1 },
     [TimerNextMode] = { (TimerCallback)GameSetNextMode, 1 },
     [TimerContinueMatch] = { (TimerCallback)GameSetDeferredValue, 2 },
-    [TimerImpactWave] = { (TimerCallback)WeaponSpawnImpactObject, 3 },
+    [TimerImpactWave] = { (TimerCallback)WeaponSpawnImpactObject, 5 },
+    [TimerFunnyWave] = { (TimerCallback)WeaponSpawnImpactEffects, 5 },
     [TimerMovingExplosion] = { (TimerCallback)WeaponSpawnMovingExplosion, 5 },
 };
 

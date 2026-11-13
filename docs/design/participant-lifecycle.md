@@ -19,6 +19,33 @@ are settings, but host editing remains disabled in the first UI. Their defaults
 are undecided. Other modes below are design cases, not commitments to implement
 them now.
 
+## First FFA delivery boundary
+
+The first network FFA uses its own round and participant rules while retaining the
+original physics, weapons and collision. It does not emulate Tournament or the
+original Deathmatch round organization. Standalone offline modes remain unchanged.
+
+The approved scope is eight gameplay slots, participant-owned frags/deaths, a bounded
+respawn delay, and a fresh car after death. Selection is a mode policy: fixed or
+random from an agreed compatible pool; random may select the previous model. Live
+admission, departure, slot reuse, reconnect, match limits and return to the room
+belong to this delivery. Membership changes commit as authoritative tick events and
+must survive rollback, portable recovery and journal replay. Spawn failure retains
+the waiting participant, results and lease with bounded retries and a clear terminal
+outcome. Time and frag defaults remain undecided; tests specify them explicitly.
+Host editing of limits remains disabled in the first UI.
+
+Live replacement of an active car, transactional preservation of that car on failed
+replacement, and general transformation policies are deferred. The broader FSMs
+below retain those future cases as design constraints, not first-FFA acceptance.
+Tournament compatibility is not a requirement for network FFA.
+
+This requires a change to the current portable boundary: it binds cars and cameras
+to tick-zero serials and accepts only a fully living fixed roster. A new car lifetime
+needs resource-backed reconstruction independently of its tick-zero object. Removing
+that restriction and recording authoritative membership events are implementation
+work; the FSMs alone do not provide either mechanism.
+
 ## Relationships
 
 ```mermaid
@@ -70,7 +97,7 @@ commands left by the previous connection, without clearing accepted input histor
 or the sequence watermark. The client checks unique participant/slot bindings
 and that its controlled slot matches its local view before prediction starts.
 
-C simulation state, results, accepted frames and portable snapshots remain
+C simulation state, original Deathmatch round results, accepted frames and portable snapshots remain
 slot-addressed under the immutable running roster. The server retains the binding
 through recovery without a separate participant-results copy. Startup carries
 capacity and actual occupied slots separately. C player roots, pads, camera/HUD
@@ -82,7 +109,22 @@ mask and declared capacity before restoration. The C startup call requires the
 complete capacity, occupied-slot and mode-car configuration; failed or cancelled
 startup contributes no configuration to a later attempt.
 
-This boundary does not implement live admission, departure,
+Stable participant IDs also cross the startup boundary into C. C owns combat
+counters independently of the current car; Rust and browser code do not maintain a
+second score authority. The native controller bindings must match those supplied
+to C. Detached weapon effects receive copied provenance explicitly; ordinary owned
+children inherit their owner's identity. Timed secondary-wave callbacks capture identity
+values, independently of process/interaction/destruction context. Burning retains
+its source on the car after the originating effect or car disappears. Each accepted
+external ignition or refresh replaces that source, including zero for environmental
+fire; contact with the car's own attached flame does not refresh it. Shielded/frozen
+ignitions do not change it. This is provenance for one burning interval, not an
+assist or generic last-attacker system. AI damage reaction keeps its original
+attacker argument. The participant-aware raw damage export has a distinct name;
+the old calling convention is not silently accepted. Original Deathmatch still owns
+its round wins/losses and victory rules.
+
+This boundary does not implement FFA rules, respawn, live admission, departure,
 running slot reuse or car replacement. Those require the timeline and lifetime rules
 below.
 
@@ -318,12 +360,12 @@ a rollback boundary, and after portable snapshot recovery in another instance.
 | Kill, leave and match-ending score occur on one tick | The agreed ordering produces one result on authority, rollback and recovery |
 | Admission or snapshot restoration fails | State remains valid, no partial FSM transition survives, abandoned reservation is released |
 | Respawn creation fails | Results and occupied slot survive, bounded retry or terminal mode policy runs |
-| Live replacement fails | Original car, binding and gameplay RNG state are unchanged |
+| Deferred: live replacement fails | Original car, binding and gameplay RNG state are unchanged |
 | Match ends during reservation, creation or recovery | Pending operations are cancelled, teardown frees slots, the next match starts cleanly |
 | Respawn chooses a random car, including the same model | Replay selects the same model, starts a new car lifetime and preserves participant results |
 | Fixed-car FFA or Tournament respawn | Assigned model remains fixed under mode rules |
-| A mod replaces a living car | Participant stays Playing with the same lease and results, car-local state follows replacement policy |
-| Replacement occurs while the client is disconnected | Recovery restores the actual replacement rather than the client's previous model |
+| Deferred: a mod replaces a living car | Participant stays Playing with the same lease and results, car-local state follows replacement policy |
+| Deferred: live replacement occurs while the client is disconnected | Recovery restores the actual replacement rather than the client's previous model |
 | Requested model is unavailable or incompatible on a peer | Admission or pool extension is rejected before activation without stopping existing players |
 
 ## Decisions still needed

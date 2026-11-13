@@ -372,6 +372,9 @@ mod tests {
             start: SessionStart {
                 capacity: players,
                 slots: (0..players).map(|slot| slot as u8).collect(),
+                participants: (1..=players)
+                    .map(|id| tm4_network::protocol::ParticipantId(id as u64))
+                    .collect(),
                 world: "Construction Yard".into(),
                 cars: vec!["Orbital".into(); players],
                 compatibility: Compatibility {

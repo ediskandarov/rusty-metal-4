@@ -403,19 +403,28 @@ impl Simulator {
             world.call::<u32, i32>("WebNetWorldIndex", address)
         })?;
         let names = session.cars.join("\n");
-        let accepted = self.with_string(&names, |simulator, address| {
-            simulator.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
-                "WebNetStartMatch",
-                (
-                    session.capacity as i32,
-                    u32::from(session.slot_mask()),
-                    world,
-                    session.seed,
-                    -1,
-                    u32::from(session.portable),
-                    address,
-                ),
-            )
+        let identities = session
+            .participants
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        let accepted = self.with_string(&identities, |simulator, identities_address| {
+            simulator.with_string(&names, |simulator, address| {
+                simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
+                    "WebNetStartMatch",
+                    (
+                        session.capacity as i32,
+                        u32::from(session.slot_mask()),
+                        world,
+                        session.seed,
+                        -1,
+                        u32::from(session.portable),
+                        address,
+                        identities_address,
+                    ),
+                )
+            })
         })?;
         ensure!(accepted == 1, "Match setup rejected");
         self.capacity = session.capacity;
@@ -728,6 +737,10 @@ mod tests {
         SessionStart {
             capacity: 2,
             slots: (0..2).map(|slot| slot as u8).collect(),
+            participants: vec![
+                tm4_network::protocol::ParticipantId(1),
+                tm4_network::protocol::ParticipantId(2),
+            ],
             world: "Construction Yard".into(),
             cars: vec!["Orbital".into(), "Pizza Boy".into()],
             seed: 12345,
@@ -822,6 +835,9 @@ mod tests {
             let winner = i32::from(*slots.last().unwrap());
             let setup = SessionStart {
                 capacity: 8,
+                participants: (1..=count)
+                    .map(|id| tm4_network::protocol::ParticipantId(id as u64))
+                    .collect(),
                 slots,
                 cars: ["Orbital", "Pizza Boy", "Crusher"][..count]
                     .iter()
@@ -954,6 +970,295 @@ mod tests {
         Ok(())
     }
 
+    fn canonical(world: &mut Simulator) -> Result<Vec<u8>> {
+        let length = world.call::<(), u32>("HeadlessCapture", ())?;
+        ensure!(
+            length > 0,
+            "Canonical capture refused: {:?}",
+            world.state()?.unsupported
+        );
+        let address = world.call::<(), u32>("HeadlessCanonical", ())?;
+        let mut bytes = vec![0; length as usize];
+        world
+            .memory
+            .read(&world.store, address as usize, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    fn combat_results(world: &mut Simulator) -> Result<Vec<(u64, i32, i32)>> {
+        let address = world.call::<(), u32>("HeadlessParticipants", ())?;
+        let mut bytes = [0; 128];
+        world
+            .memory
+            .read(&world.store, address as usize, &mut bytes)?;
+        Ok(bytes
+            .chunks_exact(16)
+            .map(|record| {
+                (
+                    u64::from_le_bytes(record[..8].try_into().unwrap()),
+                    i32::from_le_bytes(record[8..12].try_into().unwrap()),
+                    i32::from_le_bytes(record[12..16].try_into().unwrap()),
+                )
+            })
+            .collect())
+    }
+
+    fn apply_delayed_kill(world: &mut Simulator, handle: u32) -> Result<Vec<u8>> {
+        ensure!(
+            world.call::<i32, i32>("WebTestKillParticipant", 0)? == 1,
+            "Kill fixture"
+        );
+        world.step(10, &[Input::default(); 8])?;
+        ensure!(
+            world.call::<(u32, i32), u32>("WebTestProjectileProvenance", (handle, 0))?
+                == 0xffff_fffd,
+            "Source low word lost"
+        );
+        ensure!(
+            world.call::<(u32, i32), u32>("WebTestProjectileProvenance", (handle, 1))?
+                == 0xffff_ffff,
+            "Source high word lost"
+        );
+        ensure!(
+            world.call::<(u32, i32), u32>("WebTestProjectileProvenance", (handle, 2))? == 0,
+            "Projectile retained a dead owner"
+        );
+        ensure!(
+            world.call::<i32, u32>("WebTestCaptureTarget", 7)? == 0,
+            "Captor retained its destroyed target"
+        );
+        ensure!(
+            world.call::<(u32, u32), u32>("WebTestAttributedWaves", (0xffff_fffd, 0xffff_ffff))?
+                > 0,
+            "Timed wave lost its expired producer"
+        );
+        let results = combat_results(world)?;
+        ensure!(
+            results[0] == (u64::MAX - 2, 2, 4),
+            "Death erased participant or results"
+        );
+        ensure!(
+            world.call::<(u32, i32), i32>("WebTestHitParticipant", (handle, 3))? == 1,
+            "Delayed impact fixture"
+        );
+        world.step(11, &[Input::default(); 8])?;
+        let results = combat_results(world)?;
+        ensure!(
+            results[0] == (u64::MAX - 2, 3, 4) && results[3] == ((1_u64 << 53) + 1, 0, 5),
+            "Delayed kill attributed to wrong participant: {results:?}"
+        );
+        ensure!(
+            world.call::<(u32, u32), u32>("WebTestAttributedWaves", (0xffff_fffd, 0xffff_ffff))?
+                > 0,
+            "Secondary explosion lost its departed producer"
+        );
+        canonical(world)
+    }
+
+    fn apply_burning_death(world: &mut Simulator, attributed: bool) -> Result<Vec<u8>> {
+        ensure!(
+            world.call::<i32, i32>("WebTestKillParticipant", 0)? == 1,
+            "Attacker death fixture"
+        );
+        world.step(10, &[Input::default(); 8])?;
+        ensure!(
+            world.call::<(i32, i32), u32>("WebTestBurnIdentity", (3, 0))?
+                == if attributed { 0xffff_fffd } else { 0 },
+            "Burn origin lost after attacker death"
+        );
+        world.step(11, &[Input::default(); 8])?;
+        world.step(12, &[Input::default(); 8])?;
+        let results = combat_results(world)?;
+        ensure!(
+            results[0] == (u64::MAX - 2, i32::from(attributed), 1)
+                && results[3] == ((1_u64 << 53) + 1, 0, 1),
+            "Burning result attribution: {results:?}"
+        );
+        canonical(world)
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
+    fn participant_burning_origin_rollback_and_portable_continuation() -> Result<()> {
+        use tm4_network::protocol::ParticipantId;
+        let (wasm, resources) = paths()?;
+        let setup = SessionStart {
+            capacity: 8,
+            slots: vec![0, 3, 7],
+            participants: vec![
+                ParticipantId(u64::MAX - 2),
+                ParticipantId((1_u64 << 53) + 1),
+                ParticipantId(77),
+            ],
+            cars: vec!["Orbital".into(), "Pizza Boy".into(), "Crusher".into()],
+            ..session()
+        };
+        for attributed in [true, false] {
+            let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+            world.start(&setup)?;
+            for tick in 0..10 {
+                world.step(tick, &[Input::default(); 8])?;
+            }
+            ensure!(
+                world.call::<(i32, i32), i32>("WebTestFlameContact", (0, 3))? == 1,
+                "Weapon flame collision"
+            );
+            ensure!(
+                world.call::<(i32, i32), i32>("WebTestFlameContact", (7, 3))? == 1,
+                "Second participant ignition refresh"
+            );
+            ensure!(
+                world.call::<(i32, i32), u32>("WebTestBurnIdentity", (3, 0))? == 77,
+                "Refresh did not replace source"
+            );
+            ensure!(
+                world.call::<(i32, i32), u32>("WebTestBurnIdentity", (3, 3))? == 77,
+                "Attached flame retained previous source"
+            );
+            ensure!(
+                world.call::<i32, i32>("WebTestBurnOwnContact", 3)? == 1,
+                "Own flame refreshed burning interval"
+            );
+            ensure!(
+                world.call::<(i32, i32), i32>(
+                    "WebTestFlameContact",
+                    (if attributed { 0 } else { -1 }, 3)
+                )? == 1,
+                "Final ignition"
+            );
+            let snapshot = world.snapshot()?;
+            ensure!(
+                world.call::<(), u32>("WebNetCaptureLocalCheckpoint", ())? > 0,
+                "Burn checkpoint"
+            );
+            let expected = apply_burning_death(&mut world, attributed)?;
+            ensure!(
+                world.call::<(), i32>("WebNetRestoreLocalCheckpoint", ())? == 1,
+                "Burn rollback"
+            );
+            ensure!(
+                apply_burning_death(&mut world, attributed)? == expected,
+                "Burn rollback differs"
+            );
+            ensure!(
+                world.call::<(), i32>("WebNetFinishLocalReplay", ())? == 1,
+                "Finish burn replay"
+            );
+            let mut fresh = Simulator::new(&wasm, &resources, compatibility())?;
+            fresh.start(&setup)?;
+            fresh.restore_portable(&snapshot)?;
+            ensure!(
+                apply_burning_death(&mut fresh, attributed)? == expected,
+                "Burn portable continuation differs"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
+    fn participant_export_and_constructor_contract() -> Result<()> {
+        let (wasm, resources) = paths()?;
+        let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+        world.start(&session())?;
+        let result = world.call::<i32, i32>("WebTestParticipantDamageContract", 0)?;
+        ensure!(
+            result > 0,
+            "Detached lightning/constructor or raw damage export contract: {result}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires private resources and diagnostic Wasm"]
+    fn participant_attribution_survives_death_rollback_and_portable_replay() -> Result<()> {
+        use tm4_network::protocol::ParticipantId;
+        let (wasm, resources) = paths()?;
+        for model in ["Orbital", "Crusher", "Trash Man", "Super Auger"] {
+            let setup = SessionStart {
+                capacity: 8,
+                slots: vec![0, 3, 7],
+                participants: vec![
+                    ParticipantId(u64::MAX - 2),
+                    ParticipantId((1_u64 << 53) + 1),
+                    ParticipantId(u64::MAX),
+                ],
+                cars: vec![model.into(), "Pizza Boy".into(), "Crusher".into()],
+                ..session()
+            };
+            let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+            let (_, portable) = world.start(&setup)?;
+            ensure!(portable, "Initial portable capability for {model}");
+            for tick in 0..10 {
+                world.step(tick, &[Input::default(); 8])?;
+            }
+            let handle = world.call::<i32, u32>("WebTestCreateParticipantProjectile", 0)?;
+            ensure!(handle != 0, "Projectile fixture");
+            ensure!(
+                world.call::<(i32, i32), i32>("WebTestBindCaptureTarget", (7, 0))? == 1,
+                "Capture fixture"
+            );
+            ensure!(
+                world.call::<(i32, i32, i32), i32>("WebTestSetParticipantResults", (0, 2, 3))? == 1,
+                "Source score fixture"
+            );
+            ensure!(
+                world.call::<(i32, i32, i32), i32>("WebTestSetParticipantResults", (3, 0, 4))? == 1,
+                "Target score fixture"
+            );
+            ensure!(
+                world.call::<i32, u32>("WebTestCreateParticipantWaveTimer", 0)? != 0,
+                "Delayed wave fixture"
+            );
+            let checkpoint = world.snapshot()?;
+            ensure!(
+                world.call::<(), u32>("WebNetCaptureLocalCheckpoint", ())? > 0,
+                "Local capture"
+            );
+            let expected = apply_delayed_kill(&mut world, handle)?;
+            ensure!(
+                world.call::<(), i32>("WebNetRestoreLocalCheckpoint", ())? == 1,
+                "Local restore after death"
+            );
+            ensure!(
+                apply_delayed_kill(&mut world, handle)? == expected,
+                "Rollback differs for {model}"
+            );
+            ensure!(
+                world.call::<(), i32>("WebNetFinishLocalReplay", ())? == 1,
+                "Finish local replay"
+            );
+            let mut fresh = Simulator::new(&wasm, &resources, compatibility())?;
+            fresh.start(&setup)?;
+            fresh.restore_portable(&checkpoint)?;
+            ensure!(
+                apply_delayed_kill(&mut fresh, handle)? == expected,
+                "Portable continuation differs for {model}"
+            );
+            let mut wrong = Simulator::new(&wasm, &resources, compatibility())?;
+            let mut different = setup.clone();
+            different.participants[0] = ParticipantId(42);
+            wrong.start(&different)?;
+            let initial = canonical(&mut wrong)?;
+            ensure!(
+                wrong.restore_portable(&checkpoint).is_err(),
+                "Foreign ownership accepted"
+            );
+            ensure!(
+                canonical(&mut wrong)? == initial,
+                "Rejected restore changed destination"
+            );
+            world.call::<(), ()>("WebNetCancelMatch", ())?;
+            ensure!(
+                combat_results(&mut world)?
+                    .iter()
+                    .all(|record| *record == (0, 0, 0)),
+                "Teardown retained participant state"
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     #[ignore = "requires private resources and diagnostic Wasm"]
     fn explicit_startup_rejects_missing_or_malformed_configuration_without_sticky_state()
@@ -970,9 +1275,9 @@ mod tests {
             (8, 0x09, 4, "Orbital\nPizza Boy"),
         ] {
             let accepted = world.with_string(names, |simulator, address| {
-                simulator.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+                simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
                     "WebNetStartMatch",
-                    (capacity, mask, 0, 12345, -1, flags, address),
+                    (capacity, mask, 0, 12345, -1, flags, address, 0),
                 )
             })?;
             ensure!(accepted == 0, "Invalid configuration accepted");
@@ -981,10 +1286,31 @@ mod tests {
                 "Failed start left an active match"
             );
         }
+        for identities in [
+            "",
+            "0000000000000000\n0000000000000002",
+            "0000000000000001\n0000000000000001",
+            "0000000000000001",
+            "FFFFFFFFFFFFFFFF\n0000000000000002",
+            "0000000000000001\n0000000000000002\n0000000000000003",
+        ] {
+            let accepted = world.with_string(identities, |simulator, ids| {
+                simulator.with_string("Orbital\nPizza Boy", |simulator, names| {
+                    simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
+                        "WebNetStartMatch",
+                        (8, 9, 0, 12345, -1, 0, names, ids),
+                    )
+                })
+            })?;
+            ensure!(
+                accepted == 0 && world.call::<(), u32>("HeadlessState", ())? == 0,
+                "Malformed participant configuration retained state"
+            );
+        }
         ensure!(
-            world.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+            world.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
                 "WebNetStartMatch",
-                (8, 9, 0, 12345, -1, 0, 0)
+                (8, 9, 0, 12345, -1, 0, 0, 0)
             )? == 0,
             "Missing roster accepted"
         );
@@ -999,9 +1325,9 @@ mod tests {
             "Free tail lost capacity"
         );
         let rejected = world.with_string("Orbital\nPizza Boy", |simulator, address| {
-            simulator.call::<(i32, u32, i32, u32, i32, u32, u32), i32>(
+            simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
                 "WebNetStartMatch",
-                (4, 10, 0, 77, -1, 0, address),
+                (4, 10, 0, 77, -1, 0, address, 0),
             )
         })?;
         ensure!(

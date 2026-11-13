@@ -346,6 +346,7 @@ static const SnapshotField car_fields[] = {
     SNAP_POD(Car, display_speed),
     SNAP_REF(Car, fire_effect, "anim"),
     SNAP_POD(Car, fire_ticks),
+    SNAP_POD(Car, burn_source),
     SNAP_POD(Car, turbo_fuel),
     SNAP_LOCAL(Car, maximum_turbo_fuel),
     SNAP_POD(Car, energy),

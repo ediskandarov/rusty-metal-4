@@ -7,12 +7,13 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { ObjectVersion = 1 };
+enum { ObjectVersion = 2 };
 
 typedef struct {
     u32 version;
     char class_name[OBJECT_CLASS_NAME_CAPACITY];
     u32 serial;
+    WebParticipantId participant;
     u32 previous, next, next_display, next_interaction, owner, extenders;
     Tm4ShortVectorXYZ position;
     s16 interaction_radius;
@@ -110,6 +111,7 @@ u32 WebSnapshotObjectCapture(const Tm4ObjectHeader* object, u8* output, u32 capa
     record.version = ObjectVersion;
     memcpy(record.class_name, type.name, name_length + 1);
     record.serial = object->serial;
+    record.participant = object->participant;
     record.previous = header_handle(object->previous);
     record.next = header_handle(object->next);
     if (WorldFindSquare(object->position.vx, object->position.vz)) {
@@ -182,6 +184,7 @@ Tm4ObjectHeader* WebSnapshotObjectAllocate(const u8* input, u32 length)
         memcpy(object->name, type.name, length);
     }
     object->serial = record.serial;
+    object->participant = record.participant;
     object->class_index = type.index;
     object->process = record.process_mode ? type.alternate_process : type.process;
     object->display = type.display;
@@ -226,6 +229,7 @@ int WebSnapshotObjectBind(
     object->next_display = display ? ObjectGetHeader(display) : NULL;
     object->next_interaction = interaction ? ObjectGetHeader(interaction) : NULL;
     object->owner = owner;
+    object->participant = record.participant;
     object->interaction_extenders = extenders;
     return 1;
 }

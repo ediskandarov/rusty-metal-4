@@ -41,6 +41,8 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(car->turbo_fuel);
     VALUE(car->turbo_amount);
     VALUE(car->fire_ticks);
+    VALUE(car->burn_source.low);
+    VALUE(car->burn_source.high);
     VALUE(car->freeze_ticks);
     VALUE(car->shield_ticks);
     VALUE(car->invisibility_ticks);

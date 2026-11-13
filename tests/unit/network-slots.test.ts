@@ -6,12 +6,13 @@ import { messageSchema, startSchema } from "@tm4/lightyear-client/schemas";
 const start = {
   capacity: 8,
   slots: [0, 3, 7],
+  participants: ["0000000000000001", "0000000000000002", "0000000000000003"],
   cars: ["Orbital", "Pizza Boy", "Crusher"],
   world: "Construction Yard",
   seed: 12345,
   epoch: 1,
   portable: false,
-  compatibility: { protocol: 12, build: "a".repeat(64), content: "b".repeat(64) },
+  compatibility: { protocol: 13, build: "a".repeat(64), content: "b".repeat(64) },
 };
 test("startup validates capacity, unique actual slots and one mode car per occupied slot", () => {
   expect(startSchema.parse(start)).toEqual(start);
@@ -21,6 +22,11 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     { capacity: 7 },
     { cars: ["Orbital"] },
     { slots: [7, 3, 0] },
+    { participants: undefined },
+    { participants: ["0000000000000001", "0000000000000001", "0000000000000003"] },
+    { participants: ["0000000000000001"] },
+    { participants: ["0000000000000000", "0000000000000002", "0000000000000003"] },
+    { participants: [1, 2, 3] },
     { slots: undefined },
     { capacity: undefined },
     { portable: undefined },
@@ -48,6 +54,7 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     7,
     2,
     "Orbital\nPizza Boy\nCrusher",
+    "0000000000000001\n0000000000000002\n0000000000000003",
   ]);
   expect(() => configureMatch(engine, start, 1)).toThrow();
 });

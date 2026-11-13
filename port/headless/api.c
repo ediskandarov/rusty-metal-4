@@ -1,9 +1,10 @@
 #include "port/web/net_match.h"
 #include "port/web/net_state.h"
-#include "tm4/main/main.h"
-#include "tm4/main/game.h"
-#include "tm4/main/registry.h"
+#include "port/web/participant.h"
 #include "port/web/snapshot.h"
+#include "tm4/main/game.h"
+#include "tm4/main/main.h"
+#include "tm4/main/registry.h"
 #include <emscripten.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -91,6 +92,13 @@ u32 HeadlessCarCount(void) { return RegGetNumberOfDirectoriesS("/objects/car/cha
 const char* HeadlessCarName(u32 index)
 {
     return index < HeadlessCarCount() ? RegGetDirectoryNameSN("/objects/car/characters", index) : NULL;
+}
+_Static_assert(sizeof(WebParticipantState) == 128, "headless participant state ABI");
+static WebParticipantState participant_state;
+const WebParticipantState* HeadlessParticipants(void)
+{
+    WebParticipantCapture(&participant_state);
+    return &participant_state;
 }
 const char* HeadlessError(void) { return last_error; }
 u8* HeadlessPortableBuffer(void) { return portable_bytes; }

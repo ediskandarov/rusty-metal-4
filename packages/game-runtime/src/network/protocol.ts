@@ -83,7 +83,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
   return engine.ccall(
     "WebNetStartMatch",
     "number",
-    ["number", "number", "number", "number", "number", "number", "string"],
+    ["number", "number", "number", "number", "number", "number", "string", "string"],
     [
       start.capacity,
       start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
@@ -92,6 +92,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       view,
       2 | (start.portable ? 1 : 0),
       start.cars.join("\n"),
+      start.participants.join("\n"),
     ],
   );
 }

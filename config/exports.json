@@ -39,7 +39,7 @@
       "CarAiProcess",
       "CarAiProcessFunctionDisable",
       "CarAiProcessFunctionEnable",
-      "CarApplyDamage",
+      "CarApplyParticipantDamage",
       "CarAxelWeaponSpecialConstructor",
       "CarCalypsoWeaponSpecialConstructor",
       "CarCameraConstructor",

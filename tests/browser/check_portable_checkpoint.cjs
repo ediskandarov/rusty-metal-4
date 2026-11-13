@@ -123,8 +123,20 @@ const { chromium } = require("playwright");
             !Module.ccall(
               "WebNetStartMatch",
               "number",
-              ["number", "number", "number", "number", "number", "number", "string"],
-              [players, (1 << players) - 1, worldIndex, 12345, -1, 1, cars.join("\n")],
+              ["number", "number", "number", "number", "number", "number", "string", "string"],
+              [
+                players,
+                (1 << players) - 1,
+                worldIndex,
+                12345,
+                -1,
+                1,
+                cars.join("\n"),
+                Array.from(
+                  { length: ((1 << players) - 1).toString(2).replace(/0/g, "").length },
+                  (_, index) => (index + 1).toString(16).padStart(16, "0"),
+                ).join("\n"),
+              ],
             )
           )
             throw new Error("Match refused");
@@ -598,7 +610,7 @@ const { chromium } = require("playwright");
             !Module.ccall(
               "WebNetStartMatch",
               "number",
-              ["number", "number", "number", "number", "number", "number", "string"],
+              ["number", "number", "number", "number", "number", "number", "string", "string"],
               [
                 players,
                 (1 << players) - 1,
@@ -607,6 +619,10 @@ const { chromium } = require("playwright");
                 -1,
                 0,
                 ["Orbital", "Pizza Boy", ...Array(players - 2).fill("Orbital")].join("\n"),
+                Array.from(
+                  { length: ((1 << players) - 1).toString(2).replace(/0/g, "").length },
+                  (_, index) => (index + 1).toString(16).padStart(16, "0"),
+                ).join("\n"),
               ],
             )
           )

@@ -223,6 +223,14 @@ mod tests {
         assert!(roster.release(old).is_err());
         let new = roster.reserve(3).unwrap();
         assert_ne!(old.participant, new.participant);
+        let startup_ids: Vec<_> = roster
+            .slots()
+            .map(|slot| roster.binding(slot).participant)
+            .collect();
+        assert_eq!(
+            serde_json::to_value(startup_ids).unwrap(),
+            serde_json::json!(["0000000000000001", "0000000000000004", "0000000000000003"])
+        );
         assert_eq!(roster.resolve(&old), None);
         assert_eq!(roster.binding(7), last);
         roster.freeze();

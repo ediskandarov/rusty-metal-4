@@ -1051,6 +1051,11 @@ fn update(
         let start = SessionStart {
             capacity: game.controls.len(),
             slots: game.participants.slots().map(|slot| slot as u8).collect(),
+            participants: game
+                .participants
+                .slots()
+                .map(|slot| game.participants.binding(slot).participant)
+                .collect(),
             world: game
                 .selected_world
                 .clone()
@@ -1902,6 +1907,7 @@ mod participant_control_tests {
             session: Some(SessionStart {
                 capacity: 2,
                 slots: (0..2).map(|slot| slot as u8).collect(),
+                participants: vec![ParticipantId(1), ParticipantId(2)],
                 world: "Construction Yard".into(),
                 cars: vec!["Orbital".into(), "Pizza Boy".into()],
                 compatibility,

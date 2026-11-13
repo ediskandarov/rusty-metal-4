@@ -104,6 +104,7 @@ impl Session {
 #[derive(Resource, Default)]
 pub struct LivePrediction {
     pub expected_slot_mask: Option<u8>,
+    expected_participants: Vec<crate::protocol::ParticipantId>,
     session: Option<Session>,
     resume_preparing: bool,
     resume_warmup: bool,
@@ -311,10 +312,16 @@ fn reject_clock_shift(shift: On<LocalTimelineShift>, mut state: ResMut<LivePredi
     }
 }
 
-pub fn prepare(world: &mut World, slot_mask: u8, resuming: bool) {
+pub fn prepare(
+    world: &mut World,
+    slot_mask: u8,
+    participants: Vec<crate::protocol::ParticipantId>,
+    resuming: bool,
+) {
     {
         let mut state = world.resource_mut::<LivePrediction>();
         state.expected_slot_mask = Some(slot_mask);
+        state.expected_participants = participants;
         state.resume_preparing = resuming;
     }
     if resuming {
@@ -454,12 +461,21 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
     let mut present = [false; MAX_SLOTS];
     let mut participants = std::collections::HashSet::new();
     let mut local_present = false;
+    let expected = &world.resource::<LivePrediction>().expected_participants;
+    let bindings: Vec<_> = (0..session.capacity)
+        .filter(|slot| session.contains(*slot))
+        .zip(expected.iter().copied())
+        .collect();
+    if bindings.len() != session.mask.count_ones() as usize {
+        return Err("Participant identities were not prepared before play");
+    }
     for (identity, local) in world
         .query_filtered::<(&ControllerIdentity, Has<InputMarker<ControllerCommand>>), With<NativeBuffer<Input>>>()
         .iter(world)
     {
         let slot = usize::from(identity.slot);
         if !session.contains(identity.slot)
+            || !bindings.contains(&(identity.slot, identity.participant))
             || present[slot]
             || !participants.insert(identity.participant)
             || (local && identity.slot != session.local_slot)
@@ -943,6 +959,10 @@ mod tests {
     fn sparse_native_roster_uses_real_local_slot_and_rejects_vacancies() {
         use crate::protocol::ParticipantId;
         let mut world = World::new();
+        world.insert_resource(LivePrediction {
+            expected_participants: vec![ParticipantId(100), ParticipantId(103), ParticipantId(107)],
+            ..Default::default()
+        });
         for slot in [0, 3, 7] {
             let mut entity = world.spawn((
                 ControllerIdentity {
@@ -990,6 +1010,10 @@ mod tests {
     fn native_roster_requires_unique_participants_and_the_correct_local_binding() {
         use crate::protocol::ParticipantId;
         let mut world = World::new();
+        world.insert_resource(LivePrediction {
+            expected_participants: vec![ParticipantId(17), ParticipantId(42)],
+            ..Default::default()
+        });
         let local = world
             .spawn((
                 ControllerIdentity {
@@ -1011,6 +1035,10 @@ mod tests {
             .id();
         assert!(validate_native_roster(&mut world, session()).is_ok());
         for invalid in [
+            ControllerIdentity {
+                participant: ParticipantId(99),
+                slot: 1,
+            },
             ControllerIdentity {
                 participant: ParticipantId(17),
                 slot: 1,

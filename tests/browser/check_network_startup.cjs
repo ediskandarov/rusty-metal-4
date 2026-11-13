@@ -26,8 +26,17 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
           !Module.ccall(
             "WebNetStartMatch",
             "number",
-            ["number", "number", "number", "number", "number", "number", "string"],
-            [8, 255, 0, 12345, view, 0, rosterNames],
+            ["number", "number", "number", "number", "number", "number", "string", "string"],
+            [
+              8,
+              255,
+              0,
+              12345,
+              view,
+              0,
+              rosterNames,
+              "0000000000000001\n0000000000000002\n0000000000000003\n0000000000000004\n0000000000000005\n0000000000000006\n0000000000000007\n0000000000000008",
+            ],
           )
         )
           throw new Error("Direct initialization failed");
@@ -53,8 +62,17 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
       const failed = Module.ccall(
         "WebNetStartMatch",
         "number",
-        ["number", "number", "number", "number", "number", "number", "string"],
-        [8, 255, 0, 12345, -1, 0, rosterNames],
+        ["number", "number", "number", "number", "number", "number", "string", "string"],
+        [
+          8,
+          255,
+          0,
+          12345,
+          -1,
+          0,
+          rosterNames,
+          "0000000000000001\n0000000000000002\n0000000000000003\n0000000000000004\n0000000000000005\n0000000000000006\n0000000000000007\n0000000000000008",
+        ],
       );
       const failedState = tm4Port.netMatch;
       Module.FS.rename("/DATA/GAME.MR.missing", "/DATA/GAME.MR");
@@ -88,7 +106,7 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
           !Module.ccall(
             "WebNetStartMatch",
             "number",
-            ["number", "number", "number", "number", "number", "number", "string"],
+            ["number", "number", "number", "number", "number", "number", "string", "string"],
             [
               8,
               255,
@@ -97,6 +115,7 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
               view,
               0,
               ["Orbital", "Pizza Boy", ...Array(6).fill("Orbital")].join("\n"),
+              "0000000000000001\n0000000000000002\n0000000000000003\n0000000000000004\n0000000000000005\n0000000000000006\n0000000000000007\n0000000000000008",
             ],
           )
         )
@@ -122,8 +141,20 @@ const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
             !Module.ccall(
               "WebNetStartMatch",
               "number",
-              ["number", "number", "number", "number", "number", "number", "string"],
-              [8, (1 << 3) | (1 << 6), 0, 12345, view, 0, "Orbital\nPizza Boy"],
+              ["number", "number", "number", "number", "number", "number", "string", "string"],
+              [
+                8,
+                (1 << 3) | (1 << 6),
+                0,
+                12345,
+                view,
+                0,
+                "Orbital\nPizza Boy",
+                Array.from(
+                  { length: ((1 << 3) | (1 << 6)).toString(2).replace(/0/g, "").length },
+                  (_, index) => (index + 1).toString(16).padStart(16, "0"),
+                ).join("\n"),
+              ],
             )
           )
             throw new Error("Sparse teleport startup failed");

@@ -1,18 +1,19 @@
 #include "net_match.h"
-#include "net_state.h"
+#include "cheats.h"
 #include "checkpoint.h"
+#include "level.h"
+#include "net_state.h"
+#include "participant.h"
+#include "rollback_audio.h"
 #include "snapshot.h"
 #include "snapshot_world.h"
-#include "tm4/main/main.h"
-#include <stdlib.h>
-#include "cheats.h"
-#include "level.h"
 #include "tm4/main/game.h"
+#include "tm4/main/main.h"
 #include "tm4/main/pad.h"
 #include "tm4/main/registry.h"
 #include "tm4/main/system.h"
-#include "rollback_audio.h"
 #include "tm4/modules/car.h"
+#include <stdlib.h>
 
 #include "tm4/main/loadfiles.h"
 #include <ctype.h>
@@ -132,7 +133,7 @@ int WebNetParticipantSlot(int index)
 /* All startup data is mandatory and validated in a local candidate. No prior
  * selection, failed request or cancelled match can contribute configuration. */
 EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u32 seed,
-    s32 view_slot, u32 flags, const char* car_names)
+    s32 view_slot, u32 flags, const char* car_names, const char* participant_ids)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8
         || !slots || (slots & ~((1u << capacity) - 1)) || __builtin_popcount(slots) < 2
@@ -171,9 +172,13 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
             return reject_start("Mode car is unavailable");
         cursor = end + 1;
     }
+    WebParticipantState participants;
+    if (!WebParticipantParse(&participants, slots, participant_ids))
+        return reject_start("Invalid participant identities");
     if (!session_resources_present(&candidate))
         return 0;
     match.setup = candidate;
+    WebParticipantRestore(&participants);
     match.tick = 0;
     WEB_BROWSER_REPORT({
         tm4Port.networkSynchronous = true;
@@ -211,6 +216,13 @@ static void start_session(void)
         GameSetControllerConfigDefault(&GameInfo, WebNetParticipantSlot(slot), 1);
     }
     GameInfo.next_mode = GAME_MODE_PLAY;
+    WebParticipantState participants;
+    WebParticipantCapture(&participants);
+    for (s32 slot = 0; slot < 8; ++slot) {
+        participants.slots[slot].frags = 0;
+        participants.slots[slot].deaths = 0;
+    }
+    WebParticipantRestore(&participants);
     WebLevelStart();
     match.physical_pad = (PadCache) { 0 };
     memset(PadJpad, 0, sizeof(PadJpad));
@@ -621,6 +633,8 @@ void WebNetMatchPublishTick(void)
 void WebNetMatchEnd(void)
 {
     memset(&match, 0, sizeof(match));
+    const WebParticipantState empty = { 0 };
+    WebParticipantRestore(&empty);
     WEB_BROWSER_REPORT({
         delete tm4Port.netMatch;
         delete tm4Port.netCapturedState;

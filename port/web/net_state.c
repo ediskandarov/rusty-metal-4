@@ -1,7 +1,8 @@
 #include "net_state.h"
-#include "net_match.h"
 #include "interpolation.h"
+#include "net_match.h"
 #include "net_state_fields.h"
+#include "participant.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
 #include "tm4/main/pad.h"
@@ -20,8 +21,10 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(7); /* State record schema. */
+    VALUE(9); /* State record schema. */
     const Tm4GameInfo* game = &GameInfo;
+    WebParticipantState participants;
+    WebParticipantCapture(&participants);
     VALUE(randseed());
     VALUE(WebRenderEffectRandomState());
     VALUE(MainFrameCount);
@@ -47,6 +50,10 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
         VALUE(actual_slot);
         const Tm4GamePlayer* player = &game->players[actual_slot];
         const PadCache* pad = &PadJpad[actual_slot];
+        VALUE(participants.slots[actual_slot].id.low);
+        VALUE(participants.slots[actual_slot].id.high);
+        VALUE(participants.slots[actual_slot].frags);
+        VALUE(participants.slots[actual_slot].deaths);
         VALUE(player->lives);
         VALUE(player->wins);
         VALUE(player->losses);

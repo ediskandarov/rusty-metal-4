@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const networkProtocolVersion = 12;
+export const networkProtocolVersion = 13;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -45,6 +45,10 @@ export const slotConfigurationSchema = z
     "Invalid occupied gameplay slots",
   );
 export type SlotConfiguration = z.infer<typeof slotConfigurationSchema>;
+export const participantIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{16}$/)
+  .refine((id) => id !== "0000000000000000");
 export const startSchema = slotConfigurationSchema
   .safeExtend({
     world: z
@@ -60,13 +64,17 @@ export const startSchema = slotConfigurationSchema
       )
       .min(2)
       .max(8),
+    participants: z.array(participantIdSchema).min(2).max(8),
     seed: u32,
     epoch: u32,
     compatibility: compatibilitySchema,
     portable: z.boolean(),
   })
   .refine(
-    (start) => start.cars.length === start.slots.length,
+    (start) =>
+      start.cars.length === start.slots.length &&
+      start.participants.length === start.slots.length &&
+      new Set(start.participants).size === start.participants.length,
     "One mode car is required per occupied slot",
   );
 export type Start = z.infer<typeof startSchema>;

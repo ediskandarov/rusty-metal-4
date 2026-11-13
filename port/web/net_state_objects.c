@@ -104,6 +104,8 @@ static void header_state(NetStateOutput* hash, const Tm4ObjectHeader* object)
 {
     key(hash, object->name);
     VALUE(object->serial);
+    VALUE(object->participant.low);
+    VALUE(object->participant.high);
     VALUE(object->flags);
     VALUE(object->interaction_enabled);
     VALUE(object->is_interaction_extender);

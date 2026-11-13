@@ -2,7 +2,8 @@
 
 Status: design requirements, not implemented guarantees. Updated 2026-11-09.
 Basis: the [network prototype audit](network-audit.md) and the agreed single-player
-browser model. The first supported scenario remains 2–8-player Deathmatch.
+browser model. The current supported scenario is 2–8-player Deathmatch. The next agreed mode is
+eight-slot FFA, scoped in [participant lifecycle](design/participant-lifecycle.md).
 
 ## Scope and invariants
 
@@ -10,8 +11,9 @@ browser model. The first supported scenario remains 2–8-player Deathmatch.
   listener. Local multiplayer and mixed local/network parties are out of scope.
 - The authority has no local participant, viewport, or listener. The Rust server
   runs the recovered C/Wasm simulation directly in embedded Wasmtime.
-- Reuse ordinary gameplay slots and existing physics, weapons, damage, scoring, and
-  mode rules. Networking must not implement a competing version of these rules.
+- Reuse existing physics, weapons, damage and collision. Network FFA owns its own
+  participant, scoring, respawn and round rules; it does not need Tournament or
+  original Deathmatch round compatibility. Standalone offline gameplay is preserved.
 - The server owns session configuration, slot assignments, simulation time, accepted
   inputs, gameplay outcomes, and transitions. Clients send intentions, not damage,
   scores, positions, or victory claims.

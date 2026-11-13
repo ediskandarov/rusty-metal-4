@@ -122,8 +122,8 @@ const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.c
           const started = Module.ccall(
             "WebNetStartMatch",
             "number",
-            ["number", "number", "number", "number", "number", "number", "string"],
-            [2, 3, 0, 54321, -1, 0, "Orbital\nPizza Boy"],
+            ["number", "number", "number", "number", "number", "number", "string", "string"],
+            [2, 3, 0, 54321, -1, 0, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
           );
           const tick = tm4Port.netMatch?.tick;
           Module._WebNetCancelMatch();

@@ -43,8 +43,8 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
           Module.ccall(
             "WebNetStartMatch",
             "number",
-            ["number", "number", "number", "number", "number", "number", "string"],
-            [2, 3, world, 12345, -1, 0, cars.join("\n")],
+            ["number", "number", "number", "number", "number", "number", "string", "string"],
+            [2, 3, world, 12345, -1, 0, cars.join("\n"), "0000000000000001\n0000000000000002"],
           ),
           "start",
         );

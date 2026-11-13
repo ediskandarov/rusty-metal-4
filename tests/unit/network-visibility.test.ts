@@ -58,11 +58,12 @@ afterEach(async () => {
   connectionPending = undefined;
 });
 
-const compatibility = { protocol: 12, build: "a".repeat(64), content: "b".repeat(64) };
+const compatibility = { protocol: 13, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
   capacity: 2,
   slots: [0, 1],
   world: "Road Rage",
+  participants: ["0000000000000001", "0000000000000002"],
   cars: ["Crusher", "Trash Man"],
   seed: 12345,
   epoch: 1,

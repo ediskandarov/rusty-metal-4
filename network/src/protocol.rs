@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 12;
+pub const PROTOCOL_VERSION: u16 = 13;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 29;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -36,8 +36,38 @@ pub fn checksum(seed: u32, bytes: &[u8]) -> u32 {
 pub const CHECKSUM_SEED: u32 = 2_166_136_261;
 
 /// Match-local participant identity, independent of connection and gameplay slot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ParticipantId(pub u64);
+
+impl std::fmt::Display for ParticipantId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{:016x}", self.0)
+    }
+}
+
+impl Serialize for ParticipantId {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for ParticipantId {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(deserializer)?;
+        if text.len() != 16
+            || !text
+                .bytes()
+                .all(|ch| ch.is_ascii_digit() || (b'a'..=b'f').contains(&ch))
+        {
+            return Err(serde::de::Error::custom("invalid participant identity"));
+        }
+        let id = u64::from_str_radix(&text, 16).map_err(serde::de::Error::custom)?;
+        if id == 0 {
+            return Err(serde::de::Error::custom("participant identity is zero"));
+        }
+        Ok(Self(id))
+    }
+}
 
 /// The participant ID is never reused or rebound: it also identifies this ownership lease.
 /// Binding replicated on the native Lightyear controller.
@@ -126,6 +156,8 @@ pub struct SessionStart {
     pub capacity: usize,
     /// Occupied gameplay slots, in the same order as the mode-selected cars.
     pub slots: Vec<u8>,
+    /// Stable identities in occupied-slot order; preserved in C effects and snapshots.
+    pub participants: Vec<ParticipantId>,
     pub world: String,
     pub cars: Vec<String>,
     pub compatibility: Compatibility,
@@ -139,6 +171,12 @@ impl SessionStart {
         (2..=MAX_PLAYERS).contains(&self.capacity)
             && (2..=self.capacity).contains(&self.slots.len())
             && self.slots.len() == self.cars.len()
+            && self.participants.len() == self.slots.len()
+            && self
+                .participants
+                .iter()
+                .enumerate()
+                .all(|(index, id)| id.0 != 0 && !self.participants[..index].contains(id))
             && self
                 .cars
                 .iter()
@@ -266,4 +304,28 @@ pub enum Message {
         anchor: u32,
     },
     ResumePending,
+}
+
+#[cfg(test)]
+mod participant_tests {
+    use super::*;
+
+    #[test]
+    fn participant_identity_is_lossless_for_browser_and_native_consumers() {
+        for id in [1, (1_u64 << 53) + 1, u64::MAX] {
+            let id = ParticipantId(id);
+            let encoded = serde_json::to_string(&id).unwrap();
+            assert_eq!(encoded, format!("\"{id}\""));
+            assert_eq!(serde_json::from_str::<ParticipantId>(&encoded).unwrap(), id);
+        }
+        for invalid in [
+            "0",
+            "1",
+            "\"0000000000000000\"",
+            "\"FFFFFFFFFFFFFFFF\"",
+            "\"0000000000000001extra\"",
+        ] {
+            assert!(serde_json::from_str::<ParticipantId>(invalid).is_err());
+        }
+    }
 }

@@ -1,0 +1,1944 @@
+--- a/include/tm4/main/object.h
++++ b/include/tm4/main/object.h
+@@ -1,6 +1,7 @@
+ #ifndef TM4_MAIN_OBJECT_H
+ #define TM4_MAIN_OBJECT_H
+
++#include "port/web/participant.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+@@ -48,6 +49,7 @@
+ /* The engine header immediately precedes the class-specific payload. */
+ typedef struct Tm4ObjectHeader {
+     s32 serial;
++    WebParticipantId participant;
+     char* name;
+     struct Tm4ObjectHeader* previous;
+     struct Tm4ObjectHeader* next;
+@@ -78,7 +80,7 @@
+     target->vz = z;
+ }
+
+-typedef char Tm4ObjectHeaderSizeCheck[sizeof(Tm4ObjectHeader) == 60 ? 1 : -1];
++typedef char Tm4ObjectHeaderSizeCheck[sizeof(Tm4ObjectHeader) == 68 ? 1 : -1];
+
+ /* Object-owned class lists, also traversed by MAIN Sound. */
+ typedef struct Tm4ObjectList {
+@@ -101,6 +103,7 @@
+ void ObjectSetPosition(void* payload, u32 x, u32 y, u32 z);
+ void ObjectSetOwner(void* payload, void* owner);
+ void* ObjectCreate(char* name, u32 flags, ...);
++void* ObjectCreateWithParticipant(char* name, u32 flags, WebParticipantId participant, ...);
+ void ObjectSetInteractionRadius(void* payload, u32 radius);
+
+ s32 ObjectDirectoryRecurse(Tm4DirectoryVisitor visitor);
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -1,6 +1,7 @@
+ #ifndef TM4_MODULES_CAR_H
+ #define TM4_MODULES_CAR_H
+
++#include "port/web/participant.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+@@ -358,6 +359,7 @@
+     s32 display_speed;
+     struct Anim* fire_effect;
+     s32 fire_ticks;
++    WebParticipantId burn_source;
+     s32 turbo_fuel;
+     s32 maximum_turbo_fuel;
+     s32 energy;
+@@ -409,9 +411,9 @@
+ void CarPhysicsDestructor(Car* car);
+ void CarDisplayDestructor(Car* car);
+
+-typedef s32 CarApplyDamageFunction(
+-    Car* car, void* attacker, s32 amount, SVECTOR* cause, char* format, ...);
+-CarApplyDamageFunction CarApplyDamage;
++typedef s32 CarApplyParticipantDamageFunction(Car* car, void* attacker, WebParticipantId source,
++    s32 amount, SVECTOR* cause, char* format, ...);
++CarApplyParticipantDamageFunction CarApplyParticipantDamage;
+ typedef void CarOrientWithMatrixFunction(Car* car, MATRIX* matrix);
+ CarOrientWithMatrixFunction CarOrientWithMatrix;
+ typedef void TransformOriginalBoxFunction(Car* car);
+--- a/src/main/imports_8002CE0C.c
++++ b/src/main/imports_8002CE0C.c
+@@ -131,7 +131,7 @@
+ static void ResolveCarPhysicsImports(void);
+
+ static s32* GImport = NULL;
+-static CarApplyDamageFunction* CarApplyDamageImport = NULL;
++static CarApplyParticipantDamageFunction* CarApplyParticipantDamageImport = NULL;
+ static CarOrientWithMatrixFunction* CarOrientWithMatrixImport = NULL;
+ static TransformOriginalBoxFunction* TransformOriginalBoxImport = NULL;
+ static TransformOriginalBoxCenterPointFunction* TransformOriginalBoxCenterPointImport = NULL;
+@@ -143,7 +143,7 @@
+ };
+
+ #define GImportName "G"
+-#define CarApplyDamageImportName "CarApplyDamage"
++#define CarApplyParticipantDamageImportName "CarApplyParticipantDamage"
+ #define CarOrientWithMatrixImportName "CarOrientWithMatrix"
+ #define TransformOriginalBoxImportName "TransformOriginalBox"
+ #define TransformOriginalBoxCenterPointImportName "TransformOriginalBoxCenterPoint"
+@@ -153,7 +153,7 @@
+ static void ResolveCarPhysicsImports(void)
+ {
+     GImport = OSSymbolGetAddressAssert(GImportName);
+-    CarApplyDamageImport = OSSymbolGetAddressAssert(CarApplyDamageImportName);
++    CarApplyParticipantDamageImport = OSSymbolGetAddressAssert(CarApplyParticipantDamageImportName);
+     CarOrientWithMatrixImport = OSSymbolGetAddressAssert(CarOrientWithMatrixImportName);
+     TransformOriginalBoxImport = OSSymbolGetAddressAssert(TransformOriginalBoxImportName);
+     TransformOriginalBoxCenterPointImport
+--- a/src/main/imports_8002EDE8.c
++++ b/src/main/imports_8002EDE8.c
+@@ -133,7 +133,7 @@
+ static void ResolveCarPhysicsImports(void);
+
+ static s32* GImport = NULL;
+-static CarApplyDamageFunction* CarApplyDamageImport = NULL;
++static CarApplyParticipantDamageFunction* CarApplyParticipantDamageImport = NULL;
+ static CarOrientWithMatrixFunction* CarOrientWithMatrixImport = NULL;
+ static TransformOriginalBoxFunction* TransformOriginalBoxImport = NULL;
+ static TransformOriginalBoxCenterPointFunction* TransformOriginalBoxCenterPointImport = NULL;
+@@ -145,7 +145,7 @@
+ };
+
+ #define GImportName "G"
+-#define CarApplyDamageImportName "CarApplyDamage"
++#define CarApplyParticipantDamageImportName "CarApplyParticipantDamage"
+ #define CarOrientWithMatrixImportName "CarOrientWithMatrix"
+ #define TransformOriginalBoxImportName "TransformOriginalBox"
+ #define TransformOriginalBoxCenterPointImportName "TransformOriginalBoxCenterPoint"
+@@ -155,7 +155,7 @@
+ static void ResolveCarPhysicsImports(void)
+ {
+     GImport = OSSymbolGetAddressAssert(GImportName);
+-    CarApplyDamageImport = OSSymbolGetAddressAssert(CarApplyDamageImportName);
++    CarApplyParticipantDamageImport = OSSymbolGetAddressAssert(CarApplyParticipantDamageImportName);
+     CarOrientWithMatrixImport = OSSymbolGetAddressAssert(CarOrientWithMatrixImportName);
+     TransformOriginalBoxImport = OSSymbolGetAddressAssert(TransformOriginalBoxImportName);
+     TransformOriginalBoxCenterPointImport
+--- a/src/main/imports_80031D5C.c
++++ b/src/main/imports_80031D5C.c
+@@ -131,7 +131,7 @@
+ static void ResolveCarPhysicsImports(void);
+
+ static s32* GImport = NULL;
+-static CarApplyDamageFunction* CarApplyDamageImport = NULL;
++static CarApplyParticipantDamageFunction* CarApplyParticipantDamageImport = NULL;
+ static CarOrientWithMatrixFunction* CarOrientWithMatrixImport = NULL;
+ static TransformOriginalBoxFunction* TransformOriginalBoxImport = NULL;
+ static TransformOriginalBoxCenterPointFunction* TransformOriginalBoxCenterPointImport = NULL;
+@@ -143,7 +143,7 @@
+ };
+
+ #define GImportName "G"
+-#define CarApplyDamageImportName "CarApplyDamage"
++#define CarApplyParticipantDamageImportName "CarApplyParticipantDamage"
+ #define CarOrientWithMatrixImportName "CarOrientWithMatrix"
+ #define TransformOriginalBoxImportName "TransformOriginalBox"
+ #define TransformOriginalBoxCenterPointImportName "TransformOriginalBoxCenterPoint"
+@@ -153,7 +153,7 @@
+ static void ResolveCarPhysicsImports(void)
+ {
+     GImport = OSSymbolGetAddressAssert(GImportName);
+-    CarApplyDamageImport = OSSymbolGetAddressAssert(CarApplyDamageImportName);
++    CarApplyParticipantDamageImport = OSSymbolGetAddressAssert(CarApplyParticipantDamageImportName);
+     CarOrientWithMatrixImport = OSSymbolGetAddressAssert(CarOrientWithMatrixImportName);
+     TransformOriginalBoxImport = OSSymbolGetAddressAssert(TransformOriginalBoxImportName);
+     TransformOriginalBoxCenterPointImport
+--- a/src/main/imports_80034E48.c
++++ b/src/main/imports_80034E48.c
+@@ -131,7 +131,7 @@
+ static void ResolveCarPhysicsImports(void);
+
+ static s32* GImport = NULL;
+-static CarApplyDamageFunction* CarApplyDamageImport = NULL;
++static CarApplyParticipantDamageFunction* CarApplyParticipantDamageImport = NULL;
+ static CarOrientWithMatrixFunction* CarOrientWithMatrixImport = NULL;
+ static TransformOriginalBoxFunction* TransformOriginalBoxImport = NULL;
+ static TransformOriginalBoxCenterPointFunction* TransformOriginalBoxCenterPointImport = NULL;
+@@ -143,7 +143,7 @@
+ };
+
+ #define GImportName "G"
+-#define CarApplyDamageImportName "CarApplyDamage"
++#define CarApplyParticipantDamageImportName "CarApplyParticipantDamage"
+ #define CarOrientWithMatrixImportName "CarOrientWithMatrix"
+ #define TransformOriginalBoxImportName "TransformOriginalBox"
+ #define TransformOriginalBoxCenterPointImportName "TransformOriginalBoxCenterPoint"
+@@ -153,7 +153,7 @@
+ static void ResolveCarPhysicsImports(void)
+ {
+     GImport = OSSymbolGetAddressAssert(GImportName);
+-    CarApplyDamageImport = OSSymbolGetAddressAssert(CarApplyDamageImportName);
++    CarApplyParticipantDamageImport = OSSymbolGetAddressAssert(CarApplyParticipantDamageImportName);
+     CarOrientWithMatrixImport = OSSymbolGetAddressAssert(CarOrientWithMatrixImportName);
+     TransformOriginalBoxImport = OSSymbolGetAddressAssert(TransformOriginalBoxImportName);
+     TransformOriginalBoxCenterPointImport
+--- a/src/main/object/object.c
++++ b/src/main/object/object.c
+@@ -146,7 +146,8 @@
+     return NULL;
+ }
+
+-void* ObjectCreate(char* name, u32 flags, ...)
++static void* object_create(
++    char* name, u32 flags, const WebParticipantId* participant, va_list input)
+ {
+     va_list args;
+     void* owner;
+@@ -166,7 +167,7 @@
+     s32 serial;
+     u8 object_flags;
+
+-    va_start(args, flags);
++    va_copy(args, input);
+     if (ObjectCreateStackRouteState == 0) {
+         StackGetPointer(routing_scratch);
+         if (StackIsScratchpad(routing_scratch) && StackScratchpadBelowThreshold(routing_scratch)) {
+@@ -263,6 +264,7 @@
+     header->interaction_enabled = 0;
+     header->flags = object_flags;
+     header->owner = owner;
++    header->participant = participant ? *participant : WebParticipantObjectIdentity(owner);
+     header->interaction_extenders = NULL;
+     for (i = 0; i < ObjectClassCount; i++) {
+         if (ObjectFindInteractionCallback(header->name, ObjectClasses[i].name) != NULL) {
+@@ -343,9 +345,27 @@
+         ObjectCreateStackRouteState = 1;
+     else if (routing_scratch == 1)
+         ObjectCreateStackRouteState = 0;
++    va_end(args);
++    return result;
++}
++
++void* ObjectCreate(char* name, u32 flags, ...)
++{
++    va_list args;
++    va_start(args, flags);
++    void* result = object_create(name, flags, NULL, args);
+     va_end(args);
+     return result;
+ }
++
++void* ObjectCreateWithParticipant(char* name, u32 flags, WebParticipantId participant, ...)
++{
++    va_list args;
++    va_start(args, participant);
++    void* result = object_create(name, flags, &participant, args);
++    va_end(args);
++    return result;
++}
+ #endif
+
+ #if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x80019700
+--- a/src/modules/anim/data.c
++++ b/src/modules/anim/data.c
+@@ -48,7 +48,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -138,7 +138,7 @@
+ CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable = NULL;
+ CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/anim/display.c
++++ b/src/modules/anim/display.c
+@@ -89,6 +89,7 @@
+ {
+     if (ObjectGetHeader(object)->owner != car) {
+         Import_InteractCarWithAnim_fire(car, object);
+-        Import_CarApplyDamage(car, NULL, 8, NULL, TextGreentoxKillMessage);
++        Import_CarApplyParticipantDamage(
++            car, NULL, WebParticipantObjectIdentity(object), 8, NULL, TextGreentoxKillMessage);
+     }
+ }
+--- a/src/modules/anim/imports.c
++++ b/src/modules/anim/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/anim/private.h
++++ b/src/modules/anim/private.h
+@@ -58,7 +58,7 @@
+ void OSRegisterExplosion(void);
+ void OSRegisterInteract(void);
+
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern AnimInteractionCallback* Import_InteractCarWithAnim_fire;
+ extern char ImportName_SoundEmitterSetVolumeFade[];
+ extern char ImportName_SoundEmitterSetPitchScale[];
+@@ -75,7 +75,7 @@
+ extern char ImportName_CarAiProcessFunctionEnable[];
+ extern char ImportName_CarAiProcessFunctionDisable[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+--- a/src/modules/bullet/bullet.c
++++ b/src/modules/bullet/bullet.c
+@@ -22,7 +22,7 @@
+ #include <STDIO.H>
+ #include <STRINGS.H>
+
+-typedef char BulletObjectHeaderSizeCheck[sizeof(Tm4ObjectHeader) == 60 ? 1 : -1];
++typedef char BulletObjectHeaderSizeCheck[sizeof(Tm4ObjectHeader) == 68 ? 1 : -1];
+
+ void BulletClassConstructor(RegistryDirectory* registry)
+ {
+@@ -172,9 +172,9 @@
+             return 0;
+         if (!strcmp(ObjectGetHeader(object->hit_object)->name, BulletCarClassName)) {
+             Car* car = object->hit_object;
+-            if (Import_CarApplyDamage(car, ObjectGetHeader(payload)->owner, damage,
+-                    &object->impact.vector, BulletKillMessageFormat, object->owner_name,
+-                    object->weapon_name)
++            if (Import_CarApplyParticipantDamage(car, ObjectGetHeader(payload)->owner,
++                    WebParticipantObjectIdentity(payload), damage, &object->impact.vector,
++                    BulletKillMessageFormat, object->owner_name, object->weapon_name)
+                     == 1
+                 && car->control_kind == CAR_CONTROL_PLAYER)
+                 GamePadVibrateS(car->controller_index, BulletVibrationName);
+--- a/src/modules/bullet/data.c
++++ b/src/modules/bullet/data.c
+@@ -46,7 +46,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+--- a/src/modules/bullet/imports.c
++++ b/src/modules/bullet/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/bullet/private.h
++++ b/src/modules/bullet/private.h
+@@ -38,7 +38,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -80,7 +80,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/bullet/state.c
++++ b/src/modules/bullet/state.c
+@@ -20,7 +20,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -135,6 +135,8 @@
+     directory = CarClassDirectory;
+     car->index = player;
+     car->controller_index = index;
++    if (WebNetMatchActive())
++        ObjectGetHeader(car)->participant = WebParticipantIdentity(index);
+     if (RegChangeCurrentDirectoryPS(directory, CarTextCharacters) != 1)
+         return 0;
+     if (RegChangeCurrentDirectoryS(character) != 1)
+@@ -321,11 +323,14 @@
+         material = car->particles[particle].material;
+         surface = WorldTrackData[material].kind;
+         if (surface == TM4_SURFACE_FALL_TO_DEATH) {
+-            CarApplyDamage(car, 0, 0x7fffffff, 0, "FELL TO DEATH");
++            CarApplyParticipantDamage(
++                car, 0, WebParticipantObjectIdentity(0), 0x7fffffff, 0, "FELL TO DEATH");
+             return;
+         }
+         if (surface == TM4_SURFACE_MELT) {
+-            if (CarApplyDamage(car, 0, 3, 0, "MELTED TO DEATH") != 1)
++            if (CarApplyParticipantDamage(
++                    car, 0, WebParticipantObjectIdentity(0), 3, 0, "MELTED TO DEATH")
++                != 1)
+                 return;
+             break;
+         }
+@@ -427,7 +432,7 @@
+     if (car->fire_ticks <= 0) {
+         CarClearFireEffect(car);
+     } else {
+-        if (CarApplyDamage(car, 0, 5, 0, "BURNED TO DEATH") != 1)
++        if (CarApplyParticipantDamage(car, 0, car->burn_source, 5, 0, "BURNED TO DEATH") != 1)
+             return;
+         if (car->fire_effect)
+             ObjectSetPosition(
+@@ -451,6 +456,7 @@
+ void CarClearFireEffect(void* object)
+ {
+     Car* car = object;
++    car->burn_source = (WebParticipantId) { 0 };
+     if (car->fire_effect) {
+         ObjectDestroy(car->fire_effect);
+         car->fire_effect = 0;
+--- a/src/modules/car/collision.c
++++ b/src/modules/car/collision.c
+@@ -303,7 +303,8 @@
+                 damage = Q12MulRound(received, give_factor[other]);
+                 damage = Q12MulRound(damage, speed);
+                 damage = Q12MulRound(damage, CarCollisionDamageFactor);
+-                status = CarApplyDamage(*current, cars[other], damage, NULL,
++                status = CarApplyParticipantDamage(*current, cars[other],
++                    WebParticipantObjectIdentity(cars[other]), damage, NULL,
+                     "RAMMED TO DEATH BY %s", names[0] + other * (name_width_bits >> 3));
+                 if (status != one)
+                     *current = NULL;
+@@ -448,8 +449,8 @@
+     }
+ }
+
+-s32 CarApplyDamage(
+-    Car* car_arg, void* attacker_arg, s32 amount_arg, SVECTOR* cause_arg, char* format, ...)
++s32 CarApplyParticipantDamage(Car* car_arg, void* attacker_arg, WebParticipantId source,
++    s32 amount_arg, SVECTOR* cause_arg, char* format, ...)
+ {
+     void* attacker = attacker_arg;
+     s32 amount = amount_arg;
+@@ -470,6 +471,7 @@
+     car->health -= amount;
+     CarVibrateForImpact(car->controller_index, amount);
+     if (car->health <= 0) {
++        WebParticipantRecordDeath(car, source);
+         if (format)
+             ScreenLocalMessageRegisterV(car->controller_index, format, arguments);
+         CarSpawnDestructionEffects(car, cause);
+--- a/src/modules/car/contacts.c
++++ b/src/modules/car/contacts.c
+@@ -88,7 +88,9 @@
+     for (i = 0; i < particle_count; i++) {
+         CarCheckParticleContact(&car->particles[i], car);
+         if (WorldTrackData[car->particles[i].material].kind == TM4_SURFACE_FALL_TO_DEATH)
+-            return CarApplyDamage(car, NULL, 0x7fffffff, NULL, CarFellToDeathMessage) == 1;
++            return CarApplyParticipantDamage(car, NULL, WebParticipantObjectIdentity(NULL),
++                       0x7fffffff, NULL, CarFellToDeathMessage)
++                == 1;
+     }
+     return 1;
+ }
+--- a/src/modules/car/weapon_launch.c
++++ b/src/modules/car/weapon_launch.c
+@@ -54,7 +54,8 @@
+         return 0;
+     count = RegGetFileArraySizeS(CarTextObjectsWeaponLightningEmitterPoints);
+     for (i = 0; i < count; i++) {
+-        if (!ObjectCreate(CarTextWeaponLightningEmitter, 0, CarTextLevel, points))
++        if (!ObjectCreateWithParticipant(CarTextWeaponLightningEmitter, 0,
++                WebParticipantObjectIdentity(car), CarTextLevel, points))
+             return 0;
+         ++points;
+     }
+--- a/src/modules/carprt/data.c
++++ b/src/modules/carprt/data.c
+@@ -48,7 +48,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -97,7 +97,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/carprt/imports.c
++++ b/src/modules/carprt/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/carprt/private.h
++++ b/src/modules/carprt/private.h
+@@ -62,7 +62,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -91,7 +91,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeFade;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/cars/auger/auger.c
++++ b/src/modules/cars/auger/auger.c
+@@ -70,7 +70,8 @@
+                 drill->target->position.vy - car->position.vy,
+                 drill->target->position.vz - car->position.vz)
+                 > 1024
+-            || !Import_CarApplyDamage(drill->target, car, AugerDamage, NULL, AugerDrillKillMessage,
++            || !Import_CarApplyParticipantDamage(drill->target, car,
++                WebParticipantObjectIdentity(car), AugerDamage, NULL, AugerDrillKillMessage,
+                 car->character_name)) {
+             drill->target = NULL;
+         } else {
+--- a/src/modules/cars/auger/data.c
++++ b/src/modules/cars/auger/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -82,7 +82,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/auger/imports.c
++++ b/src/modules/cars/auger/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_crush/crush.c
++++ b/src/modules/cars/c_crush/crush.c
+@@ -95,8 +95,9 @@
+                 if (!pinchers->target) {
+                     sound = SmallCollisionSound;
+                 } else {
+-                    if (!Import_CarApplyDamage(pinchers->target, car, CrusherDamage, NULL,
+-                            KillMessage, car->character_name))
++                    if (!Import_CarApplyParticipantDamage(pinchers->target, car,
++                            WebParticipantObjectIdentity(car), CrusherDamage, NULL, KillMessage,
++                            car->character_name))
+                         pinchers->target = NULL;
+                     sound = HitSound;
+                 }
+--- a/src/modules/cars/c_crush/data.c
++++ b/src/modules/cars/c_crush/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -96,7 +96,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_crush/imports.c
++++ b/src/modules/cars/c_crush/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_minion/data.c
++++ b/src/modules/cars/c_minion/data.c
+@@ -44,7 +44,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -82,7 +82,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_minion/imports.c
++++ b/src/modules/cars/c_minion/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_pirate/data.c
++++ b/src/modules/cars/c_pirate/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -79,7 +79,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_pirate/imports.c
++++ b/src/modules/cars/c_pirate/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_slam/data.c
++++ b/src/modules/cars/c_slam/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -88,7 +88,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_slam/imports.c
++++ b/src/modules/cars/c_slam/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_slam/slam.c
++++ b/src/modules/cars/c_slam/slam.c
+@@ -78,8 +78,9 @@
+             if (!shovel->target) {
+                 sound = SmallCollisionSound;
+             } else {
+-                if (!Import_CarApplyDamage(
+-                        shovel->target, car, SlamDamage, NULL, kill_message, car->character_name))
++                if (!Import_CarApplyParticipantDamage(shovel->target, car,
++                        WebParticipantObjectIdentity(car), SlamDamage, NULL, kill_message,
++                        car->character_name))
+                     shovel->target = NULL;
+                 sound = LargeCollisionSound;
+             }
+--- a/src/modules/cars/c_stooth/data.c
++++ b/src/modules/cars/c_stooth/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -83,7 +83,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_stooth/imports.c
++++ b/src/modules/cars/c_stooth/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_tank/data.c
++++ b/src/modules/cars/c_tank/data.c
+@@ -44,7 +44,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -82,7 +82,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_tank/imports.c
++++ b/src/modules/cars/c_tank/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_toy/data.c
++++ b/src/modules/cars/c_toy/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -78,7 +78,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_toy/imports.c
++++ b/src/modules/cars/c_toy/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_trash/data.c
++++ b/src/modules/cars/c_trash/data.c
+@@ -43,7 +43,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[] = "G";
+-char ImportName_CarApplyDamage[] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[] = "TransformOriginalBoxCenterPoint";
+@@ -88,7 +88,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/cars/c_trash/imports.c
++++ b/src/modules/cars/c_trash/imports.c
+@@ -41,7 +41,7 @@
+ void OSRegisterCarPhysics(void)
+ {
+     ResolveImport(G);
+-    ResolveImport(CarApplyDamage);
++    ResolveImport(CarApplyParticipantDamage);
+     ResolveImport(CarOrientWithMatrix);
+     ResolveImport(TransformOriginalBox);
+     ResolveImport(TransformOriginalBoxCenterPoint);
+--- a/src/modules/cars/c_trash/trash.c
++++ b/src/modules/cars/c_trash/trash.c
+@@ -70,7 +70,8 @@
+         if (shovel->angular_speed > 0) {
+             if (shovel->angle >= TrashMaximumAngle) {
+                 if (shovel->target) {
+-                    if (!Import_CarApplyDamage(shovel->target, car, TrashDamage, NULL, kill_message,
++                    if (!Import_CarApplyParticipantDamage(shovel->target, car,
++                            WebParticipantObjectIdentity(car), TrashDamage, NULL, kill_message,
+                             car->character_name))
+                         shovel->target = NULL;
+                     ObjectCreate(SoundClassName, 4, car, LargeCollisionSound, 0);
+@@ -84,8 +85,9 @@
+             if (!shovel->target) {
+                 sound = SmallCollisionSound;
+             } else {
+-                if (!Import_CarApplyDamage(
+-                        shovel->target, car, TrashDamage, NULL, kill_message, car->character_name))
++                if (!Import_CarApplyParticipantDamage(shovel->target, car,
++                        WebParticipantObjectIdentity(car), TrashDamage, NULL, kill_message,
++                        car->character_name))
+                     shovel->target = NULL;
+                 sound = LargeCollisionSound;
+             }
+--- a/src/modules/cars/imports.h
++++ b/src/modules/cars/imports.h
+@@ -34,7 +34,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -59,7 +59,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/expl/data.c
++++ b/src/modules/expl/data.c
+@@ -54,7 +54,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -122,7 +122,7 @@
+ CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable = NULL;
+ CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/expl/imports.c
++++ b/src/modules/expl/imports.c
+@@ -50,7 +50,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/expl/private.h
++++ b/src/modules/expl/private.h
+@@ -58,7 +58,7 @@
+ extern char ImportName_CarAiProcessFunctionEnable[];
+ extern char ImportName_CarAiProcessFunctionDisable[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -109,7 +109,7 @@
+ extern CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable;
+ extern CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/fire/data.c
++++ b/src/modules/fire/data.c
+@@ -62,7 +62,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -114,7 +114,7 @@
+ CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable = NULL;
+ CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/fire/fire.c
++++ b/src/modules/fire/fire.c
+@@ -190,8 +190,9 @@
+         } else
+             scale_q12 = ONE;
+         ScaleShortVectorRoundedQ12(&launch_world_velocity, &emitter->world_velocity, scale_q12);
+-        ObjectCreate(FireAnimClassName, 1, car, emitter->animation_name, scale_q12, &spawn_world,
+-            &launch_world_velocity, 0, ANIM_SOUND_DISABLED, 0);
++        ObjectCreateWithParticipant(FireAnimClassName, 1, WebParticipantObjectIdentity(emitter),
++            car, emitter->animation_name, scale_q12, &spawn_world, &launch_world_velocity, 0,
++            ANIM_SOUND_DISABLED, 0);
+         emitter->emit_elapsed_frames = 0;
+     }
+     emitter->emit_elapsed_frames++;
+--- a/src/modules/fire/imports.c
++++ b/src/modules/fire/imports.c
+@@ -55,7 +55,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/fire/private.h
++++ b/src/modules/fire/private.h
+@@ -83,7 +83,7 @@
+ extern char ImportName_CarAiProcessFunctionEnable[];
+ extern char ImportName_CarAiProcessFunctionDisable[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -123,7 +123,7 @@
+ extern CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable;
+ extern CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/frag/data.c
++++ b/src/modules/frag/data.c
+@@ -50,7 +50,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -99,7 +99,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/frag/imports.c
++++ b/src/modules/frag/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/frag/private.h
++++ b/src/modules/frag/private.h
+@@ -61,7 +61,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -88,7 +88,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/interact/damage.c
++++ b/src/modules/interact/damage.c
+@@ -53,9 +53,14 @@
+     Import_DestroyableApplyDamage(
+         destroyable, beam->damage, beam->hit_world.vx, beam->hit_world.vy, beam->hit_world.vz);
+ }
++void WebIgniteTerrain(Tm4CollisionPolygon* polygon, SVECTOR* point, WebParticipantId source)
++{
++    ObjectCreateWithParticipant(
++        InteractNameFireRing, 0, source, InteractNameFire, point, 1536, 192, polygon);
++}
+ void InteractWithFlammableTerrainPoly(Tm4CollisionPolygon* polygon, SVECTOR* point)
+ {
+-    ObjectCreate(InteractNameFireRing, 0, InteractNameFire, point, 1536, 192, polygon);
++    WebIgniteTerrain(polygon, point, (WebParticipantId) { 0 });
+ }
+ s32 ExplosionShockwaveGetObjectForceDamage(ExplosionWave* wave, void* object, Tm4VectorXYZ* force)
+ {
+@@ -114,12 +119,14 @@
+     if (team == CAR_CONTROL_ENEMY && owner && !strcmp(ObjectGetHeader(owner)->name, InteractNameCar)
+         && owner->control_kind == team)
+         damage /= 8;
+-    if (Import_CarApplyDamage(car, owner, damage, NULL, NULL) != 1)
++    if (Import_CarApplyParticipantDamage(
++            car, owner, WebParticipantObjectIdentity(wave), damage, NULL, NULL)
++        != 1)
+         return;
+     if (wave->definition->freeze)
+         Import_CarFreezeCar(car);
+     if (wave->definition->fire)
+-        InteractCarWithAnim_fire(car, NULL);
++        WebCarIgniteFromParticipant(car, NULL, WebParticipantObjectIdentity(wave));
+ }
+ void InteractExplosionShockWaveWithWeaponBomb(ExplosionWave* wave, WeaponBomb* bomb)
+ {
+--- a/src/modules/interact/data.c
++++ b/src/modules/interact/data.c
+@@ -45,7 +45,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -113,7 +113,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/interact/imports.c
++++ b/src/modules/interact/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/interact/interact.c
++++ b/src/modules/interact/interact.c
+@@ -24,7 +24,7 @@
+     powerup->position.fields.active = POWERUP_HIDDEN;
+     powerup->inactive_ticks = 0;
+ }
+-void InteractCarWithAnim_fire(Car* car, Anim* anim)
++void WebCarIgniteFromParticipant(Car* car, Anim* anim, WebParticipantId source)
+ {
+     s32 x, z;
+     SVECTOR position, offset, point;
+@@ -55,8 +55,8 @@
+         py += o->vy;
+         pz += o->vz;
+         setVector(v, px, py, pz);
+-        ObjectCreate(
+-            InteractNameAnim, 0, InteractNameDarksmoke, ONE / 2, v, 0, 0, ANIM_SOUND_DISABLED);
++        ObjectCreateWithParticipant(InteractNameAnim, 0, source, InteractNameDarksmoke, ONE / 2, v,
++            0, 0, ANIM_SOUND_DISABLED);
+     }
+     if (car->fire_effect) {
+         if (car->fire_effect != anim) {
+@@ -64,20 +64,28 @@
+             car->fire_effect->age_frames = 0;
+             update = Import_CarAiInteractedWithFire;
+             car->fire_ticks = CAR_FIRE_DURATION_TICKS;
++            car->burn_source = source;
++            ObjectGetHeader(car->fire_effect)->participant = source;
+             update(car);
+         }
+     } else {
+-        Anim* created = ObjectCreate(
+-            InteractNameAnim, 4, car, InteractNameFire, ONE / 2, p, 0, -1, ANIM_SOUND_DEFAULT);
++        Anim* created = ObjectCreateWithParticipant(InteractNameAnim, 4, source, car,
++            InteractNameFire, ONE / 2, p, 0, -1, ANIM_SOUND_DEFAULT);
+         car->fire_effect = created;
+-        if (created)
++        if (created) {
+             car->fire_ticks = CAR_FIRE_DURATION_TICKS;
++            car->burn_source = source;
++        }
+     }
+ }
++void InteractCarWithAnim_fire(Car* car, Anim* anim)
++{
++    WebCarIgniteFromParticipant(car, anim, WebParticipantObjectIdentity(anim));
++}
+ void InteractCarWithFlames(Car* car, char* flames)
+ {
+     if (*(void**)flames != car)
+-        InteractCarWithAnim_fire(car, NULL);
++        WebCarIgniteFromParticipant(car, NULL, WebParticipantObjectIdentity(flames));
+ }
+ void InteractCarWithTeleporter(Car* car, Teleporter* teleporter)
+ {
+--- a/src/modules/interact/private.h
++++ b/src/modules/interact/private.h
+@@ -46,7 +46,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -78,7 +78,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/levels/imports.h
++++ b/src/modules/levels/imports.h
+@@ -42,7 +42,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -82,7 +82,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/levels/w_carni/collision.c
++++ b/src/modules/levels/w_carni/collision.c
+@@ -43,7 +43,8 @@
+         {
+             SVECTOR* hit = &origin;
+             CopyShortVectorXYZ(hit, &car->position);
+-            if (Import_CarApplyDamage(car, object, damage, &world_contact, CoasterCollisionMessage)
++            if (Import_CarApplyParticipantDamage(car, object, WebParticipantObjectIdentity(object),
++                    damage, &world_contact, CoasterCollisionMessage)
+                 != 1) {
+                 CoasterApplyDamage(object, object->health, hit);
+                 return;
+--- a/src/modules/levels/w_carni/data.c
++++ b/src/modules/levels/w_carni/data.c
+@@ -46,7 +46,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+--- a/src/modules/levels/w_carni/imports.c
++++ b/src/modules/levels/w_carni/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/levels/w_carni/state.c
++++ b/src/modules/levels/w_carni/state.c
+@@ -17,7 +17,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/levels/w_neon/collision.c
++++ b/src/modules/levels/w_neon/collision.c
+@@ -43,7 +43,8 @@
+         {
+             SVECTOR* hit = &origin;
+             CopyShortVectorXYZ(hit, &car->position);
+-            if (Import_CarApplyDamage(car, object, damage, &world_contact, TrainCollisionMessage)
++            if (Import_CarApplyParticipantDamage(car, object, WebParticipantObjectIdentity(object),
++                    damage, &world_contact, TrainCollisionMessage)
+                 != 1) {
+                 TrainApplyDamage(object, object->health, hit);
+                 return;
+--- a/src/modules/levels/w_neon/data.c
++++ b/src/modules/levels/w_neon/data.c
+@@ -46,7 +46,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+--- a/src/modules/levels/w_neon/imports.c
++++ b/src/modules/levels/w_neon/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/levels/w_neon/state.c
++++ b/src/modules/levels/w_neon/state.c
+@@ -17,7 +17,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/levels/w_oil/data.c
++++ b/src/modules/levels/w_oil/data.c
+@@ -54,7 +54,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+--- a/src/modules/levels/w_oil/imports.c
++++ b/src/modules/levels/w_oil/imports.c
+@@ -54,7 +54,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/levels/w_oil/state.c
++++ b/src/modules/levels/w_oil/state.c
+@@ -20,7 +20,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/levels/w_yard/data.c
++++ b/src/modules/levels/w_yard/data.c
+@@ -46,7 +46,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+--- a/src/modules/levels/w_yard/deathpoint.c
++++ b/src/modules/levels/w_yard/deathpoint.c
+@@ -22,7 +22,8 @@
+ void InteractCarWithDeathPoint(Car* car, DeathPoint* point)
+ {
+     if (ObjectInteractionListInteractWithObjectFirstTime(&point->interactions, car))
+-        Import_CarApplyDamage(car, NULL, 0x800, NULL, DeathPointDamageMessage);
++        Import_CarApplyParticipantDamage(
++            car, NULL, WebParticipantObjectIdentity(NULL), 0x800, NULL, DeathPointDamageMessage);
+ }
+
+ void DeathPointProcess(DeathPoint* point)
+--- a/src/modules/levels/w_yard/imports.c
++++ b/src/modules/levels/w_yard/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/levels/w_yard/state.c
++++ b/src/modules/levels/w_yard/state.c
+@@ -18,7 +18,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/lightn/data.c
++++ b/src/modules/lightn/data.c
+@@ -56,7 +56,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -143,7 +143,7 @@
+ CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable = NULL;
+ CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/lightn/imports.c
++++ b/src/modules/lightn/imports.c
+@@ -54,7 +54,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/lightn/lightning.c
++++ b/src/modules/lightn/lightning.c
+@@ -73,11 +73,14 @@
+             if (target->control_kind == CAR_CONTROL_ENEMY
+                 && owner->control_kind == CAR_CONTROL_ENEMY)
+                 damage /= 4;
+-            if (Import_CarApplyDamage(target, 0, damage, 0, 0) && bolt->type->suck_health
+-                && !target->shield_ticks)
+-                Import_CarApplyDamage(owner, 0, -damage, 0, 0);
++            if (Import_CarApplyParticipantDamage(
++                    target, 0, WebParticipantObjectIdentity(emitter), damage, 0, 0)
++                && bolt->type->suck_health && !target->shield_ticks)
++                Import_CarApplyParticipantDamage(
++                    owner, 0, WebParticipantObjectIdentity(0), -damage, 0, 0);
+         } else
+-            Import_CarApplyDamage(target, 0, damage, 0, 0);
++            Import_CarApplyParticipantDamage(
++                target, 0, WebParticipantObjectIdentity(emitter), damage, 0, 0);
+     }
+     bolt->rotation_tick++;
+ }
+--- a/src/modules/lightn/private.h
++++ b/src/modules/lightn/private.h
+@@ -77,7 +77,7 @@
+ void OSRegisterExplosion(void);
+ void OSRegisterInteract(void);
+
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern char ImportName_SoundEmitterSetVolumeFade[];
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+@@ -96,7 +96,7 @@
+ extern char ImportName_CarAiProcessFunctionEnable[];
+ extern char ImportName_CarAiProcessFunctionDisable[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+--- a/src/modules/power/data.c
++++ b/src/modules/power/data.c
+@@ -50,7 +50,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -105,7 +105,7 @@
+ SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale = NULL;
+ SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/power/imports.c
++++ b/src/modules/power/imports.c
+@@ -45,7 +45,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/power/interaction.c
++++ b/src/modules/power/interaction.c
+@@ -14,7 +14,8 @@
+ {
+     if (car) {
+         s32 amount = (car->maximum_health * power->units) / ONE;
+-        Import_CarApplyDamage(car, NULL, -amount, NULL, NULL);
++        Import_CarApplyParticipantDamage(
++            car, NULL, WebParticipantObjectIdentity(NULL), -amount, NULL, NULL);
+     }
+     if (power->respawn_delay_ticks != POWERUP_RESPAWN_DISABLED) {
+         s32 a = Import_aiWorldInfo->health_regen_rate * power->position.fields.regeneration_seconds;
+--- a/src/modules/power/private.h
++++ b/src/modules/power/private.h
+@@ -73,7 +73,7 @@
+ extern char ImportName_SoundEmitterSetPitchScale[];
+ extern char ImportName_SoundEmitterSetVolumeScale[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+@@ -116,7 +116,7 @@
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetPitchScale;
+ extern SoundEmitterControlFunction* Import_SoundEmitterSetVolumeScale;
+ extern s32* Import_G;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern CarOrientWithMatrixFunction* Import_CarOrientWithMatrix;
+ extern TransformOriginalBoxFunction* Import_TransformOriginalBox;
+ extern TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint;
+--- a/src/modules/ray/collision.c
++++ b/src/modules/ray/collision.c
+@@ -25,13 +25,14 @@
+     const Tm4ShortVectorXYZ* car_position = &ObjectGetHeader(car)->position;
+     SetShortVectorXYZ(position_pointer, car_position->vx, car_position->vy, car_position->vz);
+     Import_SpawnExplosion(position_pointer, TextSmoke, 0, 0, &velocity, -2);
+-    Import_InteractCarWithAnim_fire(car, NULL);
++    WebCarIgniteFromParticipant(car, NULL, WebParticipantObjectIdentity(beam));
+     parent = ObjectGetHeader(beam)->owner;
+     if (parent && !strcmp(ObjectGetHeader(parent)->name, TextCar))
+-        Import_CarApplyDamage(
+-            car, parent, beam->damage, NULL, TextRayKillMessage, parent->character_name);
++        Import_CarApplyParticipantDamage(car, parent, WebParticipantObjectIdentity(beam),
++            beam->damage, NULL, TextRayKillMessage, parent->character_name);
+     else
+-        Import_CarApplyDamage(car, NULL, beam->damage, NULL, NULL);
++        Import_CarApplyParticipantDamage(
++            car, NULL, WebParticipantObjectIdentity(beam), beam->damage, NULL, NULL);
+ }
+
+ s32 RayUpdateWorldTransform(RayBeam* beam, void* parent)
+--- a/src/modules/ray/data.c
++++ b/src/modules/ray/data.c
+@@ -64,7 +64,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+@@ -152,7 +152,7 @@
+ CarAiProcessFunctionEnableFunction* Import_CarAiProcessFunctionEnable = NULL;
+ CarAiProcessFunctionDisableFunction* Import_CarAiProcessFunctionDisable = NULL;
+ s32* Import_G = NULL;
+-CarApplyDamageFunction* Import_CarApplyDamage = NULL;
++CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage = NULL;
+ CarOrientWithMatrixFunction* Import_CarOrientWithMatrix = NULL;
+ TransformOriginalBoxFunction* Import_TransformOriginalBox = NULL;
+ TransformOriginalBoxCenterPointFunction* Import_TransformOriginalBoxCenterPoint = NULL;
+--- a/src/modules/ray/imports.c
++++ b/src/modules/ray/imports.c
+@@ -55,7 +55,8 @@
+ void OSRegisterCarPhysics(void)
+ {
+     Import_G = OSSymbolGetAddressAssert(ImportName_G);
+-    Import_CarApplyDamage = OSSymbolGetAddressAssert(ImportName_CarApplyDamage);
++    Import_CarApplyParticipantDamage
++        = OSSymbolGetAddressAssert(ImportName_CarApplyParticipantDamage);
+     Import_CarOrientWithMatrix = OSSymbolGetAddressAssert(ImportName_CarOrientWithMatrix);
+     Import_TransformOriginalBox = OSSymbolGetAddressAssert(ImportName_TransformOriginalBox);
+     Import_TransformOriginalBoxCenterPoint
+--- a/src/modules/ray/private.h
++++ b/src/modules/ray/private.h
+@@ -71,7 +71,7 @@
+ extern GetAnimInfoFunction* Import_GetAnimInfo;
+ extern SpawnExplosionFunction* Import_SpawnExplosion;
+ extern BuildMatrixFunction* Import_BuildMatrix;
+-extern CarApplyDamageFunction* Import_CarApplyDamage;
++extern CarApplyParticipantDamageFunction* Import_CarApplyParticipantDamage;
+ extern AnimInteractionCallback* Import_InteractCarWithAnim_fire;
+ extern InteractWithFlammableTerrainPolyFunction* Import_InteractWithFlammableTerrainPoly;
+ extern SVECTOR RayImpactVelocity;
+@@ -92,7 +92,7 @@
+ extern char ImportName_CarAiProcessFunctionEnable[];
+ extern char ImportName_CarAiProcessFunctionDisable[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+--- a/src/modules/ray/ray.c
++++ b/src/modules/ray/ray.c
+@@ -187,17 +187,19 @@
+                 Import_SpawnExplosion(&beam->hit_world, beam->type->explosion, 0, 0, &velocity, -1);
+             if (beam->type->shock_wave[0]) {
+                 if (GameIsCarRegistered(parent))
+-                    ObjectCreate(TextExplosionShockWave, 1, parent, beam->type->shock_wave,
++                    ObjectCreateWithParticipant(TextExplosionShockWave, 1,
++                        WebParticipantObjectIdentity(beam), parent, beam->type->shock_wave,
+                         &beam->hit_world, (SVECTOR*)NULL, 1);
+                 else
+-                    ObjectCreate(TextExplosionShockWave, 0, beam->type->shock_wave,
++                    ObjectCreateWithParticipant(TextExplosionShockWave, 0,
++                        WebParticipantObjectIdentity(beam), beam->type->shock_wave,
+                         &beam->hit_world, (SVECTOR*)NULL, 1);
+             }
+             if (WorldTrackData[hit.surface.fields.material].flammable) {
+                 SVECTOR terrain_contact;
+                 SVECTOR* position_pointer = &terrain_contact;
+                 CopyVectorToShortVectorRoundedQ12(position_pointer, &hit.position);
+-                Import_InteractWithFlammableTerrainPoly(hit.polygon, position_pointer);
++                WebIgniteTerrain(hit.polygon, position_pointer, WebParticipantObjectIdentity(beam));
+             }
+         }
+     } else if (nearest && !beam->type->penetrate)
+--- a/src/modules/weap/bomb.c
++++ b/src/modules/weap/bomb.c
+@@ -185,7 +185,8 @@
+         && WeapBombType->ignite_terrain
+         && WorldTrackData[WeapWorldHit.surface.fields.material].flammable) {
+         CopyVectorToShortVectorRoundedQ12(&WeapHitPosition, &WeapWorldHit.position);
+-        WeapImports.interact_with_flammable_terrain_poly(WeapWorldHit.polygon, &WeapHitPosition);
++        WebIgniteTerrain(
++            WeapWorldHit.polygon, &WeapHitPosition, WebParticipantObjectIdentity(bomb));
+     }
+     if (WeapBombType->explosion && strlen(WeapBombType->explosion) > 0)
+         WeapImports.spawn_explosion(&WeapBombPosition, bomb->type->explosion, 0, 0, 0, -1);
+@@ -193,10 +194,12 @@
+     if (WeapBombType->shockwave && strlen(WeapBombType->shockwave) > 0) {
+         owner = ObjectGetHeader(bomb)->owner;
+         if (GameIsCarRegistered(owner))
+-            ObjectCreate(TextExplosionShockWave, 1, owner, bomb->type->shockwave, &WeapBombPosition,
++            ObjectCreateWithParticipant(TextExplosionShockWave, 1,
++                WebParticipantObjectIdentity(bomb), owner, bomb->type->shockwave, &WeapBombPosition,
+                 (SVECTOR*)NULL, 1);
+         else
+-            ObjectCreate(TextExplosionShockWave, 0, bomb->type->shockwave, &WeapBombPosition,
++            ObjectCreateWithParticipant(TextExplosionShockWave, 0,
++                WebParticipantObjectIdentity(bomb), bomb->type->shockwave, &WeapBombPosition,
+                 (SVECTOR*)NULL, 1);
+     }
+     remove_device = OSSymbolGetAddressAssert(TextRemoveObjectFromDetonationDeviceList);
+--- a/src/modules/weap/data.c
++++ b/src/modules/weap/data.c
+@@ -56,7 +56,7 @@
+     .resolve = OSRegisterCarPhysics,
+ };
+ char ImportName_G[4] = "G";
+-char ImportName_CarApplyDamage[16] = "CarApplyDamage";
++char ImportName_CarApplyParticipantDamage[] = "CarApplyParticipantDamage";
+ char ImportName_CarOrientWithMatrix[20] = "CarOrientWithMatrix";
+ char ImportName_TransformOriginalBox[24] = "TransformOriginalBox";
+ char ImportName_TransformOriginalBoxCenterPoint[32] = "TransformOriginalBoxCenterPoint";
+--- a/src/modules/weap/effects.c
++++ b/src/modules/weap/effects.c
+@@ -14,17 +14,20 @@
+ #include <LIBGPU.H>
+ #include <STRINGS.H>
+
+-void WeaponSpawnImpactEffects(s32 x, s32 y, s32 z)
++void WeaponSpawnImpactEffects(s32 x, s32 y, s32 z, u32 low, u32 high)
+ {
++    WebParticipantId participant = { low, high };
+     SVECTOR position;
+     SVECTOR* origin = &position;
+     setVector(origin, x, y, z);
+     WeapImports.spawn_explosion(origin, TextExp1, 0, 0, NULL, -2);
+-    ObjectCreate(TextExplosionShockWave, 0, TextFunny, origin, (SVECTOR*)NULL, 1);
++    ObjectCreateWithParticipant(
++        TextExplosionShockWave, 0, participant, TextFunny, origin, (SVECTOR*)NULL, 1);
+ }
+
+ void FunnyProjectileOnDestroy(WeaponProjectile* projectile)
+ {
++    WebParticipantId participant = WebParticipantObjectIdentity(projectile);
+     const Tm4ShortVectorXYZ* source;
+     SVECTOR* vector;
+     s32 x, y, z;
+@@ -66,8 +69,9 @@
+             destination->vz = z;
+         }
+         position.vy -= sector * 8;
+-        ObjectCreate(TextTimer, 0, scaled_delay / 8, WeaponSpawnImpactEffects, 3, position.vx,
+-            position.vy, (index++, position.vz));
++        ObjectCreateWithParticipant(TextTimer, 0, participant, scaled_delay / 8,
++            WeaponSpawnImpactEffects, 5, position.vx, position.vy, (index++, position.vz),
++            participant.low, participant.high);
+     }
+ }
+
+@@ -89,7 +93,8 @@
+             if (projectile->type->freeze)
+                 WeapImports.car_freeze_car(projectile->bullet.hit_object);
+             if (projectile->type->fire)
+-                WeapImports.interact_car_with_anim_fire(projectile->bullet.hit_object, NULL);
++                WebCarIgniteFromParticipant(
++                    projectile->bullet.hit_object, NULL, WebParticipantObjectIdentity(projectile));
+             header = ObjectGetHeader(projectile->bullet.hit_object);
+             {
+                 const Tm4ShortVectorXYZ* source = &header->position;
+@@ -125,13 +130,13 @@
+         }
+     } else if (projectile->bullet.motion.fields.world_impact && projectile->type->fire) {
+         if (WorldTrackData[projectile->bullet.collision.surface.fields.material].flammable) {
+-            WeapImports.interact_with_flammable_terrain_poly(
+-                projectile->bullet.collision.polygon, &projectile->bullet.current_world);
++            WebIgniteTerrain(projectile->bullet.collision.polygon,
++                &projectile->bullet.current_world, WebParticipantObjectIdentity(projectile));
+         } else {
+             SVECTOR rotation;
+             memset(&rotation, 0, sizeof(rotation));
+-            ObjectCreate(
+-                TextAnim, 0, TextFire, 0, &projectile->bullet.current_world, &rotation, 0, -1);
++            ObjectCreateWithParticipant(TextAnim, 0, WebParticipantObjectIdentity(projectile),
++                TextFire, 0, &projectile->bullet.current_world, &rotation, 0, -1);
+         }
+     }
+     ProjectileSpawnExplosion(projectile);
+@@ -141,11 +146,13 @@
+         ObjectDestroy(projectile);
+ }
+
+-void WeaponSpawnImpactObject(s32 x, s32 y, s32 z)
++void WeaponSpawnImpactObject(s32 x, s32 y, s32 z, u32 low, u32 high)
+ {
++    WebParticipantId participant = { low, high };
+     SVECTOR position;
+     setVector(&position, x, y, z);
+-    ObjectCreate(TextExplosionShockWave, 0, TextNuke2, &position, (SVECTOR*)NULL, 1);
++    ObjectCreateWithParticipant(
++        TextExplosionShockWave, 0, participant, TextNuke2, &position, (SVECTOR*)NULL, 1);
+ }
+
+ void WeaponSpawnMovingExplosion(s32 x, s32 y, s32 z, s32 scale, s32 speed)
+@@ -161,6 +168,7 @@
+
+ void NukeProjectileOnDestroy(WeaponProjectile* projectile)
+ {
++    WebParticipantId participant = WebParticipantObjectIdentity(projectile);
+     const Tm4ShortVectorXYZ* source;
+     SVECTOR* vector;
+     s32 x, y, z;
+@@ -193,23 +201,23 @@
+     transform.m[1][2] = ONE;
+     transform.m[2][2] = 0;
+     ProjectileSpawnExplosion(projectile);
+-    ObjectCreate(TextWeaponRayBeam, 0, &transform, TextNuke, 0, 1);
++    ObjectCreateWithParticipant(TextWeaponRayBeam, 0, participant, &transform, TextNuke, 0, 1);
+     for (i = 1; i < 5; i++) {
+         delay = i * 2;
+         position.vy = origin.vy - (i << 9);
+-        ObjectCreate(
+-            TextTimer, 0, delay, WeaponSpawnImpactObject, 3, position.vx, position.vy, position.vz);
++        ObjectCreateWithParticipant(TextTimer, 0, participant, delay, WeaponSpawnImpactObject, 5,
++            position.vx, position.vy, position.vz, participant.low, participant.high);
+         if (i == 1) {
+             position.vy = origin.vy + 512;
+-            ObjectCreate(TextTimer, 0, delay, WeaponSpawnImpactObject, 3, position.vx, position.vy,
+-                position.vz);
++            ObjectCreateWithParticipant(TextTimer, 0, participant, delay, WeaponSpawnImpactObject,
++                5, position.vx, position.vy, position.vz, participant.low, participant.high);
+         }
+     }
+-    ObjectCreate(TextTimer, 0, 4, WeaponSpawnMovingExplosion, 5, origin.vx, origin.vy, origin.vz,
+-        (ONE / 2), 1024);
+-    ObjectCreate(TextTimer, 0, delay, WeaponSpawnMovingExplosion, 5, origin.vx, origin.vy,
+-        origin.vz, ONE, 1536);
+-    ObjectCreate(TextSoundEmitter, 0, TextNukeRumble, 0);
++    ObjectCreateWithParticipant(TextTimer, 0, participant, 4, WeaponSpawnMovingExplosion, 5,
++        origin.vx, origin.vy, origin.vz, (ONE / 2), 1024);
++    ObjectCreateWithParticipant(TextTimer, 0, participant, delay, WeaponSpawnMovingExplosion, 5,
++        origin.vx, origin.vy, origin.vz, ONE, 1536);
++    ObjectCreateWithParticipant(TextSoundEmitter, 0, participant, TextNukeRumble, 0);
+ }
+
+ void ProjectileSpawnTrailEffects(WeaponProjectile* projectile)
+@@ -294,10 +302,12 @@
+     if (projectile->type->shockwave) {
+         void* owner = ObjectGetHeader(projectile)->owner;
+         if (GameIsCarRegistered(owner))
+-            ObjectCreate(TextExplosionShockWave, 1, owner, projectile->type->shockwave, position,
+-                (SVECTOR*)NULL, 1);
++            ObjectCreateWithParticipant(TextExplosionShockWave, 1,
++                WebParticipantObjectIdentity(projectile), owner, projectile->type->shockwave,
++                position, (SVECTOR*)NULL, 1);
+         else
+-            ObjectCreate(TextExplosionShockWave, 0, projectile->type->shockwave, position,
++            ObjectCreateWithParticipant(TextExplosionShockWave, 0,
++                WebParticipantObjectIdentity(projectile), projectile->type->shockwave, position,
+                 (SVECTOR*)NULL, 1);
+     }
+ }
+--- a/src/modules/weap/fireball.c
++++ b/src/modules/weap/fireball.c
+@@ -131,7 +131,8 @@
+ {
+     SVECTOR velocity;
+     memset(&velocity, 0, sizeof(velocity));
+-    ObjectCreate(TextAnim, 0, TextFire, 0, &fireball->position.vector, &velocity, 0, -1);
++    ObjectCreateWithParticipant(TextAnim, 0, WebParticipantObjectIdentity(fireball), TextFire, 0,
++        &fireball->position.vector, &velocity, 0, -1);
+     WeapImports.spawn_explosion(&fireball->position.vector, fireball->explosion, 0, 0, 0, -1);
+ }
+
+@@ -149,8 +150,8 @@
+         projectile->bullet.collision.surface.fields.material = 0;
+         if (projectile->bullet.hit_object && GameIsCarRegistered(projectile->bullet.hit_object))
+             WeapImports.car_apply_damage(projectile->bullet.hit_object,
+-                ObjectGetHeader(projectile)->owner, projectile->damage,
+-                &projectile->bullet.impact.vector, TextWeaponKillMessage,
++                ObjectGetHeader(projectile)->owner, WebParticipantObjectIdentity(projectile),
++                projectile->damage, &projectile->bullet.impact.vector, TextWeaponKillMessage,
+                 projectile->bullet.owner_name, projectile->bullet.weapon_name);
+         ProjectileApplyImpact(projectile);
+         return;
+--- a/src/modules/weap/imports.c
++++ b/src/modules/weap/imports.c
+@@ -65,8 +65,9 @@
+     s32* address = OSSymbolGetAddressAssert(ImportName_G);
+     register s32** destination TM4_BIND_REGISTER("$3") = &WeapImports.g;
+     *destination = address;
+-    ResolveTypedWeaponImport(car_apply_damage, ImportName_CarApplyDamage, CarApplyDamageFunction*);
+     ResolveTypedWeaponImport(
++        car_apply_damage, ImportName_CarApplyParticipantDamage, CarApplyParticipantDamageFunction*);
++    ResolveTypedWeaponImport(
+         car_orient_with_matrix, ImportName_CarOrientWithMatrix, CarOrientWithMatrixFunction*);
+     ResolveTypedWeaponImport(
+         transform_original_box, ImportName_TransformOriginalBox, TransformOriginalBoxFunction*);
+--- a/src/modules/weap/physics.c
++++ b/src/modules/weap/physics.c
+@@ -169,9 +169,9 @@
+     if (Q12MulRound(projectile->secondary_delay_seconds_q12, SIMULATION_FPS)
+             < projectile->age_frames
+         && projectile->expiry_frames_left == 0 && projectile->age_frames % 7 == 0) {
+-        ObjectCreate(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER, projectile->owner,
+-            TextMIRVbaby, projectile->target, &projectile->model_to_world,
+-            &projectile->bullet.motion.vector);
++        ObjectCreateWithParticipant(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER,
++            WebParticipantObjectIdentity(projectile), projectile->owner, TextMIRVbaby,
++            projectile->target, &projectile->model_to_world, &projectile->bullet.motion.vector);
+     }
+     ProjectilePhysics(projectile);
+ }
+@@ -181,9 +181,9 @@
+     if (Q12MulRound(projectile->secondary_delay_seconds_q12, SIMULATION_FPS)
+             < projectile->age_frames
+         && projectile->expiry_frames_left == 0 && projectile->age_frames % 3 == 0) {
+-        ObjectCreate(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER, projectile->owner,
+-            TextMortar2, projectile->target, &projectile->model_to_world,
+-            &projectile->bullet.motion.vector);
++        ObjectCreateWithParticipant(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER,
++            WebParticipantObjectIdentity(projectile), projectile->owner, TextMortar2,
++            projectile->target, &projectile->model_to_world, &projectile->bullet.motion.vector);
+     }
+     ProjectilePhysics(projectile);
+ }
+@@ -193,9 +193,9 @@
+     if (Q12MulRound(projectile->secondary_delay_seconds_q12, SIMULATION_FPS)
+             < projectile->age_frames
+         && projectile->expiry_frames_left == 0 && projectile->age_frames % 7 == 0) {
+-        ObjectCreate(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER, projectile->owner,
+-            TextNapalm2, projectile->target, &projectile->model_to_world,
+-            &projectile->bullet.motion.vector);
++        ObjectCreateWithParticipant(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER,
++            WebParticipantObjectIdentity(projectile), projectile->owner, TextNapalm2,
++            projectile->target, &projectile->model_to_world, &projectile->bullet.motion.vector);
+     }
+     ProjectilePhysics(projectile);
+ }
+@@ -270,8 +270,9 @@
+         && projectile->expiry_frames_left == 0 && projectile->age_frames % 30 == 0) {
+         void* owner = ObjectGetHeader(projectile)->owner;
+         if (owner) {
+-            ObjectCreate(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER, owner, TextMIRVbaby,
+-                projectile->target, &projectile->model_to_world, &projectile->bullet.motion.vector);
++            ObjectCreateWithParticipant(TextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER,
++                WebParticipantObjectIdentity(projectile), owner, TextMIRVbaby, projectile->target,
++                &projectile->model_to_world, &projectile->bullet.motion.vector);
+         }
+     }
+     ProjectilePhysicsWithThrust(projectile);
+@@ -296,8 +297,8 @@
+     if (Q12MulRound(projectile->secondary_delay_seconds_q12, SIMULATION_FPS)
+             < projectile->age_frames
+         && projectile->expiry_frames_left == 0 && projectile->age_frames % 5 == 0) {
+-        ObjectCreate(TextWeaponFireball, 0, &projectile->bullet.current_world,
+-            &projectile->bullet.motion.vector);
++        ObjectCreateWithParticipant(TextWeaponFireball, 0, WebParticipantObjectIdentity(projectile),
++            &projectile->bullet.current_world, &projectile->bullet.motion.vector);
+     }
+     ProjectilePhysics(projectile);
+ }
+--- a/src/modules/weap/private.h
++++ b/src/modules/weap/private.h
+@@ -99,7 +99,7 @@
+     CarAiProcessFunctionEnableFunction* car_ai_process_function_enable;
+     CarAiProcessFunctionDisableFunction* car_ai_process_function_disable;
+     s32* g;
+-    CarApplyDamageFunction* car_apply_damage;
++    CarApplyParticipantDamageFunction* car_apply_damage;
+     CarOrientWithMatrixFunction* car_orient_with_matrix;
+     TransformOriginalBoxFunction* transform_original_box;
+     TransformOriginalBoxCenterPointFunction* transform_original_box_center_point;
+@@ -196,7 +196,7 @@
+ extern char ImportName_CarAiProcessFunctionEnable[];
+ extern char ImportName_CarAiProcessFunctionDisable[];
+ extern char ImportName_G[];
+-extern char ImportName_CarApplyDamage[];
++extern char ImportName_CarApplyParticipantDamage[];
+ extern char ImportName_CarOrientWithMatrix[];
+ extern char ImportName_TransformOriginalBox[];
+ extern char ImportName_TransformOriginalBoxCenterPoint[];
+--- a/src/modules/weap/target.c
++++ b/src/modules/weap/target.c
+@@ -65,7 +65,8 @@
+     beam.m[2][2] = 0;
+     beam.t[1] -= 8192;
+     owner = header->owner;
+-    ObjectCreate(TextWeaponRayBeam, OBJECT_DESTROY_WITH_OWNER, owner, &beam, TextTank, 0, 1);
++    ObjectCreateWithParticipant(TextWeaponRayBeam, OBJECT_DESTROY_WITH_OWNER,
++        WebParticipantObjectIdentity(target), owner, &beam, TextTank, 0, 1);
+     if (WeapTargetExplodeSound && (s32)strlen(WeapTargetExplodeSound) > 0)
+         ObjectCreate(TextSoundEmitter, 0, WeapTargetExplodeSound, SOUND_EMITTER_POSITION,
+             target->transform.t[0], target->transform.t[1], target->transform.t[2]);

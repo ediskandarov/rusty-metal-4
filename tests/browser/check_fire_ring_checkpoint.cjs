@@ -39,7 +39,7 @@ const { chromium } = require("playwright");
           Module.ccall(
             "WebNetStartMatch",
             "number",
-            ["number", "number", "number", "number", "number", "number", "string"],
+            ["number", "number", "number", "number", "number", "number", "string", "string"],
             [
               8,
               255,
@@ -48,6 +48,7 @@ const { chromium } = require("playwright");
               -1,
               1,
               ["Orbital", "Pizza Boy", ...Array(6).fill("Orbital")].join("\n"),
+              "0000000000000001\n0000000000000002\n0000000000000003\n0000000000000004\n0000000000000005\n0000000000000006\n0000000000000007\n0000000000000008",
             ],
           ),
           "match start failed",

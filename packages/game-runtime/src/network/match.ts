@@ -334,6 +334,7 @@ export async function joinMatch(
           slotConfiguration = { capacity: message.capacity, slots: message.slots };
           socket.preparePrediction(
             message.slots.reduce((mask, slot) => mask | (1 << slot), 0),
+            message.participants,
             message.type === "resume_prepare",
           );
           if (!configureMatch(engine, message, slot))

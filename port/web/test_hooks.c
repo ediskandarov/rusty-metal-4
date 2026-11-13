@@ -2,30 +2,32 @@
 #include "test_hooks.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
-#include "snapshot_types.h"
-#include "snapshot_session.h"
-#include "rollback_audio.h"
-#include "net_state.h"
 #include "net_match.h"
-#include "src/modules/menu/private.h"
+#include "net_state.h"
+#include "overlays.h"
+#include "port/web/browser_report.h"
+#include "rollback_audio.h"
+#include "snapshot_session.h"
+#include "snapshot_types.h"
 #include "src/main/object/private.h"
-#include "src/modules/menu/private.h"
 #include "src/modules/car/private.h"
-#include "src/modules/firing/private.h"
 #include "src/modules/cars/c_crush/private.h"
 #include "src/modules/cars/shovel.h"
+#include "src/modules/firing/private.h"
 #include "src/modules/levels/w_carni/private.h"
 #include "src/modules/levels/w_neon/private.h"
 #include "src/modules/levels/w_oil/private.h"
 #include "src/modules/levels/w_yard/private.h"
-#include "overlays.h"
+#include "src/modules/lightn/private.h"
+#include "src/modules/menu/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
+#include "tm4/main/pad.h"
 #include "tm4/main/screen.h"
 #include "tm4/main/sound.h"
-#include "tm4/main/pad.h"
 #include "tm4/main/system.h"
 #include "tm4/main/tournament.h"
+#include "tm4/modules/anim.h"
 #include "tm4/modules/auger.h"
 #include "tm4/modules/camera.h"
 #include "tm4/modules/conveyer.h"
@@ -37,11 +39,12 @@
 #include "tm4/modules/tele.h"
 #include "tm4/modules/weap.h"
 #include "tm4/vector.h"
-#include "port/web/browser_report.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+
+s32 CarLaunchLightning(Car*, void*, CarWeaponInstance*, s32);
 
 EMSCRIPTEN_KEEPALIVE void WebTestInspectObjectCallbacks(void)
 {
@@ -1112,7 +1115,6 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestFlameEmitterCount(void)
     return count;
 }
 
-s32 CarLaunchLightning(Car*, void*, CarWeaponInstance*, s32);
 EMSCRIPTEN_KEEPALIVE s32 WebTestPrepareLevelLightning(void)
 {
     Car* player = GameInfo.players[0].car;
@@ -1539,6 +1541,252 @@ EMSCRIPTEN_KEEPALIVE void WebTestNetworkHudMessages(s32 slot, s32 count)
     test_hud_count = count;
 }
 
+/* Focused participant-lifetime fixtures schedule mutations at the existing tick boundary. */
+static s32 participant_kill_slot = -1;
+static s32 participant_hit_slot = -1;
+static u32 participant_hit_projectile;
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestCreateParticipantProjectile(s32 slot)
+{
+    if (!WebNetMatchActive() || !WebNetSlotOccupied(slot))
+        return 0;
+    Car* car = GameInfo.players[slot].car;
+    if (!car)
+        return 0;
+    MATRIX launch = car->transform;
+    launch.t[1] -= 512;
+    SVECTOR velocity = { 0 };
+    WebCheckpointArenaSelect(1);
+    WeaponProjectile* projectile = ObjectCreate(CarTextWeaponProjectile,
+        OBJECT_HAS_OWNER | OBJECT_SURVIVE_OWNER, car, CarTextPower, NULL, &launch, &velocity);
+    if (projectile) {
+        setVector(&projectile->bullet.motion.fields.world_velocity, 0, 0, 0);
+        projectile->damage = 0xffff;
+    }
+    WebCheckpointArenaSelect(0);
+    return projectile ? ObjectGetHeader(projectile)->serial + 1u : 0;
+}
+
+static Car** test_capture_target(Car* car)
+{
+    const SnapshotType* type = car ? WebSnapshotCarCallbackType(car) : NULL;
+    if (!type || !car->callback_context)
+        return NULL;
+    if (!strcmp(type->name, "pinchers"))
+        return &((CrusherPinchers*)car->callback_context)->target;
+    if (!strcmp(type->name, "shovel"))
+        return &((CarShovelState*)car->callback_context)->target;
+    return NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestBindCaptureTarget(s32 captor, s32 target)
+{
+    if (!WebNetSlotOccupied(captor) || !WebNetSlotOccupied(target))
+        return 0;
+    Car** reference = test_capture_target(GameInfo.players[captor].car);
+    if (!reference || !GameInfo.players[target].car)
+        return 0;
+    *reference = GameInfo.players[target].car;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestCaptureTarget(s32 captor)
+{
+    Car** reference
+        = WebNetSlotOccupied(captor) ? test_capture_target(GameInfo.players[captor].car) : NULL;
+    return reference ? WebSnapshotLiveHandle(*reference) : UINT32_MAX;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestFlameContact(s32 source_slot, s32 target_slot)
+{
+    if (!WebNetSlotOccupied(target_slot) || !GameInfo.players[target_slot].car
+        || (source_slot >= 0
+            && (!WebNetSlotOccupied(source_slot) || !GameInfo.players[source_slot].car))
+        || ObjectCurrentProcess)
+        return 0;
+    Car* target = GameInfo.players[target_slot].car;
+    WebParticipantId source = WebParticipantIdentity(source_slot);
+    SVECTOR position;
+    ApplyMatrixWithTranslationSV(&target->transform, &target->collision_box.center, &position);
+    WebCheckpointArenaSelect(1);
+    Anim* flame = ObjectCreateWithParticipant("anim", 0, source, "fire", ONE / 2, &position, NULL,
+        ANIM_DURATION_INFINITE, ANIM_SOUND_DISABLED);
+    if (flame) {
+        ObjectInteractObjectHeaderWithObjectHeader(ObjectGetHeader(target), ObjectGetHeader(flame));
+        ObjectDestroy(flame);
+    }
+    WebCheckpointArenaSelect(0);
+    if (!target->fire_effect)
+        return 0;
+    target->health = 15;
+    return target->burn_source.low == source.low && target->burn_source.high == source.high;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestBurnIdentity(s32 slot, s32 part)
+{
+    Car* car = WebNetSlotOccupied(slot) ? GameInfo.players[slot].car : NULL;
+    if (!car)
+        return 0;
+    return part == 0                    ? car->burn_source.low
+        : part == 1                     ? car->burn_source.high
+        : part == 2                     ? car->fire_ticks
+        : part == 3 && car->fire_effect ? ObjectGetHeader(car->fire_effect)->participant.low
+                                        : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestBurnOwnContact(s32 slot)
+{
+    Car* car = WebNetSlotOccupied(slot) ? GameInfo.players[slot].car : NULL;
+    if (!car || !car->fire_effect)
+        return 0;
+    const s32 ticks = car->fire_ticks;
+    WebParticipantId source = car->burn_source;
+    WebCheckpointArenaSelect(1);
+    ObjectInteractObjectHeaderWithObjectHeader(
+        ObjectGetHeader(car), ObjectGetHeader(car->fire_effect));
+    WebCheckpointArenaSelect(0);
+    return ticks == car->fire_ticks && source.low == car->burn_source.low
+        && source.high == car->burn_source.high;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestParticipantDamageContract(s32 slot)
+{
+    Car* car = WebNetSlotOccupied(slot) ? GameInfo.players[slot].car : NULL;
+    if (!car)
+        return -1;
+    if (OSSymbolGetAddress("CarApplyDamage"))
+        return -2;
+    if (!OSSymbolGetAddress("CarApplyParticipantDamage"))
+        return -3;
+    if (ObjectCurrentProcess)
+        return -4;
+    const s32 first_serial = ObjectNextSerial;
+    WebCheckpointArenaSelect(1);
+    LightningEmitter* created = LightnClassCount > 0
+        ? ObjectCreateWithParticipant("weaponLightningEmitter", 0, WebParticipantIdentity(slot),
+              LightnClasses[0].name, &car->position)
+        : NULL;
+    s32 result = created != NULL;
+    WebCheckpointArenaSelect(0);
+    if (!result)
+        return -5;
+    s32 count = 0;
+    WebParticipantId source = WebParticipantIdentity(slot);
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list)
+        for (const Tm4ObjectHeader* header = ObjectLists[list].first; header;
+             header = header->next) {
+            if (header->serial < first_serial || strcmp(header->name, "weaponLightningEmitter"))
+                continue;
+            if (header->owner || header->participant.low != source.low
+                || header->participant.high != source.high)
+                return -6;
+            const LightningEmitter* emitter = ObjectGetPayload(header);
+            if (!emitter->bolts[0])
+                return -7;
+            WebParticipantId child = WebParticipantObjectIdentity(emitter->bolts[0]);
+            if (child.low != source.low || child.high != source.high)
+                return -8;
+            ++count;
+        }
+    return count;
+}
+
+void WeaponSpawnImpactObject(s32 x, s32 y, s32 z, u32 low, u32 high);
+void WeaponSpawnMovingExplosion(s32 x, s32 y, s32 z, s32 scale, s32 speed);
+EMSCRIPTEN_KEEPALIVE u32 WebTestCreateParticipantWaveTimer(s32 slot)
+{
+    if (!WebNetSlotOccupied(slot))
+        return 0;
+    WebParticipantId source = WebParticipantIdentity(slot);
+    WebCheckpointArenaSelect(1);
+    void* timer = ObjectCreateWithParticipant("timer", 0, source, 1, WeaponSpawnImpactObject, 5,
+        -16000, -10000, -16000, source.low, source.high);
+    void* cosmetic = ObjectCreateWithParticipant(
+        "timer", 0, source, 1, WeaponSpawnMovingExplosion, 5, -16000, -10000, -16000, 2048, 0);
+    if (!cosmetic && timer) {
+        ObjectDestroy(timer);
+        timer = NULL;
+    }
+    WebCheckpointArenaSelect(0);
+    return timer ? ObjectGetHeader(timer)->serial + 1u : 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestSetParticipantResults(s32 slot, s32 frags, s32 deaths)
+{
+    if (!WebNetSlotOccupied(slot) || frags < 0 || deaths < 0)
+        return 0;
+    WebParticipantState state;
+    WebParticipantCapture(&state);
+    state.slots[slot].frags = frags;
+    state.slots[slot].deaths = deaths;
+    WebParticipantRestore(&state);
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestKillParticipant(s32 slot)
+{
+    if (!WebNetSlotOccupied(slot) || !GameInfo.players[slot].car)
+        return 0;
+    participant_kill_slot = slot;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestHitParticipant(u32 handle, s32 slot)
+{
+    const void* object = WebSnapshotFindLiveObject(handle);
+    if (!object || strcmp(ObjectGetHeader(object)->name, "weaponProjectile")
+        || !WebNetSlotOccupied(slot) || !GameInfo.players[slot].car)
+        return 0;
+    participant_hit_projectile = handle;
+    participant_hit_slot = slot;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestProjectileProvenance(u32 handle, s32 part)
+{
+    const void* object = WebSnapshotFindLiveObject(handle);
+    if (!object)
+        return 0;
+    const Tm4ObjectHeader* header = ObjectGetHeader(object);
+    return part == 0 ? header->participant.low
+        : part == 1  ? header->participant.high
+                     : header->owner != NULL;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestAttributedWaves(u32 low, u32 high)
+{
+    u32 count = 0;
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list)
+        for (const Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next)
+            if (!strcmp(header->name, "explosionShockWave") && header->participant.low == low
+                && header->participant.high == high)
+                ++count;
+    return count;
+}
+
+static void test_participant_actions(void)
+{
+    const s32 kill = participant_kill_slot;
+    const s32 hit = participant_hit_slot;
+    const u32 handle = participant_hit_projectile;
+    participant_kill_slot = participant_hit_slot = -1;
+    participant_hit_projectile = 0;
+    if (WebNetSlotOccupied(kill)) {
+        Car* car = GameInfo.players[kill].car;
+        if (car)
+            CarApplyParticipantDamage(car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff,
+                NULL, "PARTICIPANT TEST");
+    }
+    WeaponProjectile* projectile = handle ? WebSnapshotFindLiveObject(handle) : NULL;
+    if (projectile && WebNetSlotOccupied(hit) && GameInfo.players[hit].car) {
+        projectile->bullet.hit_object = GameInfo.players[hit].car;
+        projectile->bullet.hit_pending = 1;
+        projectile->bullet.motion.fields.world_impact = 0;
+        projectile->bullet.impact.fields.world_position
+            = ObjectGetHeader(GameInfo.players[hit].car)->position;
+    }
+}
+
 /* Browser commands may arrive during an Asyncify yield; mutate objects at a tick boundary. */
 void WebTestApplyPendingActions(void)
 {
@@ -1546,6 +1794,7 @@ void WebTestApplyPendingActions(void)
         ScreenLocalMessageRegister(test_hud_slot, "ROLLBACK TEST %d", i + 1);
     test_hud_count = 0;
     test_rollback_audio();
+    test_participant_actions();
     test_approach_scenery();
     if (test_destroy_map_pending) {
         test_destroy_map_pending = 0;
@@ -1565,7 +1814,8 @@ void WebTestApplyPendingActions(void)
         Car* player = GameInfo.players[0].car;
         if (player) {
             player->shield_ticks = 0;
-            CarApplyDamage(player, NULL, 0x7fffffff, NULL, "DEATHMATCH TEST");
+            CarApplyParticipantDamage(player, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff,
+                NULL, "DEATHMATCH TEST");
         }
     }
     if (sparse_winner_pending) {
@@ -1576,7 +1826,8 @@ void WebTestApplyPendingActions(void)
             if (car == winner || car->health <= 0)
                 continue;
             car->shield_ticks = 0;
-            CarApplyDamage(car, winner, 0x7fffffff, NULL, "SPARSE SLOT TEST");
+            CarApplyParticipantDamage(car, winner, WebParticipantObjectIdentity(winner), 0x7fffffff,
+                NULL, "SPARSE SLOT TEST");
         }
     }
     if (!defeat_opponents_pending)
@@ -1588,7 +1839,8 @@ void WebTestApplyPendingActions(void)
         if (car->control_kind != CAR_CONTROL_ENEMY || car->health <= 0)
             continue;
         car->shield_ticks = 0;
-        CarApplyDamage(car, player, 0x7fffffff, NULL, "PROGRESSION TEST");
+        CarApplyParticipantDamage(car, player, WebParticipantObjectIdentity(player), 0x7fffffff,
+            NULL, "PROGRESSION TEST");
     }
 }
 
@@ -2145,7 +2397,8 @@ static void test_coop_actions(void)
         coop_damage_pending = -1;
         if (car) {
             car->shield_ticks = 0;
-            CarApplyDamage(car, NULL, 0x7fffffff, NULL, "COOP TEST");
+            CarApplyParticipantDamage(
+                car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff, NULL, "COOP TEST");
         }
     }
 }
