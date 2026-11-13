@@ -10,8 +10,9 @@
     "typecheck": "wrangler types && tsc --noEmit -p src/worker/tsconfig.json && bun --bun astro check"
   },
   "dependencies": {
+    "@tm4/lightyear-client": "workspace:*",
     "@tm4/rooms-client": "workspace:*",
     "@tm4/rustymetal-server-client": "workspace:*",
-    "@tm4/lightyear-client": "workspace:*"
+    "posthog-js": "1.448.0"
   }
 }
