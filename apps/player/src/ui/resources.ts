@@ -278,7 +278,6 @@ export function initializeResources() {
       sections.clear();
       list.replaceChildren();
       running = false;
-      show();
       search.value = "";
       issues.checked = false;
       action.disabled = true;

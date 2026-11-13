@@ -8,6 +8,7 @@ import { installCarMods } from "@tm4/resources/mods/install";
 
 import { prepareIsolation } from "./isolation.ts";
 import { inRoom, roomPlayerReady } from "./room.ts";
+import { createStartupStore, type DiscSource, runtimeWasStarted } from "./state/startup.ts";
 import { carLobby } from "./ui/car-lobby.ts";
 import { element } from "./ui/dom.ts";
 import { initializeFullscreen } from "./ui/fullscreen.ts";
@@ -16,11 +17,9 @@ import { initializeMods } from "./ui/mods.ts";
 import { initializePopups } from "./ui/popups.ts";
 import { initializeResources } from "./ui/resources.ts";
 import { initializeSettings } from "./ui/settings.ts";
+import { initializeStartup } from "./ui/startup.ts";
 import { initializeTroubleshoot } from "./ui/troubleshoot.ts";
 
-const startup = element("startup", HTMLElement);
-const progress = element("startup-progress", HTMLElement);
-const warnings = element("startup-warnings", HTMLElement);
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
 initializeFullscreen(canvas);
@@ -28,44 +27,45 @@ const popups = initializePopups();
 initializeTroubleshoot();
 const resources = initializeResources();
 const mods = initializeMods();
-let starting = false;
-let runtimeStarted = false;
+const startup = createStartupStore();
+initializeStartup(startup, resources, popups);
+const { browserReady, begin, reportProgress, prepareMods, startRuntime, complete, fail } =
+  startup.getState();
 
 function warn(message: string) {
-  const line = document.createElement("li");
-  line.textContent = message;
-  warnings.append(line);
+  startup.getState().warn(message);
   console.warn(message);
 }
 
-async function launch(resolveSources: () => DiscSources) {
-  if (starting) return;
-  starting = true;
-  folderPicker.disabled = true;
+interface DiscSelection {
+  sources: DiscSources;
+  warnings?: readonly string[];
+}
+
+async function launch(
+  resolveSources: () => DiscSelection | Promise<DiscSelection>,
+  source: DiscSource = "folder",
+) {
+  if (!begin(source)) return;
   try {
     const selectedMods = await mods.beginSession();
-    const sources = resolveSources();
+    const { sources, warnings: messages } = await resolveSources();
+    startup.getState().loadDisc(messages);
+    messages?.forEach((message) => console.warn(message));
     await resources.inspect(sources);
-    if (!crossOriginIsolated)
-      throw new Error("This page needs cross-origin isolation headers to run the game.");
     const assets = await loadDisc(sources, {
-      progress: (message) => {
-        progress.textContent = message;
-      },
+      progress: reportProgress,
       warn,
     });
-    progress.textContent = "Preparing mods…";
+    prepareMods();
     await installCarMods(assets, selectedMods);
-    progress.textContent = "Starting game…";
-    runtimeStarted = true;
+    startRuntime();
     const endpoint = new URLSearchParams(location.search).get("match");
     const status = element("status", HTMLElement);
     const showMatchStatus = matchStatus(status);
     if (endpoint || inRoom) {
       showMatchStatus("lobby", "Preparing Deathmatch…");
     }
-    // Hide before starting SDL so its initial viewport uses the final page layout.
-    startup.hidden = true;
     const runtime = await startGame(assets, canvas, {
       resourceMods: selectedMods.length,
       session: inRoom,
@@ -84,52 +84,41 @@ async function launch(resolveSources: () => DiscSources) {
     } else {
       status.textContent = "";
     }
-    popups.close();
+    complete();
     if (!new URLSearchParams(location.search).has("preview")) canvas.focus();
   } catch (error) {
-    startup.hidden = false;
-    resources.show();
-    const message = error instanceof Error ? error.message : String(error);
-    progress.textContent = runtimeStarted ? `${message}\nReload the page to try again.` : message;
+    fail(error);
     console.error(error);
   } finally {
-    mods.finishStartup(runtimeStarted);
-    starting = runtimeStarted;
-    folderPicker.disabled = runtimeStarted;
+    mods.finishStartup(runtimeWasStarted(startup.getState().phase));
   }
 }
 
 folderPicker.addEventListener("change", () => {
-  warnings.replaceChildren();
   const files = folderPicker.files;
-  if (files?.length) void launch(() => directorySources(files));
+  if (files?.length) void launch(() => ({ sources: directorySources(files) }));
 });
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 canvas.addEventListener("pointerdown", () => canvas.focus());
 
-folderPicker.disabled = !crossOriginIsolated;
-if (!crossOriginIsolated) {
-  progress.textContent =
-    isSecureContext && "serviceWorker" in navigator
-      ? "Preparing browser support… The page will reload automatically. If it does not, allow service workers for this site and reload."
-      : "This game needs HTTPS and a browser with service worker support.";
-}
-
 try {
+  if (!crossOriginIsolated && (!isSecureContext || !("serviceWorker" in navigator)))
+    throw new Error("This game needs HTTPS and a browser with service worker support.");
   await prepareIsolation();
+  if (crossOriginIsolated) browserReady();
 } catch (error) {
-  progress.textContent = error instanceof Error ? error.message : String(error);
+  fail(error);
 }
 
 if (TM4_DEV && crossOriginIsolated) {
-  progress.textContent = "Connecting to local disc server…";
-  try {
-    const { sources, warnings: messages } = await remoteSources(
-      new URL("/__dev/disc.json", location.href),
-    );
-    messages.forEach(warn);
-    await launch(() => sources);
-  } catch (error) {
-    progress.textContent = `Local disc unavailable. You can select a disc folder instead.\n${error instanceof Error ? error.message : String(error)}`;
-  }
+  void launch(async () => {
+    try {
+      return await remoteSources(new URL("/__dev/disc.json", location.href));
+    } catch (error) {
+      throw new Error(
+        `Local disc unavailable. You can select a disc folder instead.\n${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  }, "dev-server");
 }
