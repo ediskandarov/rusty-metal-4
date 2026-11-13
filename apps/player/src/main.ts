@@ -8,6 +8,7 @@ import { installCarMods } from "@tm4/resources/mods/install";
 
 import { prepareIsolation } from "./isolation.ts";
 import { inRoom, roomPlayerReady } from "./room.ts";
+import { createResourcesStore } from "./state/resources.ts";
 import { createStartupStore, type DiscSource, runtimeWasStarted } from "./state/startup.ts";
 import { carLobby } from "./ui/car-lobby.ts";
 import { element } from "./ui/dom.ts";
@@ -25,10 +26,11 @@ const canvas = element("canvas", HTMLCanvasElement);
 initializeFullscreen(canvas);
 const popups = initializePopups();
 initializeTroubleshoot();
-const resources = initializeResources();
+const resources = createResourcesStore();
+const resourcesView = initializeResources(resources);
 const mods = initializeMods();
 const startup = createStartupStore();
-initializeStartup(startup, resources, popups);
+initializeStartup(startup, resourcesView, popups);
 const { browserReady, begin, reportProgress, prepareMods, startRuntime, complete, fail } =
   startup.getState();
 
@@ -52,7 +54,7 @@ async function launch(
     const { sources, warnings: messages } = await resolveSources();
     startup.getState().loadDisc(messages);
     messages?.forEach((message) => console.warn(message));
-    await resources.inspect(sources);
+    await resources.getState().inspect(sources);
     const assets = await loadDisc(sources, {
       progress: reportProgress,
       warn,

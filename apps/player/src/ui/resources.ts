@@ -1,14 +1,7 @@
-import {
-  checkResources,
-  compatibilityReport,
-  executableSizeTolerancePercent,
-  resourceReference,
-  resourceRows,
-} from "@tm4/resources/compatibility";
-import type { ResourceCandidate, ResourceRow, ResourceStatus } from "@tm4/resources/compatibility";
-import { discoverResources } from "@tm4/resources/loader/resources";
-import type { DiscSources } from "@tm4/resources/loader/types";
+import { compatibilityReport, executableSizeTolerancePercent } from "@tm4/resources/compatibility";
+import type { ResourceRow, ResourceStatus } from "@tm4/resources/compatibility";
 
+import type { ResourcesStore } from "../state/resources.ts";
 import { element } from "./dom.ts";
 
 const labels: Record<ResourceStatus, string> = {
@@ -123,7 +116,7 @@ function bytes(size: number | undefined) {
       : `${(size / 1024 / 1024).toFixed(1)} MiB`;
 }
 
-export function initializeResources() {
+export function initializeResources(store: ResourcesStore) {
   const panel = element("resources", HTMLDetailsElement);
   const list = element("resource-list", HTMLElement);
   const summary = element("resource-summary", HTMLElement);
@@ -132,10 +125,6 @@ export function initializeResources() {
   const issues = element("resource-issues", HTMLInputElement);
   const action = element("resource-check", HTMLButtonElement);
   const progress = element("resource-progress", HTMLProgressElement);
-  let controller = new AbortController();
-  let rows: ResourceRow[] = [];
-  let candidates: ResourceCandidate[] = [];
-  let running = false;
   const nodes = new Map<
     string,
     { node: HTMLElement; status: HTMLElement; info: HTMLElement; text: string; group: string }
@@ -149,12 +138,13 @@ export function initializeResources() {
   }
 
   function filter() {
-    const query = search.value.trim().toLowerCase();
+    const { rows, issuesOnly, query: searchQuery } = store.getState();
+    const query = searchQuery.trim().toLowerCase();
     for (const row of rows) {
       const entry = nodes.get(row.id)!;
       entry.node.hidden =
         !entry.text.includes(query) ||
-        (issues.checked && row.status !== "warning" && row.status !== "uncompatible");
+        (issuesOnly && row.status !== "warning" && row.status !== "uncompatible");
     }
     for (const [group, section] of sections) {
       const visible = rows.filter(
@@ -162,19 +152,20 @@ export function initializeResources() {
       ).length;
       section.hidden = visible === 0;
       section.querySelector("summary")!.textContent = `${group} (${visible})`;
-      if (query || issues.checked) section.open = true;
+      if (query || issuesOnly) section.open = true;
     }
   }
-  function refresh(row?: ResourceRow, rowOnly = false) {
-    if (row) {
-      const entry = nodes.get(row.id)!;
-      entry.status.textContent = labels[row.status];
-      entry.node.dataset.status = row.status;
-      entry.info.textContent = [row.id, `Size: ${bytes(row.size)}`, row.message]
-        .filter(Boolean)
-        .join("\n");
-    }
-    if (rowOnly) return;
+  function refreshRow(row: ResourceRow) {
+    const entry = nodes.get(row.id)!;
+    entry.status.textContent = labels[row.status];
+    entry.node.dataset.status = row.status;
+    entry.info.textContent = [row.id, `Size: ${bytes(row.size)}`, row.message]
+      .filter(Boolean)
+      .join("\n");
+  }
+  function refresh() {
+    const { rows, phase } = store.getState();
+    const running = phase === "checking";
     const count = (status: ResourceStatus) => rows.filter((row) => row.status === status).length;
     const checked = rows.length - count("pending") - count("checking");
     progress.max = rows.length || 1;
@@ -192,7 +183,7 @@ export function initializeResources() {
     action.disabled = !running && !count("pending");
     filter();
   }
-  function populate() {
+  function populate(rows: ResourceRow[]) {
     nodes.clear();
     sections.clear();
     list.replaceChildren();
@@ -228,36 +219,45 @@ export function initializeResources() {
         group: description.group,
       });
     }
-    for (const row of rows) refresh(row, true);
-    refresh();
+    for (const row of rows) refreshRow(row);
   }
-  async function runChecks() {
-    const current = controller;
-    running = true;
-    refresh();
-    try {
-      await checkResources(candidates, rows, current.signal, (row) => {
-        if (current === controller) refresh(row);
-      });
-    } catch (error) {
-      if (!current.signal.aborted && current === controller) notices.textContent = String(error);
-    } finally {
-      if (current === controller) {
-        running = false;
-        refresh();
-      }
-    }
-  }
-  action.addEventListener("click", () => {
-    if (running) {
-      controller.abort();
+  function render(state: ReturnType<ResourcesStore["getState"]>, previous?: typeof state) {
+    search.value = state.query;
+    issues.checked = state.issuesOnly;
+    notices.textContent = [...state.notices, state.error].filter(Boolean).join("\n");
+    if (state.phase === "idle" || state.phase === "reading" || state.phase === "failed") {
+      nodes.clear();
+      sections.clear();
+      list.replaceChildren();
+      action.disabled = true;
+      action.textContent = "Pause checks";
+      summary.textContent =
+        state.phase === "failed"
+          ? "Could not read resource directory"
+          : state.phase === "reading"
+            ? "Reading disc directory…"
+            : "";
+      if (state.phase === "reading") progress.removeAttribute("value");
+      else progress.value = 0;
       return;
     }
-    controller = new AbortController();
-    void runChecks();
+    if (state.rows.length !== nodes.size || state.rows.some((row) => !nodes.has(row.id)))
+      populate(state.rows);
+    else if (state.rows !== previous?.rows)
+      state.rows.forEach((row, index) => {
+        if (row !== previous?.rows[index]) refreshRow(row);
+      });
+    refresh();
+  }
+  render(store.getState());
+  store.subscribe(render);
+  action.addEventListener("click", () => {
+    const state = store.getState();
+    if (state.phase === "checking") state.pause();
+    else state.resume();
   });
-  search.addEventListener("input", filter);
-  issues.addEventListener("change", filter);
+  search.addEventListener("input", () => store.getState().setQuery(search.value));
+  issues.addEventListener("change", () => store.getState().setIssuesOnly(issues.checked));
   panel.addEventListener("keydown", (event) => {
     event.stopPropagation();
     if (event.key === "Escape") {
@@ -266,38 +266,5 @@ export function initializeResources() {
     }
   });
   panel.addEventListener("keyup", (event) => event.stopPropagation());
-  return {
-    show,
-    async inspect(sources: DiscSources) {
-      controller.abort();
-      controller = new AbortController();
-      const current = controller;
-      rows = [];
-      candidates = [];
-      nodes.clear();
-      sections.clear();
-      list.replaceChildren();
-      running = false;
-      search.value = "";
-      issues.checked = false;
-      action.disabled = true;
-      summary.textContent = "Reading disc directory…";
-      notices.textContent = "";
-      progress.removeAttribute("value");
-      try {
-        const found = await discoverResources(sources, current.signal);
-        if (controller !== current) return;
-        candidates = found.resources;
-        notices.textContent = found.notices.join("\n");
-        rows = resourceRows(candidates, resourceReference);
-        populate();
-        void runChecks();
-      } catch (error) {
-        if (controller !== current) return;
-        summary.textContent = "Could not read resource directory";
-        notices.textContent = error instanceof Error ? error.message : String(error);
-        progress.value = 0;
-      }
-    },
-  };
+  return { show };
 }
