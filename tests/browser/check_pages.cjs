@@ -1,4 +1,4 @@
-/* global Module, tm4Network */
+/* global Module */
 const assert = require("node:assert/strict");
 const { lstatSync, readdirSync } = require("node:fs");
 const { resolve, join } = require("node:path");
@@ -109,7 +109,8 @@ const { chromium } = require("playwright");
     assert.deepEqual(Object.keys(fingerprint).sort(), ["authoritySha256", "sha256"]);
     assert.match(fingerprint.sha256, /^[0-9a-f]{64}$/);
     assert.match(fingerprint.authoritySha256, /^[0-9a-f]{64}$/);
-    // Loading through the real bridge must resolve both generated modules beneath
+    assert(await page.evaluate(() => !("tm4Network" in globalThis)));
+    // Loading through the real client must resolve both generated modules beneath
     // the application path. No game files are needed to initialize networking.
     let probeOpened = false;
     probe = Bun.serve({
@@ -126,16 +127,30 @@ const { chromium } = require("playwright");
         message() {},
       },
     });
+    const clientBundle = await Bun.build({
+      entrypoints: [resolve("packages/lightyear-client/src/index.ts")],
+      target: "browser",
+    });
+    assert(clientBundle.success, "Networking test client failed to bundle");
+    const clientSource = await clientBundle.outputs[0].text();
     const endpoint = new URL(probe.url);
     endpoint.protocol = "ws:";
-    await page.evaluate(async (endpoint) => {
-      const connection = await tm4Network.connect(endpoint);
-      globalThis.pagesNetworkProbe = connection;
-      await new Promise((resolve, reject) => {
-        connection.onopen = resolve;
-        connection.onerror = reject;
-      });
-    }, endpoint.href);
+    await page.evaluate(
+      async ({ endpoint, clientSource }) => {
+        const clientUrl = URL.createObjectURL(
+          new Blob([clientSource], { type: "text/javascript" }),
+        );
+        const { connectNetwork } = await import(clientUrl);
+        URL.revokeObjectURL(clientUrl);
+        const connection = await connectNetwork(endpoint);
+        globalThis.pagesNetworkProbe = connection;
+        await new Promise((resolve, reject) => {
+          connection.onopen = resolve;
+          connection.onerror = reject;
+        });
+      },
+      { endpoint: endpoint.href, clientSource },
+    );
     const deadline = Date.now() + 5000;
     while (!probeOpened && Date.now() < deadline) await Bun.sleep(10);
     assert(probeOpened, "Networking probe did not open its WebSocket");

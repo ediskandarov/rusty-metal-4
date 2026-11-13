@@ -1,4 +1,4 @@
-import { NetworkConnectionError } from "@tm4/lightyear-client";
+import { connectNetwork, NetworkConnectionError } from "@tm4/lightyear-client";
 import type { LobbyState, Message, Request, SnapshotBegin } from "@tm4/lightyear-client/schemas";
 
 import { startClientJournal } from "./journal.ts";
@@ -6,7 +6,6 @@ import { attachLivePrediction } from "./livePrediction.ts";
 import type { NetworkEngine, NetworkPort, RoundState } from "./protocol.ts";
 import { configureMatch } from "./protocol.ts";
 import { checksum, maxResumeTicks, SnapshotReplay } from "./replay.ts";
-import { connectNetwork } from "./transport.ts";
 export type { LobbyState } from "@tm4/lightyear-client/schemas";
 
 export type LobbyView = (
@@ -423,7 +422,7 @@ export async function joinMatch(
           port.portableCheckpoint = download.bytes;
           try {
             if (
-              !engine._WebNetBeginPortableReplay?.() ||
+              !engine._WebNetBeginPortableReplay() ||
               !port.netMatch ||
               port.netMatch.tick !== download.header.tick ||
               !sameOutcome(port.netMatch, download.header.state)

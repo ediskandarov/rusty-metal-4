@@ -22,8 +22,7 @@ export interface NetworkEngine {
   _WebNetQueueTick(tick: number): number;
   _WebNetCancelMatch(): void;
   _WebNetEndReplay(): void;
-  _WebNetCapturePortableCheckpoint?(): number;
-  _WebNetBeginPortableReplay?(): number;
+  _WebNetBeginPortableReplay(): number;
 }
 
 export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is NetworkEngine {
@@ -32,7 +31,8 @@ export function hasNetworkEngine(runtime: Partial<NetworkEngine>): runtime is Ne
     typeof runtime._WebNetSetInput === "function" &&
     typeof runtime._WebNetQueueTick === "function" &&
     typeof runtime._WebNetCancelMatch === "function" &&
-    typeof runtime._WebNetEndReplay === "function"
+    typeof runtime._WebNetEndReplay === "function" &&
+    typeof runtime._WebNetBeginPortableReplay === "function"
   );
 }
 

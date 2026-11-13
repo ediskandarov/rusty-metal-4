@@ -10,7 +10,7 @@ The new recovery triggers reuse the existing server snapshot, bounded catch-up a
 2. **Separate diagnostics from control.** Move the retarget attempt counter out of `diagnostics`. Reading diagnostics must not prevent recovery. Diagnostics should report operational state, not own it.
 3. **Unify reconnect policy.** Hidden tabs, event-loop stalls and expired prediction history already resume through a snapshot. Ordinary transport loss still ends the session. Consider routing transient transport failures through the same bounded recovery policy, while keeping simulation divergence and unsupported state fatal. The manual reconnect button remains useful until then.
 4. **Remove duplicate shape validation.** Zod already validates integer ranges, byte arrays and block sizes at the client boundary. Remove redundant checks in message handlers where that boundary is guaranteed. Preserve sequencing, attempt identity, checksums and lifecycle-dependent checks.
-5. **Remove the residual transport facade.** `packages/game-runtime/src/network/transport.ts` re-exports the Lightyear client and exposes `tm4Network` globally for a browser test. Import the client directly in production and separate test access.
+5. **Transport facade removed.** Production imports the Lightyear client directly. The Pages test bundles its own probe; there is no production `tm4Network` global.
 
 ## Keep these distinctions
 

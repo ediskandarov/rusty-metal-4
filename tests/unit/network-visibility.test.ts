@@ -28,7 +28,8 @@ class Connection {
 }
 let connections: Connection[] = [];
 let connectionPending: Promise<void> | undefined;
-mock.module("../../packages/game-runtime/src/network/transport.ts", () => ({
+mock.module("@tm4/lightyear-client", () => ({
+  NetworkConnectionError,
   connectNetwork: async () => {
     const connection = new Connection();
     connections.push(connection);

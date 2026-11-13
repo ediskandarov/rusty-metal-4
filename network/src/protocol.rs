@@ -131,7 +131,6 @@ pub struct SessionStart {
     pub compatibility: Compatibility,
     pub seed: u32,
     pub epoch: u32,
-    #[serde(default)]
     pub portable: bool,
 }
 

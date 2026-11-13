@@ -10,6 +10,7 @@ const start = {
   world: "Construction Yard",
   seed: 12345,
   epoch: 1,
+  portable: false,
   compatibility: { protocol: 12, build: "a".repeat(64), content: "b".repeat(64) },
 };
 test("startup validates capacity, unique actual slots and one mode car per occupied slot", () => {
@@ -22,6 +23,7 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     { slots: [7, 3, 0] },
     { slots: undefined },
     { capacity: undefined },
+    { portable: undefined },
     { cars: ["Orbital", "Pizza Boy\0extra", "Crusher"] },
     { cars: ["Orbital", "Pizza Boy\nextra", "Crusher"] },
   ])
@@ -56,6 +58,7 @@ test("portable catch-up decodes capacity-width rows but stages only the real occ
   const engine: NetworkEngine = {
     ccall: () => 0,
     _WebNetCancelMatch() {},
+    _WebNetBeginPortableReplay: () => 1,
     _WebNetSetInput(tick: number, slot: number, buttons: number) {
       seen.push([tick, slot, buttons]);
       return 1;

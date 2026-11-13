@@ -15,6 +15,7 @@ function setup() {
   const engine: NetworkEngine = {
     ccall: () => 0,
     _WebNetCancelMatch() {},
+    _WebNetBeginPortableReplay: () => 1,
     _WebNetSetInput: () => 1,
     _WebNetQueueTick(tick: number) {
       counts.steps++;

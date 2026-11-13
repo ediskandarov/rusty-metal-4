@@ -63,7 +63,7 @@ export const startSchema = slotConfigurationSchema
     seed: u32,
     epoch: u32,
     compatibility: compatibilitySchema,
-    portable: z.boolean().optional(),
+    portable: z.boolean(),
   })
   .refine(
     (start) => start.cars.length === start.slots.length,

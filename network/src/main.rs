@@ -663,9 +663,8 @@ impl Match {
                 token,
                 compatibility,
             } if !self.started && !self.ended => {
-                if !self.room_only {
-                    self.request(links, entity, Request::Join { compatibility });
-                } else if let Some(binding) = self.participants.find_room_credential(&token)
+                if self.room_only
+                    && let Some(binding) = self.participants.find_room_credential(&token)
                     && self.participants.resolve(&binding).is_some()
                     && self.controls[usize::from(binding.slot)]
                         .connection
@@ -2072,6 +2071,53 @@ mod participant_control_tests {
             2
         );
         Ok(())
+    }
+
+    #[test]
+    fn session_start_requires_explicit_recovery_capability() {
+        let session = game().session.unwrap();
+        let mut encoded = serde_json::to_value(session).unwrap();
+        for portable in [true, false] {
+            encoded["portable"] = serde_json::json!(portable);
+            let decoded: SessionStart = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(decoded.portable, portable);
+        }
+        encoded.as_object_mut().unwrap().remove("portable");
+        assert!(serde_json::from_value::<SessionStart>(encoded).is_err());
+    }
+
+    #[test]
+    fn stale_resume_does_not_join_an_open_lobby() {
+        let mut world = World::new();
+        let client = connection(&mut world, 1);
+        let mut game = game();
+        game.started = false;
+        game.session = None;
+        let compatibility = game.compatibility.clone().unwrap();
+        let binding = game.participants.binding(0);
+        world.insert_resource(game);
+        request(
+            &mut world,
+            client,
+            Request::Resume {
+                token: "aa".repeat(32),
+                compatibility: compatibility.clone(),
+            },
+        );
+        bind(&mut world);
+        let game = world.resource::<Match>();
+        assert!(game.controls.iter().all(|control| {
+            control.connection.is_none()
+                && control.controller.is_none()
+                && control.compatibility.is_none()
+        }));
+        assert_eq!(game.participants.binding(0), binding);
+        request(&mut world, client, Request::Join { compatibility });
+        bind(&mut world);
+        let game = world.resource::<Match>();
+        assert_eq!(game.controls[0].connection, Some(client));
+        assert!(game.controls[0].controller.is_some());
+        assert_eq!(game.participants.binding(0), binding);
     }
 
     #[test]
