@@ -80,8 +80,12 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
     const match = room.match;
     journal.hidden = !host || !(match || room.journal);
     journal.disabled = downloading;
+    const joining = match?.stage === "playing" && !match.endpoint;
     const locked =
-      !!match && ["starting", "connecting", "playing", "stopping"].includes(match.stage);
+      !!match &&
+      ["starting", "connecting", "playing", "stopping"].includes(match.stage) &&
+      !joining;
+    const choices = joining ? cars.filter((name) => match.cars.includes(name)) : cars;
     el("match-status").textContent =
       match?.message || room.notice || "Load your disc, then the host can prepare the server.";
     if (compatibility && !match?.endpoint)
@@ -90,14 +94,14 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
         message: match?.message || room.notice || "Disc loaded. Choose your car in the room.",
       });
     if (
-      car.options.length !== cars.length ||
-      cars.some((name, index) => car.options[index]?.value !== name)
+      car.options.length !== choices.length ||
+      choices.some((name, index) => car.options[index]?.value !== name)
     )
-      car.replaceChildren(...cars.map((name) => new Option(name, name)));
-    if (self.car && cars.includes(self.car)) car.value = self.car;
+      car.replaceChildren(...choices.map((name) => new Option(name, name)));
+    if (self.car && choices.includes(self.car)) car.value = self.car;
     car.disabled = busy || !compatibility || locked;
-    ready.disabled = busy || !compatibility || match?.stage !== "ready" || !self.car;
-    ready.textContent = self.ready ? "Not ready" : "Ready";
+    ready.disabled = busy || !compatibility || (match?.stage !== "ready" && !joining) || !self.car;
+    ready.textContent = joining ? "Join match" : self.ready ? "Not ready" : "Ready";
     prepare.hidden = !host || (!!match && match.stage !== "uploading");
     prepare.disabled = busy || !compatibility;
     prepare.textContent = match ? "Resume resource upload" : "Prepare server from my disc";
@@ -110,7 +114,7 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
       room.participants.some((member) => !member.ready || !member.connected);
     reconnect.hidden = !match?.endpoint;
     reconnect.disabled = !compatibility || busy;
-    if (!match && sentSession) {
+    if (!match?.endpoint && sentSession) {
       send({ action: "stop", message: room.notice });
       sentSession = null;
     }

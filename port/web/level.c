@@ -400,7 +400,7 @@ void WebLevelFrame(void)
         if (WebNetReplaying())
             return;
         WebNetMatchPollInput();
-        if (WebNetMatchViewSlot() >= 0 && network_frame_pending && WebRenderBeginLevelFrame()) {
+        if (WebNetLocalViewCount() && network_frame_pending && WebRenderBeginLevelFrame()) {
             network_frame_pending = 0;
             draw_network_view(WebNetMatchViewSlot());
         }

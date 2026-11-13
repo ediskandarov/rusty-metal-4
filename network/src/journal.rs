@@ -11,11 +11,12 @@ use tm4_network::{
     input::Input,
     protocol::{
         CHECKSUM_SEED, JOURNAL_FRAME_PREFIX, JOURNAL_INPUT_BYTES, JOURNAL_MAX_TICKS, MAX_PLAYERS,
-        REPLAY_CHUNK_TICKS, RoundState, SessionStart, checksum, journal_frame_bytes,
+        MembershipChange, REPLAY_CHUNK_TICKS, RoundState, SessionStart, checksum,
+        decode_membership, encode_membership, journal_frame_bytes,
     },
 };
 
-const MAGIC: &[u8; 8] = b"TM4JRNL\x02";
+const MAGIC: &[u8; 8] = b"TM4JRNL\x03";
 const HEADER_LIMIT: usize = 4096;
 const CACHE_LIMIT: usize = 8 * 1024 * 1024;
 const MAX_FRAME_BYTES: usize = journal_frame_bytes(MAX_PLAYERS);
@@ -69,6 +70,7 @@ pub struct Journal {
     pub path: PathBuf,
     writer: BufWriter<File>,
     width: usize,
+    pool: Vec<String>,
     rows: Vec<u8>,
     cache_limit: usize,
     record_offset: u64,
@@ -87,7 +89,13 @@ fn word(reader: &mut impl Read) -> io::Result<u32> {
     Ok(u32::from_le_bytes(bytes))
 }
 
-fn encode(inputs: &[Input], state: &RoundState, bytes: &mut [u8]) {
+fn encode(
+    inputs: &[Input],
+    changes: &[MembershipChange],
+    pool: &[String],
+    state: &RoundState,
+    bytes: &mut [u8],
+) {
     for (part, value) in bytes[..24]
         .chunks_exact_mut(4)
         .zip(std::iter::once(state.digest).chain(state.sections))
@@ -96,6 +104,11 @@ fn encode(inputs: &[Input], state: &RoundState, bytes: &mut [u8]) {
     }
     bytes[24..28].copy_from_slice(&state.next_mode.to_le_bytes());
     bytes[28] = u8::from(state.unsupported.is_some());
+    assert!(encode_membership(
+        changes,
+        pool,
+        &mut bytes[29..JOURNAL_FRAME_PREFIX]
+    ));
     for (part, input) in bytes[JOURNAL_FRAME_PREFIX..]
         .chunks_exact_mut(JOURNAL_INPUT_BYTES)
         .zip(inputs)
@@ -142,6 +155,7 @@ impl Journal {
             path,
             writer,
             width,
+            pool: header.start.cars.clone(),
             rows: Vec::new(),
             cache_limit: cache_limit / width * width,
             record_offset: (MAGIC.len() + 8 + bytes.len()) as u64,
@@ -169,16 +183,23 @@ impl Journal {
         self.record_offset + u64::from(self.ticks) * (self.width + 5) as u64
     }
 
-    pub fn append(&mut self, tick: u32, inputs: &[Input], state: &RoundState) -> io::Result<()> {
+    pub fn append(
+        &mut self,
+        tick: u32,
+        inputs: &[Input],
+        changes: &[MembershipChange],
+        state: &RoundState,
+    ) -> io::Result<()> {
         if tick != self.ticks()
             || tick >= JOURNAL_MAX_TICKS
             || journal_frame_bytes(inputs.len()) != self.width
+            || !tm4_network::protocol::valid_membership(changes, inputs.len(), &self.pool)
         {
             return Err(invalid("Invalid journal tick"));
         }
         let mut buffer = [0; MAX_FRAME_BYTES];
         let bytes = &mut buffer[..self.width];
-        encode(inputs, state, bytes);
+        encode(inputs, changes, &self.pool, state, bytes);
         let rolling = checksum(self.rolling, bytes);
         let cache = self.rows.len() < self.cache_limit;
         if cache && self.rows.capacity() - self.rows.len() < self.width {
@@ -324,7 +345,13 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
             };
             return Ok(summary);
         }
-        if data[28] > 1
+        if decode_membership(
+            &data[29..JOURNAL_FRAME_PREFIX],
+            summary.header.start.capacity,
+            &summary.header.start.cars,
+        )
+        .is_none()
+            || data[28] > 1
             || data[JOURNAL_FRAME_PREFIX..]
                 .chunks_exact(JOURNAL_INPUT_BYTES)
                 .any(|input| input[6] > 1)
@@ -413,7 +440,7 @@ mod tests {
         let header_length = export.lock().unwrap().as_ref().unwrap().length;
         let inputs = [Input::default(); 2];
         for tick in 0..30 {
-            journal.append(tick, &inputs, &state(tick, 0)).unwrap();
+            journal.append(tick, &inputs, &[], &state(tick, 0)).unwrap();
         }
         let frozen = export.lock().unwrap().clone().unwrap();
         assert_eq!(
@@ -421,7 +448,7 @@ mod tests {
             header_length + 30 * (journal.width + 5) as u64
         );
         for tick in 30..65 {
-            journal.append(tick, &inputs, &state(tick, 0)).unwrap();
+            journal.append(tick, &inputs, &[], &state(tick, 0)).unwrap();
         }
         let mut prefix = Vec::new();
         File::open(frozen.path)
@@ -454,6 +481,7 @@ mod tests {
                 .append(
                     tick,
                     &inputs,
+                    &[],
                     &state(tick, if tick == 26_999 { 2 } else { 0 }),
                 )
                 .unwrap();
@@ -466,7 +494,11 @@ mod tests {
         assert_eq!(u32::from_le_bytes(sample[..4].try_into().unwrap()), 26_999);
         assert_eq!(sample[24], 2);
         assert_eq!(
-            u16::from_le_bytes(sample[78..80].try_into().unwrap()),
+            u16::from_le_bytes(
+                sample[JOURNAL_FRAME_PREFIX + 49..JOURNAL_FRAME_PREFIX + 51]
+                    .try_into()
+                    .unwrap()
+            ),
             26_999
         );
         journal.finish(End::Finished).unwrap();
@@ -475,7 +507,10 @@ mod tests {
         assert_eq!(result.end, End::Finished);
         assert_eq!(result.header.initial_digest, 42);
         let bytes = fs::metadata(&journal.path).unwrap().len();
-        assert_eq!(bytes, journal.record_offset + 27_000 * 90 + 10);
+        assert_eq!(
+            bytes,
+            journal.record_offset + 27_000 * (journal_frame_bytes(8) + 5) as u64 + 10
+        );
         eprintln!(
             "Eight-slot journal: {bytes} disk bytes, {used} cache bytes / {capacity} allocated"
         );
@@ -492,7 +527,7 @@ mod tests {
             if tick == 1 {
                 frame.unsupported = Some("fixture".into());
             }
-            journal.append(tick, &inputs, &frame).unwrap();
+            journal.append(tick, &inputs, &[], &frame).unwrap();
         }
         let data = journal.range(0, 3).unwrap();
         assert_eq!(data.len(), 3 * width);

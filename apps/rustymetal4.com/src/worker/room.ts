@@ -286,13 +286,44 @@ export class Room extends DurableObject<Env> {
       }
       if (status.phase === "lobby" && match.stage === "starting") {
         match.stage = "connecting";
-        match.message = "Server ready. Connecting the fixed match roster…";
+        match.message = "Server ready. Connecting the prepared participants…";
         await this.commit();
         return;
       }
+      if (status.phase === "match" && match.stage === "playing") {
+        const inspections = [];
+        for (const entry of match.roster) {
+          if (!entry.pending) continue;
+          // Query the simulation thread after reservation, rather than infer loss
+          // from transport state or a periodically published status snapshot.
+          const lease = await this.api().membershipStatus({
+            sessionId: match.id,
+            credential: entry.credential,
+          });
+          inspections.push({ entry, lease });
+        }
+        let changed = false;
+        for (const { entry, lease } of inspections) {
+          if (lease.identity && !lease.pending) {
+            entry.pending = false;
+            changed = true;
+          } else if (!lease.identity) {
+            match.roster = match.roster.filter((old) => old !== entry);
+            const member = state.members.find((member) => member.id === entry.id);
+            if (member) member.ready = false;
+            changed = true;
+          }
+        }
+        if (changed) {
+          prune(state, now);
+          await this.commit();
+          return;
+        }
+      }
       if (status.phase === "match" && match.stage !== "playing") {
         match.stage = "playing";
-        match.message = "Match in progress. Existing players can reconnect.";
+        match.message =
+          "Match in progress. New players can join with a prepared car; existing players can reconnect.";
         await this.commit();
         return;
       }
@@ -365,7 +396,7 @@ export class Room extends DurableObject<Env> {
         !["connecting", "playing"].includes(match.stage) ||
         !match.roster.some((entry) => entry.id === member.id)
       )
-        throw new RoomError(403, "Only the fixed match participants can connect.");
+        throw new RoomError(403, "Prepare your participation before connecting to this match.");
       return this.server("/match", { headers: { Upgrade: "websocket" } });
     }
     requireHost(state, key);
@@ -446,6 +477,36 @@ export class Room extends DurableObject<Env> {
           await this.commit();
         } else if (path === "/player" && request.method === "POST") {
           updatePlayer(state, key, await readJson(request));
+          const member = memberFor(state, key)!;
+          const match = state.match;
+          if (
+            match?.stage === "playing" &&
+            member.ready &&
+            !match.roster.some((entry) => entry.id === member.id)
+          ) {
+            const credential = (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", "");
+            try {
+              await this.api().membership({
+                sessionId: match.id,
+                change: { kind: "admit", credential, car: member.car! },
+              });
+              match.roster.push({ id: member.id, credential, car: member.car!, pending: true });
+            } catch (error) {
+              member.ready = false;
+              // A lost HTTP response cannot leave an indefinite reservation.
+              // Native preparation also has its own bounded cancellation deadline.
+              try {
+                await this.api().membership({
+                  sessionId: match.id,
+                  change: { kind: "depart", credential },
+                });
+              } catch {
+                /* Authority expires an unreachable pending preparation. */
+              }
+              await this.commit();
+              throw error;
+            }
+          }
           await this.commit();
         } else if (path === "/prepare" && request.method === "POST") {
           const match = beginPreparation(state, key, now);
@@ -465,7 +526,7 @@ export class Room extends DurableObject<Env> {
           await this.commit();
           try {
             await this.api().start({
-              players: match.roster.length,
+              players: state.settings.capacity,
               world: mapLabel(state.settings.mapId),
               sessionId: match.id,
               roster: match.roster.map(({ credential, car }) => ({ credential, car })),
@@ -480,6 +541,20 @@ export class Room extends DurableObject<Env> {
         } else if (path === "/leave" && request.method === "POST") {
           const member = memberFor(state, key);
           if (member) {
+            const match = state.match;
+            const lease = match?.roster.find((entry) => entry.id === member.id);
+            if (match?.stage === "playing" && lease) {
+              await this.api().membership({
+                sessionId: match.id,
+                change: { kind: "depart", credential: lease.credential },
+              });
+              match.roster = match.roster.filter((entry) => entry.id !== member.id);
+            } else if (match?.roster.length && lease) {
+              throw new RoomError(
+                409,
+                "Wait for the match to start before leaving its gameplay seat.",
+              );
+            }
             removeMember(state, member.id, now);
             await this.commit();
             for (const socket of this.ctx.getWebSockets()) {

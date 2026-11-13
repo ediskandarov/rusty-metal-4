@@ -1,6 +1,7 @@
 mod assets;
 mod health;
 mod journal;
+mod membership;
 mod participant;
 mod resume;
 mod simulator;
@@ -29,8 +30,8 @@ use tm4_network::{
     input::{ControllerCommand, Input, InputHistory},
     protocol::{
         CHECKSUM_SEED, Catalog, Compatibility, ControllerIdentity, JOURNAL_MAX_TICKS, LobbyPlayer,
-        MAX_PLAYERS, Message, REPLAY_CHUNK_TICKS, Request, RoundState, SessionChannel,
-        SessionStart, checksum, protocol,
+        MAX_PLAYERS, MembershipChange, Message, REPLAY_CHUNK_TICKS, Request, RoundState,
+        SessionChannel, SessionStart, checksum, protocol,
     },
 };
 
@@ -163,12 +164,16 @@ impl AcceptedTimeline {
         tick: u32,
         inputs: &[Input],
         controls: &[ControllerState],
+        occupied: &[usize],
     ) -> game_protocol::AcceptedInputs {
         use lightyear::input::input_message::{ActionStateSequence, InputTarget, PerTargetData};
         let end = self.anchor.unwrap() + tick as i32 + 1;
         let mut packet = game_protocol::AcceptedInputs::new(end);
         packet.rebroadcast = true;
         for (slot, player) in controls.iter().enumerate() {
+            if !occupied.contains(&slot) {
+                continue;
+            }
             let buffer = &mut self.accepted[slot];
             buffer.set(end, ActionState(inputs[slot]));
             if buffer.len() > usize::from(game_protocol::PREDICTION_DEPTH + 1) {
@@ -189,6 +194,8 @@ impl AcceptedTimeline {
 #[derive(Resource)]
 struct Match {
     participants: ParticipantRoster,
+    membership: membership::LiveMembership,
+    room_requests: Option<web::MembershipQueue>,
     controls: Vec<ControllerState>,
     authority_ready: bool,
     compatibility: Option<Compatibility>,
@@ -472,6 +479,7 @@ impl Match {
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
         tick: u32,
         inputs: Vec<Input>,
+        changes: Vec<MembershipChange>,
         state: RoundState,
         dispatched: Instant,
     ) {
@@ -480,7 +488,7 @@ impl Match {
             .journal
             .as_mut()
             .expect("stepping requires a journal")
-            .append(tick, &inputs, &state);
+            .append(tick, &inputs, &changes, &state);
         if let Err(error) = result {
             self.health
                 .lock()
@@ -498,6 +506,7 @@ impl Match {
             return;
         }
         let message = Message::Frame {
+            changes,
             tick,
             inputs,
             state: state.clone(),
@@ -589,6 +598,82 @@ impl Match {
             .iter()
             .position(|player| player.connection == Some(entity));
         match request {
+            Request::Join { compatibility }
+                if self.started && !self.ended && slot.is_none() && !self.room_only =>
+            {
+                if Some(&compatibility) != self.compatibility.as_ref() {
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message:
+                                "Gameplay build or local resources do not match the authority."
+                                    .into(),
+                        },
+                    );
+                    return;
+                }
+                match self.reserve_live() {
+                    Ok(identity) => {
+                        let slot = usize::from(identity.slot);
+                        self.controls[slot].connection = Some(entity);
+                        self.controls[slot].compatibility = Some(compatibility);
+                        send(links, entity, &Message::Welcome { slot });
+                        self.live_lobby(slot, links);
+                    }
+                    Err(message) => send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: message.into(),
+                        },
+                    ),
+                }
+            }
+            Request::SelectCar { car, ready }
+                if self.started
+                    && !self.ended
+                    && slot.is_some_and(|slot| self.participants.joining(slot))
+                    && !self.room_only =>
+            {
+                let slot = slot.unwrap();
+                if self.controls[slot].resume.is_some()
+                    || !self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.cars.contains(&car))
+                {
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: "Choose a model from this match's prepared pool.".into(),
+                        },
+                    );
+                    return;
+                }
+                self.participants.at_slot_mut(slot).car = Some(car);
+                if ready {
+                    self.prepare_live(slot, links);
+                } else {
+                    self.live_lobby(slot, links);
+                }
+            }
+            Request::Leave if self.started && !self.ended && slot.is_some() => {
+                let slot = slot.unwrap();
+                if !self.participants.joining(slot) {
+                    let identity = self.participants.binding(slot);
+                    if let Err(message) = self.schedule_departure(identity, links) {
+                        send(
+                            links,
+                            entity,
+                            &Message::Error {
+                                message: message.into(),
+                            },
+                        );
+                    }
+                }
+            }
             Request::Join { compatibility }
                 if !self.started && !self.ended && slot.is_none() && !self.room_only =>
             {
@@ -686,7 +771,11 @@ impl Match {
                 token,
                 compatibility,
             } if slot.is_none() => {
-                let requested = self.participants.find_credential(&token);
+                let requested = self.participants.find_credential(&token).or_else(|| {
+                    self.participants
+                        .find_room_credential(&token)
+                        .map(|identity| usize::from(identity.slot))
+                });
                 let session = self.session.as_ref().filter(|session| {
                     session.portable
                         && session.compatibility == compatibility
@@ -709,7 +798,20 @@ impl Match {
                     player.history.disconnect();
                     player.resume = Some(resume::Attempt::new(self.next_resume));
                     send(links, entity, &Message::Welcome { slot });
+                    if let Some(token) = self.participants.at_slot(slot).credential.clone() {
+                        send(links, entity, &Message::ResumeCredential { token });
+                    }
                     send(links, entity, &Message::ResumePrepare(session.clone()));
+                    for (&tick, changes) in &self.membership.scheduled {
+                        send(
+                            links,
+                            entity,
+                            &Message::Membership {
+                                tick,
+                                changes: changes.clone(),
+                            },
+                        );
+                    }
                 } else {
                     send(
                         links,
@@ -791,6 +893,17 @@ impl Match {
                     send(links, entity, &Message::ResumeActive { head });
                     for frame in attempt.frames {
                         send(links, entity, &frame);
+                    }
+                    if self.participants.joining(slot.unwrap()) {
+                        if let Err(message) = self.schedule_admission(slot.unwrap(), links) {
+                            send(
+                                links,
+                                entity,
+                                &Message::Error {
+                                    message: message.into(),
+                                },
+                            );
+                        }
                     }
                 }
             }
@@ -925,15 +1038,28 @@ fn update(
     owners: Query<&ControlledBy>,
     mut commands: Commands,
 ) {
+    let room_requests: Vec<_> = game
+        .room_requests
+        .as_ref()
+        .map(|requests| requests.lock().unwrap().try_iter().collect())
+        .unwrap_or_default();
+    for request in room_requests {
+        game.room_membership(request, &mut links, &mut commands);
+    }
     let mut lobby_changed = false;
     game.retired_connections
         .retain(|entity| links.contains(*entity));
-    for slot in game.participants.slots().collect::<Vec<_>>() {
+    for slot in game.participants.all_slots().collect::<Vec<_>>() {
         if let Some(entity) = game.controls[slot]
             .connection
             .filter(|entity| !links.contains(*entity))
         {
-            lobby_changed |= detach_connection(&mut game, slot, entity, &mut commands);
+            if game.started && game.participants.joining(slot) {
+                let identity = game.participants.binding(slot);
+                game.cancel_admission(identity, &mut links, &mut commands);
+            } else {
+                lobby_changed |= detach_connection(&mut game, slot, entity, &mut commands);
+            }
         }
     }
 
@@ -956,14 +1082,15 @@ fn update(
         let stalled = game
             .controls
             .iter()
-            .find(|p| p.connection == Some(entity))
-            .and_then(|p| {
+            .enumerate()
+            .find(|(_, p)| p.connection == Some(entity))
+            .and_then(|(slot, p)| {
                 if let Some(attempt) = &p.resume {
                     return attempt
                         .timeout(now)
                         .then_some("Snapshot reconnect stopped or expired. Retry this match.");
                 }
-                (game.tick.saturating_sub(p.progress_tick) > 90)
+                (!game.participants.joining(slot) && game.tick.saturating_sub(p.progress_tick) > 90)
                     .then_some("Client session progress timed out.")
             });
         let unidentified = !known && now.duration_since(admission.opened) > Duration::from_secs(10);
@@ -997,6 +1124,7 @@ fn update(
     for (entity, request) in requests {
         game.request(&mut links, entity, request);
     }
+    game.maintain_membership(&mut links, &mut commands);
     game.pump_resume(&mut links, &mut simulator);
     bind_controllers(&mut game, &owners, &mut commands);
 
@@ -1108,11 +1236,14 @@ fn update(
         );
         return;
     }
+    // Tick-zero readiness belongs to initial clock negotiation. Live members
+    // prepare through a current snapshot and must never restart this quorum.
     if !game.authority_ready
-        || game
-            .participants
-            .slots()
-            .any(|slot| !game.controls[slot].ready)
+        || (game.prediction.anchor.is_none()
+            && game
+                .participants
+                .slots()
+                .any(|slot| !game.controls[slot].ready))
     {
         if now.duration_since(game.loading_since) > Duration::from_secs(45) {
             game.fail(&mut links, "Session loading exceeded 45 seconds.");
@@ -1207,13 +1338,69 @@ fn update(
         let scheduled = *game.tick_schedule.get_or_insert(step_started);
         let lateness = step_started.saturating_duration_since(scheduled);
         let tick = game.tick;
+        let proposed = game.membership.scheduled.remove(&tick).unwrap_or_default();
+        let mut changes = Vec::with_capacity(proposed.len());
+        for change in &proposed {
+            let identity = change.identity();
+            match simulator.membership(tick, change) {
+                Ok(true) => {
+                    match change {
+                        MembershipChange::Admit { .. } => {
+                            game.participants
+                                .commit_live(identity)
+                                .expect("admission owns its reservation");
+                            game.membership.pending.remove(&identity.participant);
+                        }
+                        MembershipChange::Depart { .. } => {
+                            game.retire_live(identity, &mut commands)
+                        }
+                    }
+                    changes.push(change.clone());
+                }
+                Ok(false) if matches!(change, MembershipChange::Admit { .. }) => {
+                    if let Some(connection) = game.controls[usize::from(identity.slot)].connection {
+                        send(&mut links, connection, &Message::Error { message: "The selected car could not be prepared; the admission was cancelled.".into() });
+                    }
+                    game.retire_live(identity, &mut commands);
+                }
+                result => {
+                    eprintln!("Membership event rejected: {change:?}: {result:?}");
+                    game.fail(
+                        &mut links,
+                        "The authoritative membership event could not be applied.",
+                    );
+                    return;
+                }
+            }
+        }
+        if changes != proposed {
+            // A failed preparation is not a committed event. Replace the forecast
+            // before confirming this row; replay records only actual mutations.
+            game.broadcast(
+                &mut links,
+                &Message::Membership {
+                    tick,
+                    changes: changes.clone(),
+                },
+            );
+        }
+        let occupied: Vec<_> = game.participants.slots().collect();
         let inputs: Vec<_> = game
             .controls
             .iter_mut()
-            .map(|player| player.history.sample(tick))
+            .enumerate()
+            .map(|(slot, player)| {
+                if occupied.contains(&slot) {
+                    player.history.sample(tick)
+                } else {
+                    Input::default()
+                }
+            })
             .collect();
         let game = &mut *game;
-        let packet = game.prediction.packet(tick, &inputs, &game.controls);
+        let packet = game
+            .prediction
+            .packet(tick, &inputs, &game.controls, &occupied);
         for player in &game.controls {
             if let Some(entity) = player.connection
                 && let Ok(mut sender) = accepted_senders.get_mut(entity)
@@ -1229,7 +1416,7 @@ fn update(
                         .unwrap()
                         .event("rustymetal4_simulation_unsupported_total");
                 }
-                game.completed(&mut links, tick, inputs, state, now);
+                game.completed(&mut links, tick, inputs, changes, state, now);
                 if game.tick == tick + 1 {
                     game.health
                         .lock()
@@ -1452,8 +1639,13 @@ fn main() -> Result<(), Box<dyn Error>> {
             simulator::Simulator::from_environment()?,
         )
     };
-    let participants = ParticipantRoster::new(count, &(0..count).collect::<Vec<_>>())?;
-    if !room_roster.is_empty() && room_roster.len() != count {
+    let initial_count = if room_roster.is_empty() {
+        count
+    } else {
+        room_roster.len()
+    };
+    let participants = ParticipantRoster::new(count, &(0..initial_count).collect::<Vec<_>>())?;
+    if !room_roster.is_empty() && !(2..=count).contains(&room_roster.len()) {
         return Err("Room members do not match the prepared participant roster".into());
     }
     // The mode assigns initial room members once. Admission uses these bindings,
@@ -1553,6 +1745,8 @@ fn run_match(
     app.world_mut().trigger(LinkStart { entity });
     let mut game = Match {
         participants,
+        membership: Default::default(),
+        room_requests: launcher.map(|launcher| launcher.membership.clone()),
         controls: (0..capacity).map(|_| ControllerState::default()).collect(),
         authority_ready: false,
         compatibility: Some(compatibility),
@@ -1660,9 +1854,9 @@ fn run_match(
                         status.message =
                             "Match stopped. Restart the server to prepare a new match.".into();
                     }
-                } else if game.started {
+                } else if game.started && game.tick > 0 {
                     status.phase = "match".into();
-                    status.message = "Roster locked. Existing participants can reconnect.".into();
+                    status.message = "Live admission uses the prepared model pool; existing participants can reconnect.".into();
                 }
             }
         }
@@ -1887,6 +2081,8 @@ mod participant_control_tests {
         };
         Match {
             participants: ParticipantRoster::new(2, &[0, 1]).unwrap(),
+            membership: Default::default(),
+            room_requests: None,
             controls: (0..2).map(|_| ControllerState::default()).collect(),
             authority_ready: true,
             compatibility: Some(compatibility.clone()),
@@ -2689,5 +2885,262 @@ mod participant_control_tests {
                 assert_eq!(game.controls[0].received_sequence, 0);
             }
         }
+    }
+    #[test]
+    fn live_reservations_are_sparse_exclusive_and_cancel_with_fresh_leases() {
+        let mut roster = ParticipantRoster::new(8, &[0, 3, 7]).unwrap();
+        roster.freeze();
+        let unaffected = roster.binding(7);
+        let first = roster.reserve_live().unwrap();
+        assert_eq!(first.slot, 1);
+        assert!(!roster.contains(1));
+        assert_eq!(roster.resolve(&first), None);
+        let second = roster.reserve_live().unwrap();
+        assert_eq!(second.slot, 2);
+        roster.release_live(first).unwrap();
+        let replacement = roster.reserve_live().unwrap();
+        assert_eq!(replacement.slot, 1);
+        assert_ne!(first.participant, replacement.participant);
+        assert!(roster.commit_live(first).is_err());
+        roster.commit_live(replacement).unwrap();
+        assert_eq!(roster.slots().collect::<Vec<_>>(), [0, 1, 3, 7]);
+        assert_eq!(roster.binding(7), unaffected);
+        while roster.reserve_live().is_ok() {}
+        assert!(roster.reserve_live().is_err());
+        assert_eq!(roster.all_slots().count(), 8);
+    }
+
+    fn live_game() -> Match {
+        let mut game = game();
+        game.participants = ParticipantRoster::new(8, &[0, 3, 7]).unwrap();
+        game.participants.freeze();
+        game.controls = (0..8).map(|_| ControllerState::default()).collect();
+        game.room_only = true;
+        game.session.as_mut().unwrap().capacity = 8;
+        game
+    }
+
+    fn room_change(
+        world: &mut World,
+        change: web::RoomMembership,
+    ) -> Result<web::MembershipReply, &'static str> {
+        let (response, receive) = tokio::sync::oneshot::channel();
+        let mut request = Some(web::MembershipCommand { change, response });
+        world
+            .run_system_once(
+                move |mut game: ResMut<Match>,
+                      mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+                      mut commands: Commands| {
+                    game.room_membership(request.take().unwrap(), &mut links, &mut commands);
+                },
+            )
+            .unwrap();
+        receive.blocking_recv().unwrap()
+    }
+
+    #[test]
+    fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
+        let mut world = World::new();
+        world.insert_resource(live_game());
+        let credential = "ab".repeat(32);
+        assert!(
+            room_change(
+                &mut world,
+                web::RoomMembership::Admit {
+                    credential: credential.clone(),
+                    car: "Minion".into()
+                }
+            )
+            .is_err()
+        );
+        assert_eq!(
+            world.resource::<Match>().participants.all_slots().count(),
+            3
+        );
+        let first = room_change(
+            &mut world,
+            web::RoomMembership::Admit {
+                credential: credential.clone(),
+                car: "Orbital".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(first.identity.unwrap().slot, 1);
+        assert_eq!(first.tick, None);
+        let inspected = room_change(
+            &mut world,
+            web::RoomMembership::Inspect {
+                credential: credential.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(inspected.identity, first.identity);
+        assert!(inspected.pending);
+
+        let duplicate = room_change(
+            &mut world,
+            web::RoomMembership::Admit {
+                credential: credential.clone(),
+                car: "Orbital".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(duplicate.identity, first.identity);
+        assert_eq!(
+            world.resource::<Match>().participants.all_slots().count(),
+            4
+        );
+        room_change(
+            &mut world,
+            web::RoomMembership::Depart {
+                credential: credential.clone(),
+            },
+        )
+        .unwrap();
+        assert!(
+            world
+                .resource::<Match>()
+                .participants
+                .find_room_credential(&credential)
+                .is_none()
+        );
+        let absent = room_change(
+            &mut world,
+            web::RoomMembership::Depart {
+                credential: credential.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(absent.identity, None);
+        assert_eq!(absent.tick, None);
+        let inspected = room_change(
+            &mut world,
+            web::RoomMembership::Inspect {
+                credential: credential.clone(),
+            },
+        )
+        .unwrap();
+        assert_eq!(inspected.identity, None);
+        assert!(!inspected.pending);
+
+        let next = room_change(
+            &mut world,
+            web::RoomMembership::Admit {
+                credential: "cd".repeat(32),
+                car: "Orbital".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(next.identity.unwrap().slot, 1);
+        assert_ne!(
+            next.identity.unwrap().participant,
+            first.identity.unwrap().participant
+        );
+        world.resource_mut::<Match>().ended = true;
+        world
+            .run_system_once(
+                |mut game: ResMut<Match>,
+                 mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+                 mut commands: Commands| {
+                    game.maintain_membership(&mut links, &mut commands)
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            world.resource::<Match>().participants.all_slots().count(),
+            3
+        );
+        assert!(world.resource::<Match>().membership.pending.is_empty());
+        assert!(world.resource::<Match>().membership.scheduled.is_empty());
+    }
+
+    #[test]
+    fn slot_reuse_retires_credentials_controllers_and_queued_commands() {
+        let mut world = World::new();
+        let old_link = connection(&mut world, 91);
+        let new_link = connection(&mut world, 92);
+        let mut game = live_game();
+        game.controls[0].connection = Some(old_link);
+        game.controls[0].received_sequence = 50;
+        game.participants.at_slot_mut(0).credential = Some("ab".repeat(32));
+        game.participants.at_slot_mut(0).room_credential = Some("cd".repeat(32));
+        let old = game.participants.binding(0);
+        world.insert_resource(game);
+        bind(&mut world);
+        let controller = world.resource::<Match>().controls[0].controller.unwrap();
+        world.entity_mut(controller).insert(buffer(999, 99));
+        world
+            .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
+                game.retire_live(old, &mut commands)
+            })
+            .unwrap();
+        let fresh = {
+            let mut game = world.resource_mut::<Match>();
+            assert!(
+                game.participants
+                    .find_credential(&"ab".repeat(32))
+                    .is_none()
+            );
+            assert!(
+                game.participants
+                    .find_room_credential(&"cd".repeat(32))
+                    .is_none()
+            );
+            assert_eq!(game.controls[0].received_sequence, 0);
+            let fresh = game.reserve_live().unwrap();
+            game.participants.commit_live(fresh).unwrap();
+            game.controls[0].connection = Some(new_link);
+            fresh
+        };
+        bind(&mut world);
+        assert_ne!(fresh.participant, old.participant);
+        assert_eq!(fresh.slot, old.slot);
+        assert_ne!(
+            world.resource::<Match>().controls[0].controller,
+            Some(controller)
+        );
+        // Even a retained old entity with stale native records cannot contribute
+        // to the new lease's accepted command queue.
+        world.entity_mut(controller).insert(ControlledBy {
+            owner: old_link,
+            lifetime: Lifetime::Persistent,
+        });
+        world.run_system_once(accept_native_inputs).unwrap();
+        let mut game = world.resource_mut::<Match>();
+        assert_eq!(game.controls[0].received_sequence, 0);
+        assert_eq!(game.controls[0].history.sample(100), Input::default());
+        assert!(game.retired_connections.contains(&old_link));
+    }
+
+    #[test]
+    fn disconnect_is_not_departure_and_pending_timeout_releases_only_its_reservation() {
+        let mut world = World::new();
+        let link = connection(&mut world, 94);
+        let mut game = live_game();
+        game.controls[3].connection = Some(link);
+        let stable = game.participants.binding(3);
+        assert!(game.controls[3].disconnect(link));
+        assert_eq!(game.participants.resolve(&stable), Some(3));
+        assert!(game.membership.scheduled.is_empty());
+        let pending = game.reserve_live().unwrap();
+        game.membership
+            .pending
+            .get_mut(&pending.participant)
+            .unwrap()
+            .opened = Instant::now() - Duration::from_secs(46);
+        world.insert_resource(game);
+        world
+            .run_system_once(
+                |mut game: ResMut<Match>,
+                 mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+                 mut commands: Commands| {
+                    game.maintain_membership(&mut links, &mut commands)
+                },
+            )
+            .unwrap();
+        let game = world.resource::<Match>();
+        assert_eq!(game.participants.resolve(&stable), Some(3));
+        assert!(!game.participants.joining(usize::from(pending.slot)));
+        assert!(game.membership.pending.is_empty());
     }
 }

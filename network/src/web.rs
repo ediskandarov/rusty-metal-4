@@ -61,6 +61,39 @@ struct StartOptions {
     players: usize,
     world: String,
 }
+#[derive(Clone, Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum RoomMembership {
+    Admit {
+        credential: String,
+        car: String,
+    },
+    Depart {
+        credential: String,
+    },
+    #[serde(skip)]
+    Inspect {
+        credential: String,
+    },
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MembershipOptions {
+    session_id: String,
+    change: RoomMembership,
+}
+#[derive(Serialize)]
+pub struct MembershipReply {
+    pub identity: Option<tm4_network::protocol::ControllerIdentity>,
+    pub tick: Option<u32>,
+    pub pending: bool,
+}
+pub struct MembershipCommand {
+    pub change: RoomMembership,
+    pub response: tokio::sync::oneshot::Sender<std::result::Result<MembershipReply, &'static str>>,
+}
+pub type MembershipQueue = Arc<Mutex<Receiver<MembershipCommand>>>;
+
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 // The proxy owns TLS and admission; never enable this on a directly exposed listener.
@@ -110,6 +143,7 @@ pub struct Launcher {
     pub health: crate::health::Shared,
     pub journal: crate::journal::SharedExport,
     requests: Receiver<SetupRequest>,
+    pub membership: MembershipQueue,
     _private: PrivateDirectory,
     http: Option<thread::JoinHandle<()>>,
 }
@@ -181,6 +215,8 @@ impl Launcher {
         let health = crate::health::Shared::default();
         let journal = crate::journal::SharedExport::default();
         let (sender, requests) = mpsc::channel();
+        let (membership_sender, membership_receiver) = mpsc::sync_channel(8);
+        let membership = Arc::new(Mutex::new(membership_receiver));
         let service = Arc::new(Service {
             private: private.0.clone(),
             secret,
@@ -189,6 +225,7 @@ impl Launcher {
             health: health.clone(),
             journal: journal.clone(),
             sender,
+            membership: membership_sender,
             mutation: Arc::new(AsyncMutex::new(())),
         });
         let http = serve_http(listener, router(service), stopped.clone(), status.clone())?;
@@ -200,6 +237,7 @@ impl Launcher {
             health,
             journal,
             requests,
+            membership,
             _private: private,
             http: Some(http),
         })
@@ -286,6 +324,7 @@ struct Service {
     health: crate::health::Shared,
     journal: crate::journal::SharedExport,
     sender: Sender<SetupRequest>,
+    membership: mpsc::SyncSender<MembershipCommand>,
     mutation: Arc<AsyncMutex<()>>,
 }
 
@@ -326,6 +365,8 @@ fn router(service: Arc<Service>) -> Router {
         .route("/api/resources/{*path}", put(upload))
         .route("/api/prepare", post(prepare))
         .route("/api/start", post(start))
+        .route("/api/membership", post(membership))
+        .route("/api/membership/status", post(membership_status))
         .route_layer(middleware::from_fn_with_state(
             service.clone(),
             authenticate,
@@ -488,6 +529,80 @@ async fn prepare(State(service): State<Arc<Service>>, request: Request) -> ApiRe
     service.send(SetupRequest::Prepare)?;
     Ok((StatusCode::ACCEPTED, "Preparing resources").into_response())
 }
+async fn membership(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
+    let bytes = to_bytes(request.into_body(), 1024).await.map_err(invalid)?;
+    let options: MembershipOptions = serde_json::from_slice(&bytes).map_err(invalid)?;
+    membership_command(service, options).await
+}
+
+async fn membership_status(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Lookup {
+        session_id: String,
+        credential: String,
+    }
+    let bytes = to_bytes(request.into_body(), 1024).await.map_err(invalid)?;
+    let lookup: Lookup = serde_json::from_slice(&bytes).map_err(invalid)?;
+    membership_command(
+        service,
+        MembershipOptions {
+            session_id: lookup.session_id,
+            change: RoomMembership::Inspect {
+                credential: lookup.credential,
+            },
+        },
+    )
+    .await
+}
+
+async fn membership_command(service: Arc<Service>, options: MembershipOptions) -> ApiResult {
+    {
+        let status = service.status.lock().unwrap();
+        if status.phase != "match"
+            || status.session_id.as_deref() != Some(options.session_id.as_str())
+        {
+            return Err((
+                StatusCode::CONFLICT,
+                "This match is no longer accepting membership changes.".into(),
+            ));
+        }
+    }
+    let credential = match &options.change {
+        RoomMembership::Admit { credential, .. }
+        | RoomMembership::Depart { credential }
+        | RoomMembership::Inspect { credential } => credential,
+    };
+    if credential.len() != 64
+        || !credential
+            .bytes()
+            .all(|ch| ch.is_ascii_digit() || (b'a'..=b'f').contains(&ch))
+    {
+        return Err(invalid("Invalid room membership credential"));
+    }
+    let (response, receive) = tokio::sync::oneshot::channel();
+    service
+        .membership
+        .try_send(MembershipCommand {
+            change: options.change,
+            response,
+        })
+        .map_err(|_| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "The membership queue is busy. Retry shortly.".into(),
+            )
+        })?;
+    match timeout(Duration::from_secs(2), receive).await {
+        Ok(Ok(Ok(reply))) => Ok(Json(reply).into_response()),
+        Ok(Ok(Err(message))) => Err((StatusCode::CONFLICT, message.into())),
+        _ => Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Membership preparation did not respond.".into(),
+        )),
+    }
+}
+
 async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
     let _guard = service.mutation.lock().await;
     if service.status.lock().unwrap().phase != "ready" {
@@ -508,7 +623,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         }
         if options.session_id.is_some() || !options.roster.is_empty() {
             if options.session_id.as_ref().is_none_or(|id| id.len() != 36)
-                || options.roster.len() != options.players
+                || !(2..=options.players).contains(&options.roster.len())
                 || options.roster.iter().any(|member| {
                     member.credential.len() != 64
                         || !member
@@ -523,7 +638,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
                         .any(|other| other.credential == member.credential)
                 })
             {
-                return Err(invalid("Invalid fixed room roster"));
+                return Err(invalid("Invalid initial room roster"));
             }
         }
         status.session_id = options.session_id;
@@ -665,6 +780,7 @@ mod tests {
                 required: 2,
             }));
             let (sender, requests) = mpsc::channel();
+            let (membership, _) = mpsc::sync_channel(8);
             let service = Arc::new(Service {
                 private,
                 secret: "test-secret".into(),
@@ -673,6 +789,7 @@ mod tests {
                 health: crate::health::Shared::default(),
                 journal: crate::journal::SharedExport::default(),
                 sender,
+                membership,
                 mutation: Arc::new(AsyncMutex::new(())),
             });
             Self {
@@ -742,6 +859,8 @@ mod tests {
             ("GET", "/api/journal"),
             ("POST", "/api/start"),
             ("POST", "/api/prepare"),
+            ("POST", "/api/membership"),
+            ("POST", "/api/membership/status"),
             ("PUT", "/api/resources/DATA/MAIN.MR"),
         ] {
             let response = router(fixture.service.clone())
@@ -911,7 +1030,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn room_roster_is_fixed_validated_and_never_exposed_in_status() {
+    async fn room_roster_is_capacity_bounded_validated_and_never_exposed_in_status() {
         let fixture = Fixture::new();
         {
             let mut status = fixture.service.status.lock().unwrap();
@@ -923,10 +1042,10 @@ mod tests {
             serde_json::json!({"credential": "a".repeat(64), "car": "Orbital"}),
             serde_json::json!({"credential": "b".repeat(64), "car": "Pizza Boy"}),
         ];
-        let valid = serde_json::json!({"players": 2, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster});
+        let valid = serde_json::json!({"players": 8, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster});
         for bad in [
             serde_json::json!({"players": 2, "world": "Construction Yard", "roster": roster}),
-            serde_json::json!({"players": 3, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster}),
+            serde_json::json!({"players": 1, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster}),
             serde_json::json!({"players": 2, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": [roster[0], roster[0]]}),
         ] {
             assert_eq!(
@@ -1120,6 +1239,7 @@ mod tests {
             health: fixture.service.health.clone(),
             journal: fixture.service.journal.clone(),
             requests: fixture.requests,
+            membership: Arc::new(Mutex::new(mpsc::sync_channel(8).1)),
             _private: PrivateDirectory(path.clone()),
             http: Some(http),
         };

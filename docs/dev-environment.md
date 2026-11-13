@@ -101,9 +101,11 @@ site, URL or logs. Uploaded resources live in an owner-only temporary directory
 outside the static tree and are removed on normal exit, SIGINT or SIGTERM.
 An uncatchable process kill may leave that private temporary directory behind.
 
-The standalone launcher remains one match per process: its configured 2–8 slots
-fill, the roster locks and eligible participants reconnect. Restart it after
-completion or failure. The website below supplies reusable rooms by releasing
+The standalone launcher remains one match per process: its configured 2–8 initial
+slots fill before startup. During an active round, explicit departure frees a seat
+for admission from the prepared model pool; authenticated recovery retains an existing
+lease. Restart the launcher after completion or failure. The website below supplies
+reusable rooms by releasing
 each completed match process and allocating a fresh one for the next match.
 
 With the server bundle and native debug binary built, `bun run test:server`
@@ -122,7 +124,11 @@ Rooms gather players, choose settings and prepare one match at a time. Browsing
 and joining need no disc resources or simulation container. The embedded existing
 player reads each participant's own disc. The host explicitly prepares the private
 server, then every participant readies and the host starts the actual roster.
-Native completion returns everyone to the same room and releases the server.
+Native completion returns everyone to the same room and releases the server. Room
+capacity is independent of the initial roster size. During play, a newcomer can load
+their own disc, select from the startup-prepared model pool and join a free seat;
+explicit room leave schedules native departure. Closing a tab preserves recovery
+identity rather than releasing its gameplay seat.
 
 Run `bun run dev:rustymetal4.com` and open [localhost:8787](http://localhost:8787).
 This builds only the frontend and runs Wrangler locally, persisting room state
@@ -143,6 +149,16 @@ only when working on the retained container infrastructure.
   the diagnostic native binary, and `TM4_DISC_DIR`. Its existing combat fixture
   positions a lethal duel; normal engine results release the process and a second
   match uses the same room. It does not verify deployed Cloudflare containers.
+- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_live_membership.cjs`: four
+  independent browsers use ordinary room actions to admit, depart, reuse a seat,
+  reject retired credentials and recover the same identity. Reloading a preparing
+  iframe after predicted admission verifies cancellation through Lightyear's actual
+  rollback schedule, then same-room-member retry with a fresh identity. It uses the same
+  native diagnostic bundle and matching website runtime as the match browser test.
+  The downloaded journal is `build/room-tests/live-membership.tm4j`;
+  `TM4_SIMULATION_WASM=<authority Wasm> TM4_RESOURCE_DIR=<resource root> node
+  tests/simulation/replay-membership-journal.cjs <journal>` checks every recorded
+  subsystem digest in a fresh simulation instance.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
   admission, creation retries, permissions, reconnect/hibernation, host succession,
   directory outages and complete empty-room cleanup. Allow about 90 seconds.

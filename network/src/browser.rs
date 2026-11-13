@@ -33,7 +33,8 @@ fn receive(mut inbox: ResMut<Inbox>, mut receivers: Query<&mut MessageReceiver<M
 
 fn attach_controls(
     mut commands: Commands,
-    slots: Query<Entity, (With<ControllerIdentity>, Without<ActionState<Input>>)>,
+    slots: Query<(Entity, &ControllerIdentity, Has<ActionState<Input>>)>,
+    state: Res<LivePrediction>,
     query: Query<
         Entity,
         (
@@ -43,10 +44,27 @@ fn attach_controls(
         ),
     >,
 ) {
-    for entity in &slots {
-        commands
-            .entity(entity)
-            .insert(NativeBuffer::<Input>::default());
+    for (entity, identity, attached) in &slots {
+        let origin = state.input_origin(*identity);
+        if origin.is_none() {
+            if attached {
+                commands
+                    .entity(entity)
+                    .remove::<(NativeBuffer<Input>, ActionState<Input>)>();
+            }
+            continue;
+        }
+        if attached {
+            continue;
+        }
+        if let Some(origin) = origin {
+            let mut buffer = NativeBuffer::<Input>::default();
+            if let Some(boundary) = origin {
+                buffer.set(boundary, ActionState(Input::default()));
+                buffer.last_remote_tick = Some(boundary);
+            }
+            commands.entity(entity).insert(buffer);
+        }
     }
     for entity in &query {
         commands.entity(entity).insert((
@@ -146,6 +164,7 @@ impl NetworkClient {
         &mut self,
         slot_mask: u8,
         participants: &str,
+        prepared_pool: &str,
         resuming: bool,
     ) -> Result<(), JsValue> {
         let participants: Vec<crate::protocol::ParticipantId> = serde_json::from_str(participants)
@@ -158,7 +177,23 @@ impl NetworkClient {
         {
             return Err(JsValue::from_str("Invalid prediction participant bindings"));
         }
-        live_prediction::prepare(self.app.world_mut(), slot_mask, participants, resuming);
+        let prepared_pool: Vec<String> = serde_json::from_str(prepared_pool)
+            .map_err(|_| JsValue::from_str("Invalid prepared car pool"))?;
+        if prepared_pool.is_empty()
+            || prepared_pool.len() > 8
+            || prepared_pool
+                .iter()
+                .any(|car| car.is_empty() || car.len() > 63 || car.contains(['\0', '\n']))
+        {
+            return Err(JsValue::from_str("Invalid prepared car pool"));
+        }
+        live_prediction::prepare(
+            self.app.world_mut(),
+            slot_mask,
+            participants,
+            prepared_pool,
+            resuming,
+        );
         Ok(())
     }
 
@@ -255,15 +290,18 @@ impl NetworkClient {
         Ok(())
     }
 
-    pub fn diagnostics(&self) -> String {
-        let link = self.app.world().get::<Link>(self.connection);
+    pub fn diagnostics(&mut self) -> String {
+        let world = self.app.world_mut();
+        let roster: Vec<_> = world.query::<(&ControllerIdentity, Has<InputMarker<ControllerCommand>>, &NativeBuffer<Input>)>().iter(world).map(|(identity, local, buffer)| serde_json::json!({"identity": identity, "local": local, "acceptedThrough": buffer.last_remote_tick.map(|tick| tick.0)})).collect();
+        let link = world.get::<Link>(self.connection);
         serde_json::json!({
             "rttMs": link.map(|l| l.stats.rtt.as_secs_f64() * 1000.0),
             "jitterMs": link.map(|l| l.stats.jitter.as_secs_f64() * 1000.0),
             "queuedPackets": link.map(|l| l.recv.len() + l.send.len()),
-            "nativeTick": self.app.world().resource::<LocalTimeline>().tick().0,
-            "prediction": self.app.world().resource::<LivePrediction>()
-                .diagnostics(self.app.world().resource::<PredictionWindowWait>()),
+            "nativeTick": world.resource::<LocalTimeline>().tick().0,
+            "nativeRoster": roster,
+            "prediction": world.resource::<LivePrediction>()
+                .diagnostics(world.resource::<PredictionWindowWait>()),
         })
         .to_string()
     }

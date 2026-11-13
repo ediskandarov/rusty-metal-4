@@ -42,6 +42,7 @@ const namespace = (await mf.getDurableObjectNamespace("SERVER")) as unknown as N
 type Server = {
   configureForTest(value: object): Promise<void>;
   inspectForTest(): Promise<{ stops: number; roster: unknown[] }>;
+  cancelAdmissionsForTest(): Promise<void>;
 };
 try {
   for (const browser of browsers) await browser("session", {});
@@ -63,6 +64,7 @@ try {
   const rooms = (await mf.getDurableObjectNamespace("ROOMS")) as unknown as Namespace;
   const room = rooms.get(rooms.idFromName(initial.id)) as {
     expireMatchForTest(): Promise<void>;
+    expireDisconnectedForTest(memberId: string): Promise<void>;
     emptyMatchForTest(): Promise<void>;
     checkMatchForTest(): Promise<RoomMatch | undefined>;
     restoreMatchFromStorageForTest(): Promise<RoomMatch | undefined>;
@@ -99,6 +101,59 @@ try {
   assert.equal((await guest(path + "/join", { playerName: "Guest" })).status, 200);
   assert.equal((await server().inspectForTest()).roster.length, 2);
   await eventually(view, (state) => state.match?.stage === "playing");
+  assert.equal((await stranger(path + "/join", { playerName: "Late" })).status, 200);
+  assert.equal(
+    (await stranger(path + "/player", { car: "Pizza Boy", compatibility, ready: true })).status,
+    409,
+    "late admission is limited to the declared prepared pool",
+  );
+  const lateMember = ((await (await stranger(path)).json()) as { room: RoomSnapshot }).room.you!;
+  assert.equal(
+    (await stranger(path + "/player", { car: "Orbital", compatibility, ready: false })).status,
+    200,
+  );
+  assert.equal(
+    (await stranger(path + "/player", { car: "Orbital", compatibility, ready: true })).status,
+    200,
+  );
+  const pending = (await room.checkMatchForTest())!.roster.find(
+    (entry) => entry.id === lateMember,
+  )!;
+  assert(pending.pending);
+  await server().cancelAdmissionsForTest();
+  await server().configureForTest({ lookupFailure: true });
+  assert(
+    (await room.checkMatchForTest())!.roster.some((entry) => entry.id === lateMember),
+    "monitoring failure cannot establish cancellation",
+  );
+  await server().configureForTest({ lookupFailure: false });
+  assert(!(await room.checkMatchForTest())!.roster.some((entry) => entry.id === lateMember));
+  let lateView = ((await (await stranger(path)).json()) as { room: RoomSnapshot }).room;
+  assert.equal(lateView.match!.credential, null);
+  assert.equal(lateView.participants.find((entry) => entry.id === lateMember)!.ready, false);
+  assert.equal(
+    (await stranger(path + "/player", { car: "Orbital", compatibility, ready: true })).status,
+    200,
+  );
+  const retried = (await room.checkMatchForTest())!.roster.find(
+    (entry) => entry.id === lateMember,
+  )!;
+  assert.notEqual(retried.credential, pending.credential);
+  await room.expireDisconnectedForTest(lateMember);
+  assert(
+    (await view()).participants.some((entry) => entry.id === lateMember),
+    "pending native lease retains room membership until authoritative cancellation",
+  );
+  await server().cancelAdmissionsForTest();
+  await room.checkMatchForTest();
+  lateView = await view();
+  assert(
+    !lateView.participants.some((entry) => entry.id === lateMember),
+    "canceled disconnected preparation is pruned",
+  );
+  console.log(
+    "PASS authoritative preparation cancellation, monitoring outage, same-member retry and disconnected pruning",
+  );
   const journalPath = path + "/match/" + match.id + "/journal";
   assert.equal((await guest(journalPath)).status, 403);
   assert.equal((await stranger(journalPath)).status, 403);

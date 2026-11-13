@@ -1,6 +1,9 @@
 use crate::input::{ControllerCommand, Input};
 use crate::prediction_input::LocalInputs;
-use crate::protocol::{ControllerIdentity, Message, PREDICTION_DEPTH};
+use crate::protocol::{
+    ControllerIdentity, MembershipChange, Message, PREDICTION_DEPTH, ParticipantId,
+    valid_membership,
+};
 use bevy_app::{App, FixedPostUpdate, FixedPreUpdate, FixedUpdate, PostUpdate, PreUpdate};
 use bevy_ecs::prelude::*;
 use bevy_time::{Fixed, Time, Virtual};
@@ -8,13 +11,19 @@ use lightyear::input::client::InputSystems;
 use lightyear::prelude::client::InputDelayConfig;
 use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
 use lightyear::prelude::*;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn journal_authority_frame(json: &str);
+    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
+    fn apply_live_membership(tick: u32, json: &str) -> bool;
+    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
+    fn live_slot_mask() -> u8;
+    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
+    fn live_participant_part(slot: u8, part: u8) -> u32;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn retain_live_tick(tick: u32) -> u32;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
@@ -34,7 +43,9 @@ const VERIFICATION_HISTORY: usize = 2 * PREDICTION_DEPTH as usize + 1;
 const MAX_SLOTS: usize = 8;
 const MAX_EDGES: usize = 16;
 type Digests = [u32; 6];
-type VerifiedRow = (u32, Digests, [Input; MAX_SLOTS]);
+type Bindings = [Option<ParticipantId>; MAX_SLOTS];
+type VerifiedRow = (u32, Digests, [Input; MAX_SLOTS], Bindings);
+type Frontiers = HashMap<ControllerIdentity, Option<Tick>>;
 
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +116,9 @@ impl Session {
 pub struct LivePrediction {
     pub expected_slot_mask: Option<u8>,
     expected_participants: Vec<crate::protocol::ParticipantId>,
+    prepared_pool: Vec<String>,
+    plans: BTreeMap<u32, Vec<MembershipChange>>,
+    dynamic_membership: bool,
     session: Option<Session>,
     resume_preparing: bool,
     resume_warmup: bool,
@@ -139,11 +153,36 @@ impl LivePrediction {
             "acceptedDepth": wait.prediction_depth(),
             "confirmedNativeTick": wait.confirmed_tick().map(|tick| tick.0),
             "resumePreparing": self.resume_preparing,
+            "expectedSlotMask": self.expected_slot_mask,
+            "expectedParticipants": self.expected_participants,
             "replayed": self.replayed,
             "maxDepth": self.depth,
             "historyBytes": self.bytes,
             "peakBytes": self.peak_bytes,
             "buttonEdges": self.edges.len(),
+        })
+    }
+
+    // A reserved controller has no input timeline. Admission supplies its
+    // neutral pre-activation boundary before Lightyear receives the first row.
+    pub fn input_origin(&self, identity: ControllerIdentity) -> Option<Option<Tick>> {
+        if let Some(mask) = self.expected_slot_mask {
+            let index = (0..identity.slot.min(8))
+                .filter(|slot| mask & (1 << slot) != 0)
+                .count();
+            if identity.slot < 8
+                && mask & (1 << identity.slot) != 0
+                && self.expected_participants.get(index) == Some(&identity.participant)
+            {
+                return Some(None);
+            }
+        }
+        let session = self.session?;
+        self.plans.iter().find_map(|(tick, changes)| {
+            changes
+                .iter()
+                .any(|change| change.identity() == identity)
+                .then_some(Some(session.anchor + *tick as i32))
         })
     }
 
@@ -162,6 +201,47 @@ impl LivePrediction {
         world: &mut World,
         inbox: Vec<Message>,
     ) -> Result<Vec<Message>, PredictionFailure> {
+        for message in &inbox {
+            let (tick, changes) = match message {
+                Message::Membership { tick, changes } => (*tick, changes),
+                Message::Frame { tick, changes, .. } => (*tick, changes),
+                _ => continue,
+            };
+            let mut state = world.resource_mut::<Self>();
+            if changes.is_empty() && !state.plans.contains_key(&tick) {
+                continue;
+            }
+            if !state.prepared_pool.is_empty()
+                && !valid_membership(changes, MAX_SLOTS, &state.prepared_pool)
+            {
+                return Err("Invalid authoritative membership plan".into());
+            }
+            if state.plans.get(&tick) == Some(changes) {
+                continue;
+            }
+            if let Some(session) = state.session {
+                if tick < state.confirmed {
+                    return Err(PredictionFailure::expired(
+                        "A membership decision arrived outside retained history",
+                    ));
+                }
+                if tick < state.head {
+                    let boundary = session.anchor + tick as i32;
+                    state.pending_resume_rollback = Some(
+                        state
+                            .pending_resume_rollback
+                            .map_or(boundary, |old| if old < boundary { old } else { boundary }),
+                    );
+                }
+            }
+            if state.plans.len() >= 128 && !state.plans.contains_key(&tick) {
+                return Err(PredictionFailure::expired(
+                    "Membership history exceeded the retained window",
+                ));
+            }
+            state.dynamic_membership = true;
+            state.plans.insert(tick, changes.clone());
+        }
         let session = world.resource::<Self>().session;
         let Some(session) = session else {
             return Ok(inbox);
@@ -175,9 +255,8 @@ impl LivePrediction {
         let frontier = world
             .query::<(&ControllerIdentity, &NativeBuffer<Input>)>()
             .iter(world)
-            .filter(|(identity, _)| session.contains(identity.slot))
-            .map(|(_, buffer)| buffer.last_remote_tick)
-            .collect::<Vec<_>>();
+            .map(|(identity, buffer)| (*identity, buffer.last_remote_tick))
+            .collect::<Frontiers>();
         let mut state = world.resource_mut::<Self>();
         // Observe accepted inputs before verification can reject the update.
         for message in &inbox {
@@ -193,7 +272,7 @@ impl LivePrediction {
     fn verify_confirmations(
         &mut self,
         session: Session,
-        frontier: &[Option<Tick>],
+        frontier: &Frontiers,
         inbox: Vec<Message>,
     ) -> Result<Vec<Message>, PredictionFailure> {
         let state = self;
@@ -217,23 +296,39 @@ impl LivePrediction {
         {
             let tick = *tick + 1;
             if tick != state.confirmed + 1 {
-                return Err("Authority sent an out-of-order confirmation".into());
+                return Err(format!("Authority sent an out-of-order confirmation: got {tick}, expected {}, predicted head {}", state.confirmed + 1, state.head).into());
             }
-            if frontier.len() != session.mask.count_ones() as usize
-                || frontier
-                    .iter()
-                    .any(|end| end.is_none_or(|end| end < session.anchor + tick as i32))
-                || tick > state.head
-            {
+            if tick > state.head || state.pending_resume_rollback.is_some() {
                 break;
             }
-            let Some((_, local, applied)) =
-                state.checksums.iter().find(|(saved, _, _)| *saved == tick)
+            let Some((_, local, applied, bindings)) = state
+                .checksums
+                .iter()
+                .find(|(saved, _, _, _)| *saved == tick)
             else {
                 return Err(PredictionFailure::expired(
                     "Authority confirmation is older than retained simulation history",
                 ));
             };
+            if bindings
+                .iter()
+                .enumerate()
+                .filter_map(|(slot, id)| {
+                    id.map(|participant| ControllerIdentity {
+                        slot: slot as u8,
+                        participant,
+                    })
+                })
+                .any(|identity| {
+                    frontier
+                        .get(&identity)
+                        .copied()
+                        .flatten()
+                        .is_none_or(|end| end < session.anchor + tick as i32)
+                })
+            {
+                break;
+            }
             if authority.unsupported.is_some()
                 || local[0] != authority.digest
                 || local[1..] != authority.sections
@@ -248,6 +343,9 @@ impl LivePrediction {
             }
             state.confirmed = tick;
             state.local_inputs.discard_confirmed(tick);
+            state
+                .plans
+                .retain(|event_tick, _| *event_tick + u32::from(PREDICTION_DEPTH) * 2 >= tick);
             ready.push(state.confirmations.pop_front().unwrap());
         }
         // A received batch can be larger than the rollback window. Bound only the
@@ -259,6 +357,19 @@ impl LivePrediction {
         }
         Ok(ready)
     }
+}
+
+fn current_bindings(capacity: u8) -> Bindings {
+    let mask = live_slot_mask();
+    std::array::from_fn(|slot| {
+        if slot >= usize::from(capacity) || mask & (1 << slot) == 0 {
+            return None;
+        }
+        Some(ParticipantId(
+            u64::from(live_participant_part(slot as u8, 0))
+                | (u64::from(live_participant_part(slot as u8, 1)) << 32),
+        ))
+    })
 }
 
 fn hashes() -> Digests {
@@ -316,12 +427,22 @@ pub fn prepare(
     world: &mut World,
     slot_mask: u8,
     participants: Vec<crate::protocol::ParticipantId>,
+    prepared_pool: Vec<String>,
     resuming: bool,
 ) {
     {
         let mut state = world.resource_mut::<LivePrediction>();
         state.expected_slot_mask = Some(slot_mask);
         state.expected_participants = participants;
+        state.prepared_pool = prepared_pool;
+        if state
+            .plans
+            .values()
+            .any(|changes| !valid_membership(changes, MAX_SLOTS, &state.prepared_pool))
+        {
+            state.error = Some("Invalid prepared membership plan".into());
+        }
+        state.dynamic_membership = resuming || !state.plans.is_empty();
         state.resume_preparing = resuming;
     }
     if resuming {
@@ -347,6 +468,12 @@ pub fn prepare(
 }
 
 pub fn ready(world: &mut World) -> bool {
+    if world.resource::<LivePrediction>().resume_preparing {
+        let bindings = current_bindings(8);
+        let mut state = world.resource_mut::<LivePrediction>();
+        state.expected_slot_mask = Some(live_slot_mask());
+        state.expected_participants = bindings.into_iter().flatten().collect();
+    }
     let Some(expected) = world.resource::<LivePrediction>().expected_slot_mask else {
         return false;
     };
@@ -356,6 +483,14 @@ pub fn ready(world: &mut World) -> bool {
     world
         .query::<(&ControllerIdentity, &NativeBuffer<Input>)>()
         .iter(world)
+        .filter(|(identity, _)| {
+            let state = world.resource::<LivePrediction>();
+            let index = (expected & ((1u16 << identity.slot.min(8)) as u8).wrapping_sub(1))
+                .count_ones() as usize;
+            identity.slot < 8
+                && expected & (1 << identity.slot) != 0
+                && state.expected_participants.get(index) == Some(&identity.participant)
+        })
         .count()
         == expected.count_ones() as usize
         && world
@@ -413,6 +548,14 @@ pub fn begin_resume(
     head: u32,
     sequence: u32,
 ) -> Result<(), &'static str> {
+    let bindings = current_bindings(capacity);
+    {
+        let mut state = world.resource_mut::<LivePrediction>();
+        state.expected_slot_mask = Some(live_slot_mask());
+        state.expected_participants = bindings.into_iter().flatten().collect();
+        state.dynamic_membership = true;
+        state.plans.retain(|tick, _| *tick >= head);
+    }
     let anchor = Tick(anchor);
     let boundary = anchor + head as i32;
     let clock = world.resource::<LocalTimeline>().tick();
@@ -460,7 +603,7 @@ pub fn begin_resume(
 fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'static str> {
     let mut present = [false; MAX_SLOTS];
     let mut participants = std::collections::HashSet::new();
-    let mut local_present = false;
+    let dynamic = world.resource::<LivePrediction>().dynamic_membership;
     let expected = &world.resource::<LivePrediction>().expected_participants;
     let bindings: Vec<_> = (0..session.capacity)
         .filter(|slot| session.contains(*slot))
@@ -474,6 +617,9 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
         .iter(world)
     {
         let slot = usize::from(identity.slot);
+        if dynamic && !bindings.contains(&(identity.slot, identity.participant)) {
+            continue;
+        }
         if !session.contains(identity.slot)
             || !bindings.contains(&(identity.slot, identity.participant))
             || present[slot]
@@ -483,15 +629,26 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
             return Err("Invalid native controller assignment");
         }
         present[slot] = true;
-        local_present |= local;
     }
     if present
         .iter()
         .enumerate()
         .any(|(slot, present)| *present != session.contains(slot as u8))
-        || !local_present
     {
         return Err("A native controller slot was not replicated before play");
+    }
+    let local: Vec<_> = world
+        .query_filtered::<&ControllerIdentity, With<InputMarker<ControllerCommand>>>()
+        .iter(world)
+        .copied()
+        .collect();
+    if local.len() != 1
+        || local[0].slot != session.local_slot
+        || (session.contains(session.local_slot)
+            && !bindings.contains(&(local[0].slot, local[0].participant)))
+        || (!session.contains(session.local_slot) && !dynamic)
+    {
+        return Err("The local native controller does not own its prepared lease");
     }
     Ok(())
 }
@@ -507,7 +664,9 @@ fn start_at(
         || world.resource::<LivePrediction>().session.is_some()
         || world.resource::<LivePrediction>().expected_slot_mask != Some(session.mask)
         || !(2..=8).contains(&session.capacity)
-        || !session.contains(session.local_slot)
+        || (session.local_slot >= session.capacity
+            || (!session.contains(session.local_slot)
+                && !world.resource::<LivePrediction>().dynamic_membership))
         || checkpoint_depth != PREDICTION_DEPTH
     {
         return Err("Invalid prediction start");
@@ -553,9 +712,12 @@ fn start_at(
     state.sequence = sequence;
     state.head = head;
     state.confirmed = head;
-    state
-        .checksums
-        .push_back((head, hashes(), [Input::default(); MAX_SLOTS]));
+    state.checksums.push_back((
+        head,
+        hashes(),
+        [Input::default(); MAX_SLOTS],
+        current_bindings(session.capacity),
+    ));
     state.bytes = bytes;
     state.peak_bytes = bytes;
     Ok(())
@@ -604,7 +766,7 @@ fn step_world(
         &mut NativeBuffer<Input>,
     )>,
 ) {
-    let Some(session) = state.session else {
+    let Some(mut session) = state.session else {
         return;
     };
     let native_tick = timeline.tick();
@@ -616,10 +778,41 @@ fn step_world(
         state.error = Some("Lightyear shifted beyond the C simulation timeline".into());
         return;
     }
+    if let Some(changes) = state.plans.get(&tick) {
+        if changes.iter().any(|change| matches!(change, MembershipChange::Admit { identity, .. } if !slots.iter().any(|(replicated, _, _)| replicated == identity))) {
+            state.error = Some(PredictionFailure::expired("The new participant's native controller has not arrived before admission"));
+            return;
+        }
+        if !apply_live_membership(tick, &serde_json::to_string(changes).unwrap()) {
+            state.error = Some("The game refused an authoritative membership decision".into());
+            return;
+        }
+    }
+    session.mask = live_slot_mask();
+    state.session = Some(session);
+    let bindings = current_bindings(session.capacity);
+    state.expected_slot_mask = Some(session.mask);
+    state.expected_participants = bindings.into_iter().flatten().collect();
     let mut inputs = [None; MAX_SLOTS];
     for (identity, accepted, mut buffer) in &mut slots {
         let slot = identity.slot;
-        if !session.contains(slot) || inputs[slot as usize].is_some() {
+        if slot >= session.capacity || bindings[usize::from(slot)] != Some(identity.participant) {
+            if state
+                .plans
+                .range(..=tick)
+                .any(|(_, changes)| changes.iter().any(|change| change.identity() == *identity))
+            {
+                buffer.set(native_tick, ActionState(Input::default()));
+                if buffer
+                    .last_remote_tick
+                    .is_none_or(|last| last < native_tick)
+                {
+                    buffer.last_remote_tick = Some(native_tick);
+                }
+            }
+            continue;
+        }
+        if inputs[slot as usize].is_some() {
             state.error = Some("Invalid native controller slot".into());
             return;
         }
@@ -707,7 +900,9 @@ fn step_world(
     if state.checksums.len() == VERIFICATION_HISTORY {
         state.checksums.pop_front();
     }
-    state.checksums.push_back((checkpoint.0, hashes(), applied));
+    state
+        .checksums
+        .push_back((checkpoint.0, hashes(), applied, bindings));
     if state.restoring {
         state.replayed += 1;
     }
@@ -739,10 +934,12 @@ fn update_prediction_wait(
     let mut count: u32 = 0;
     let mut complete = true;
     let mut frontier = None;
-    for (_, buffer) in slots_query
-        .iter()
-        .filter(|(identity, _)| identity.slot < 8 && slots & (1 << identity.slot) != 0)
-    {
+    for (_, buffer) in slots_query.iter().filter(|(identity, _)| {
+        identity.slot < 8
+            && slots & (1 << identity.slot) != 0
+            && (!state.dynamic_membership
+                || current_bindings(8)[identity.slot as usize] == Some(identity.participant))
+    }) {
         count += 1;
         if let Some(last) = buffer.last_remote_tick.or(anchor) {
             frontier =
@@ -824,7 +1021,9 @@ fn restore_world(
     state.rollbacks += 1;
     state.depth = state.depth.max((timeline.tick() - tick).max(0) as u32);
     state.restoring = true;
-    state.checksums.retain(|(tick, _, _)| *tick <= checkpoint.0);
+    state
+        .checksums
+        .retain(|(tick, _, _, _)| *tick <= checkpoint.0);
 }
 
 fn end_replay(mut state: ResMut<LivePrediction>) {
@@ -850,11 +1049,26 @@ mod tests {
     }
 
     fn row(tick: u32) -> VerifiedRow {
-        (tick, [tick, 1, 2, 3, 4, 5], [Input::default(); MAX_SLOTS])
+        (
+            tick,
+            [tick, 1, 2, 3, 4, 5],
+            [Input::default(); MAX_SLOTS],
+            [
+                Some(ParticipantId(1)),
+                Some(ParticipantId(2)),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ],
+        )
     }
 
     fn frame(tick: u32) -> Message {
         Message::Frame {
+            changes: Vec::new(),
             tick: tick - 1,
             inputs: vec![Input::default(); 2],
             state: RoundState {
@@ -871,6 +1085,27 @@ mod tests {
         }
     }
 
+    fn frontiers(tick: Option<Tick>) -> Frontiers {
+        [
+            (
+                ControllerIdentity {
+                    participant: ParticipantId(1),
+                    slot: 0,
+                },
+                tick,
+            ),
+            (
+                ControllerIdentity {
+                    participant: ParticipantId(2),
+                    slot: 1,
+                },
+                tick,
+            ),
+        ]
+        .into_iter()
+        .collect()
+    }
+
     fn state() -> LivePrediction {
         LivePrediction {
             session: Some(session()),
@@ -885,7 +1120,7 @@ mod tests {
     fn delayed_batch_verifies_before_applying_the_pending_queue_limit() {
         // Safari journal: confirmed 31, local head 48, then frames 32..49 arrive together.
         let mut state = state();
-        let frontier = [Some(session().anchor + 49); 2];
+        let frontier = frontiers(Some(session().anchor + 49));
         let ready = state
             .verify_confirmations(session(), &frontier, (32..=49).map(frame).collect())
             .unwrap();
@@ -910,7 +1145,7 @@ mod tests {
         let mut state = state();
         state.checksums.pop_front();
         assert!(matches!(
-            state.verify_confirmations(session(), &[Some(Tick(400)); 2], vec![frame(32)]),
+            state.verify_confirmations(session(), &frontiers(Some(Tick(400))), vec![frame(32)]),
             Err(PredictionFailure::Recoverable {
                 reason: RecoveryReason::HistoryExpired,
                 ..
@@ -918,7 +1153,7 @@ mod tests {
         ));
         let mut state = self::state();
         assert!(matches!(
-            state.verify_confirmations(session(), &[None; 2], (32..=49).map(frame).collect()),
+            state.verify_confirmations(session(), &frontiers(None), (32..=49).map(frame).collect()),
             Err(PredictionFailure::Recoverable {
                 reason: RecoveryReason::HistoryExpired,
                 ..
@@ -931,7 +1166,7 @@ mod tests {
         let mut state = state();
         state.checksums[5].1[3] ^= 1;
         assert!(
-            matches!(state.verify_confirmations(session(), &[Some(Tick(400)); 2], (32..=49).map(frame).collect()),
+            matches!(state.verify_confirmations(session(), &frontiers(Some(Tick(400))), (32..=49).map(frame).collect()),
             Err(PredictionFailure::Fatal(message)) if message.contains("diverged at confirmed tick 37"))
         );
     }
@@ -1074,5 +1309,144 @@ mod tests {
             .entity_mut(local)
             .insert(InputMarker::<ControllerCommand>::default());
         assert!(validate_native_roster(&mut world, session()).is_ok());
+    }
+    #[test]
+    fn membership_plan_replacement_uses_native_rollback_and_keeps_cancellation() {
+        let mut world = World::new();
+        let mut state = state();
+        state.prepared_pool = vec!["Orbital".into()];
+        world.insert_resource(state);
+        let change = MembershipChange::Admit {
+            identity: ControllerIdentity {
+                participant: ParticipantId(3),
+                slot: 2,
+            },
+            car: "Orbital".into(),
+        };
+        LivePrediction::drain_confirmed(
+            &mut world,
+            vec![Message::Membership {
+                tick: 40,
+                changes: vec![change],
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            world.resource::<LivePrediction>().pending_resume_rollback,
+            Some(session().anchor + 40)
+        );
+        LivePrediction::drain_confirmed(
+            &mut world,
+            vec![Message::Membership {
+                tick: 40,
+                changes: vec![],
+            }],
+        )
+        .unwrap();
+        assert!(world.resource::<LivePrediction>().plans[&40].is_empty());
+        assert!(matches!(
+            LivePrediction::drain_confirmed(
+                &mut world,
+                vec![Message::Membership {
+                    tick: 30,
+                    changes: vec![MembershipChange::Depart {
+                        identity: ControllerIdentity {
+                            participant: ParticipantId(2),
+                            slot: 1
+                        }
+                    }]
+                }]
+            ),
+            Err(PredictionFailure::Recoverable { .. })
+        ));
+    }
+
+    #[test]
+    fn an_old_controllers_frontier_cannot_confirm_a_reused_slots_input() {
+        let mut state = state();
+        state.checksums.front_mut().unwrap().3[1] = Some(ParticipantId(3));
+        let mut old = frontiers(Some(Tick(400)));
+        assert!(
+            state
+                .verify_confirmations(session(), &old, vec![frame(32)])
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(state.confirmed, 31);
+        old.insert(
+            ControllerIdentity {
+                participant: ParticipantId(3),
+                slot: 1,
+            },
+            Some(Tick(400)),
+        );
+        assert_eq!(
+            state
+                .verify_confirmations(session(), &old, vec![])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(state.confirmed, 32);
+    }
+    #[test]
+    fn a_joining_local_controller_has_no_input_history_before_its_admission_boundary() {
+        let mut world = World::new();
+        world.insert_resource(LivePrediction {
+            expected_slot_mask: Some(7),
+            expected_participants: vec![ParticipantId(1), ParticipantId(2), ParticipantId(3)],
+            dynamic_membership: true,
+            session: Some(Session {
+                capacity: 8,
+                mask: 7,
+                local_slot: 3,
+                ..session()
+            }),
+            ..Default::default()
+        });
+        for slot in 0..3 {
+            world.spawn((
+                ControllerIdentity {
+                    participant: ParticipantId(u64::from(slot) + 1),
+                    slot,
+                },
+                NativeBuffer::<Input>::default(),
+            ));
+        }
+        let identity = ControllerIdentity {
+            participant: ParticipantId(4),
+            slot: 3,
+        };
+        world.spawn((identity, InputMarker::<ControllerCommand>::default()));
+        let prepared = Session {
+            capacity: 8,
+            mask: 7,
+            local_slot: 3,
+            ..session()
+        };
+        assert!(validate_native_roster(&mut world, prepared).is_ok());
+        assert_eq!(
+            world.resource::<LivePrediction>().input_origin(identity),
+            None
+        );
+        world.resource_mut::<LivePrediction>().plans.insert(
+            50,
+            vec![MembershipChange::Admit {
+                identity,
+                car: "Orbital".into(),
+            }],
+        );
+        assert_eq!(
+            world.resource::<LivePrediction>().input_origin(identity),
+            Some(Some(session().anchor + 50))
+        );
+        world
+            .resource_mut::<LivePrediction>()
+            .plans
+            .insert(50, vec![]);
+        assert_eq!(
+            world.resource::<LivePrediction>().input_origin(identity),
+            None
+        );
     }
 }

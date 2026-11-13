@@ -22,6 +22,8 @@ typedef struct WebParticipantRespawn {
 typedef struct WebParticipantState {
     WebParticipantResult slots[8];
     WebParticipantRespawn respawns[8];
+    /* One-based index into the immutable, prepared startup car list. */
+    u32 models[8];
 } WebParticipantState;
 
 struct Car;

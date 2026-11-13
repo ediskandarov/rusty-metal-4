@@ -300,13 +300,13 @@ if(TM4_STANDALONE)
     set_property(TARGET tm4_web PROPERTY LINK_OPTIONS "${options}")
     set(exports _malloc _free _HeadlessInitialize _HeadlessCapture _HeadlessCanonical
         _HeadlessDigest _HeadlessTick _HeadlessParticipants _WebNetWorldIndex _WebNetStartMatch
-        _WebNetSetInput _WebNetQueueTick _WebNetCaptureLocalCheckpoint
+        _WebNetSlotMask _WebNetParticipantIdentityPart _WebNetAdmitParticipant _WebNetDepartParticipant _WebNetSetInput _WebNetQueueTick _WebNetCaptureLocalCheckpoint
         _WebNetRestoreLocalCheckpoint _WebNetFinishLocalReplay _WebNetCancelMatch
         _HeadlessState _HeadlessError _HeadlessWorldCount _HeadlessWorldName
         _HeadlessCarCount _HeadlessCarName _HeadlessPortableBuffer _HeadlessPortableCapture
         _HeadlessPortableRestore _WebNetEndReplay)
     if(TM4_WEB_TEST_HOOKS)
-        list(APPEND exports _WebTestSimulationAllocationSize _WebTestCrusherRespawnAllocationBytes _WebTestCarResource _WebTestRestartNetworkReplay _WebTestSimulationFreeBytes _WebTestScheduleRespawn _WebTestCarHandle _WebTestRespawnState _WebTestCreateParticipantWaveTimer _WebTestFlameContact _WebTestBurnIdentity _WebTestBurnOwnContact _WebTestParticipantDamageContract
+        list(APPEND exports _WebTestFailSimulationAllocation _WebTestSimulationAllocationSize _WebTestCrusherRespawnAllocationBytes _WebTestCarResource _WebTestRestartNetworkReplay _WebTestSimulationFreeBytes _WebTestScheduleRespawn _WebTestCarHandle _WebTestRespawnState _WebTestCreateParticipantWaveTimer _WebTestFlameContact _WebTestBurnIdentity _WebTestBurnOwnContact _WebTestParticipantDamageContract
             _WebTestCreateParticipantProjectile _WebTestSetParticipantResults _WebTestKillParticipant
             _WebTestHitParticipant _WebTestBindCaptureTarget _WebTestCaptureTarget _WebTestProjectileProvenance _WebTestAttributedWaves _WebTestTeleportCamera _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget

@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const networkProtocolVersion = 13;
+export const networkProtocolVersion = 14;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -92,9 +92,36 @@ export const lobbySchema = z.object({
     .max(8),
 });
 export type LobbyState = z.infer<typeof lobbySchema>;
+export const controllerIdentitySchema = z.object({
+  participant: participantIdSchema,
+  slot: z.number().int().min(0).max(7),
+});
+export const membershipChangeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("admit"),
+    identity: controllerIdentitySchema,
+    car: z
+      .string()
+      .min(1)
+      .max(63)
+      .regex(/^[^\0\n]+$/),
+  }),
+  z.object({ kind: z.literal("depart"), identity: controllerIdentitySchema }),
+]);
+export const membershipChangesSchema = z
+  .array(membershipChangeSchema)
+  .max(8)
+  .refine(
+    (changes) =>
+      new Set(changes.map((change) => change.identity.slot)).size === changes.length &&
+      new Set(changes.map((change) => change.identity.participant)).size === changes.length,
+    "Duplicate membership slot or identity",
+  );
+export type MembershipChange = z.infer<typeof membershipChangeSchema>;
 export const frameSchema = z.object({
   type: z.literal("frame"),
   tick: u32,
+  changes: membershipChangesSchema,
   inputs: z.array(inputSchema).max(8),
   state: roundStateSchema,
 });
@@ -118,7 +145,7 @@ export const catchupChunkSchema = z.object({
   attempt: u32,
   start: u32,
   head: u32,
-  data: z.array(byte).max(64 * (29 + 7 * 8)),
+  data: z.array(byte).max(64 * (118 + 7 * 8)),
   checksum: u32,
 });
 export type CatchupChunk = z.infer<typeof catchupChunkSchema>;
@@ -145,6 +172,7 @@ export const messageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("resume_active"), head: u32 }),
   z.object({ type: z.literal("prediction_offer"), anchor: u32 }),
   z.object({ type: z.literal("prediction_begin"), anchor: u32 }),
+  z.object({ type: z.literal("membership"), tick: u32, changes: membershipChangesSchema }),
   frameSchema,
   catchupChunkSchema,
   z.object({ type: z.literal("welcome"), slot: z.number().int().min(0).max(7) }),
@@ -152,6 +180,7 @@ export const messageSchema = z.discriminatedUnion("type", [
 ]);
 export type Message = z.infer<typeof messageSchema>;
 export const requestSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("leave") }),
   z.object({ type: z.literal("join"), compatibility: compatibilitySchema }),
   z.object({ type: z.literal("resume"), token: sha256Schema, compatibility: compatibilitySchema }),
   z.object({ type: z.literal("select_car"), car: z.string(), ready: z.boolean() }),
@@ -175,6 +204,15 @@ export const diagnosticsSchema = z.object({
   jitterMs: count.nullable(),
   queuedPackets: count.nullable(),
   nativeTick: count,
+  nativeRoster: z
+    .array(
+      z.object({
+        identity: controllerIdentitySchema,
+        local: z.boolean(),
+        acceptedThrough: u32.nullable(),
+      }),
+    )
+    .max(32),
   prediction: z.object({
     head: count,
     confirmed: count,
@@ -184,6 +222,8 @@ export const diagnosticsSchema = z.object({
     acceptedDepth: i32,
     confirmedNativeTick: u32.nullable(),
     resumePreparing: z.boolean(),
+    expectedSlotMask: byte.nullable(),
+    expectedParticipants: z.array(participantIdSchema).max(8),
     replayed: count,
     maxDepth: count,
     historyBytes: count,

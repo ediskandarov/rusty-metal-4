@@ -17,7 +17,12 @@ interface RustClient {
   send(json: string): void;
   update(): string;
   diagnostics(): string;
-  prepare_prediction(slotMask: number, participants: string, resuming: boolean): void;
+  prepare_prediction(
+    slotMask: number,
+    participants: string,
+    preparedPool: string,
+    resuming: boolean,
+  ): void;
   prediction_clock(): number;
   begin_prediction(
     anchor: number,
@@ -76,8 +81,18 @@ export async function connectNetwork(endpoint: string) {
       ...diagnosticsSchema.parse(JSON.parse(client.diagnostics())),
       pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
     }),
-    preparePrediction: (slotMask: number, participants: string[], resuming: boolean) =>
-      client.prepare_prediction(slotMask, JSON.stringify(participants), resuming),
+    preparePrediction: (
+      slotMask: number,
+      participants: string[],
+      preparedPool: string[],
+      resuming: boolean,
+    ) =>
+      client.prepare_prediction(
+        slotMask,
+        JSON.stringify(participants),
+        JSON.stringify(preparedPool),
+        resuming,
+      ),
     predictionClock: () => client.prediction_clock(),
     beginPrediction: (
       anchor: number,

@@ -7029,6 +7029,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "lightyear",
+ "postcard",
  "serde",
  "serde_json",
  "sha2",

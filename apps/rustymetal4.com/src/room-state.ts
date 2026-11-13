@@ -68,7 +68,7 @@ export interface RoomMatch {
   emptyUntil: number | null;
   cars: string[];
   compatibility: Compatibility | null;
-  roster: { id: string; credential: string; car: string }[];
+  roster: { id: string; credential: string; car: string; pending: boolean }[];
   message: string;
 }
 export interface Member {
@@ -135,8 +135,8 @@ export function join(state: RoomState, key: string, name: unknown, now: number):
   if (state.closed) throw new RoomError(410, "This room has closed. Find another room.");
   const existing = memberFor(state, key);
   if (existing) return existing;
-  if (state.match?.roster.length)
-    throw new RoomError(409, "A match is in progress. Wait for it to finish.");
+  if (state.match?.roster.length && state.match.stage !== "playing")
+    throw new RoomError(409, "The match is still preparing. Wait for play to begin.");
   if (state.members.length >= state.settings.capacity)
     throw new RoomError(409, "This room is full.");
   const member: Member = {
@@ -220,7 +220,10 @@ export function summary(state: RoomState): RoomSummary {
     id: state.id,
     host: state.members.find((member) => member.id === state.hostId)?.name ?? "Waiting for a host",
     participantCount: state.members.length,
-    freePlaces: state.match?.roster.length ? 0 : state.settings.capacity - state.members.length,
+    freePlaces:
+      state.match?.roster.length && state.match.stage !== "playing"
+        ? 0
+        : state.settings.capacity - state.members.length,
   };
 }
 export function snapshot(state: RoomState, key: string): RoomSnapshot {
@@ -288,7 +291,11 @@ export function sameCompatibility(a: Compatibility | null, b: Compatibility | nu
 export function updatePlayer(state: RoomState, key: string, value: unknown): void {
   const member = memberFor(state, key);
   if (!member) throw new RoomError(403, "Join this room first.");
-  if (state.match?.roster.length) throw new RoomError(409, "The match roster is locked.");
+  if (
+    state.match?.roster.length &&
+    (state.match.stage !== "playing" || state.match.roster.some((entry) => entry.id === member.id))
+  )
+    throw new RoomError(409, "This participant's current match selection is locked.");
   const input = object(value);
   const car = input.car === null ? null : text(input.car, "Car", 48);
   const raw = input.compatibility === null ? null : object(input.compatibility);
@@ -311,7 +318,7 @@ export function updatePlayer(state: RoomState, key: string, value: unknown): voi
     (changed ||
       !car ||
       !state.match ||
-      state.match.stage !== "ready" ||
+      !["ready", "playing"].includes(state.match.stage) ||
       !state.match.cars.includes(car) ||
       !sameCompatibility(compatibility, state.match.compatibility))
   )
@@ -361,12 +368,14 @@ export function freezeRoster(state: RoomState, key: string, now: number): RoomMa
     throw new RoomError(409, "At least two players must be present, with every participant ready.");
   match.roster = state.members.map((member) => ({
     id: member.id,
+    pending: false,
     car: member.car!,
     credential: (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", ""),
   }));
+  match.cars = [...new Set(match.roster.map((entry) => entry.car))];
   match.stage = "starting";
   match.deadline = now + preparationLimit;
-  match.message = "Connecting the fixed match roster…";
+  match.message = "Connecting the prepared participants…";
   return match;
 }
 export function resetMatch(state: RoomState, message: string, now: number): void {

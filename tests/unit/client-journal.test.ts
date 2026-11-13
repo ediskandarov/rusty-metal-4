@@ -68,6 +68,7 @@ describe("client diagnostic journal", () => {
         JSON.stringify({
           frame: {
             tick: 0,
+            changes: [],
             inputs: [{ buttons: 0, axes: 0, analog: false }],
             state: {
               remaining: 2,

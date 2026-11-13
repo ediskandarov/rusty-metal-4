@@ -35,12 +35,12 @@ function fixture() {
   return state;
 }
 describe("room match authority", () => {
-  test("capacity is an upper bound and the ready roster is immutable", () => {
+  test("capacity is an upper bound and preparation locks the initial roster", () => {
     const state = fixture();
     expect(state.settings.capacity).toBe(8);
     const match = freezeRoster(state, "host", 200);
     expect(match.roster).toHaveLength(2);
-    expect(() => join(state, "late", "Late", 200)).toThrow("in progress");
+    expect(() => join(state, "late", "Late", 200)).toThrow("still preparing");
     expect(join(state, "host", "Host", 200).id).toBe(match.roster[0]!.id);
     expect(() => updatePlayer(state, "host", selected)).toThrow("locked");
     expect(() => freezeRoster(state, "host", 200)).toThrow();
@@ -97,4 +97,23 @@ describe("room match authority", () => {
     edit(state, "host", { ...state.settings, mapId: "neon-city" });
     expect(state.members[0]!.ready).toBe(false);
   });
+});
+
+test("running membership advertises vacancies and limits late car selection to the prepared pool", () => {
+  const state = fixture();
+  const match = freezeRoster(state, "host", 200);
+  expect(match.cars).toEqual(["Orbital"]);
+  match.stage = "playing";
+  const late = join(state, "late", "Late", 300);
+  connect(state, "late", "late-tab");
+  expect(snapshot(state, "late").freePlaces).toBe(5);
+  expect(snapshot(state, "late").match!.endpoint).toBeNull();
+  updatePlayer(state, "late", selected);
+  expect(() =>
+    updatePlayer(state, "late", { ...selected, car: "Pizza Boy", ready: true }),
+  ).toThrow();
+  updatePlayer(state, "late", { ...selected, ready: true });
+  expect(late.ready).toBe(true);
+  expect(match.roster).toHaveLength(2);
+  expect(() => updatePlayer(state, "host", selected)).toThrow("locked");
 });

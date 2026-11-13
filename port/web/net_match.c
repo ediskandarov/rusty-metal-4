@@ -1,9 +1,12 @@
 #include "net_match.h"
 #include "cheats.h"
 #include "checkpoint.h"
+#include "checkpoint_memory.h"
 #include "level.h"
+#include "interpolation.h"
 #include "net_state.h"
 #include "participant.h"
+#include "src/main/object/private.h"
 #include "rollback_audio.h"
 #include "snapshot.h"
 #include "snapshot_world.h"
@@ -42,6 +45,7 @@ typedef struct NetMatchSetup {
 
 static struct {
     NetMatchSetup setup;
+    WebParticipantState initial_participants;
     NetPadInput inputs[8];
     u32 tick;
     u32 input_mask;
@@ -54,6 +58,7 @@ static struct {
 } match;
 
 static void start_session(void);
+void WebCheckpointSetRandomState(u32 random, u32 effects);
 
 EMSCRIPTEN_KEEPALIVE int WebNetWorldIndex(const char* name)
 {
@@ -114,10 +119,19 @@ static int session_resources_present(const NetMatchSetup* setup)
 }
 
 int WebNetSlotCapacity(void) { return match.setup.capacity; }
-int WebNetSlotMask(void) { return match.setup.slots; }
+EMSCRIPTEN_KEEPALIVE int WebNetSlotMask(void)
+{
+    WebParticipantState participants;
+    WebParticipantCapture(&participants);
+    u32 mask = 0;
+    for (s32 slot = 0; slot < match.setup.capacity; ++slot)
+        if (participants.slots[slot].id.low || participants.slots[slot].id.high)
+            mask |= 1u << slot;
+    return mask;
+}
 int WebNetSlotOccupied(int slot)
 {
-    return slot >= 0 && slot < match.setup.capacity && (match.setup.slots & (1u << slot));
+    return slot >= 0 && slot < match.setup.capacity && (WebNetSlotMask() & (1u << slot));
 }
 /* The live car list is dense; player roots and controller indices are actual slots. */
 int WebNetParticipantSlot(int index)
@@ -130,6 +144,152 @@ int WebNetParticipantSlot(int index)
     return -1;
 }
 
+void WebNetInitialParticipantIds(u32 output[16])
+{
+    for (s32 slot = 0; slot < 8; ++slot) {
+        output[slot * 2] = match.initial_participants.slots[slot].id.low;
+        output[slot * 2 + 1] = match.initial_participants.slots[slot].id.high;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebNetParticipantIdentityPart(s32 slot, s32 part)
+{
+    const WebParticipantId id = WebParticipantIdentity(slot);
+    return part == 0 ? id.low : part == 1 ? id.high : 0;
+}
+
+int WebNetParticipantModelsValid(const WebParticipantState* state, u32 slots)
+{
+    if (!WebParticipantStateValid(state, slots) || (slots & ~((1u << match.setup.capacity) - 1)))
+        return 0;
+    const u32 prepared = __builtin_popcount(match.setup.slots);
+    for (s32 slot = 0; slot < 8; ++slot)
+        if (state->models[slot] > prepared)
+            return 0;
+    return 1;
+}
+
+void WebNetRestoreParticipantConfiguration(void)
+{
+    WebParticipantState participants;
+    WebParticipantCapture(&participants);
+    s32 entrant = 0;
+    memset(GameInfo.character_names, 0, sizeof(GameInfo.character_names));
+    for (s32 slot = 0; slot < match.setup.capacity; ++slot) {
+        if (!WebNetSlotOccupied(slot))
+            continue;
+        GameInfo.character_names[entrant] = match.setup.cars[participants.models[slot] - 1];
+        if (GameInfo.players[slot].car)
+            GameInfo.players[slot].car->index = entrant;
+        ++entrant;
+    }
+    GameInfo.player_car_count = entrant;
+    GameInfo.entrant_count = entrant;
+    GameInfo.extra_player_count = entrant ? entrant - 1 : 0;
+}
+
+static int membership_boundary(u32 tick)
+{
+    return WebNetMatchActive() && WebLevelActive() && tick == match.tick && !match.stepping
+        && !match.tick_pending && !match.input_mask && GameInfo.active
+        && GameInfo.mode == GAME_MODE_PLAY && !GameInfo.next_mode;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetAdmitParticipant(
+    u32 tick, s32 slot, u32 low, u32 high, const char* model)
+{
+    if (!membership_boundary(tick) || GameInfo.deathmatch_finished || slot < 0
+        || slot >= match.setup.capacity || WebNetSlotOccupied(slot) || (!low && !high) || !model)
+        return 0;
+    WebParticipantState previous;
+    WebParticipantCapture(&previous);
+    for (s32 i = 0; i < 8; ++i)
+        if (previous.slots[i].id.low == low && previous.slots[i].id.high == high)
+            return 0;
+    u32 prepared_model = 0;
+    for (s32 i = 0; i < __builtin_popcount(match.setup.slots); ++i)
+        if (!strcmp(match.setup.cars[i], model)) {
+            prepared_model = i + 1;
+            break;
+        }
+    if (!prepared_model)
+        return 0;
+    const u32 serial = ObjectNextSerial;
+    const u32 random = randseed(), effects = WebRenderEffectRandomState();
+    RegistryDirectory* directory = RegGetCurrentDirectoryPtr();
+    const Tm4GamePlayer old_player = GameInfo.players[slot];
+    const PadCache old_pad = PadJpad[slot];
+    WebParticipantState candidate = previous;
+    candidate.slots[slot] = (WebParticipantResult) { .id = { low, high } };
+    candidate.respawns[slot] = (WebParticipantRespawn) { .state = WebCarWaiting };
+    candidate.models[slot] = prepared_model;
+    /* Preparation is invisible outside this synchronous transaction. Resources
+     * come only from the startup pool already loaded on every simulating peer. */
+    WebCheckpointArenaSelect(WebLevelCheckpointActive());
+    WebParticipantRestore(&candidate);
+    GameInfo.players[slot] = (Tm4GamePlayer) { 0 };
+    PadJpad[slot] = (PadCache) { 0 };
+    GameSetControllerConfigDefault(&GameInfo, slot, 0);
+    GameSetControllerConfigDefault(&GameInfo, slot, 1);
+    WebNetRestoreParticipantConfiguration();
+    GameInfo.players[slot].camera = ObjectCreate("camera", 0, NULL);
+    if (GameInfo.players[slot].camera) {
+        s32 entrant = 0;
+        while (WebNetParticipantSlot(entrant) != slot)
+            ++entrant;
+        GameSpawnCar(entrant, 0, 0, 0, 0, 0, 0, 0);
+    }
+    const int admitted = GameInfo.players[slot].car != NULL;
+    if (admitted) {
+        WebParticipantCapture(&candidate);
+        candidate.respawns[slot] = (WebParticipantRespawn) { .state = WebCarActive };
+        WebParticipantRestore(&candidate);
+    } else {
+        if (GameInfo.players[slot].camera)
+            ObjectDestroy(GameInfo.players[slot].camera);
+        GameInfo.players[slot] = old_player;
+        PadJpad[slot] = old_pad;
+        WebParticipantRestore(&previous);
+        WebNetRestoreParticipantConfiguration();
+        ObjectNextSerial = serial;
+        WebCheckpointSetRandomState(random, effects);
+    }
+    WebCheckpointArenaSelect(0);
+    RegChangeCurrentDirectoryP(directory);
+    return admitted;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u32 high)
+{
+    if (!membership_boundary(tick) || !WebNetSlotOccupied(slot))
+        return 0;
+    WebParticipantState participants;
+    WebParticipantCapture(&participants);
+    const WebParticipantId id = participants.slots[slot].id;
+    if (id.low != low || id.high != high)
+        return 0;
+    WebCheckpointArenaSelect(WebLevelCheckpointActive());
+    /* Ordinary object destruction resolves described weak references, capture
+     * links and owned children while copied projectile provenance survives. */
+    if (GameInfo.players[slot].car)
+        ObjectDestroy(GameInfo.players[slot].car);
+    if (GameInfo.active_view == GameInfo.players[slot].camera)
+        GameInfo.active_view = NULL;
+    if (GameInfo.players[slot].camera)
+        ObjectDestroy(GameInfo.players[slot].camera);
+    WebParticipantCapture(&participants);
+    GameInfo.players[slot] = (Tm4GamePlayer) { 0 };
+    PadJpad[slot] = (PadCache) { 0 };
+    match.inputs[slot] = (NetPadInput) { 0 };
+    participants.slots[slot] = (WebParticipantResult) { 0 };
+    participants.respawns[slot] = (WebParticipantRespawn) { 0 };
+    participants.models[slot] = 0;
+    WebParticipantRestore(&participants);
+    WebNetRestoreParticipantConfiguration();
+    WebCheckpointArenaSelect(0);
+    return 1;
+}
+
 /* All startup data is mandatory and validated in a local candidate. No prior
  * selection, failed request or cancelled match can contribute configuration. */
 EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u32 seed,
@@ -138,7 +298,6 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8
         || !slots || (slots & ~((1u << capacity) - 1)) || __builtin_popcount(slots) < 2
         || view_slot < -1 || view_slot >= capacity
-        || (view_slot >= 0 && !(slots & (1u << view_slot)))
         || world < 0 || world >= GameGetNumberOfWorlds() || flags > 3 || !car_names
         || ((flags & 2) && (view_slot < 0 || WebSimulationOnly())))
         return reject_start("Invalid explicit match configuration or session already running");
@@ -178,6 +337,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
     if (!session_resources_present(&candidate))
         return 0;
     match.setup = candidate;
+    match.initial_participants = participants;
     WebParticipantRestore(&participants);
     match.tick = 0;
     WEB_BROWSER_REPORT({
@@ -193,6 +353,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
 
 static void start_session(void)
 {
+    WebParticipantRestore(&match.initial_participants);
     WebLeaveMenu();
     memset(&GameInfo, 0, sizeof(GameInfo));
     GameInitialize();
@@ -480,7 +641,10 @@ EMSCRIPTEN_KEEPALIVE void WebNetCancelMatch(void)
 
 int WebNetLocalViewCount(void)
 {
-    return WebNetMatchActive() ? (match.setup.view_slot >= 0) : GameInfo.player_count;
+    return WebNetMatchActive()
+        ? (match.setup.view_slot >= 0 && WebNetSlotOccupied(match.setup.view_slot)
+              && GameInfo.players[match.setup.view_slot].camera != NULL)
+        : GameInfo.player_count;
 }
 
 int WebNetGameplaySlot(int view)
@@ -547,7 +711,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetQueueTick(u32 tick)
 {
     if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.stepping
         || match.tick_pending
-        || match.input_mask != match.setup.slots)
+        || match.input_mask != (u32)WebNetSlotMask())
         return 0;
 
     match.tick_pending = 1;

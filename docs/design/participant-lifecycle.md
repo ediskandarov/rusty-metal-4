@@ -1,16 +1,17 @@
 # Slots, participants and cars
 
-Design requirements for dynamic membership. This extends the identity model in
-[network requirements v0.1](../network-requirements-v0.1.md); it does not claim that
-live admission or FFA is implemented. Updated 2026-11-13.
+Design and implementation boundaries for dynamic membership. This extends the identity
+model in [network requirements v0.1](../network-requirements-v0.1.md). The shared live
+membership foundation uses original Deathmatch for validation; a complete FFA mode
+remains separate work. Updated 2026-11-13.
 
 ## Evidence and scope
 
 | Status | Boundary |
 | --- | --- |
-| Current main | Fixed match roster, reconnect and snapshot recovery. Reconnecting an existing participant is not admitting a new one. |
-| Experiment 336, not integrated | A third, preloaded slot joins, leaves and is reused in a controlled Deathmatch fixture, including rollback and snapshot recovery. This does not prove arbitrary admission, sparse slots or all object lifetimes. |
-| Target | Separate identity, control ownership and car lifetime before adding live admission and mode-specific respawning. |
+| Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
+| Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
+| Deferred mode policy | Complete FFA rounds, automatic respawn, random model selection, match limits, spectator seats and live replacement of a living car. |
 
 The first agreed new mode is FFA: eight gameplay slots and joining and leaving
 during play. Car selection belongs to the mode: FFA supports a fixed car or random
@@ -42,7 +43,7 @@ Tournament compatibility is not a requirement for network FFA.
 
 Portable car recovery now reconstructs runtime resources from the configured model
 and registered callback descriptors, independently of the tick-zero car serial.
-Authoritative live membership events remain future work.
+Current membership and its selected prepared models are canonical session roots.
 
 ## Relationships
 
@@ -62,50 +63,53 @@ that reuse must distinguish the previous owner from the next one, even if both u
 the same numerical slot. Connection credentials and a car pointer cannot provide
 that distinction by themselves.
 
-## Current fixed-roster boundary
+## Preparation and live membership
 
-The authority keeps match-local participant IDs and their unique gameplay-slot
-bindings separately from connection, recovery and command-acceptance state.
-Unauthenticated open-lobby re-entry gets a fresh participant ID; authenticated
-room recovery keeps its ID.
+The authority owns match-local participant IDs and unique gameplay-slot bindings,
+separately from connection, recovery and command-acceptance state. A reservation
+consumes a real free slot without publishing a C participant or car. Occupied and
+reserved slots share the eight-seat capacity; cancelling preparation never renumbers
+another slot. Participant IDs are never reused, including cancelled reservations.
 
-Capacity is independent of participant count. Free slots are explicit; preparation
-reservations may be cancelled and reused without renumbering other slots. The
-never-reused participant ID also identifies its lease. Cancelling a reservation or
-open-lobby re-entry allocates a new ID. Starting freezes all prepared bindings;
-reserve/release then reject changes. This stage has no simultaneous live
-reservations and occupied seats.
+Initial startup loads its selected models. The declared live pool is the distinct
+model names in that immutable startup roster. Admission can select any of those
+models; it cannot extend the pool, substitute an unavailable model or load assets
+from another player. The newcomer prepares the complete pool from their own local
+resources before restoring the current authority checkpoint and catching up.
 
-Preparation changes belong to the Match: retiring a binding removes its native
-controller, connection authorization, credentials and input state before reuse.
-The retired link closes; queued admission requests from it cannot reclaim the new
-reservation while the transport finishes unlinking.
-Room credentials are associated with explicit participant bindings during setup;
-admission does not interpret the room member's list position as a gameplay slot.
+After synchronization, admission commits at an authoritative simulation tick. C
+prepares the mandatory camera and car resources before publishing the new ownership.
+Failure restores canonical state, RNG and object serials, releases the reservation
+and reports a preparation failure. Reservations and catch-up have bounded deadlines;
+round completion or match end cancels unfinished admission. Explicit room leave is
+idempotent when a failed preparation has already released its reservation. The room
+checks pending leases on the simulation thread, clears canceled grants and readiness,
+and permits the same member to retry with a fresh credential and identity. Monitoring
+failures preserve the grant until an authoritative response arrives; committed leases
+remain intact across transport loss. Initial clock negotiation
+and tick-zero digest agreement do not run again for a live member.
 
-During the running Deathmatch the binding is fixed:
-authenticated recovery replaces the connection while retaining the participant,
-slot, C-owned results and input sequence watermark. Credentials
-authenticate an existing participant; they are not its identity.
+Explicit departure removes the current car through ordinary object destruction,
+retires connection authorization and credentials, discards queued commands and input
+history, and releases the actual slot. Re-entry gets a fresh identity, controls and
+zero results. The current foundation ends departed combat-score eligibility; copied
+provenance remains on old effects and cannot award the replacement occupant. It does
+not add a departed-player scoreboard.
 
-The replicated native controller carries both participant ID and slot. Input
-acceptance also checks its current controller entity and connected owner, in
-addition to Lightyear's existing target authorization. Rebinding discards raw
-commands left by the previous connection, without clearing accepted input history
-or the sequence watermark. The client checks unique participant/slot bindings
-and that its controlled slot matches its local view before prediction starts.
+A transport loss, hidden tab or recovery request does not schedule departure. The
+existing recovery policy retains that occupied lease until explicit departure or match
+end; choosing a shorter reconnect grace and eviction policy remains mode work.
+Authenticated recovery keeps identity, results, slot and the input sequence watermark.
+Rebinding the connection discards raw commands left by its predecessor. Input acceptance
+checks participant identity, current native controller entity and connected owner, in
+addition to Lightyear's target authorization.
 
-C simulation state, original Deathmatch round results, accepted frames and portable snapshots remain
-slot-addressed under the immutable running roster. The server retains the binding
-through recovery without a separate participant-results copy. Startup carries
-capacity and actual occupied slots separately. C player roots, pads, camera/HUD
-ownership and results use those actual slots. The existing dense car list and car
-entrant index describe simulation objects, independently of controller slots.
-Vacancies create no car or camera and take no part in readiness, native input
-frontiers or Deathmatch results. Portable session roots validate the occupied-slot
-mask and declared capacity before restoration. The C startup call requires the
-complete capacity, occupied-slot and mode-car configuration; failed or cancelled
-startup contributes no configuration to a later attempt.
+C player roots, pads, camera/HUD ownership and results use actual sparse slots. The
+dense car list and entrant indices describe simulation objects and may be rebuilt when
+membership changes; they never identify a participant. Human car resources are prepared
+for the declared slot capacity, so a larger live roster cannot overrun initial-count
+allocations. A reserved local seat has no viewport or listener until its camera exists.
+Standalone offline startup and round rules retain their original behavior.
 
 Stable participant IDs also cross the startup boundary into C. C owns combat
 counters independently of the current car; Rust and browser code do not maintain a
@@ -141,8 +145,28 @@ Constructor RNG consumption is deterministic and restored through the existing s
 Automatic production respawn policy is deliberately unwired pending the network round-policy
 decision. Original Deathmatch can still finish when only one car remains; focused fixtures
 keep enough other cars alive and request respawns at explicit deterministic tick boundaries.
-There is no new network event protocol, complete FFA, live admission/departure, running slot
-reuse or live replacement. Offline round rules are unchanged.
+Automatic FFA respawn and live replacement remain outside this foundation.
+Offline round rules are unchanged.
+
+## Authoritative event boundary
+
+Membership uses the existing Lightyear clock, reliable session channel, input buffers
+and C rollback checkpoints. A scheduled batch is the complete ordered membership plan
+for one tick; an empty replacement cancels its pending changes. At that tick, departures
+precede admissions in slot order, then accepted inputs and ordinary gameplay run.
+Original Deathmatch still decides deaths and round completion through its own code.
+
+A reserved controller has no accepted gameplay input history. Admission establishes its
+neutral pre-activation boundary; retirement preserves the old native history for the
+retained rollback window while preventing future control. Late plan changes request
+Lightyear rollback, or current-snapshot recovery when the boundary has expired. The
+browser never runs an independent membership clock.
+
+The final decisions are recorded with their input row and stable model selection in
+the checksummed journal. Recovery sends the current checkpoint plus its event/input
+suffix and future scheduled plans. Portable roots validate the immutable initial match
+identity and prepared resources independently from the mutable current roster, allowing
+restoration after admission, departure, reuse or car respawn in another instance.
 
 ## Slot FSM
 
@@ -252,7 +276,7 @@ after the match has ended.
 | Mode | Join during play | After death | Departure consequences |
 | --- | --- | --- | --- |
 | FFA, agreed direction | Reserve any free seat, catch up, spawn | Keep results and slot; fixed or random car according to the mode setting | Free seat; old effects must not become the next occupant's |
-| Current Deathmatch | Existing participant reconnect only | Existing game rules | Current fixed-roster behavior remains until explicitly replaced |
+| Current Deathmatch validation | Prepared-pool admission while the round is active | Existing game rules | Retire at the event tick; original victory rules can finish the round |
 | Team deathmatch, candidate | Also assign a team | Preserve team and results | Preserve team results independently of occupancy |
 | Capture the flag, candidate | Also assign a team | Respawn under mode rules | Resolve a carried objective before removing the car |
 | Elimination or limited lives, candidate | May wait for the next round | Wait, spend a life or become eliminated | Decide forfeit and victory rules explicitly |
@@ -386,10 +410,10 @@ a rollback boundary, and after portable snapshot recovery in another instance.
 
 ## Decisions still needed
 
-- Reconnect grace duration and the disconnected car's behavior: neutral input,
-  AI takeover or another explicit policy.
-- Ordering of death, departure and victory on the same tick; scoring of hits from
-  departed participants and retention of their results.
+- A shorter reconnect grace and eviction policy; the current foundation retains
+  disconnected leases and applies the existing bounded missing-input policy.
+- FFA scoring of hits from departed participants and retention of departed results;
+  current validation ends their score eligibility and never transfers attribution.
 - Spectator capacity, late admission into round-based modes, and minimum players
   needed to start or continue an otherwise empty match.
 - Admission and respawn retry limits and terminal policies. Live replacement

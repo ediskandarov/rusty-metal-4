@@ -22,7 +22,7 @@ function storage() {
   };
   return { map, api: api as unknown as JournalStorage };
 }
-function response(size: number, version = 2) {
+function response(size: number, version = 3) {
   const bytes = new Uint8Array(size).fill(42);
   bytes.set(new TextEncoder().encode("TM4JRNL"));
   bytes[7] = version;
@@ -48,7 +48,7 @@ test("invalid, shortened and oversized responses preserve previous journal", asy
   const archive = new ServerJournal(api);
   await archive.save(response(64));
   await expect(archive.save(response(64, 1))).rejects.toThrow("Invalid");
-  await expect(archive.save(response(64, 3))).rejects.toThrow("Invalid");
+  await expect(archive.save(response(64, 2))).rejects.toThrow("Invalid");
   await expect(archive.save(response(32))).rejects.toThrow("shrank");
   await expect(
     archive.save(new Response("bad", { headers: { "content-length": "80" } })),

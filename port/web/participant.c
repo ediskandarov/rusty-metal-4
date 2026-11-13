@@ -18,10 +18,7 @@ static int equal(WebParticipantId first, WebParticipantId second)
     return first.low == second.low && first.high == second.high;
 }
 
-static int present(WebParticipantId id)
-{
-    return id.low || id.high;
-}
+static int present(WebParticipantId id) { return id.low || id.high; }
 
 WebParticipantId WebParticipantIdentity(s32 slot)
 {
@@ -114,8 +111,11 @@ int WebParticipantStateValid(const WebParticipantState* state, u32 mask)
 {
     for (s32 slot = 0; slot < 8; ++slot) {
         const WebParticipantResult* result = &state->slots[slot];
-        if (present(result->id) != !!(mask & (1u << slot)) || result->frags < 0
-            || result->deaths < 0 || (!(mask & (1u << slot)) && (result->frags || result->deaths)))
+        if (present(result->id) != !!(mask & (1u << slot))
+            || ((mask & (1u << slot)) ? !state->models[slot] || state->models[slot] > 8
+                                      : state->models[slot] != 0)
+            || result->frags < 0 || result->deaths < 0
+            || (!(mask & (1u << slot)) && (result->frags || result->deaths)))
             return 0;
         const WebParticipantRespawn* pending = &state->respawns[slot];
         if (pending->state > WebCarSpawnFailed || pending->attempts > MaxRespawnAttempts
@@ -159,6 +159,7 @@ int WebParticipantParse(WebParticipantState* state, u32 mask, const char* identi
             id.low = (id.low << 4) | (ch <= '9' ? ch - '0' : ch - 'a' + 10);
         }
         state->slots[slot].id = id;
+        state->models[slot] = __builtin_popcount(mask & ((1u << slot) - 1)) + 1;
         if (mask >> (slot + 1)) {
             if (*cursor++ != '\n')
                 return 0;
@@ -168,11 +169,5 @@ int WebParticipantParse(WebParticipantState* state, u32 mask, const char* identi
     return WebParticipantStateValid(state, mask);
 }
 
-void WebParticipantCapture(WebParticipantState* state)
-{
-    *state = participants;
-}
-void WebParticipantRestore(const WebParticipantState* state)
-{
-    participants = *state;
-}
+void WebParticipantCapture(WebParticipantState* state) { *state = participants; }
+void WebParticipantRestore(const WebParticipantState* state) { participants = *state; }

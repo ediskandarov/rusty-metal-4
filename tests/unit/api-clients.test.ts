@@ -222,6 +222,7 @@ test("Lightyear bridge schemas reject malformed envelopes and accept disconnecte
     jitterMs: null,
     queuedPackets: null,
     nativeTick: 0,
+    nativeRoster: [],
     prediction: {
       head: 0,
       confirmed: 0,
@@ -231,6 +232,8 @@ test("Lightyear bridge schemas reject malformed envelopes and accept disconnecte
       acceptedDepth: 0,
       confirmedNativeTick: null,
       resumePreparing: false,
+      expectedSlotMask: null,
+      expectedParticipants: [],
       replayed: 0,
       maxDepth: 0,
       historyBytes: 0,

@@ -14,7 +14,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 6,
+    SessionVersion = 7,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -53,6 +53,7 @@ typedef struct {
     u32 squares, gte_length;
     u8 gte[256];
     WebParticipantState participants;
+    WebParticipantId initial_participants[8];
     u32 car_order[MaxPlayers];
     PlayerRecord players[MaxPlayers];
     s32 games_completed, deathmatch_winner, deathmatch_finished;
@@ -69,7 +70,7 @@ static int supported_session(void)
 {
     const s32 count = GameInfo.player_car_count;
     if (!GameInfo.active || GameInfo.mode != GAME_MODE_PLAY || GameInfo.next_mode
-        || GameInfo.pause_player || GameInfo.game_type != GAME_TYPE_DEATHMATCH || count < 2
+        || GameInfo.pause_player || GameInfo.game_type != GAME_TYPE_DEATHMATCH || count < 0
         || count > MaxPlayers || GameInfo.computer_count
         || GameInfo.active_player_count != GameInfo.car_count || GameInfo.car_count < 0
         || GameInfo.car_count > count || !WorldSquares)
@@ -162,6 +163,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     record.capacity = WebNetSlotCapacity();
     record.slot_mask = WebNetSlotMask();
     WebParticipantCapture(&record.participants);
+    WebNetInitialParticipantIds((u32*)record.initial_participants);
     record.squares = square_count();
     const u32 length = sizeof(record) + record.squares * sizeof(SquareRecord);
     if (!record.squares || length > capacity || !save_devices(&record) || CarHealthPickupCount < 0
@@ -293,21 +295,41 @@ static void free_devices(CarDetonationNode* devices)
     }
 }
 
+int WebSnapshotSessionPrepare(const u8* input, u32 length)
+{
+    SessionRecord record;
+    if (!input || length < sizeof(record))
+        return 0;
+    memcpy(&record, input, sizeof(record));
+    WebParticipantId initial[8];
+    WebNetInitialParticipantIds((u32*)initial);
+    if (memcmp(initial, record.initial_participants, sizeof(initial)))
+        return 0;
+    if (record.version != SessionVersion || record.capacity != WebNetSlotCapacity()
+        || record.participant_count != (u32)__builtin_popcount(record.slot_mask)
+        || !WebNetParticipantModelsValid(&record.participants, record.slot_mask))
+        return 0;
+    /* The outer portable restore transaction owns rollback of these roots if
+     * construction or validation of the object graph fails. */
+    WebParticipantRestore(&record.participants);
+    WebNetRestoreParticipantConfiguration();
+    return 1;
+}
+
 int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject* find_object)
 {
     SessionRecord record;
-    if (!supported_session() || !input || length < sizeof(record) || !find_object)
+    if (!input || length < sizeof(record) || !find_object)
         return 0;
     memcpy(&record, input, sizeof(record));
     u8 current_gte[sizeof(record.gte)];
     if (record.version != SessionVersion || record.participant_count != GameInfo.player_car_count
         || record.capacity != WebNetSlotCapacity() || record.slot_mask != WebNetSlotMask()
-        || !WebParticipantStateValid(&record.participants, record.slot_mask)
-        || record.car_count > record.participant_count || record.participant_count < 2
-        || record.participant_count > MaxPlayers || !record.serial || record.tick >= INT32_MAX
-        || record.registry_depth > RegistryDepth || record.device_count > MaxDevices
-        || record.health_count > ArrayCount(record.health) || !record.squares
-        || record.squares != square_count()
+        || !WebNetParticipantModelsValid(&record.participants, record.slot_mask)
+        || record.car_count > record.participant_count || record.participant_count > MaxPlayers
+        || !record.serial || record.tick >= INT32_MAX || record.registry_depth > RegistryDepth
+        || record.device_count > MaxDevices || record.health_count > ArrayCount(record.health)
+        || !record.squares || record.squares != square_count()
         || length != sizeof(record) + record.squares * sizeof(SquareRecord) || !record.gte_length
         || record.gte_length != WebCheckpointGteCapture(current_gte, sizeof(current_gte)))
         return 0;
@@ -319,12 +341,6 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     }
     if (!directory)
         return 0;
-    WebParticipantState current_participants;
-    WebParticipantCapture(&current_participants);
-    for (u32 slot = 0; slot < MaxPlayers; ++slot)
-        if (memcmp(&current_participants.slots[slot].id, &record.participants.slots[slot].id,
-                sizeof(WebParticipantId)))
-            return 0;
     Car* cars[MaxPlayers] = { 0 };
     Car* player_cars[MaxPlayers] = { 0 };
     Camera* cameras[MaxPlayers] = { 0 };
@@ -449,6 +465,15 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     ObjectActiveInteractionCells
         = record.active_cells ? &WorldSquares[record.active_cells - 1] : NULL;
     memcpy(GameInfo.cars, cars, sizeof(cars));
+    for (u32 slot = 0; slot < MaxPlayers; ++slot) {
+        if (!(record.slot_mask & (1u << slot)))
+            GameInfo.players[slot] = (Tm4GamePlayer) { 0 };
+        else {
+            GameSetControllerConfigDefault(&GameInfo, slot, 0);
+            GameSetControllerConfigDefault(&GameInfo, slot, 1);
+        }
+    }
+    memset(PadJpad, 0, sizeof(PadJpad));
     GameInfo.car_count = record.car_count;
     GameInfo.active_player_count = record.car_count;
     for (u32 i = 0; i < record.participant_count; ++i) {
@@ -464,6 +489,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         PadJpad[slot] = player->input;
     }
     WebParticipantRestore(&record.participants);
+    WebNetRestoreParticipantConfiguration();
     GameInfo.games_completed = record.games_completed;
     GameInfo.deathmatch_winner = record.deathmatch_winner;
     GameInfo.deathmatch_finished = record.deathmatch_finished;

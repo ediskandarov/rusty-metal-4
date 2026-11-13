@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { SnapshotVersion = 8, MaxObjects = 2048 };
+enum { SnapshotVersion = 9, MaxObjects = 2048 };
 
 typedef struct {
     u32 version, count, session_bytes, world_bytes;
@@ -194,6 +194,9 @@ static void release_baseline(Tm4ObjectHeader* object)
 static int apply_snapshot(const SnapshotHeader* snapshot, const u8* session, const u8* world,
     Tm4ObjectHeader** baseline, u32 baseline_count, const char** blocker)
 {
+    *blocker = "session membership";
+    if (!WebSnapshotSessionPrepare(session, snapshot->session_bytes))
+        return 0;
     for (u32 i = 0; i < restoring_count; ++i) {
         GraphObject* entry = &restoring_objects[i];
         *blocker = entry->type->name;

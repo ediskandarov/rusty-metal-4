@@ -53,8 +53,8 @@ RegistryDirectory* WebPowerupBindType(PowerupState* power, char* type);
 
 static void* find_powerup_name(char* key)
 {
-    RegistryDirectory* directory = PowerDirectory ? RegGetDirectoryPtrPS(PowerDirectory, key)
-                                                  : NULL;
+    RegistryDirectory* directory
+        = PowerDirectory ? RegGetDirectoryPtrPS(PowerDirectory, key) : NULL;
     return directory ? RegGetDirectoryNameP(directory) : NULL;
 }
 
@@ -135,6 +135,15 @@ static u32 capture_camera(const void* payload, u8* output, u32 capacity)
     }
     memcpy(output, &binding, sizeof(binding));
     return sizeof(binding);
+}
+
+static void release_camera(void* payload)
+{
+    Camera* camera = payload;
+    /* Removed baseline targets may already be released. Only the camera-owned
+     * runtime storage survives here; gameplay callbacks must not run. */
+    camera->object = NULL;
+    CameraSetObject(camera, NULL);
 }
 
 static int restore_camera(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
@@ -227,10 +236,11 @@ static int jumbotron_valid(const void* payload)
 }
 
 const SnapshotType WebSnapshotSceneTypes[] = {
-    { "powerup", sizeof(PowerupState), powerup_fields, powerup_valid, NULL,
-        restore_powerup_type, .baseline_removable = 1 },
+    { "powerup", sizeof(PowerupState), powerup_fields, powerup_valid, NULL, restore_powerup_type,
+        .baseline_removable = 1 },
     { "teleporter", sizeof(Teleporter), teleporter_fields, .needs_template = 1 },
-    { "camera", sizeof(Camera), camera_fields, NULL, capture_camera, restore_camera },
+    { "camera", sizeof(Camera), camera_fields, NULL, capture_camera, restore_camera,
+        .baseline_removable = 1, .release = release_camera },
     { "carJump", sizeof(CarJump), car_jump_fields, .custom = &car_jump_class },
     { OBJECT_INTERACTION_EXTENDER_NAME, sizeof(Tm4InteractionExtender), extender_fields,
         .baseline_removable = 1, .custom = &extender_class },

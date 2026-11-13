@@ -87,17 +87,17 @@ export async function joinMatch(
   }
   let slot = -1;
   let capacity = 0;
-  let slotConfiguration: { capacity: number; slots: number[] } | undefined;
+  let slotConfiguration: { capacity: number; slots: number[]; cars: string[] } | undefined;
   let epoch = 0;
   let session: SessionState = { phase: "connecting" };
   let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
   let prediction: ReturnType<typeof attachLivePrediction> | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   let reconnectAttempts = 0;
-  const credentialKey = "tm4.resume." + endpoint;
-  let credential: string | null = null;
+  const credentialKey = "tm4.resume." + endpoint + (admission ? "." + admission : "");
+  let credential: string | null = admission ?? null;
   try {
-    credential = sessionStorage.getItem(credentialKey);
+    credential = sessionStorage.getItem(credentialKey) ?? credential;
   } catch {
     // Playing without session storage is still supported.
   }
@@ -319,7 +319,7 @@ export async function joinMatch(
         case "prediction_prepare": {
           lobby(null);
           show("lobby", "Loading Deathmatch…");
-          if (prediction || slot < 0 || !message.slots.includes(slot))
+          if (prediction || slot < 0 || slot >= message.capacity)
             throw new Error("Invalid live prediction setup");
           journal.identify({
             world: message.world,
@@ -331,10 +331,15 @@ export async function joinMatch(
             compatibility: message.compatibility,
           });
           prediction = attachLivePrediction(engine, port, journal);
-          slotConfiguration = { capacity: message.capacity, slots: message.slots };
+          slotConfiguration = {
+            capacity: message.capacity,
+            slots: message.slots,
+            cars: message.cars,
+          };
           socket.preparePrediction(
             message.slots.reduce((mask, slot) => mask | (1 << slot), 0),
             message.participants,
+            message.cars,
             message.type === "resume_prepare",
           );
           if (!configureMatch(engine, message, slot))
@@ -391,6 +396,9 @@ export async function joinMatch(
           reconnectAttempts = 0;
           clearTimeout(recoveryDeadline);
           show("playing", "Player " + (slot + 1) + " · Live prediction");
+          break;
+        case "membership":
+          // Rust owns the scheduled plan and any Lightyear rollback it requires.
           break;
         case "snapshot_begin": {
           const active = session.phase === "recovering" ? session : undefined;

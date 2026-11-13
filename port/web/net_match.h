@@ -1,6 +1,15 @@
 #ifndef TM4_WEB_NET_MATCH_H
 #define TM4_WEB_NET_MATCH_H
 
+struct WebParticipantState;
+void WebNetInitialParticipantIds(unsigned int output[16]);
+unsigned int WebNetParticipantIdentityPart(int slot, int part);
+/* Authoritative events apply before inputs at the named simulation boundary. */
+int WebNetAdmitParticipant(
+    unsigned int tick, int slot, unsigned int low, unsigned int high, const char* model);
+int WebNetDepartParticipant(unsigned int tick, int slot, unsigned int low, unsigned int high);
+int WebNetParticipantModelsValid(const struct WebParticipantState* state, unsigned int slots);
+void WebNetRestoreParticipantConfiguration(void);
 int WebNetSlotCapacity(void);
 int WebNetSlotMask(void);
 int WebNetParticipantSlot(int index);
@@ -16,7 +25,8 @@ int WebNetReplaying(void);
 int WebNetRenderedPrediction(void);
 int WebNetPortableCheckpointEnabled(void);
 int WebNetLocalCheckpointSupported(void);
-const char* WebNetCapturePortableInto(unsigned char* output, unsigned int capacity, unsigned int* length);
+const char* WebNetCapturePortableInto(
+    unsigned char* output, unsigned int capacity, unsigned int* length);
 const char* WebNetRestorePortableFrom(const unsigned char* input, unsigned int length);
 void WebNetSuppressReplayedSounds(void);
 int WebNetMatchViewSlot(void);

@@ -13,7 +13,7 @@ function setup() {
   };
   const counts = { steps: 0, ends: 0 };
   const engine: NetworkEngine = {
-    ccall: () => 0,
+    ccall: (name) => (name === "WebNetSlotMask" ? 3 : 0),
     _WebNetCancelMatch() {},
     _WebNetBeginPortableReplay: () => 1,
     _WebNetSetInput: () => 1,
@@ -38,7 +38,7 @@ function setup() {
       start,
       target,
       digest,
-      { capacity: 2, slots: [0, 1] },
+      { capacity: 2, slots: [0, 1], cars: ["Orbital", "Crusher"] },
       engine,
       port,
       abort.signal,
@@ -47,7 +47,7 @@ function setup() {
 }
 
 function chunk(start: number, ticks: number, target = head) {
-  const rowBytes = 43;
+  const rowBytes = 132;
   const bytes = new Uint8Array(ticks * rowBytes);
   const data = new DataView(bytes.buffer);
   for (let tick = 0; tick < ticks; tick++) data.setUint32(tick * rowBytes, start + tick + 1, true);

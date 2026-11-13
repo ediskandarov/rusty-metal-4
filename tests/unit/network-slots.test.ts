@@ -12,7 +12,7 @@ const start = {
   seed: 12345,
   epoch: 1,
   portable: false,
-  compatibility: { protocol: 13, build: "a".repeat(64), content: "b".repeat(64) },
+  compatibility: { protocol: 14, build: "a".repeat(64), content: "b".repeat(64) },
 };
 test("startup validates capacity, unique actual slots and one mode car per occupied slot", () => {
   expect(startSchema.parse(start)).toEqual(start);
@@ -56,14 +56,15 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     "Orbital\nPizza Boy\nCrusher",
     "0000000000000001\n0000000000000002\n0000000000000003",
   ]);
-  expect(() => configureMatch(engine, start, 1)).toThrow();
+  expect(configureMatch(engine, start, 1)).toBe(1);
+  expect(() => configureMatch(engine, start, 8)).toThrow();
 });
 test("portable catch-up decodes capacity-width rows but stages only the real occupied slots", async () => {
   const sections: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   const port = { netMatch: { tick: 10, digest: 42, sections, unsupported: null, nextMode: 0 } };
   const seen: number[][] = [];
   const engine: NetworkEngine = {
-    ccall: () => 0,
+    ccall: (name) => (name === "WebNetSlotMask" ? 0x89 : 0),
     _WebNetCancelMatch() {},
     _WebNetBeginPortableReplay: () => 1,
     _WebNetSetInput(tick: number, slot: number, buttons: number) {
@@ -80,15 +81,15 @@ test("portable catch-up decodes capacity-width rows but stages only the real occ
     10,
     11,
     42,
-    { capacity: 8, slots: [0, 3, 7] },
+    { capacity: 8, slots: [0, 3, 7], cars: start.cars },
     engine,
     port,
     new AbortController().signal,
   );
-  const data = new Uint8Array(29 + 7 * 8);
+  const data = new Uint8Array(118 + 7 * 8);
   const view = new DataView(data.buffer);
   view.setUint32(0, 43, true);
-  for (let slot = 0; slot < 8; slot++) view.setUint16(29 + 7 * slot, 100 + slot, true);
+  for (let slot = 0; slot < 8; slot++) view.setUint16(118 + 7 * slot, 100 + slot, true);
   await replay.accept({
     type: "catchup_frames",
     attempt: 1,

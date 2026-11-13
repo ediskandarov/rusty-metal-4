@@ -143,6 +143,7 @@ mod tests {
 
     fn frame(tick: u32) -> Message {
         Message::Frame {
+            changes: Vec::new(),
             tick,
             inputs: Vec::new(),
             state: RoundState {

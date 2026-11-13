@@ -1,5 +1,10 @@
 import {
   healthSnapshotSchema,
+  type MembershipLookup,
+  membershipLookupSchema,
+  type MembershipOptions,
+  membershipOptionsSchema,
+  membershipReplySchema,
   resourceIdSchema,
   resourceManifestSchema,
   serverStatusSchema,
@@ -72,6 +77,24 @@ export function createServerClient(options: ClientOptions) {
         signal,
       });
       await response.body?.cancel();
+    },
+    async membership(input: MembershipOptions, signal?: AbortSignal) {
+      const response = await request("membership", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(membershipOptionsSchema.parse(input)),
+        signal,
+      });
+      return membershipReplySchema.parse(await response.json());
+    },
+    async membershipStatus(input: MembershipLookup, signal?: AbortSignal) {
+      const response = await request("membership/status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(membershipLookupSchema.parse(input)),
+        signal,
+      });
+      return membershipReplySchema.parse(await response.json());
     },
     async health(signal?: AbortSignal) {
       return healthSnapshotSchema.parse(await (await request("metrics", { signal })).json());

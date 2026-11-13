@@ -31,6 +31,14 @@ export class Room extends ProductionRoom {
     if (this.state?.match) this.state.match.deadline = Date.now() - 1;
     await this.alarm();
   }
+  async expireDisconnectedForTest(memberId: string) {
+    const member = this.state?.members.find((member) => member.id === memberId);
+    if (member) {
+      member.connections = [];
+      member.disconnectedUntil = Date.now() - 1;
+    }
+    await this.alarm();
+  }
   async ageSilentSocketsForTest() {
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = socket.deserializeAttachment() as {
@@ -99,11 +107,23 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
   private failStop = false;
   private statusFailure: "http" | "timeout" | null = null;
   private roster: unknown[] = [];
+  private leases = new Map<
+    string,
+    { identity: { participant: string; slot: number }; pending: boolean }
+  >();
+  private nextParticipant = 8;
+  private lookupFailure = false;
+  cancelAdmissionsForTest() {
+    for (const [credential, lease] of this.leases)
+      if (lease.pending) this.leases.delete(credential);
+  }
+
   configureForTest(options: {
     phase?: string;
     failUpload?: boolean;
     failStop?: boolean;
     statusFailure?: "http" | "timeout" | null;
+    lookupFailure?: boolean;
     sessionId?: string;
   }) {
     Object.assign(this, options);
@@ -146,11 +166,38 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       this.roster = input.roster;
       this.phase = "match";
       await new ServerJournal(this.ctx.storage).save(
-        new Response(new Uint8Array([84, 77, 52, 74, 82, 78, 76, 1, 0, 1, 2]), {
+        new Response(new Uint8Array([84, 77, 52, 74, 82, 78, 76, 3, 0, 1, 2]), {
           headers: { "Content-Length": "11" },
         }),
       );
       return new Response(null, { status: 202 });
+    }
+    if (path === "/api/membership/status") {
+      if (this.lookupFailure)
+        return new Response("Temporary lease monitoring outage", { status: 503 });
+      const { credential } = (await request.json()) as { credential: string };
+      return Response.json({
+        ...(this.leases.get(credential) ?? { identity: null, pending: false }),
+        tick: null,
+      });
+    }
+    if (path === "/api/membership") {
+      const { change } = (await request.json()) as {
+        change: { kind: "admit" | "depart"; credential: string };
+      };
+      if (change.kind === "depart") this.leases.delete(change.credential);
+      else
+        this.leases.set(change.credential, {
+          identity: {
+            participant: (++this.nextParticipant).toString(16).padStart(16, "0"),
+            slot: 2,
+          },
+          pending: true,
+        });
+      return Response.json({
+        ...(this.leases.get(change.credential) ?? { identity: null, pending: false }),
+        tick: null,
+      });
     }
     if (path === "/api/status") {
       if (this.statusFailure === "http")

@@ -604,6 +604,42 @@ impl Simulator {
                 .collect(),
         })
     }
+    pub fn membership(
+        &mut self,
+        tick: u32,
+        change: &tm4_network::protocol::MembershipChange,
+    ) -> Result<bool> {
+        use tm4_network::protocol::MembershipChange;
+        let identity = change.identity();
+        ensure!(
+            usize::from(identity.slot) < self.capacity,
+            "Invalid membership slot"
+        );
+        let low = identity.participant.0 as u32;
+        let high = (identity.participant.0 >> 32) as u32;
+        let accepted = match change {
+            MembershipChange::Admit { car, .. } => self.with_string(car, |world, model| {
+                world.call::<(u32, i32, u32, u32, u32), i32>(
+                    "WebNetAdmitParticipant",
+                    (tick, i32::from(identity.slot), low, high, model),
+                )
+            })?,
+            MembershipChange::Depart { .. } => self.call::<(u32, i32, u32, u32), i32>(
+                "WebNetDepartParticipant",
+                (tick, i32::from(identity.slot), low, high),
+            )?,
+        } == 1;
+        self.refresh_slots()?;
+        Ok(accepted)
+    }
+    fn refresh_slots(&mut self) -> Result<()> {
+        let mask = self.call::<(), u32>("WebNetSlotMask", ())?;
+        self.slots = (0..self.capacity)
+            .filter(|slot| mask & (1 << slot) != 0)
+            .map(|slot| slot as u8)
+            .collect();
+        Ok(())
+    }
     pub fn step(&mut self, tick: u32, inputs: &[Input]) -> Result<RoundState> {
         ensure!(
             inputs.len() == self.capacity && self.capacity != 0,
@@ -665,6 +701,7 @@ impl Simulator {
             "{}",
             self.error()
         );
+        self.refresh_slots()?;
         Ok(())
     }
 }

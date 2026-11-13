@@ -2,6 +2,7 @@ import { journalAuthorityFrameSchema } from "@tm4/lightyear-client/schemas";
 
 import type { ClientJournal } from "./journal.ts";
 import type { NetworkEngine, NetworkPort } from "./protocol.ts";
+import { applyMembership } from "./protocol.ts";
 
 interface PredictionEngine extends NetworkEngine {
   _WebNetRetainLocalCheckpoint(tick: number): number;
@@ -14,6 +15,9 @@ interface PredictionEngine extends NetworkEngine {
 
 interface Bridge {
   journal_authority_frame(json: string): void;
+  apply_live_membership(tick: number, json: string): boolean;
+  live_slot_mask(): number;
+  live_participant_part(slot: number, part: number): number;
   retain_live_tick(tick: number): number;
   restore_live_tick(tick: number): boolean;
   stage_live_input(
@@ -56,6 +60,15 @@ export function attachLivePrediction(
     maxRollbackMs: 0,
   });
   globalThis.tm4LivePrediction = {
+    apply_live_membership: (tick, json) => applyMembership(engine, tick, JSON.parse(json)),
+    live_slot_mask: () => engine.ccall("WebNetSlotMask", "number", [], []),
+    live_participant_part: (slot, part) =>
+      engine.ccall(
+        "WebNetParticipantIdentityPart",
+        "number",
+        ["number", "number"],
+        [slot, part],
+      ) >>> 0,
     journal_authority_frame(json) {
       if (!journal) return;
       try {

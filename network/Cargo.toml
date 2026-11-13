@@ -56,6 +56,7 @@ wasmtime-wasi = { version = "=47.0.1", default-features = false, features = ["p1
 console_error_panic_hook = "0.1"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
+postcard = { version = "1", default-features = false, features = ["alloc"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["test-util"] }
 

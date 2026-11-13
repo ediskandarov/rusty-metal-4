@@ -1,4 +1,8 @@
-import { compatibilitySchema, sha256Schema } from "@tm4/lightyear-client/schemas";
+import {
+  compatibilitySchema,
+  controllerIdentitySchema,
+  sha256Schema,
+} from "@tm4/lightyear-client/schemas";
 import { z } from "zod";
 const count = z.number().int().nonnegative();
 export const serverStatusSchema = z.object({
@@ -50,9 +54,11 @@ export const startOptionsSchema = z
     (value) =>
       (value.sessionId === undefined && value.roster === undefined) ||
       (value.sessionId !== undefined &&
-        value.roster?.length === value.players &&
-        new Set(value.roster.map((member) => member.credential)).size === value.players),
-    "Invalid fixed room roster",
+        value.roster !== undefined &&
+        value.roster.length >= 2 &&
+        value.roster.length <= value.players &&
+        new Set(value.roster.map((member) => member.credential)).size === value.roster.length),
+    "Invalid initial room roster",
   );
 export type StartOptions = z.infer<typeof startOptionsSchema>;
 export const measurementSchema = z.object({
@@ -79,3 +85,31 @@ export const healthSnapshotSchema = z
     "Duplicate health measurements",
   );
 export type HealthSnapshot = z.infer<typeof healthSnapshotSchema>;
+
+export const membershipOptionsSchema = z.object({
+  sessionId: z.string().uuid(),
+  change: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("admit"),
+      credential: sha256Schema,
+      car: z
+        .string()
+        .min(1)
+        .max(63)
+        .regex(/^[^\0\n]+$/),
+    }),
+    z.object({ kind: z.literal("depart"), credential: sha256Schema }),
+  ]),
+});
+export type MembershipOptions = z.infer<typeof membershipOptionsSchema>;
+export const membershipReplySchema = z.object({
+  identity: controllerIdentitySchema.nullable(),
+  tick: count.max(0xffffffff).nullable(),
+  pending: z.boolean(),
+});
+
+export const membershipLookupSchema = z.object({
+  sessionId: z.string().uuid(),
+  credential: sha256Schema,
+});
+export type MembershipLookup = z.infer<typeof membershipLookupSchema>;

@@ -58,7 +58,7 @@ afterEach(async () => {
   connectionPending = undefined;
 });
 
-const compatibility = { protocol: 13, build: "a".repeat(64), content: "b".repeat(64) };
+const compatibility = { protocol: 14, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
   capacity: 2,
   slots: [0, 1],
@@ -327,14 +327,14 @@ const unavailableDiagnostics = () => {
 test("unavailable diagnostics do not prevent joining or confirming frames", async () => {
   const { first, port, statuses } = await setup(unavailableDiagnostics);
   expect(statuses.at(-1)?.[0]).toBe("playing");
-  first.onmessage({ type: "frame", tick: 0, inputs: [], state });
+  first.onmessage({ type: "frame", changes: [], tick: 0, inputs: [], state });
   expect(port.netConfirmedTick).toBe(1);
   expect(first.readyState).toBe(WebSocket.OPEN);
   expect(port.netDiagnostics?.transportError).toBe("diagnostics unavailable");
   expect(port.netDiagnostics?.transport).toBeUndefined();
 
   first.diagnostics = () => ({});
-  first.onmessage({ type: "frame", tick: 1, inputs: [], state });
+  first.onmessage({ type: "frame", changes: [], tick: 1, inputs: [], state });
   expect(port.netConfirmedTick).toBe(2);
   expect(port.netDiagnostics?.transportError).toBeUndefined();
 });

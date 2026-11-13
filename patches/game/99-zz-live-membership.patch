@@ -1,0 +1,32 @@
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/web/net_match.h"
+ #include "tm4/compiler.h"
+ #include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+@@ -160,10 +161,11 @@
+     }
+     fallback = RegGetDirectoryPtrPS(CarClassDirectory, "ai");
+     REQUIRE_AI_SETTING(ai_primary, fallback, "aiEnabledFlag", enabled, u8);
+-    car->ai.attacker_damage = MemAlloc(GameInfo.entrant_count * sizeof(*car->ai.attacker_damage));
++    const s32 capacity = WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count;
++    car->ai.attacker_damage = MemAlloc(capacity * sizeof(*car->ai.attacker_damage));
+     if (!car->ai.attacker_damage)
+         return 0;
+-    car->ai.nearby_records = MemAlloc(GameInfo.entrant_count * sizeof(*car->ai.nearby_records));
++    car->ai.nearby_records = MemAlloc(capacity * sizeof(*car->ai.nearby_records));
+     if (!car->ai.nearby_records) {
+         if (car->ai.attacker_damage)
+             MemFree(car->ai.attacker_damage);
+@@ -194,7 +196,7 @@
+     car->ai.maneuver_flag = 0;
+     car->ai.path_attempts = 3;
+     car->ai.spatial_node = spatial;
+-    for (weight_index = 0; weight_index < GameInfo.entrant_count; weight_index++)
++    for (weight_index = 0; weight_index < capacity; weight_index++)
+         car->ai.attacker_damage[weight_index] = 0;
+     car->ai.target = NULL;
+     car->ai.target_entry = NULL;

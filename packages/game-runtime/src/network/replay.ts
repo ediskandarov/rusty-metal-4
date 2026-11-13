@@ -2,12 +2,12 @@ import type { CatchupChunk } from "@tm4/lightyear-client/schemas";
 import { type SlotConfiguration, slotConfigurationSchema } from "@tm4/lightyear-client/schemas";
 
 import type { NetworkEngine, NetworkPort } from "./protocol.ts";
-import { stateSections } from "./protocol.ts";
+import { applyMembership, stateSections } from "./protocol.ts";
 export type { CatchupChunk } from "@tm4/lightyear-client/schemas";
 
 export const maxResumeTicks = 240;
 const maxChunkTicks = 64;
-const framePrefix = 29;
+const framePrefix = 118;
 const inputBytes = 7;
 const maxBatchTicks = 24;
 const batchBudgetMs = 8;
@@ -27,7 +27,7 @@ export class SnapshotReplay {
   readonly #port: NetworkPort;
   readonly #signal: AbortSignal;
   readonly #capacity: number;
-  readonly #slotMask: number;
+  readonly #cars: string[];
   readonly #width: number;
   readonly #start: number;
   #head: number;
@@ -39,12 +39,12 @@ export class SnapshotReplay {
     start: number,
     head: number,
     digest: number,
-    configuration: SlotConfiguration,
+    configuration: SlotConfiguration & { cars: string[] },
     engine: NetworkEngine,
     port: NetworkPort,
     signal: AbortSignal,
   ) {
-    const { capacity, slots } = slotConfigurationSchema.parse(configuration);
+    const { capacity } = slotConfigurationSchema.parse(configuration);
     if (
       !integer(head, 0xffffffff) ||
       !integer(start, head) ||
@@ -58,7 +58,13 @@ export class SnapshotReplay {
     this.#port = port;
     this.#signal = signal;
     this.#capacity = capacity;
-    this.#slotMask = slots.reduce((mask, slot) => mask | (1 << slot), 0);
+    this.#cars = [...configuration.cars];
+    if (
+      this.#cars.length < 2 ||
+      this.#cars.length > 8 ||
+      this.#cars.some((car) => !car || car.includes("\0") || car.includes("\n"))
+    )
+      throw new Error("Invalid prepared journal model pool");
     this.#width = framePrefix + inputBytes * capacity;
     this.#start = start;
     this.#head = head;
@@ -154,9 +160,38 @@ export class SnapshotReplay {
       const deadline = performance.now() + batchBudgetMs;
       do {
         const tick = this.#applied;
+        const count = frame.getUint8(row + 29);
+        if (count > 8) throw new Error("Invalid membership journal count");
+        const changes = [];
+        for (let index = 0; index < 8; ++index) {
+          const entry = row + 30 + index * 11;
+          if (index >= count) {
+            if (data.subarray(entry, entry + 11).some((byte) => byte !== 0))
+              throw new Error("Invalid membership journal padding");
+            continue;
+          }
+          const kind = frame.getUint8(entry);
+          const slot = frame.getUint8(entry + 1);
+          const participant = frame
+            .getBigUint64(entry + 2, true)
+            .toString(16)
+            .padStart(16, "0");
+          const model = frame.getUint8(entry + 10);
+          if (slot >= this.#capacity || (kind !== 1 && kind !== 2) || (kind === 2 && model !== 0))
+            throw new Error("Invalid membership journal decision");
+          const identity = { slot, participant };
+          changes.push(
+            kind === 1
+              ? { kind: "admit", identity, car: this.#cars[model] }
+              : { kind: "depart", identity },
+          );
+        }
+        if (!applyMembership(engine, tick, changes))
+          throw new Error("The game refused journal membership at tick " + tick);
+        const slotMask = engine.ccall("WebNetSlotMask", "number", [], []);
         let input = row + framePrefix;
         for (let slot = 0; slot < this.#capacity; slot++, input += inputBytes) {
-          if (!(this.#slotMask & (1 << slot))) continue;
+          if (!(slotMask & (1 << slot))) continue;
           if (
             !engine._WebNetSetInput(
               tick,

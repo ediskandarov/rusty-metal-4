@@ -1802,9 +1802,9 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestCrusherRespawnAllocationBytes(s32 index)
     case 3:
         return sizeof(*car->weapons[0].descriptor);
     case 4:
-        return GameInfo.entrant_count * sizeof(*car->ai.attacker_damage);
+        return WebNetSlotCapacity() * sizeof(*car->ai.attacker_damage);
     case 5:
-        return GameInfo.entrant_count * sizeof(*car->ai.nearby_records);
+        return WebNetSlotCapacity() * sizeof(*car->ai.nearby_records);
     case 6:
         return car->turbo_emitter_count * sizeof(*car->turbo_emitters);
     case 7:

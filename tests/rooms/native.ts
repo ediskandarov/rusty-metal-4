@@ -106,11 +106,14 @@ export async function nativeBridge(bundle: string, executable: string, fixture?:
       const headers = new Headers(request.headers);
       headers.set("Authorization", "Bearer " + native.secret);
       headers.delete("host");
-      const response = await fetch("http://127.0.0.1:" + native.api + path, {
-        method: request.method,
-        headers,
-        body: request.body,
-      });
+      const response = await fetch(
+        "http://127.0.0.1:" + native.api + (path === "/_server/journal" ? "/api/journal" : path),
+        {
+          method: request.method,
+          headers,
+          body: request.body,
+        },
+      );
       if (path === "/api/status" && response.ok) {
         const status = (await response.clone().json()) as { phase: string };
         history.push({ id, phase: status.phase });

@@ -1,5 +1,5 @@
 import type { NetworkDiagnostics } from "@tm4/lightyear-client";
-import { startSchema } from "@tm4/lightyear-client/schemas";
+import { membershipChangesSchema, startSchema } from "@tm4/lightyear-client/schemas";
 import type { Compatibility, RoundState, Start } from "@tm4/lightyear-client/schemas";
 export type {
   Input,
@@ -77,7 +77,8 @@ export interface NetworkPort {
 
 export function configureMatch(engine: NetworkEngine, proposed: Start, view: number) {
   const start = startSchema.parse(proposed);
-  if (!start.slots.includes(view)) throw new Error("Invalid local gameplay slot");
+  if (!Number.isInteger(view) || view < 0 || view >= start.capacity)
+    throw new Error("Invalid local gameplay slot");
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
   if (world < 0) throw new Error("Session map is missing locally");
   return engine.ccall(
@@ -95,4 +96,31 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       start.participants.join("\n"),
     ],
   );
+}
+
+/** Apply the authority's complete, ordered membership decisions before this input row. */
+export function applyMembership(engine: NetworkEngine, tick: number, proposed: unknown): boolean {
+  const changes = membershipChangesSchema.parse(proposed);
+  for (const change of changes) {
+    const id = BigInt("0x" + change.identity.participant);
+    const values = [tick, change.identity.slot, Number(id & 0xffffffffn), Number(id >> 32n)];
+    const accepted =
+      change.kind === "admit"
+        ? engine.ccall(
+            "WebNetAdmitParticipant",
+            "number",
+            ["number", "number", "number", "number", "string"],
+            [...values, change.car],
+          )
+        : engine.ccall(
+            "WebNetDepartParticipant",
+            "number",
+            ["number", "number", "number", "number"],
+            values,
+          );
+    // A failed initial car preparation leaves the reservation unpublished. The
+    // authority retires that reservation; its unchanged state is still verified.
+    if (!accepted && change.kind === "depart") return false;
+  }
+  return true;
 }

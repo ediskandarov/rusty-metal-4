@@ -1,4 +1,4 @@
-//! Capacity, reservations and immutable running participant data and its explicit gameplay-slot bindings.
+//! Capacity, preparation reservations and live participant leases.
 //! Connections and input history live separately in the match's control records.
 use std::collections::HashMap;
 
@@ -6,6 +6,7 @@ use tm4_network::protocol::{Catalog, ControllerIdentity, MAX_PLAYERS, Participan
 
 #[derive(Default)]
 pub(crate) struct Participant {
+    pub joining: bool,
     pub car: Option<String>,
     pub lobby_ready: bool,
     pub credential: Option<String>,
@@ -71,20 +72,72 @@ impl ParticipantRoster {
         self.slots.len()
     }
     pub fn count(&self) -> usize {
-        self.participants.len()
+        self.slots().count()
     }
     pub fn contains(&self, slot: usize) -> bool {
-        self.slots.get(slot).is_some_and(Option::is_some)
+        self.slots
+            .get(slot)
+            .and_then(|id| *id)
+            .is_some_and(|id| !self.frozen || !self.participants[&id].joining)
     }
     pub fn slots(&self) -> impl Iterator<Item = usize> + '_ {
         self.slots
             .iter()
             .enumerate()
+            .filter_map(|(slot, _)| self.contains(slot).then_some(slot))
+    }
+    pub fn all_slots(&self) -> impl Iterator<Item = usize> + '_ {
+        self.slots
+            .iter()
+            .enumerate()
             .filter_map(|(slot, id)| id.map(|_| slot))
     }
-    // These operations are preparation-only. Running membership needs a future deterministic event path.
+    pub fn joining(&self, slot: usize) -> bool {
+        self.slots
+            .get(slot)
+            .and_then(|id| *id)
+            .is_some_and(|id| self.participants[&id].joining)
+    }
+    pub fn reserve_live(&mut self) -> Result<ControllerIdentity, &'static str> {
+        if !self.frozen {
+            return Err("match has not started");
+        }
+        let slot = self
+            .slots
+            .iter()
+            .position(Option::is_none)
+            .ok_or("The match is full.")?;
+        let id = self.allocate();
+        self.participants.get_mut(&id).unwrap().joining = true;
+        self.slots[slot] = Some(id);
+        Ok(self.binding(slot))
+    }
+    pub fn commit_live(&mut self, binding: ControllerIdentity) -> Result<(), &'static str> {
+        if !self.frozen
+            || self.slots.get(usize::from(binding.slot)) != Some(&Some(binding.participant))
+            || !self.joining(usize::from(binding.slot))
+        {
+            return Err("stale admission reservation");
+        }
+        self.participants
+            .get_mut(&binding.participant)
+            .unwrap()
+            .joining = false;
+        Ok(())
+    }
+    pub fn release_live(&mut self, binding: ControllerIdentity) -> Result<(), &'static str> {
+        if !self.frozen
+            || self.slots.get(usize::from(binding.slot)) != Some(&Some(binding.participant))
+        {
+            return Err("stale membership lease");
+        }
+        self.slots[usize::from(binding.slot)] = None;
+        self.participants.remove(&binding.participant);
+        Ok(())
+    }
+    // Preparation and live mutation use separate, explicit phase checks.
     fn reserve(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
-        if self.frozen || slot >= self.capacity() || self.contains(slot) {
+        if self.frozen || slot >= self.capacity() || self.slots[slot].is_some() {
             return Err("slot unavailable");
         }
         let id = self.allocate();
@@ -112,7 +165,8 @@ impl ParticipantRoster {
 
     pub fn resolve(&self, binding: &ControllerIdentity) -> Option<usize> {
         let slot = usize::from(binding.slot);
-        (self.slots.get(slot) == Some(&Some(binding.participant))).then_some(slot)
+        (self.contains(slot) && self.slots.get(slot) == Some(&Some(binding.participant)))
+            .then_some(slot)
     }
 
     pub fn at_slot(&self, slot: usize) -> &Participant {
@@ -138,7 +192,7 @@ impl ParticipantRoster {
     }
 
     pub fn find_room_credential(&self, token: &str) -> Option<ControllerIdentity> {
-        self.slots().find_map(|slot| {
+        self.all_slots().find_map(|slot| {
             self.at_slot(slot)
                 .room_credential
                 .as_deref()
