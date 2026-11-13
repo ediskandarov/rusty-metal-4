@@ -1,5 +1,6 @@
 import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
+import { createRenderingStore } from "../state/rendering.ts";
 import { initializeInputSettings } from "./controls.ts";
 import { element } from "./dom.ts";
 import { initializePerformance } from "./performance.ts";
@@ -65,9 +66,11 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
   input.hidden = false;
   rendering.hidden = false;
   toolbar.hidden = false;
-  const settings = [initializeRendering(module), initializePerformance(module)];
+  const settings = createRenderingStore(new URLSearchParams(location.search).get("fps") === "1");
+  initializeRendering(module, settings);
+  initializePerformance(module, settings);
   element("render-reset", HTMLButtonElement).addEventListener("click", () => {
-    for (const setting of settings) setting.reset();
+    settings.getState().reset();
   });
   toolbar.addEventListener("keydown", (event) => {
     event.stopPropagation();

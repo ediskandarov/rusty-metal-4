@@ -1,5 +1,6 @@
 import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
+import type { RenderingStore } from "../state/rendering.ts";
 import { element } from "./dom.ts";
 
 const sampleInterval = 250;
@@ -10,7 +11,7 @@ const svgNamespace = "http://www.w3.org/2000/svg";
 
 type Sample = { time: number; rates: number[] };
 
-export function initializePerformance(module: GameModule) {
+export function initializePerformance(module: GameModule, store: RenderingStore) {
   const checkbox = element("render-fps", HTMLInputElement);
   const panel = element("fps-counter", HTMLElement);
   const definitions = [
@@ -111,8 +112,10 @@ export function initializePerformance(module: GameModule) {
   }
   function update() {
     stop();
-    panel.hidden = !checkbox.checked;
-    if (!checkbox.checked || document.hidden) return;
+    const enabled = store.getState().showPerformance;
+    checkbox.checked = enabled;
+    panel.hidden = !enabled;
+    if (!enabled || document.hidden) return;
     history = [];
     for (const { value, line, unit } of rows) {
       value.textContent = `— ${unit}`;
@@ -124,14 +127,10 @@ export function initializePerformance(module: GameModule) {
     animation = requestAnimationFrame(onAnimationFrame);
     timer = setInterval(sample, sampleInterval);
   }
-  checkbox.checked = new URLSearchParams(location.search).get("fps") === "1";
-  checkbox.addEventListener("change", update);
+  checkbox.addEventListener("change", () => store.getState().setShowPerformance(checkbox.checked));
   document.addEventListener("visibilitychange", update);
   update();
-  return {
-    reset() {
-      checkbox.checked = false;
-      update();
-    },
-  };
+  return store.subscribe((state, previous) => {
+    if (state.showPerformance !== previous.showPerformance) update();
+  });
 }
