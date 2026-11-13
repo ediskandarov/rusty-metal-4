@@ -1,5 +1,6 @@
 import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
+import { bindableKey, createControlsStore } from "../state/controls.ts";
 import { element, item } from "./dom.ts";
 
 // PS1 packet bit order. Controller names describe positions across brands.
@@ -21,25 +22,6 @@ const buttons: [name: string, symbol: string, description: string, x: number, y:
   ["Down", "↓", "D-pad down", 75, 112],
   ["Left", "←", "D-pad left", 55, 93],
 ];
-const defaultKeys = [
-  "KeyW",
-  "KeyE",
-  "KeyQ",
-  "KeyR",
-  "KeyS",
-  "KeyD",
-  "KeyX",
-  "KeyZ",
-  "Backspace",
-  "Digit1",
-  "Digit2",
-  "Enter",
-  "ArrowUp",
-  "ArrowRight",
-  "ArrowDown",
-  "ArrowLeft",
-];
-const defaultPad = buttons.map((_, index) => index);
 // Tm4GameControl enum order. Button masks come from the live game or menu.
 const actions = [
   "Steer left",
@@ -64,9 +46,6 @@ const fixedActions: Record<number, string> = {
   14: "Menu down",
   15: "Menu left",
 };
-const storageKey = "tm4-browser-input-v1";
-const bindableKey =
-  /^(Key[A-Z]|Digit[0-9]|Numpad(?:[0-9]|Add|Subtract|Multiply|Divide|Decimal|Enter)|Arrow(?:Up|Down|Left|Right)|Space|Enter|Backspace|Insert|Delete|Home|End|PageUp|PageDown|Shift(?:Left|Right)|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Backquote|Comma|Period|Slash)$/;
 const keyLabels: Record<string, string> = {
   ArrowUp: "↑",
   ArrowRight: "→",
@@ -99,15 +78,6 @@ function describeKey(code: string) {
   return keyLabels[code] || code.replace(/^(Key|Digit)/, "").replace(/^Numpad/, "Num ");
 }
 
-function validMap<T>(value: unknown, isValid: (value: unknown) => value is T): value is T[] {
-  return (
-    Array.isArray(value) &&
-    value.length === buttons.length &&
-    value.every(isValid) &&
-    new Set(value).size === buttons.length
-  );
-}
-
 export function initializeInputSettings(
   module: GameModule,
   toolbar: HTMLElement,
@@ -123,59 +93,18 @@ export function initializeInputSettings(
   const list = element("input-map", HTMLElement);
   const controller = settings.querySelector<HTMLElement>(".input-controller");
   if (!controller) throw new Error("Missing controller diagram");
-  let keyboard = [...defaultKeys];
-  let gamepads = Array.from({ length: 4 }, () => [...defaultPad]);
-  let storageAvailable = true;
-  try {
-    const stored = localStorage.getItem(storageKey);
-    if (stored !== null) {
-      const parsed: unknown = JSON.parse(stored);
-      const config = parsed && typeof parsed === "object" ? parsed : {};
-      const savedKeyboard = "keyboard" in config ? config.keyboard : undefined;
-      const savedPads: unknown[] =
-        "gamepads" in config && Array.isArray(config.gamepads) ? config.gamepads : [];
-      if (
-        validMap(
-          savedKeyboard,
-          (code): code is string => typeof code === "string" && bindableKey.test(code),
-        )
-      )
-        keyboard = savedKeyboard;
-      gamepads = gamepads.map((fallback, slot) => {
-        const map = savedPads[slot];
-        return validMap(
-          map,
-          (source): source is number =>
-            typeof source === "number" &&
-            Number.isInteger(source) &&
-            source >= 0 &&
-            source < buttons.length,
-        )
-          ? map
-          : fallback;
-      });
-    }
-  } catch (error) {
-    // Malformed values use defaults, and can be overwritten with new preferences.
-    storageAvailable = error instanceof SyntaxError;
-  }
-
-  let player = 0;
+  const store = createControlsStore();
   let focused = document.hasFocus();
   let blocked = false;
-  let capture: {
-    kind: "key" | "pad";
-    target: number;
-    id: number;
-    origin: HTMLElement | null;
-    armed: boolean;
-  } | null = null;
+  let captureOrigin: HTMLElement | null = null;
   let interval: ReturnType<typeof setInterval> | undefined;
   const down = new Set<string>();
   const activeKeys = new Set<string>();
   const bit = (index: number) => 1 << index;
   const keyboardMask = (keys: Set<string>) =>
-    keyboard.reduce((mask, code, index) => mask | (keys.has(code) ? bit(index) : 0), 0);
+    store
+      .getState()
+      .keyboard.reduce((mask, code, index) => mask | (keys.has(code) ? bit(index) : 0), 0);
 
   function updateBlocked() {
     const next =
@@ -184,23 +113,6 @@ export function initializeInputSettings(
     blocked = next;
     module._WebSetInputBlocked(Number(blocked));
     module._WebSetKeyboardButtons(blocked ? 0 : keyboardMask(activeKeys));
-  }
-
-  function applyMaps() {
-    for (const [slot, map] of gamepads.entries())
-      map.forEach((source, target) => module._WebMapGamepadButton(slot, target, source));
-    updateBlocked();
-  }
-
-  function saveMaps(text: string) {
-    applyMaps();
-    try {
-      localStorage.setItem(storageKey, JSON.stringify({ keyboard, gamepads }));
-      storageAvailable = true;
-    } catch {
-      storageAvailable = false;
-    }
-    message.textContent = storageAvailable ? text : `${text} Browser storage is unavailable.`;
   }
 
   function create<K extends keyof HTMLElementTagNameMap>(tag: K, text = "", className = "") {
@@ -228,7 +140,9 @@ export function initializeInputSettings(
   }
 
   const rows = buttons.map(([name, symbol, , x, y], target) => {
-    const diagram = makeButton(symbol, () => beginCapture(player === 0 ? "key" : "pad", target));
+    const diagram = makeButton(symbol, () =>
+      beginCapture(store.getState().player === 0 ? "key" : "pad", target),
+    );
     diagram.className = "input-diagram-button";
     diagram.style.left = `${x / 4}%`;
     diagram.style.top = `${(y / 184) * 100}%`;
@@ -247,84 +161,65 @@ export function initializeInputSettings(
     list.append(heading, key, pad);
   }
 
+  function restoreCaptureFocus(capture: NonNullable<ReturnType<typeof store.getState>["capture"]>) {
+    if (!settings.open) return;
+    const { key, pad } = item(rows, capture.target);
+    (captureOrigin?.matches("button:not(:disabled)")
+      ? captureOrigin
+      : capture.kind === "key"
+        ? key
+        : pad
+    ).focus({ preventScroll: true });
+  }
+
   function finishCapture(restoreFocus = true) {
+    const capture = store.getState().capture;
     if (!capture) return;
-    const { kind, target, origin } = capture;
-    capture = null;
-    captureBox.hidden = true;
-    item(rows, target).diagram.removeAttribute("data-selected");
-    if (restoreFocus && settings.open) {
-      const { key, pad } = item(rows, target);
-      (origin?.matches("button:not(:disabled)") ? origin : kind === "key" ? key : pad).focus({
-        preventScroll: true,
-      });
-    }
+    store.getState().cancelCapture();
+    if (restoreFocus) restoreCaptureFocus(capture);
+    captureOrigin = null;
   }
 
   function beginCapture(kind: "key" | "pad", target: number) {
+    const player = store.getState().player;
     const id = module._WebGetInputDevice(player);
     if (kind === "pad" && !id) return;
     finishCapture(false);
-    capture = {
-      kind,
-      target,
-      id,
-      origin: document.activeElement instanceof HTMLElement ? document.activeElement : null,
-      armed: !module._WebGetPhysicalButtons(player),
-    };
-    message.textContent = "";
-    prompt.textContent =
-      kind === "key"
-        ? `Press a key for ${item(buttons, target)[0]}.`
-        : `${capture.armed ? "Press a controller button" : "Release held buttons"} for ${item(buttons, target)[0]}.`;
-    captureBox.hidden = false;
-    item(rows, target).diagram.dataset.selected = "";
-    cancel.focus({ preventScroll: true });
+    captureOrigin = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    store.getState().beginCapture(kind, target, id, module._WebGetPhysicalButtons(player));
+    if (store.getState().capture) cancel.focus({ preventScroll: true });
   }
 
-  function assign(source: string | number) {
-    if (!capture) return;
-    const { kind, target } = capture;
-    let previous: number;
-    if (kind === "key" && typeof source === "string") {
-      previous = swapBinding(keyboard, target, source);
-    } else if (kind === "pad" && typeof source === "number") {
-      previous = swapBinding(item(gamepads, player), target, source);
-    } else {
-      return;
+  function render() {
+    const { player, keyboard, gamepads, capture, notice, storageAvailable } = store.getState();
+    playerSelect.value = String(player);
+    captureBox.hidden = !capture;
+    if (capture) {
+      const name = item(buttons, capture.target)[0];
+      prompt.textContent =
+        capture.kind === "key"
+          ? `Press a key for ${name}.`
+          : capture.phase === "multiple"
+            ? "Release all buttons, then press just one."
+            : `${capture.phase === "press" ? "Press a controller button" : "Release held buttons"} for ${name}.`;
     }
-    finishCapture();
-    const name = item(buttons, target)[0];
-    const input = typeof source === "string" ? describeKey(source) : item(buttons, source)[2];
-    saveMaps(
-      previous >= 0 && previous !== target
-        ? `${name} and ${item(buttons, previous)[0]} inputs swapped.`
-        : `${name} assigned to ${input}.`,
-    );
-    refresh();
-  }
-
-  function refresh() {
+    let text = "";
+    if (notice?.kind === "disconnected") text = "Controller disconnected. Assignment canceled.";
+    else if (notice?.kind === "reset") text = "Original input defaults restored.";
+    else if (notice?.kind === "assigned") {
+      const { target, source, previous } = notice;
+      const name = item(buttons, target)[0];
+      const input = typeof source === "string" ? describeKey(source) : item(buttons, source)[2];
+      text =
+        previous >= 0 && previous !== target
+          ? `${name} and ${item(buttons, previous)[0]} inputs swapped.`
+          : `${name} assigned to ${input}.`;
+    }
+    message.textContent = storageAvailable
+      ? text
+      : `${text} Browser storage is unavailable.`.trim();
     const id = module._WebGetInputDevice(player);
     const raw = module._WebGetPhysicalButtons(player);
-    if (capture?.kind === "pad") {
-      if (id !== capture.id) {
-        finishCapture(false);
-        playerSelect.focus({ preventScroll: true });
-        message.textContent = "Controller disconnected. Assignment canceled.";
-      } else if (!raw && !capture.armed) {
-        capture.armed = true;
-        prompt.textContent = `Press a controller button for ${item(buttons, capture.target)[0]}.`;
-      } else if (capture.armed && raw) {
-        if ((raw & (raw - 1)) === 0) {
-          assign(31 - Math.clz32(raw));
-          return;
-        }
-        capture.armed = false;
-        prompt.textContent = "Release all buttons, then press just one.";
-      }
-    }
-
     const connection =
       player === 0
         ? `Keyboard · ${id ? "Controller connected" : "No controller connected"}`
@@ -364,6 +259,7 @@ export function initializeInputSettings(
           `Change ${name} using ${player === 0 ? "keyboard" : "controller"}`,
         );
       }
+      diagram.toggleAttribute("data-selected", capture?.target === target);
       diagram.disabled = player !== 0 && !id;
       pad.disabled = !id;
       diagram.toggleAttribute("data-active", fromKeyboard || fromPad);
@@ -371,6 +267,31 @@ export function initializeInputSettings(
       pad.toggleAttribute("data-active", fromPad);
     });
   }
+
+  function refresh() {
+    const { player } = store.getState();
+    store
+      .getState()
+      .sampleGamepad(module._WebGetInputDevice(player), module._WebGetPhysicalButtons(player));
+    render();
+  }
+
+  store.subscribe((state, previous) => {
+    if (state.gamepads !== previous.gamepads) {
+      state.gamepads.forEach((map, slot) => {
+        if (map !== previous.gamepads[slot])
+          map.forEach((source, target) => module._WebMapGamepadButton(slot, target, source));
+      });
+    }
+    if (state.keyboard !== previous.keyboard || state.gamepads !== previous.gamepads)
+      updateBlocked();
+    render();
+    if (previous.capture && !state.capture && state.notice !== previous.notice) {
+      if (state.notice?.kind === "assigned") restoreCaptureFocus(previous.capture);
+      else if (state.notice?.kind === "disconnected") playerSelect.focus({ preventScroll: true });
+      captureOrigin = null;
+    }
+  });
 
   function close() {
     finishCapture(false);
@@ -382,7 +303,7 @@ export function initializeInputSettings(
   settings.addEventListener("toggle", () => {
     clearInterval(interval);
     if (settings.open) {
-      message.textContent = storageAvailable ? "" : "Browser storage is unavailable.";
+      store.getState().clearNotice();
       refresh();
       interval = setInterval(refresh, 50);
     } else {
@@ -392,18 +313,16 @@ export function initializeInputSettings(
     updateBlocked();
   });
   playerSelect.addEventListener("change", () => {
+    const player = Number(playerSelect.value);
     finishCapture(false);
-    message.textContent = "";
-    player = Number(playerSelect.value);
+    store.getState().selectPlayer(player);
     refresh();
   });
   cancel.addEventListener("click", () => finishCapture());
   element("input-close", HTMLElement).addEventListener("click", close);
   element("input-reset", HTMLElement).addEventListener("click", () => {
     finishCapture(false);
-    keyboard = [...defaultKeys];
-    gamepads = gamepads.map(() => [...defaultPad]);
-    saveMaps("Original input defaults restored.");
+    store.getState().reset();
     refresh();
   });
 
@@ -434,12 +353,12 @@ export function initializeInputSettings(
         event.preventDefault();
         event.stopPropagation();
         if (!event.repeat) {
-          if (capture) finishCapture();
+          if (store.getState().capture) finishCapture();
           else close();
         }
         return;
       }
-      if (capture?.kind === "key" && settings.open) {
+      if (store.getState().capture?.kind === "key" && settings.open) {
         if (event.key === "Tab") return;
         event.preventDefault();
         event.stopPropagation();
@@ -450,7 +369,7 @@ export function initializeInputSettings(
           !event.metaKey &&
           bindableKey.test(event.code)
         )
-          assign(event.code);
+          store.getState().assign(event.code);
         return;
       }
       if (
@@ -476,12 +395,11 @@ export function initializeInputSettings(
     true,
   );
 
-  applyMaps();
-}
-
-function swapBinding<T>(map: T[], target: number, source: T): number {
-  const previous = map.indexOf(source);
-  if (previous >= 0) map[previous] = item(map, target);
-  map[target] = source;
-  return previous;
+  store
+    .getState()
+    .gamepads.forEach((map, slot) =>
+      map.forEach((source, target) => module._WebMapGamepadButton(slot, target, source)),
+    );
+  updateBlocked();
+  render();
 }
