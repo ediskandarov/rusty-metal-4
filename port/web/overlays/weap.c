@@ -173,11 +173,6 @@ static void destroy_bomb_class(RegistryDirectory* directory)
 {
     WeaponBombClassDestructor(directory);
 }
-/* Bullet dispatch supplies a hit position and ignores the legacy return value. */
-static s32 damage_bomb(void* object, s32 damage, SVECTOR* hit)
-{
-    return WeaponBombApplyDamage(object, damage, hit);
-}
 s32 WeaponFireballConstructor(WeaponFireball* fireball, va_list arguments);
 void WeaponFireballDestructor(WeaponFireball* fireball);
 void WeaponFireballDisplay(void*, Tm4OrderingTag*, u8**, u8*, MATRIX*);
@@ -215,7 +210,7 @@ OSWord WebWeaponExport(const char* name)
     EXPORT("WeaponBombConstructor", construct_bomb);
     EXPORT("WeaponBombDestructor", destroy_bomb);
     EXPORT("WeaponBombDisplay", display_bomb);
-    EXPORT("WeaponBombApplyDamage", damage_bomb);
+    EXPORT("WeaponBombApplyDamage", WeaponBombApplyDamage);
     EXPORT("WeaponProjectileClassDestructor", destroy_class);
     EXPORT("WeaponProjectileConstructor", construct);
     EXPORT("WeaponProjectileProcess", process);
