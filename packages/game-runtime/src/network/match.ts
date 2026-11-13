@@ -1,3 +1,4 @@
+import { NetworkConnectionError } from "@tm4/lightyear-client";
 import type { LobbyState, Message, Request, SnapshotBegin } from "@tm4/lightyear-client/schemas";
 
 import { startClientJournal } from "./journal.ts";
@@ -13,6 +14,7 @@ export type LobbyView = (
 ) => void;
 
 const resumeIdleMs = 7_000;
+const maxReconnectAttempts = 3;
 
 type SnapshotDownload = {
   header: SnapshotBegin;
@@ -91,6 +93,7 @@ export async function joinMatch(
   let recoveryDeadline: ReturnType<typeof setTimeout> | undefined;
   let prediction: ReturnType<typeof attachLivePrediction> | undefined;
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let reconnectAttempts = 0;
   const credentialKey = "tm4.resume." + endpoint;
   let credential: string | null = null;
   try {
@@ -144,11 +147,20 @@ export async function joinMatch(
   };
   const armResumeTimeout = () => {
     clearTimeout(recoveryDeadline);
-    recoveryDeadline = setTimeout(() => fail("Reconnect progress timed out"), resumeIdleMs);
+    recoveryDeadline = setTimeout(
+      () => onerror(new NetworkConnectionError("Reconnect progress timed out")),
+      resumeIdleMs,
+    );
   };
 
   const reconnect = async () => {
     if (session.phase !== "suspended" || document.hidden) return;
+    if (reconnectAttempts >= maxReconnectAttempts) {
+      fail("Could not reconnect after " + maxReconnectAttempts + " attempts");
+      return;
+    }
+    reconnectAttempts++;
+    journal.record("reconnect", null, { attempt: reconnectAttempts });
     const attempt: SessionState = { phase: "reconnecting" };
     session = attempt;
     show("lobby", "Reconnecting to the current match…");
@@ -163,7 +175,7 @@ export async function joinMatch(
       session = { phase: "connecting" };
       bindSocket();
     } catch (error) {
-      if (session === attempt) fail(error);
+      if (session === attempt) onerror(error);
     } finally {
       if (session.phase === "suspended" && !document.hidden) scheduleReconnect();
     }
@@ -171,7 +183,7 @@ export async function joinMatch(
   const scheduleReconnect = () => {
     clearTimeout(reconnectTimer);
     // Let the old transport close on the server before reclaiming its slot.
-    reconnectTimer = setTimeout(() => void reconnect(), 500);
+    reconnectTimer = setTimeout(() => void reconnect(), 500 * 2 ** reconnectAttempts);
   };
   const suspend = (reason: string) => {
     if (session.phase === "closed" || !credential) return false;
@@ -213,10 +225,12 @@ export async function joinMatch(
         ? { type: "resume", token, compatibility: port.compatibility }
         : { type: "join", compatibility: port.compatibility },
     );
+    if (reconnectAttempts > 0) armResumeTimeout();
   };
   const onerror = (error: unknown) => {
     sampleTransportDiagnostics();
     const unsupported = port.netMatch?.unsupported;
+    if (!unsupported && error instanceof NetworkConnectionError && suspend(error.message)) return;
     fail(unsupported ? "Live rollback cannot restore this state: " + unsupported : error);
   };
 
@@ -251,6 +265,11 @@ export async function joinMatch(
   const onmessage = (message: Message) => {
     try {
       switch (message.type) {
+        case "resume_pending":
+          if (session.phase !== "connecting" || !credential)
+            throw new Error("Unexpected reconnect retry response");
+          suspend("Previous connection is still closing");
+          break;
         case "prediction_recovery_required":
           sampleTransportDiagnostics();
           journal.record("recovery-required", port.netMatch?.tick ?? null, {
@@ -275,6 +294,8 @@ export async function joinMatch(
         case "lobby":
           if (slot < 0 || slot >= message.players.length || prediction)
             throw new Error("Invalid lobby state");
+          reconnectAttempts = 0;
+          clearTimeout(recoveryDeadline);
           show("lobby", "");
           lobby({
             ...message,
@@ -360,6 +381,8 @@ export async function joinMatch(
             throw new Error("Unexpected live prediction clock anchor");
           socket.beginPrediction(message.anchor, epoch, players, slot, prediction.depth);
           session = { phase: "playing" };
+          reconnectAttempts = 0;
+          clearTimeout(recoveryDeadline);
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;
         case "snapshot_begin": {
@@ -504,6 +527,7 @@ export async function joinMatch(
             throw new Error("Unexpected reconnect acknowledgement");
           journal.record("resumed", message.head, { snapshotTick: session.download.header.tick });
           session = { phase: "playing" };
+          reconnectAttempts = 0;
           clearTimeout(recoveryDeadline);
           show("playing", "Player " + (slot + 1) + " of " + players + " · Live prediction");
           break;

@@ -11,8 +11,19 @@ target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
   try {
     const errors = [];
     const clients = await Promise.all(
-      [0, 1].map(async () => {
+      [0, 1].map(async (index) => {
         const page = await browser.newPage();
+        if (index === 0) {
+          await page.addInitScript(() => {
+            const NativeWebSocket = globalThis.WebSocket;
+            globalThis.WebSocket = class extends NativeWebSocket {
+              constructor(...args) {
+                super(...args);
+                (globalThis.testSockets ??= []).push(this);
+              }
+            };
+          });
+        }
         page.on("pageerror", (error) => errors.push(error.message));
         await page.route("**/network/tm4_network.js", async (route) => {
           const response = await route.fetch();
@@ -35,7 +46,12 @@ target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
           });
         });
         await page.goto(target.href);
-        await readyInLobby(page);
+        try {
+          await readyInLobby(page);
+        } catch (error) {
+          console.error("Lobby did not open", await page.locator("#status").textContent());
+          throw error;
+        }
         return page;
       }),
     );
@@ -112,8 +128,33 @@ target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
       recoveries.length > 0,
       "Rust must explicitly request recovery after its timeline expires",
     );
+    await client.evaluate(() => {
+      globalThis.previousRecovery = tm4Port.netDiagnostics.recoveredTick;
+    });
+    const statusBefore = await client.locator("#status").textContent();
+    const connectionsBefore = await client.evaluate(() => {
+      const count = globalThis.testSockets.length;
+      globalThis.testSockets.at(-1).close(1000, "Test transport interruption");
+      return count;
+    });
+    await wait(client, () => {
+      const port = globalThis.tm4Port;
+      return (
+        (port?.netDiagnostics?.recoveredTick > globalThis.previousRecovery &&
+          port.netConfirmedTick > port.netDiagnostics.recoveredTick + 30) ||
+        document.getElementById("status").dataset.matchState === "error"
+      );
+    });
+    assert(
+      (await client.evaluate(() => globalThis.testSockets.length)) > connectionsBefore,
+      "Transport loss must open a new connection",
+    );
+    assert.equal(await client.locator("#status").textContent(), statusBefore);
     assert.deepEqual(errors, []);
-    console.log("PASS hidden-tab, frozen-event-loop and native network-pause recovery", recoveries);
+    console.log(
+      "PASS hidden-tab, event-loop, native clock and transport-loss recovery",
+      recoveries,
+    );
   } finally {
     await browser.close();
   }

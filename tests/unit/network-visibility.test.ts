@@ -3,6 +3,7 @@ import { afterEach, expect, mock, test } from "bun:test";
 import { clientJournal } from "@tm4/game-runtime/network/journal";
 import type { NetworkPort } from "@tm4/game-runtime/network/protocol";
 import { checksum } from "@tm4/game-runtime/network/replay";
+import { NetworkConnectionError } from "@tm4/lightyear-client";
 import type { Message, Request } from "@tm4/lightyear-client/schemas";
 
 class Connection {
@@ -267,7 +268,7 @@ test("a connection completed after suspension cannot replace the current attempt
   connectionPending = undefined;
   page.hidden = false;
   page.dispatchEvent(new Event("visibilitychange"));
-  await Bun.sleep(550);
+  await Bun.sleep(1050);
   expect(connections).toHaveLength(3);
   const next = connections[2]!;
   next.onopen();
@@ -298,7 +299,7 @@ test("suspending during snapshot download discards that attempt and its late blo
   expect(interrupted.sent.some((message) => message.type === "resume_clock")).toBe(false);
   page.hidden = false;
   page.dispatchEvent(new Event("visibilitychange"));
-  await Bun.sleep(550);
+  await Bun.sleep(1050);
   expect(connections).toHaveLength(3);
   const next = connections[2]!;
   next.onopen();
@@ -334,7 +335,7 @@ test("unavailable diagnostics do not prevent joining or confirming frames", asyn
   expect(port.netDiagnostics?.transportError).toBeUndefined();
 });
 
-test("diagnostic failures do not block snapshot recovery or replace transport errors", async () => {
+test("diagnostic failures do not block snapshot recovery or replace runtime errors", async () => {
   const { first, port, statuses } = await setup();
   first.diagnostics = unavailableDiagnostics;
   first.onmessage({
@@ -347,10 +348,95 @@ test("diagnostic failures do not block snapshot recovery or replace transport er
   await restore(next);
   expect(statuses.at(-1)?.[0]).toBe("playing");
   expect(port.netConfirmedTick).toBe(20);
-  next.onerror(new Error("connection lost"));
-  expect(statuses.at(-1)).toEqual(["error", "connection lost"]);
-  expect(clientJournal()?.export().stopped).toBe("connection lost");
+  next.onerror(new Error("runtime failed"));
+  expect(statuses.at(-1)).toEqual(["error", "runtime failed"]);
+  expect(clientJournal()?.export().stopped).toBe("runtime failed");
 });
+
+test("transport loss restores the same player and successful recovery resets the retry budget", async () => {
+  const { first, port, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  await restore(next);
+  expect(port.netConfirmedTick).toBe(20);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+  next.onerror(new NetworkConnectionError("connection lost again"));
+  await Bun.sleep(550);
+  const third = connections[2]!;
+  third.onopen();
+  await restore(third);
+  expect(
+    clientJournal()
+      ?.export()
+      .events.filter((event) => event.kind === "reconnect")
+      .map((event) => event.data),
+  ).toEqual([{ attempt: 1 }, { attempt: 1 }]);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+});
+
+test("connection failures stop after three consecutive reconnect attempts", async () => {
+  const { first, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await Bun.sleep(500 * 2 ** (attempt - 1) + 50);
+    expect(connections).toHaveLength(attempt + 1);
+    connections[attempt]!.onerror(new NetworkConnectionError("connection timed out"));
+  }
+  await Bun.sleep(4050);
+  expect(connections).toHaveLength(4);
+  expect(statuses.at(-1)).toEqual(["error", "Could not reconnect after 3 attempts"]);
+  expect(clientJournal()?.export().stopped).toContain("3 attempts");
+}, 10000);
+
+test("leaving the room cancels a retry after transport loss", async () => {
+  const { first } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  stop!();
+  await Bun.sleep(550);
+  expect(connections).toHaveLength(1);
+});
+
+test("a busy previous connection retries, but a rejected credential remains fatal", async () => {
+  const { first, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  next.onmessage({ type: "resume_pending" });
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  await Bun.sleep(1050);
+  const third = connections[2]!;
+  third.onopen();
+  third.onmessage({ type: "error", message: "This participant cannot resume this match." });
+  expect(statuses.at(-1)).toEqual(["error", "This participant cannot resume this match."]);
+  await Bun.sleep(2100);
+  expect(connections).toHaveLength(3);
+});
+
+test("unsupported simulation state is fatal even when the transport also fails", async () => {
+  const { first, port, statuses } = await setup();
+  port.netMatch!.unsupported = "unsupported object";
+  first.onerror(new NetworkConnectionError("connection lost"));
+  expect(statuses.at(-1)).toEqual([
+    "error",
+    "Live rollback cannot restore this state: unsupported object",
+  ]);
+  await Bun.sleep(550);
+  expect(connections).toHaveLength(1);
+});
+
+test("stalled snapshot download retries through the same recovery path", async () => {
+  const { first, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  next.onmessage({ type: "welcome", slot: 0 });
+  next.onmessage({ type: "resume_prepare", ...start });
+  await Bun.sleep(8100);
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  expect(connections).toHaveLength(3);
+  const third = connections[2]!;
+  third.onopen();
+  await restore(third);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+}, 10000);
 
 test("recovery owns its retarget limit independently of diagnostic counters", async () => {
   const { first, port, statuses } = await setup();

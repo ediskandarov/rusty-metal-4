@@ -87,6 +87,7 @@ export const messageSchema = z.discriminatedUnion("type", [
   startSchema.extend({ type: z.literal("prediction_prepare") }),
   startSchema.extend({ type: z.literal("resume_prepare") }),
   z.object({ type: z.literal("resume_credential"), token: sha256Schema }),
+  z.object({ type: z.literal("resume_pending") }),
   snapshotBeginSchema,
   z.object({
     type: z.literal("snapshot_chunk"),

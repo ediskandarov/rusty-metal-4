@@ -645,9 +645,11 @@ impl Match {
                         && !self.ended
                         && self.tick > 0
                 });
-                if let (Some(slot), Some(session)) = (requested, session)
-                    && self.players[slot].entity.is_none()
-                {
+                if let (Some(slot), Some(session)) = (requested, session) {
+                    if self.players[slot].entity.is_some() {
+                        send(links, entity, &Message::ResumePending);
+                        return;
+                    }
                     self.health
                         .lock()
                         .unwrap()
@@ -661,9 +663,13 @@ impl Match {
                     send(links, entity, &Message::Welcome { slot });
                     send(links, entity, &Message::ResumePrepare(session.clone()));
                 } else {
-                    send(links, entity, &Message::Error {
-                        message: "This participant cannot resume this match. If its previous connection is still closing, retry in a moment.".into(),
-                    });
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: "This participant cannot resume this match.".into(),
+                        },
+                    );
                 }
             }
             Request::SnapshotReceived {

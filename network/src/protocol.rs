@@ -232,4 +232,5 @@ pub enum Message {
     PredictionOffer {
         anchor: u32,
     },
+    ResumePending,
 }

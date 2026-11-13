@@ -46,6 +46,9 @@ interface Bindings {
   NetworkClient: new (endpoint: string) => RustClient;
 }
 let bindings: Promise<Bindings> | undefined;
+
+export class NetworkConnectionError extends Error {}
+
 async function loadBindings(): Promise<Bindings> {
   if (!bindings)
     bindings = (async () => {
@@ -141,15 +144,15 @@ export async function connectNetwork(endpoint: string) {
         opened = true;
         transport.readyState = 1;
         transport.onopen();
-      } else if (opened && !connected) {
-        throw new Error("Lost the Lightyear connection");
-      } else if (!opened && performance.now() - started > 10_000) {
-        throw new Error("Lightyear connection timed out");
       }
       for (const message of messages) {
         if (closed) break;
         transport.onmessage(message);
       }
+      if (closed) return;
+      if (opened && !connected) throw new NetworkConnectionError("Lost the Lightyear connection");
+      if (!opened && performance.now() - started > 10_000)
+        throw new NetworkConnectionError("Lightyear connection timed out");
     } catch (error) {
       maxUpdateMs = Math.max(maxUpdateMs, performance.now() - now);
       console.error("Lightyear runtime failure", error);
