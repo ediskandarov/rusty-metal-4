@@ -11,7 +11,7 @@ interface ModsState {
   error: string | null;
   addFiles: (files: readonly File[]) => Promise<void>;
   remove: (id: string) => Promise<void>;
-  beginSession: () => Promise<CarMod[]>;
+  beginSession: (options?: { enabled: boolean }) => Promise<CarMod[]>;
   finishStartup: (started: boolean) => void;
 }
 
@@ -86,12 +86,12 @@ export function createModsStore({
     remove(id) {
       return update(() => get().selected.filter((mod) => mod.manifest.id !== id));
     },
-    async beginSession() {
+    async beginSession({ enabled } = { enabled: true }) {
       if (get().session !== "idle") throw new Error("A mod session has already started");
       // Lock before waiting: an in-flight save belongs to this launch, later edits do not.
       set({ session: "starting" });
       await pending;
-      const selected = [...get().selected];
+      const selected = enabled ? [...get().selected] : [];
       set({ active: selected });
       return [...selected];
     },

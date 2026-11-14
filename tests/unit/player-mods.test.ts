@@ -193,3 +193,28 @@ test("real mod package is validated, persisted and restored through the store", 
   expect(selected[0]!.manifest).toEqual(manifest);
   expect(selected[0]!.model.folders.has("display")).toBe(true);
 });
+
+test("network startup excludes restored mods without changing the saved selection", async () => {
+  const restored = deferred<Uint8Array<ArrayBuffer>[]>();
+  let saves = 0;
+  const store = createModsStore({
+    load: () => restored.promise,
+    read,
+    save: () => {
+      ++saves;
+      return Promise.resolve();
+    },
+  });
+  const session = store.getState().beginSession({ enabled: false });
+  expect(modsLocked(store.getState())).toBe(true);
+  restored.resolve([bytes]);
+  expect(await session).toEqual([]);
+  expect(store.getState().active).toEqual([]);
+  expect(store.getState().selected[0]!.manifest.id).toBe("evelyn");
+  store.getState().finishStartup(true);
+  expect(store.getState().session).toBe("running");
+  expect(saves).toBe(0);
+
+  const singleplayer = createModsStore({ load: () => Promise.resolve([bytes]), save, read });
+  expect((await singleplayer.getState().beginSession())[0]!.manifest.id).toBe("evelyn");
+});

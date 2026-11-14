@@ -23,7 +23,8 @@ import { initializeStartup } from "./ui/startup.ts";
 import { initializeTroubleshoot } from "./ui/troubleshoot.ts";
 
 const endpoint = new URLSearchParams(location.search).get("match");
-document.documentElement.classList.toggle("network-game", inRoom || !!endpoint);
+const networkGame = inRoom || !!endpoint;
+document.documentElement.classList.toggle("network-game", networkGame);
 
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
@@ -55,7 +56,7 @@ async function launch(
 ) {
   if (!begin(source)) return;
   try {
-    const selectedMods = await mods.getState().beginSession();
+    const selectedMods = await mods.getState().beginSession({ enabled: !networkGame });
     const { sources, warnings: messages } = await resolveSources();
     startup.getState().loadDisc(messages);
     messages?.forEach((message) => console.warn(message));
@@ -69,7 +70,7 @@ async function launch(
     startRuntime();
     const status = element("status", HTMLElement);
     const showMatchStatus = matchStatus(status);
-    if (endpoint || inRoom) {
+    if (networkGame) {
       showMatchStatus("lobby", "Preparing Free for all…");
     }
     const runtime = await startGame(assets, canvas, {
