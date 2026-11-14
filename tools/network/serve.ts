@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import { runCli, UsageError } from "../cli.js";
 import { isolationHeaders, serveFile, staticFile } from "../server/files.js";
 
 export async function serveHost(options: {
@@ -49,21 +50,32 @@ export async function serveHost(options: {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({
-    options: {
-      mode: { type: "string", default: "dev" },
-      port: { type: "string", default: "8120" },
-      api: { type: "string", default: "http://127.0.0.1:8121" },
-    },
+  await runCli(async () => {
+    const { values } = parseArgs({
+      strict: true,
+      allowPositionals: false,
+      options: {
+        help: { type: "boolean", short: "h" },
+        mode: { type: "string", default: "dev" },
+        port: { type: "string", default: "8120" },
+        api: { type: "string", default: "http://127.0.0.1:8121" },
+      },
+    });
+    if (values.help) {
+      console.log(
+        "Usage: bun run server:site [--mode dev|release|diagnostic] [--port PORT] [--api URL]",
+      );
+      return;
+    }
+    if (!["dev", "release", "diagnostic"].includes(values.mode))
+      throw new UsageError("Unknown build mode");
+    const port = Number(values.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new UsageError("Invalid port");
+    const server = await serveHost({
+      site: resolve(import.meta.dir, "../../build", values.mode, "server-site"),
+      api: values.api,
+      port,
+    });
+    console.log(`Server web app: ${server.url}`);
   });
-  if (!["dev", "release", "diagnostic"].includes(values.mode))
-    throw new Error("Unknown build mode");
-  const port = Number(values.port);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
-  const server = await serveHost({
-    site: resolve(import.meta.dir, "../../build", values.mode, "server-site"),
-    api: values.api,
-    port,
-  });
-  console.log(`Server web app: ${server.url}`);
 }

@@ -1,12 +1,23 @@
 import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 import { $, Glob } from "bun";
 
-import { runCli } from "../cli.js";
-import { buildPath, options, root } from "../common.js";
+import { runCli, UsageError } from "../cli.js";
+import { buildPath, root } from "../common.js";
 await runCli(async () => {
-  const { output: requested } = options(["output"]);
+  const { values } = parseArgs({
+    strict: true,
+    allowPositionals: false,
+    options: { help: { type: "boolean", short: "h" }, output: { type: "string" } },
+  });
+  if (values.help) {
+    console.log("Usage: bun tools/prepare/game.js --output PATH");
+    return;
+  }
+  if (!values["output"]) throw new UsageError("bun tools/prepare/game.js --output PATH");
+  const { output: requested } = values;
   const output = await buildPath(requested);
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });

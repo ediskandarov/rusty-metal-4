@@ -1,15 +1,24 @@
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { runCli } from "../cli.js";
+import { runCli, UsageError } from "../cli.js";
 import { root } from "../common.js";
 
 await runCli(async () => {
-  const modeIndex = process.argv.indexOf("--mode");
-  const mode = modeIndex < 0 ? "dev" : process.argv[modeIndex + 1];
+  const { values } = parseArgs({
+    strict: true,
+    allowPositionals: false,
+    options: { help: { type: "boolean", short: "h" }, mode: { type: "string", default: "dev" } },
+  });
+  if (values.help) {
+    console.log("Usage: bun tools/network/build.ts [--mode dev|release|diagnostic]");
+    return;
+  }
+  const mode = values.mode;
   if (!mode || !["dev", "release", "diagnostic"].includes(mode))
-    throw new Error("Unknown network build mode");
+    throw new UsageError("Unknown network build mode");
   const profile = mode !== "diagnostic" ? "release" : "debug";
   const manifest = join(root, "network/Cargo.toml");
   const target = join(root, "build/network-wasm");

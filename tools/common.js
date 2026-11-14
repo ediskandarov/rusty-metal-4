@@ -1,14 +1,7 @@
 import { mkdir, realpath } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
-import { parseArgs } from "node:util";
 
 export const root = resolve(import.meta.dir, "..");
-export function options(names, args = process.argv.slice(2)) {
-  return parseArgs({
-    args,
-    options: Object.fromEntries(names.map((name) => [name, { type: "string" }])),
-  }).values;
-}
 export async function write(path, text) {
   if (
     (await Bun.file(path)

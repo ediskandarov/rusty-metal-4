@@ -6,16 +6,23 @@ import { $ } from "bun";
 
 import { buildPlayer } from "../apps/player/build.ts";
 import { buildServer } from "../apps/server/build.ts";
-import { runCli } from "./cli.js";
+import { runCli, UsageError } from "./cli.js";
 import { root } from "./common.js";
 await runCli(async () => {
   const { values } = parseArgs({
+    strict: true,
+    allowPositionals: false,
     options: {
+      help: { type: "boolean", short: "h" },
       dev: { type: "boolean", default: false },
       diagnostic: { type: "boolean", default: false },
     },
   });
-  if (values.dev && values.diagnostic) throw new Error("Choose either --dev or --diagnostic");
+  if (values.help) {
+    console.log("Usage: bun run build [--dev | --diagnostic]");
+    return;
+  }
+  if (values.dev && values.diagnostic) throw new UsageError("Choose either --dev or --diagnostic");
   const mode = values.diagnostic ? "diagnostic" : values.dev ? "dev" : "release";
   const diagnostics = values.diagnostic;
   const directory = join(root, "build", mode);

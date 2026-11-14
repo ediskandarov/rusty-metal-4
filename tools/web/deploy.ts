@@ -8,9 +8,11 @@ import { root } from "../common.js";
 
 await runCli(async () => {
   const { values } = parseArgs({
+    strict: true,
+    allowPositionals: false,
     options: {
       "prepare-only": { type: "boolean", default: false },
-      help: { type: "boolean", default: false },
+      help: { type: "boolean", short: "h", default: false },
     },
   });
 

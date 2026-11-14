@@ -1,10 +1,11 @@
 import { utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { runCli } from "../cli.js";
-import { json, options, root, write } from "../common.js";
+import { runCli, UsageError } from "../cli.js";
+import { json, root, write } from "../common.js";
 import { findDefinitions, planExports, selectExports, validateExports } from "../exports/model.js";
 import { renderAccessor, renderRegistry } from "../exports/templates.js";
 
@@ -70,14 +71,50 @@ async function check({ manifestFile, stamp }) {
 }
 
 await runCli(async () => {
-  const [action, ...args] = process.argv.slice(2);
-  const separator = args.indexOf("--");
-  const compiler = separator < 0 ? [] : args.slice(separator + 1);
-  const commandArgs = separator < 0 ? args : args.slice(0, separator);
-  const flags = options(
-    ["sources", "output", "game-root", "manifest", "unit", "stamp"],
-    commandArgs,
+  const {
+    values: flags,
+    positionals,
+    tokens,
+  } = parseArgs({
+    strict: true,
+    allowPositionals: true,
+    tokens: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      sources: { type: "string" },
+      output: { type: "string" },
+      "game-root": { type: "string" },
+      manifest: { type: "string" },
+      unit: { type: "string" },
+      stamp: { type: "string" },
+    },
+  });
+  if (flags.help) {
+    console.log(
+      "Usage: bun tools/prepare/exports.js plan --game-root PATH --sources FILE --output PATH\n       bun tools/prepare/exports.js generate --manifest FILE --unit ID --output FILE -- COMPILER [ARGS...]\n       bun tools/prepare/exports.js check --manifest FILE --stamp FILE",
+    );
+    return;
+  }
+  const separator = tokens.find((token) => token.kind === "option-terminator");
+  const before = tokens.filter(
+    (token) => token.kind === "positional" && (!separator || token.index < separator.index),
   );
+  if (before.length !== 1)
+    throw new UsageError("Supply one export command: plan, generate or check");
+  const [action, ...compiler] = positionals;
+  if (action !== "generate" && separator)
+    throw new UsageError("Only generate accepts a compiler after --");
+  const requirements = {
+    plan: ["game-root", "sources", "output"],
+    generate: ["manifest", "unit", "output"],
+    check: ["manifest", "stamp"],
+  };
+  if (!Object.hasOwn(requirements, action))
+    throw new UsageError("Unknown export command: " + action);
+  const required = requirements[action];
+  for (const name of required) if (!flags[name]) throw new UsageError("Supply --" + name);
+  if (action === "generate" && !compiler.length)
+    throw new UsageError("Supply the compiler command after --");
 
   switch (action) {
     case "plan":

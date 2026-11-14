@@ -1,6 +1,19 @@
+const { parseArgs } = require("node:util");
 const { chromium } = require("playwright");
 const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
 (async () => {
+  const { values, positionals } = parseArgs({
+    strict: true,
+    allowPositionals: true,
+    options: { help: { type: "boolean", short: "h" } },
+  });
+  if (values.help) {
+    console.log("Usage: bun run test:simulation:record [OUTPUT]");
+    return;
+  }
+  if (positionals.length > 1 || positionals[0] === "")
+    throw new Error("Supply at most one output path");
+  const output = positionals[0] ?? process.env.TM4_TEST_RECORD ?? "build/browser-record.json";
   const browser = await chromium.launch({
     channel: "chrome",
     args: ["--enable-unsafe-swiftshader", "--mute-audio"],
@@ -97,10 +110,7 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
         firstCar: process.env.TM4_TEST_CAR,
       },
     );
-    await Bun.write(
-      process.argv[2] || process.env.TM4_TEST_RECORD || "build/browser-record.json",
-      JSON.stringify(record),
-    );
+    await Bun.write(output, JSON.stringify(record));
     console.log(
       JSON.stringify({
         rows: record.rows.length,
@@ -115,6 +125,6 @@ const { fixtureAction, fixtureCommands } = require("./fixture.cjs");
     await browser.close();
   }
 })().catch((error) => {
-  console.error(error);
+  console.error("error: " + (error instanceof Error ? error.message : error));
   process.exit(1);
 });

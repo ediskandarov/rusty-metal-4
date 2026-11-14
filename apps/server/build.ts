@@ -3,6 +3,7 @@ import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import { runCli, UsageError } from "../../tools/cli.js";
 import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer, type PlayerMode } from "../player/build.ts";
 
@@ -65,9 +66,19 @@ export async function buildServer(mode: PlayerMode) {
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { mode: { type: "string", default: "dev" } } });
-  const mode = values.mode;
-  if (mode !== "release" && mode !== "dev" && mode !== "diagnostic")
-    throw new Error("Choose --mode release, dev or diagnostic");
-  console.log(`Built server bundle: ${await buildServer(mode)}`);
+  await runCli(async () => {
+    const { values } = parseArgs({
+      strict: true,
+      allowPositionals: false,
+      options: { help: { type: "boolean", short: "h" }, mode: { type: "string", default: "dev" } },
+    });
+    if (values.help) {
+      console.log("Usage: bun run build:server [--mode dev|release|diagnostic]");
+      return;
+    }
+    const mode = values.mode;
+    if (mode !== "release" && mode !== "dev" && mode !== "diagnostic")
+      throw new UsageError("Choose --mode release, dev or diagnostic");
+    console.log(`Built server bundle: ${await buildServer(mode)}`);
+  });
 }

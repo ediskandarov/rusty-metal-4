@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { parseArgs } from "node:util";
 
 import { readMr } from "@tm4/resources/compatibility/mr";
 import { type CarDisplayOptions, validateCarMr } from "@tm4/resources/mods/car-display";
@@ -40,7 +41,17 @@ async function independentComparison(
 }
 
 async function main(args: string[]) {
-  if (args.includes("--help") || args.length === 0) {
+  const { values, positionals } = parseArgs({
+    args,
+    strict: true,
+    allowPositionals: true,
+    options: {
+      help: { type: "boolean", short: "h" },
+      "strict-associations": { type: "boolean" },
+      "reference-root": { type: "string" },
+    },
+  });
+  if (values.help || args.length === 0) {
     console.log(
       "Usage: bun tools/resources/validate-car.ts FILE [--strict-associations] [--reference-root game]",
     );
@@ -48,17 +59,10 @@ async function main(args: string[]) {
     console.log("Does not establish playable-mod completeness, runtime behavior or art quality.");
     return;
   }
-  const input = args.shift()!;
-  let referenceRoot: string | undefined;
-  const options: CarDisplayOptions = {};
-  while (args.length) {
-    const option = args.shift();
-    if (option === "--strict-associations") options.strictAssociations = true;
-    else if (option === "--reference-root") {
-      referenceRoot = args.shift();
-      requireValue(referenceRoot, "--reference-root requires a path");
-    } else throw new Error(`Unknown option: ${option}`);
-  }
+  requireValue(positionals.length === 1 && positionals[0], "Supply exactly one car MR file");
+  const input = positionals[0];
+  const referenceRoot = values["reference-root"];
+  const options: CarDisplayOptions = { strictAssociations: values["strict-associations"] };
   const bytes = new Uint8Array(await Bun.file(input).arrayBuffer());
   const result = await validateCarMr(bytes, options);
   if (referenceRoot && !result.errors.length) {

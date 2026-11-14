@@ -1,14 +1,23 @@
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { runCli } from "../cli.js";
+import { runCli, UsageError } from "../cli.js";
 import { root } from "../common.js";
 await runCli(async () => {
-  const modeIndex = process.argv.indexOf("--mode");
-  const mode = modeIndex < 0 ? "dev" : process.argv[modeIndex + 1];
+  const { values } = parseArgs({
+    strict: true,
+    allowPositionals: false,
+    options: { help: { type: "boolean", short: "h" }, mode: { type: "string", default: "dev" } },
+  });
+  if (values.help) {
+    console.log("Usage: bun tools/headless/build.ts [--mode dev|release|diagnostic]");
+    return;
+  }
+  const mode = values.mode;
   if (!mode || !["dev", "release", "diagnostic"].includes(mode))
-    throw new Error("Unknown simulation build mode");
+    throw new UsageError("Unknown simulation build mode");
   const directory = join(root, "build", mode, "authority");
   const definitions = [
     "-DCMAKE_BUILD_TYPE=Release",
