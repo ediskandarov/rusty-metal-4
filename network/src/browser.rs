@@ -294,9 +294,16 @@ impl NetworkClient {
         let world = self.app.world_mut();
         let roster: Vec<_> = world.query::<(&ControllerIdentity, Has<InputMarker<ControllerCommand>>, &NativeBuffer<Input>)>().iter(world).map(|(identity, local, buffer)| serde_json::json!({"identity": identity, "local": local, "acceptedThrough": buffer.last_remote_tick.map(|tick| tick.0)})).collect();
         let link = world.get::<Link>(self.connection);
+        let rtt_samples = world
+            .get::<PingManager>(self.connection)
+            .map_or(0, |manager| manager.latency_samples_recv());
+        // LinkStats starts at zero; only explicit Ping/Pong samples make it an estimate.
+        let measured_link =
+            link.filter(|_| rtt_samples > 0 && world.get::<Connected>(self.connection).is_some());
         serde_json::json!({
-            "rttMs": link.map(|l| l.stats.rtt.as_secs_f64() * 1000.0),
-            "jitterMs": link.map(|l| l.stats.jitter.as_secs_f64() * 1000.0),
+            "rttSamples": rtt_samples,
+            "rttMs": measured_link.map(|l| l.stats.rtt.as_secs_f64() * 1000.0),
+            "jitterMs": measured_link.map(|l| l.stats.jitter.as_secs_f64() * 1000.0),
             "queuedPackets": link.map(|l| l.recv.len() + l.send.len()),
             "nativeTick": world.resource::<LocalTimeline>().tick().0,
             "nativeRoster": roster,

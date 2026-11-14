@@ -75,12 +75,23 @@ export async function connectNetwork(endpoint: string) {
   let pollGapMs = 0;
   let maxPollGapMs = 0;
   let maxUpdateMs = 0;
+  let rttSamples = 0;
+  let lastRttSampleAt: number | undefined;
   const transport = {
     readyState: 0,
-    diagnostics: () => ({
-      ...diagnosticsSchema.parse(JSON.parse(client.diagnostics())),
-      pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
-    }),
+    diagnostics: () => {
+      const diagnostics = diagnosticsSchema.parse(JSON.parse(client.diagnostics()));
+      const now = performance.now();
+      if (diagnostics.rttSamples !== rttSamples) {
+        rttSamples = diagnostics.rttSamples;
+        lastRttSampleAt = rttSamples > 0 ? now : undefined;
+      }
+      return {
+        ...diagnostics,
+        rttSampleAgeMs: lastRttSampleAt === undefined ? null : now - lastRttSampleAt,
+        pump: { pollGapMs, maxPollGapMs, maxUpdateMs, visibility: document.visibilityState },
+      };
+    },
     preparePrediction: (
       slotMask: number,
       participants: string[],

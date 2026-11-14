@@ -62,6 +62,8 @@ export interface NetworkPort {
   };
   netDiagnostics?: {
     receivedFrames: number;
+    transportActive?: boolean;
+    transportSampledAt?: number;
     clockOffers?: number;
     recoveredTick?: number;
     snapshotTick?: number;

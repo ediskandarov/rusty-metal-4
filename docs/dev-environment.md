@@ -137,6 +137,11 @@ scenario flags (timing, audio, background tabs) remain local to their tests.
   `startDiagnosticGame` rejects ordinary Wasm with a build hint instead of waiting
   for nonexistent game counters. Match scenarios additionally need the server
   fixtures described below.
+- `bun tests/browser/check_network_latency.mjs` checks live Lightyear RTT, a 90 ms
+  incoming packet delay, stale diagnostics and connection replacement. Set
+  `TM4_WEB_URL` to a dev player with local disc resources and `TM4_MATCH_ENDPOINT`
+  to a fresh two-player authority. Screenshots go under `build/checks/`. This
+  checks a local authority, not Cloudflare latency.
 - `bun run test:pages` serves its own release site without disc assets and checks
   isolation, subpath loading and runtime initialization; it needs no diagnostic build.
 

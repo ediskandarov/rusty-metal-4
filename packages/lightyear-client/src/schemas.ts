@@ -203,6 +203,7 @@ export const requestSchema = z.discriminatedUnion("type", [
 export type Request = z.infer<typeof requestSchema>;
 const count = z.number().finite().nonnegative();
 export const diagnosticsSchema = z.object({
+  rttSamples: count,
   rttMs: count.nullable(),
   jitterMs: count.nullable(),
   queuedPackets: count.nullable(),

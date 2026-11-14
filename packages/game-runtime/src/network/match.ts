@@ -80,10 +80,12 @@ export async function joinMatch(
   }
   const diagnostics: NonNullable<NetworkPort["netDiagnostics"]> = (port.netDiagnostics = {
     receivedFrames: 0,
+    transportActive: false,
   });
   const sampleTransportDiagnostics = () => {
     try {
       diagnostics.transport = socket.diagnostics();
+      diagnostics.transportSampledAt = performance.now();
       delete diagnostics.transportError;
     } catch (error) {
       diagnostics.transportError = error instanceof Error ? error.message : String(error);
@@ -95,6 +97,9 @@ export async function joinMatch(
   const stopAttempt = (phase: "closed" | "suspended") => {
     const previous = session;
     session = { phase };
+    diagnostics.transportActive = false;
+    delete diagnostics.transport;
+    delete diagnostics.transportSampledAt;
     socket.close();
     if (previous.phase === "recovering") previous.recovery.close();
     if ("match" in previous) previous.match.prediction.close();
@@ -225,6 +230,8 @@ export async function joinMatch(
 
   const startPlaying = (match: PreparedMatch) => {
     session = { phase: "playing", match };
+    diagnostics.transportActive = true;
+    sampleTransportDiagnostics();
     reconnectAttempts = 0;
     clearTimeout(recoveryDeadline);
     show("playing", "Player " + (match.slot + 1) + " · Live prediction");

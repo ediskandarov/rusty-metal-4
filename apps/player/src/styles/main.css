@@ -112,6 +112,7 @@ html.network-game :is(#cheat-settings, #mods, #startup-mods, #mod-drop-hint) {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+#network-latency,
 #fps-counter {
   position: absolute;
   top: 10px;
@@ -124,6 +125,18 @@ html.network-game :is(#cheat-settings, #mods, #startup-mods, #mod-drop-hint) {
   font-size: 12px;
   pointer-events: none;
   font-variant-numeric: tabular-nums;
+}
+#network-latency {
+  left: auto;
+  right: 68px;
+  width: auto;
+  padding: 6px 9px;
+}
+#performance-ping {
+  margin-top: 8px;
+}
+#performance-ping polyline {
+  stroke: #c3a4ed;
 }
 #cheat-panel label {
   grid-template-columns: 1fr auto;
