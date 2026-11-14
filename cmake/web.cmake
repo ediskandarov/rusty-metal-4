@@ -234,7 +234,16 @@ add_executable(tm4_web
 target_compile_definitions(tm4_web PRIVATE TM4_WEB_SUBPIXEL=1)
 option(TM4_WEB_TEST_HOOKS "Expose browser integration-test entry points" OFF)
 if(TM4_WEB_TEST_HOOKS)
-    target_sources(tm4_web PRIVATE "${TM4_WEB}/test_hooks.c")
+    target_sources(tm4_web PRIVATE
+        "${TM4_ROOT}/tests/native/hooks.c"
+        "${TM4_ROOT}/tests/native/hooks/runtime.c"
+        "${TM4_ROOT}/tests/native/hooks/checkpoint.c"
+        "${TM4_ROOT}/tests/native/hooks/audio.c"
+        "${TM4_ROOT}/tests/native/hooks/combat.c"
+        "${TM4_ROOT}/tests/native/hooks/participant.c"
+        "${TM4_ROOT}/tests/native/hooks/world.c"
+        "${TM4_ROOT}/tests/native/hooks/presentation.c"
+        "${TM4_ROOT}/tests/native/hooks/match.c")
     target_compile_definitions(tm4_web PRIVATE TM4_WEB_TEST_HOOKS=1)
     set_property(SOURCE "${TM4_WEB}/memory.c" APPEND PROPERTY COMPILE_DEFINITIONS TM4_WEB_TEST_HOOKS=1)
 endif()

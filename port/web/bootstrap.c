@@ -9,7 +9,7 @@
 #include "render_sync.h"
 #include "subpixel.h"
 #ifdef TM4_WEB_TEST_HOOKS
-#include "test_hooks.h"
+#include "tests/native/hooks.h"
 #endif
 #include "tm4/main/redbook.h"
 #include <libetc.h>

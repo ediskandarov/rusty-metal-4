@@ -41,8 +41,7 @@
 #include <string.h>
 
 #ifdef TM4_WEB_TEST_HOOKS
-void WebTestApplyPendingActions(void);
-void WebTestMotionInput(void);
+#include "tests/native/hooks.h"
 #endif
 
 /* Browser frame loop for the recovered game session and world renderer. */
