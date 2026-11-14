@@ -5,25 +5,72 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::time::{Duration, Instant};
 use tm4_network::protocol::{ControllerIdentity, MembershipChange, Message, ParticipantId};
 
+use super::{ControllerState, Match, control::send};
+use crate::{resume, web};
+
 const ADMISSION_DEADLINE: Duration = Duration::from_secs(45);
 const EVENT_LEAD: u32 = tm4_network::protocol::PREDICTION_DEPTH as u32 * 2;
 
-pub struct Reservation {
+pub(super) struct Reservation {
     pub opened: Instant,
     pub tick: Option<u32>,
 }
 #[derive(Default)]
-pub struct LiveMembership {
+pub(super) struct LiveMembership {
     pub pending: HashMap<ParticipantId, Reservation>,
     pub scheduled: BTreeMap<u32, Vec<MembershipChange>>,
     pub departing: HashSet<ParticipantId>,
     retired: VecDeque<(u32, Entity)>,
 }
 
-impl crate::Match {
-    pub fn room_membership(
+impl Match {
+    pub(super) fn configure_room(
         &mut self,
-        request: crate::web::MembershipCommand,
+        members: Vec<(ControllerIdentity, web::RosterMember)>,
+    ) -> Result<(), &'static str> {
+        if self.started
+            || self.ended
+            || self.room_only
+            || members.len() < 2
+            || members.len() != self.participants.count()
+            || self
+                .controls
+                .iter()
+                .any(|control| control.connection.is_some() || control.controller.is_some())
+        {
+            return Err("room setup is not an empty preparation");
+        }
+        let mut identities = HashSet::new();
+        let mut credentials = HashSet::new();
+        if members.iter().any(|(binding, member)| {
+            self.participants.resolve(binding).is_none()
+                || !identities.insert(binding.participant)
+                || !credentials.insert(&member.credential)
+                || member.credential.len() != 64
+                || !member
+                    .credential
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit())
+                || !self
+                    .catalog
+                    .as_ref()
+                    .is_some_and(|catalog| catalog.cars.contains(&member.car))
+        }) {
+            return Err("invalid room participant binding");
+        }
+        for (binding, member) in members {
+            let participant = self.participants.at_slot_mut(usize::from(binding.slot));
+            participant.room_credential = Some(member.credential);
+            participant.car = Some(member.car);
+            participant.lobby_ready = true;
+        }
+        self.room_only = true;
+        Ok(())
+    }
+
+    pub(super) fn room_membership(
+        &mut self,
+        request: web::MembershipCommand,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
         commands: &mut Commands,
     ) {
@@ -35,9 +82,9 @@ impl crate::Match {
                 return Err("This room match has ended.");
             }
             match request.change {
-                crate::web::RoomMembership::Inspect { credential } => {
+                web::RoomMembership::Inspect { credential } => {
                     let identity = self.participants.find_room_credential(&credential);
-                    Ok(crate::web::MembershipReply {
+                    Ok(web::MembershipReply {
                         pending: identity.is_some_and(|identity| {
                             self.participants.joining(usize::from(identity.slot))
                         }),
@@ -45,7 +92,7 @@ impl crate::Match {
                         tick: None,
                     })
                 }
-                crate::web::RoomMembership::Admit { credential, car } => {
+                web::RoomMembership::Admit { credential, car } => {
                     if !self
                         .session
                         .as_ref()
@@ -63,7 +110,7 @@ impl crate::Match {
                         {
                             return Err("This reservation already selected another model.");
                         }
-                        return Ok(crate::web::MembershipReply {
+                        return Ok(web::MembershipReply {
                             identity: Some(identity),
                             pending: self.participants.joining(usize::from(identity.slot)),
                             tick: self
@@ -78,18 +125,18 @@ impl crate::Match {
                     participant.room_credential = Some(credential);
                     participant.car = Some(car);
                     participant.lobby_ready = true;
-                    participant.credential = crate::resume::credential();
-                    Ok(crate::web::MembershipReply {
+                    participant.credential = resume::credential();
+                    Ok(web::MembershipReply {
                         identity: Some(identity),
                         pending: true,
                         tick: None,
                     })
                 }
-                crate::web::RoomMembership::Depart { credential } => {
+                web::RoomMembership::Depart { credential } => {
                     let Some(identity) = self.participants.find_room_credential(&credential) else {
                         // A preparation deadline or a prior departure may already
                         // have released this lease. Explicit room leave is idempotent.
-                        return Ok(crate::web::MembershipReply {
+                        return Ok(web::MembershipReply {
                             identity: None,
                             pending: false,
                             tick: None,
@@ -97,7 +144,7 @@ impl crate::Match {
                     };
                     if self.participants.joining(usize::from(identity.slot)) {
                         self.cancel_admission(identity, links, commands);
-                        return Ok(crate::web::MembershipReply {
+                        return Ok(web::MembershipReply {
                             identity: Some(identity),
                             pending: false,
                             tick: None,
@@ -109,7 +156,7 @@ impl crate::Match {
                     } else {
                         self.schedule_departure(identity, links)?
                     };
-                    Ok(crate::web::MembershipReply {
+                    Ok(web::MembershipReply {
                         identity: Some(identity),
                         pending: false,
                         tick: Some(tick),
@@ -120,7 +167,7 @@ impl crate::Match {
         let _ = request.response.send(result);
     }
 
-    pub fn reserve_live(&mut self) -> Result<ControllerIdentity, &'static str> {
+    pub(super) fn reserve_live(&mut self) -> Result<ControllerIdentity, &'static str> {
         if !self.started
             || self.tick == 0
             || self.ended
@@ -194,7 +241,7 @@ impl crate::Match {
         tick
     }
 
-    pub fn schedule_departure(
+    pub(super) fn schedule_departure(
         &mut self,
         identity: ControllerIdentity,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -208,7 +255,7 @@ impl crate::Match {
         Ok(self.schedule_membership(MembershipChange::Depart { identity }, links))
     }
 
-    pub fn schedule_admission(
+    pub(super) fn schedule_admission(
         &mut self,
         slot: usize,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -239,7 +286,7 @@ impl crate::Match {
         Ok(tick)
     }
 
-    pub fn retire_live(&mut self, identity: ControllerIdentity, commands: &mut Commands) {
+    pub(super) fn retire_live(&mut self, identity: ControllerIdentity, commands: &mut Commands) {
         let preparing = self.participants.joining(usize::from(identity.slot));
         if self.participants.release_live(identity).is_err() {
             return;
@@ -269,7 +316,7 @@ impl crate::Match {
         }
     }
 
-    pub fn cancel_admission(
+    pub(super) fn cancel_admission(
         &mut self,
         identity: ControllerIdentity,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -290,7 +337,7 @@ impl crate::Match {
             self.publish_plan(tick, links);
         }
         if let Some(connection) = self.controls[usize::from(identity.slot)].connection {
-            crate::send(
+            send(
                 links,
                 connection,
                 &Message::Error {
@@ -301,7 +348,7 @@ impl crate::Match {
         self.retire_live(identity, commands);
     }
 
-    pub fn maintain_membership(
+    pub(super) fn maintain_membership(
         &mut self,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
         commands: &mut Commands,
@@ -342,7 +389,7 @@ impl crate::Match {
         }
     }
 
-    pub fn live_lobby(
+    pub(super) fn live_lobby(
         &self,
         slot: usize,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -350,7 +397,7 @@ impl crate::Match {
         let Some(connection) = self.controls[slot].connection else {
             return;
         };
-        crate::send(
+        send(
             links,
             connection,
             &Message::Lobby {
@@ -377,7 +424,7 @@ impl crate::Match {
         );
     }
 
-    pub fn prepare_live(
+    pub(super) fn prepare_live(
         &mut self,
         slot: usize,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -398,9 +445,9 @@ impl crate::Match {
             .at_slot(slot)
             .credential
             .clone()
-            .or_else(crate::resume::credential)
+            .or_else(resume::credential)
         else {
-            crate::send(
+            send(
                 links,
                 connection,
                 &Message::Error {
@@ -411,11 +458,11 @@ impl crate::Match {
         };
         self.participants.at_slot_mut(slot).credential = Some(token.clone());
         self.next_resume = self.next_resume.wrapping_add(1);
-        self.controls[slot].resume = Some(crate::resume::Attempt::new(self.next_resume));
-        crate::send(links, connection, &Message::ResumeCredential { token });
-        crate::send(links, connection, &Message::ResumePrepare(session));
+        self.controls[slot].resume = Some(resume::Attempt::new(self.next_resume));
+        send(links, connection, &Message::ResumeCredential { token });
+        send(links, connection, &Message::ResumePrepare(session));
         for (&tick, changes) in &self.membership.scheduled {
-            crate::send(
+            send(
                 links,
                 connection,
                 &Message::Membership {
@@ -424,5 +471,64 @@ impl crate::Match {
                 },
             );
         }
+    }
+}
+
+// Preparation reuse retires the connection and native controller with the binding.
+impl Match {
+    pub(super) fn reserve_preparation(
+        &mut self,
+        slot: usize,
+    ) -> Result<ControllerIdentity, &'static str> {
+        if self.started || self.ended {
+            return Err("match membership is frozen");
+        }
+        if self
+            .controls
+            .get(slot)
+            .is_none_or(|control| control.controller.is_some() || control.connection.is_some())
+        {
+            return Err("slot control has not been retired");
+        }
+        let binding = self.participants.reserve(slot)?;
+        self.controls[slot] = ControllerState::default();
+        self.prediction.accepted[slot] = Default::default();
+        Ok(binding)
+    }
+    pub(super) fn release_preparation(
+        &mut self,
+        binding: ControllerIdentity,
+        commands: &mut bevy_ecs::prelude::Commands,
+    ) -> Result<(), &'static str> {
+        if self.started || self.ended {
+            return Err("match membership is frozen");
+        }
+        self.participants.release(binding)?;
+        let slot = usize::from(binding.slot);
+        let retired = std::mem::take(&mut self.controls[slot]);
+        self.prediction.accepted[slot] = Default::default();
+        if let Some(controller) = retired.controller {
+            commands.entity(controller).try_despawn();
+        }
+        if let Some(connection) = retired.connection {
+            self.retired_connections.insert(connection);
+            commands.trigger(lightyear::prelude::Unlink {
+                entity: connection,
+                reason: lightyear::prelude::UnlinkReason::UserRequested(Some(
+                    "Gameplay binding retired".into(),
+                )),
+            });
+        }
+        // The old connection is no longer associated with any participant. A new
+        // reservation never inherits it, its authorization, credential or inputs.
+        Ok(())
+    }
+    pub(super) fn replace_preparation(
+        &mut self,
+        binding: ControllerIdentity,
+        commands: &mut bevy_ecs::prelude::Commands,
+    ) -> Result<ControllerIdentity, &'static str> {
+        self.release_preparation(binding, commands)?;
+        self.reserve_preparation(usize::from(binding.slot))
     }
 }

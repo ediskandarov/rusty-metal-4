@@ -136,7 +136,7 @@ impl ParticipantRoster {
         Ok(())
     }
     // Preparation and live mutation use separate, explicit phase checks.
-    fn reserve(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
+    pub(super) fn reserve(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
         if self.frozen || slot >= self.capacity() || self.slots[slot].is_some() {
             return Err("slot unavailable");
         }
@@ -144,7 +144,7 @@ impl ParticipantRoster {
         self.slots[slot] = Some(id);
         Ok(self.binding(slot))
     }
-    fn release(&mut self, binding: ControllerIdentity) -> Result<(), &'static str> {
+    pub(super) fn release(&mut self, binding: ControllerIdentity) -> Result<(), &'static str> {
         if self.frozen || self.resolve(&binding).is_none() {
             return Err("stale or running binding");
         }
@@ -199,63 +199,6 @@ impl ParticipantRoster {
                 .filter(|expected| crate::resume::matches_credential(expected, token))
                 .map(|_| self.binding(slot))
         })
-    }
-}
-
-// A preparation binding is changed only together with its connection and native
-// controller. Keeping these operations here makes raw roster mutation private.
-impl crate::Match {
-    pub fn reserve_preparation(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
-        if self.started || self.ended {
-            return Err("match membership is frozen");
-        }
-        if self
-            .controls
-            .get(slot)
-            .is_none_or(|control| control.controller.is_some() || control.connection.is_some())
-        {
-            return Err("slot control has not been retired");
-        }
-        let binding = self.participants.reserve(slot)?;
-        self.controls[slot] = crate::ControllerState::default();
-        self.prediction.accepted[slot] = Default::default();
-        Ok(binding)
-    }
-    pub fn release_preparation(
-        &mut self,
-        binding: ControllerIdentity,
-        commands: &mut bevy_ecs::prelude::Commands,
-    ) -> Result<(), &'static str> {
-        if self.started || self.ended {
-            return Err("match membership is frozen");
-        }
-        self.participants.release(binding)?;
-        let slot = usize::from(binding.slot);
-        let retired = std::mem::take(&mut self.controls[slot]);
-        self.prediction.accepted[slot] = Default::default();
-        if let Some(controller) = retired.controller {
-            commands.entity(controller).try_despawn();
-        }
-        if let Some(connection) = retired.connection {
-            self.retired_connections.insert(connection);
-            commands.trigger(lightyear::prelude::Unlink {
-                entity: connection,
-                reason: lightyear::prelude::UnlinkReason::UserRequested(Some(
-                    "Gameplay binding retired".into(),
-                )),
-            });
-        }
-        // The old connection is no longer associated with any participant. A new
-        // reservation never inherits it, its authorization, credential or inputs.
-        Ok(())
-    }
-    pub fn replace_preparation(
-        &mut self,
-        binding: ControllerIdentity,
-        commands: &mut bevy_ecs::prelude::Commands,
-    ) -> Result<ControllerIdentity, &'static str> {
-        self.release_preparation(binding, commands)?;
-        self.reserve_preparation(usize::from(binding.slot))
     }
 }
 
@@ -338,5 +281,37 @@ mod tests {
                 .collect::<Vec<_>>(),
             [3, 6]
         );
+    }
+
+    #[test]
+    fn car_selection_requires_catalog_membership_and_explicit_readiness() {
+        let catalog = Catalog {
+            cars: vec!["Orbital".into(), "Pizza Boy".into()],
+            worlds: vec![],
+        };
+        let mut player = Participant::default();
+        assert!(!player.lobby_ready);
+        assert!(
+            player
+                .select_car(&catalog, "Pizza Boy".into(), true)
+                .is_ok()
+        );
+        assert_eq!(player.car.as_deref(), Some("Pizza Boy"));
+        assert!(player.lobby_ready);
+        assert!(
+            player
+                .select_car(&catalog, "unknown".into(), false)
+                .is_err()
+        );
+        assert_eq!(player.car.as_deref(), Some("Pizza Boy"));
+        assert!(player.lobby_ready);
+        player
+            .select_car(&catalog, "Orbital".into(), false)
+            .unwrap();
+        assert!(!player.lobby_ready);
+        assert_eq!(player.car.as_deref(), Some("Orbital"));
+        let mut other = Participant::default();
+        other.select_car(&catalog, "Orbital".into(), true).unwrap();
+        assert_eq!(other.car, player.car);
     }
 }
