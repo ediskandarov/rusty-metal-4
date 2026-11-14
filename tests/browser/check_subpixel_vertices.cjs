@@ -1,14 +1,10 @@
 /* global tm4Port, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, togglePanel, setPanelOpen } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 960, height: 720 } });
     const errors = [];
@@ -42,7 +38,7 @@ const assert = require("node:assert/strict");
       };
     });
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     const press = async (key) => {
       await page.keyboard.down(key);
       await page.waitForTimeout(150);
@@ -59,22 +55,16 @@ const assert = require("node:assert/strict");
     await screen("carsel");
 
     const scale = 4;
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.selectOption("#render-scale", String(scale));
     await page.waitForFunction((scale) => tm4Port.renderScale === scale, scale);
-    await page.locator("#render-settings").evaluate((node) => {
-      node.open = false;
-    });
+    await setPanelOpen(page, "render-settings", false);
     await page.locator("canvas").focus();
     const checkbox = page.locator("#subpixel-vertices");
     assert.equal(await checkbox.isChecked(), true);
-    await page.locator("#render-settings").evaluate((node) => {
-      node.open = true;
-    });
+    await setPanelOpen(page, "render-settings", true);
     await checkbox.uncheck();
-    await page.locator("#render-settings").evaluate((node) => {
-      node.open = false;
-    });
+    await setPanelOpen(page, "render-settings", false);
     await page.waitForFunction(() => tm4Port.subpixelVertices === false);
     await page.evaluate(() => {
       if (typeof Module._WebTestSetPreviewAngle !== "function")
@@ -102,14 +92,10 @@ const assert = require("node:assert/strict");
       });
     };
     const toggle = async (enabled) => {
-      await page.locator("#render-settings").evaluate((node) => {
-        node.open = true;
-      });
+      await setPanelOpen(page, "render-settings", true);
       await checkbox.setChecked(enabled);
       await page.waitForFunction((enabled) => tm4Port.subpixelVertices === enabled, enabled);
-      await page.locator("#render-settings").evaluate((node) => {
-        node.open = false;
-      });
+      await setPanelOpen(page, "render-settings", false);
       await page.locator("canvas").focus();
     };
 

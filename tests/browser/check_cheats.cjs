@@ -1,20 +1,16 @@
 /* global Module, tm4Port */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, togglePanel } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 720 } });
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
-    await page.locator("#cheat-settings summary").click();
+    await startDiagnosticGame(page);
+    await togglePanel(page, "cheat-settings");
     assert.equal(await page.evaluate(() => Module._WebGetCheats()), 0);
     assert.equal(await page.evaluate(() => Module._WebSetCheat(-1, 1)), 0);
     const ids = await page
@@ -29,7 +25,7 @@ const assert = require("node:assert/strict");
     assert.equal(await page.locator("[data-cheat]:checked").count(), 0);
     for (const id of [1, 16, 21]) await page.locator(`[data-cheat="${id}"]`).check();
     await page.screenshot({ path: "build/checks/cheats-menu.png" });
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.waitForFunction(() => !document.getElementById("cheat-settings").open);
     await page.locator("#render-reset").click();
     assert.equal(
@@ -67,7 +63,7 @@ const assert = require("node:assert/strict");
     });
     assert.equal(await page.evaluate(() => tm4Port.weaponAmmo), 99);
     console.log("PASS original ammo cheat applied at car construction");
-    await page.locator("#cheat-settings summary").click();
+    await togglePanel(page, "cheat-settings");
     await page.locator("#cheat-reset").click();
     await page.waitForFunction(() => Module._WebGetCheats() === 0);
     assert.equal(

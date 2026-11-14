@@ -1,13 +1,9 @@
 /* global tm4Port, scalePresentation */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, setPanelOpen } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 720 } });
     const errors = [];
@@ -29,13 +25,11 @@ const assert = require("node:assert/strict");
       };
     });
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
-    await page.waitForFunction(() => tm4Port.renderScale === 2);
+    await startDiagnosticGame(page);
+    await page.waitForFunction(() => tm4Port.renderScale === 8);
     assert.deepEqual(await page.evaluate(() => scalePresentation.buffer), [1200, 720]);
     const checkScale = async (label) => {
-      await page.locator("#render-settings").evaluate((node) => {
-        node.open = true;
-      });
+      await setPanelOpen(page, "render-settings", true);
       let original;
       for (const scale of [1, 2, 3, 4, 5, 6, 7, 8, 1, 2]) {
         const before = await page.evaluate(() =>
@@ -65,9 +59,7 @@ const assert = require("node:assert/strict");
         console.log("PASS internal rendering scale", label, scale, actual);
         await page.screenshot({ path: `build/checks/scale-${label}-${scale}.png` });
       }
-      await page.locator("#render-settings").evaluate((node) => {
-        node.open = false;
-      });
+      await setPanelOpen(page, "render-settings", false);
       await page.locator("canvas").focus();
     };
     await checkScale("menu");

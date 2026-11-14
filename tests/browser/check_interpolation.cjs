@@ -1,15 +1,11 @@
 /* global tm4Port, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, togglePanel } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    // Exercise the 60 Hz path even when headless Chrome defaults to a 30 Hz clock.
-    args: ["--enable-unsafe-swiftshader", "--disable-frame-rate-limit"],
-  });
+  // Exercise 60 Hz even when headless Chrome defaults to a 30 Hz clock.
+  const browser = await launchBrowser({ args: ["--disable-frame-rate-limit"] });
   try {
     const page = await browser.newPage({ viewport: { width: 720, height: 540 } });
     const errors = [];
@@ -52,10 +48,10 @@ const assert = require("node:assert/strict");
     const url = new URL(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
     url.searchParams.set("fps", "1");
     await page.goto(url.href);
-    await require("./browser_startup.cjs")(page);
-    await page.locator("#render-settings summary").click();
+    await startDiagnosticGame(page);
+    await togglePanel(page, "render-settings");
     await page.selectOption("#render-preset", "ps1");
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.locator("canvas").click();
     await press("x");
     await menu("newgame");
@@ -70,14 +66,13 @@ const assert = require("node:assert/strict");
     assert.equal(await page.evaluate(() => tm4Port.renderSmoothing), false);
     await measure("OFF", 26, 34);
 
-    const rendering = page.locator("#render-settings summary");
-    await rendering.click();
+    await togglePanel(page, "render-settings");
     await smoothing.check();
     await page.selectOption("#render-limit", "60");
     await page.waitForFunction(() => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === 0);
     await measure("ON", 48, 66);
 
-    await rendering.click();
+    await togglePanel(page, "render-settings");
     await page.locator("canvas").click();
     const origin = await page.evaluate(() => [tm4Port.carX, tm4Port.carZ]);
     await page.keyboard.down("x");
@@ -104,7 +99,7 @@ const assert = require("node:assert/strict");
     assert.equal(await page.evaluate(() => tm4Port.renderSmoothing), true);
 
     if (!(await page.locator("#render-settings").evaluate((node) => node.open)))
-      await rendering.click();
+      await togglePanel(page, "render-settings");
     await page.locator("#render-reset").click();
     assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
     assert.equal(await page.locator("#fps-counter").isVisible(), false);

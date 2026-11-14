@@ -1,17 +1,13 @@
 /* Client admission diagnostics against the embedded Rust server. */
 const assert = require("node:assert/strict");
 const { readyInLobby } = require("./network_lobby.cjs");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 (async () => {
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
   const endpoint = process.env.TM4_MATCH_ENDPOINT;
   const scenario = process.env.TM4_ADMISSION_SCENARIO ?? "map";
   assert(endpoint && ["map", "roster"].includes(scenario));
-  const browser = await chromium.launch({
-    executablePath: process.env.TM4_CHROME,
-    channel: process.env.TM4_CHROME ? undefined : "chrome",
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const clients = [await browser.newPage(), await browser.newPage()];
     for (const page of clients) {

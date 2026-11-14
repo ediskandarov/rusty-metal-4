@@ -1,14 +1,10 @@
 /* global tm4Port, presentedRect */
 /* Normal menu -> card save -> reload -> gameplay, observed at final presentation. */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -43,7 +39,7 @@ const assert = require("node:assert/strict");
   const rect = () => page.evaluate(() => presentedRect);
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.locator("canvas").click();
     const original = await rect();
     await press("ArrowUp");
@@ -78,7 +74,7 @@ const assert = require("node:assert/strict");
     );
     assert.deepEqual(await rect(), adjusted);
     await page.reload();
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.waitForFunction(() => tm4Port.frames > 30);
     assert.deepEqual(await rect(), adjusted, "saved screen adjustment survives a page reload");
     await page.locator("canvas").click();

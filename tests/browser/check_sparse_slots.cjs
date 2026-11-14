@@ -1,6 +1,6 @@
 /* global tm4Port, Module */
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const { readyInLobby } = require("./network_lobby.cjs");
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
 const room = process.env.TM4_SPARSE_ROOM === "1";
@@ -11,10 +11,7 @@ assert(endpoint, "Start the ignored sparse_match_browser_fixture Rust test first
 const target = new URL(process.env.TM4_WEB_URL ?? "http://127.0.0.1:18337/");
 target.searchParams.set("match", endpoint);
 (async () => {
-  const browser = await chromium.launch({
-    channel: "chrome",
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const pages = [];
   const errors = [];
   try {

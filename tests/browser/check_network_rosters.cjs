@@ -1,7 +1,7 @@
 /* global tm4Port */
 const assert = require("node:assert/strict");
 const { readyInLobby } = require("./network_lobby.cjs");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const { execFileSync } = require("node:child_process");
 const { instrument, sample, waitTick, schedule, drive } = require("./network_session.cjs");
 const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.cjs");
@@ -19,10 +19,7 @@ const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.c
   const width = Number(process.env.TM4_ROSTER_WIDTH ?? 960);
   const height = Number(process.env.TM4_ROSTER_HEIGHT ?? 720);
   assert(endpoint && Number.isInteger(count) && count >= 2 && count <= 8);
-  const browser = await chromium.launch({
-    channel: "chrome",
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const errors = [];
     const reference = await browser.newPage();

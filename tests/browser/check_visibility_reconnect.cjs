@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const { readyInLobby } = require("./network_lobby.cjs");
 
 const target = new URL(process.env.TM4_WEB_URL ?? "http://127.0.0.1:8348/");
@@ -7,7 +7,7 @@ assert(process.env.TM4_MATCH_ENDPOINT, "Set TM4_MATCH_ENDPOINT to a fresh two-pl
 target.searchParams.set("match", process.env.TM4_MATCH_ENDPOINT);
 
 (async () => {
-  const browser = await chromium.launch({ channel: "chrome" });
+  const browser = await launchBrowser({});
   try {
     const errors = [];
     const clients = await Promise.all(

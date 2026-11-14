@@ -1,7 +1,7 @@
 /* global tm4Port */
 const assert = require("node:assert/strict");
 const { readyInLobby } = require("./network_lobby.cjs");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
@@ -29,11 +29,7 @@ const target = new URL(site);
 target.searchParams.set("match", endpoint);
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.TM4_CHROME,
-    channel: process.env.TM4_CHROME ? undefined : "chrome",
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const errors = [];
     const open = async (resume, mode) => {

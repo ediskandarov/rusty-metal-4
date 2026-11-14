@@ -1,15 +1,10 @@
 const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     const errors = [];

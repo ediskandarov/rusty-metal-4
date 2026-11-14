@@ -1,5 +1,6 @@
 /* global testRumbles, tm4Port, setPad, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 const players = Number(process.env.TM4_PLAYERS || 2);
 const testWorld = process.env.TM4_TEST_WORLD;
@@ -7,12 +8,7 @@ assert(!testWorld || !process.env.TM4_TEST_COOP, "explicit map selection uses De
 assert.ok([2, 3, 4].includes(players));
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   const started = Date.now();
@@ -117,7 +113,7 @@ assert.ok([2, 3, 4].includes(players));
     );
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     if (testWorld) {
       const key = async (name) => {
         await page.keyboard.down(name);

@@ -116,6 +116,35 @@ players reaching native match ticks without uploading player files. Rust unit
 tests cover atomic upload publication, index validation, private storage and
 the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
+## Browser checks
+
+Run from the repository root. All Chromium scenarios use
+`tests/browser/helpers/browser.cjs`: `TM4_CHROME` selects an executable; otherwise
+macOS uses installed Chrome when available and other hosts use Playwright Chromium.
+Install the latter with `bunx playwright install chromium` if needed. Specialized
+scenario flags (timing, audio, background tabs) remain local to their tests.
+
+- `bun run test:player` checks the ordinary player UI: settings, rendering presets,
+  control capture/persistence, panel switching and narrow layouts. Point
+  `TM4_WEB_URL` at a running dev or release site (default: port 8080). Dev can use
+  its configured local disc; for release set `TM4_DISC_DIR` to select a folder.
+- `check_loader.cjs` and `check_resources.cjs` use the release folder picker and
+  need a local disc (`TM4_DISC_DIR` or `.local/dev.json`). They do not require
+  diagnostic exports. Set `TM4_WEB_URL` explicitly for these scenarios.
+- Gameplay checks such as `check_controls.cjs`, `check_render_settings.cjs` and
+  `check_render_scale.cjs` require `bun run build:diagnostic`. Serve that site's
+  directory and pass its URL through `TM4_WEB_URL`. Their shared
+  `startDiagnosticGame` rejects ordinary Wasm with a build hint instead of waiting
+  for nonexistent game counters. Match scenarios additionally need the server
+  fixtures described below.
+- `bun run test:pages` serves its own release site without disc assets and checks
+  isolation, subpath loading and runtime initialization; it needs no diagnostic build.
+
+Use `waitForPlayer` for ordinary runtime readiness and `setPanelOpen`/
+`closeSettings` for user-visible settings interactions. Do not set DOM `hidden`
+flags or `details.open` directly to bypass the gear menu. Screenshots go under
+`build/checks`; room scenarios retain `build/room-tests`.
+
 ## rustymetal4.com website
 
 `apps/rustymetal4.com` owns the public Astro website and Worker. It is separate
@@ -157,7 +186,7 @@ only when working on the retained container infrastructure.
   native diagnostic bundle and matching website runtime as the match browser test.
   The downloaded journal is `build/room-tests/live-membership.tm4j`;
   `TM4_SIMULATION_WASM=<authority Wasm> TM4_RESOURCE_DIR=<resource root> node
-  tests/simulation/replay-membership-journal.cjs <journal>` checks every recorded
+tests/simulation/replay-membership-journal.cjs <journal>` checks every recorded
   subsystem digest in a fresh simulation instance.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
   admission, creation retries, permissions, reconnect/hibernation, host succession,

@@ -2,7 +2,7 @@
 const assert = require("node:assert/strict");
 const { lstatSync, readdirSync } = require("node:fs");
 const { resolve, join } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
   const site = resolve("build/release/site");
@@ -50,15 +50,7 @@ const { chromium } = require("playwright");
       url = new URL("tm4_rewired/", server.url).href;
       assert.equal((await fetch(url)).headers.get("Cross-Origin-Opener-Policy"), null);
     }
-    browser = await chromium.launch({
-      executablePath:
-        process.env.TM4_CHROME ||
-        (process.platform === "darwin"
-          ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-          : undefined),
-      headless: true,
-      args: ["--enable-unsafe-swiftshader"],
-    });
+    browser = await launchBrowser();
     const page = await browser.newPage();
     page.on("console", (message) => console.log("browser:", message.text()));
     const errors = [],

@@ -1,17 +1,12 @@
+const { waitForPlayer, togglePanel, setPanelOpen } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
-const { readFileSync, mkdirSync } = require("node:fs");
+const { readFileSync } = require("node:fs");
 const { resolve } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
-    mkdirSync("build/checks", { recursive: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -40,10 +35,6 @@ const { chromium } = require("playwright");
       assert(await page.locator('.resource-row[data-status="warning"]').count());
       assert(await page.locator('.resource-row[data-status="uncompatible"]').count());
       await page.locator("#resource-issues").check();
-      assert.equal(
-        await page.locator('.resource-row[data-status="compatible"]:visible').count(),
-        0,
-      );
       assert.equal(
         await page.locator('.resource-row[data-status="compatible"]:visible').count(),
         0,
@@ -86,18 +77,19 @@ const { chromium } = require("playwright");
       { timeout: 90000 },
     );
     assert.equal(await page.locator('.resource-row[data-status="compatible"]').count(), 275);
+    await setPanelOpen(page, "resources", true);
     await page.locator("#resource-search").fill("neon");
     assert(await page.locator(".resource-row:visible").count());
     await page.locator("#resource-search").fill("");
     await page.screenshot({ path: "build/checks/resources-original.png" });
     // The sidebar is an overlay: opening/closing it never changes the game viewport.
     const canvas = await page.locator("canvas").boundingBox();
-    await page.locator("#resources > summary").click();
+    await togglePanel(page, "resources");
     assert.deepEqual(await page.locator("canvas").boundingBox(), canvas);
-    await require("./browser_startup.cjs")(page);
+    await waitForPlayer(page);
     assert(await page.locator("#startup").isHidden());
-    assert(await page.locator("#resources").isVisible());
-    await page.locator("#resources > summary").click();
+    await setPanelOpen(page, "resources", false);
+    await togglePanel(page, "resources");
     await page.setViewportSize({ width: 390, height: 844 });
     await page.screenshot({ path: "build/checks/resources-mobile.png" });
     const bounds = await page.locator("#resources").boundingBox();

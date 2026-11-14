@@ -1,7 +1,8 @@
 /* global Module, tm4Port */
+const { togglePanel } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
 const { resolve } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
   if (!process.env.TM4_DISC_DIR) throw new Error("Set TM4_DISC_DIR to your own disc folder");
@@ -22,12 +23,8 @@ const { chromium } = require("playwright");
   const errors = [];
   try {
     const origin = (await mf.ready).origin;
-    browser = await chromium.launch({
-      executablePath:
-        process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      headless: true,
+    browser = await launchBrowser({
       args: [
-        "--enable-unsafe-swiftshader",
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
         "--disable-backgrounding-occluded-windows",
@@ -76,9 +73,9 @@ const { chromium } = require("playwright");
       });
       await page.locator("#room-car").selectOption(index ? "Quatro" : "Calypso");
       await page.locator("#room-player").scrollIntoViewIfNeeded();
-      await frame.locator("#render-settings summary").click();
+      await togglePanel(frame, "render-settings");
       await frame.locator("#render-scale").selectOption("1");
-      await frame.locator("#render-settings summary").click();
+      await togglePanel(frame, "render-settings");
       await frame.evaluate(() => {
         const queue = Module._WebNetQueueTick;
         Module._WebNetQueueTick = (tick) => {
@@ -136,9 +133,9 @@ const { chromium } = require("playwright");
           timeout: 60000,
         });
         await b.locator("#room-player").scrollIntoViewIfNeeded();
-        await resumed.locator("#render-settings summary").click();
+        await togglePanel(resumed, "render-settings");
         await resumed.locator("#render-scale").selectOption("1");
-        await resumed.locator("#render-settings summary").click();
+        await togglePanel(resumed, "render-settings");
         await resumed.waitForFunction(() => tm4Port.netConfirmedTick > 1000, null, {
           timeout: 60000,
         });

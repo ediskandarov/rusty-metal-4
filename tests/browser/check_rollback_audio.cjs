@@ -1,13 +1,9 @@
 /* global Module, tm4Port */
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: process.env.TM4_CHROME,
-    channel: process.env.TM4_CHROME ? undefined : "chrome",
-    args: ["--enable-unsafe-swiftshader", "--autoplay-policy=no-user-gesture-required"],
-  });
+  const browser = await launchBrowser({ args: ["--autoplay-policy=no-user-gesture-required"] });
   try {
     const page = await browser.newPage();
     const errors = [];

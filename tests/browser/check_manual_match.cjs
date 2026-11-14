@@ -1,7 +1,9 @@
 /* global tm4Port, Module */
+const { setPanelOpen } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
 const { readyInLobby } = require("./network_lobby.cjs");
-const { chromium, webkit } = require("playwright");
+const { webkit } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 const endpoint = process.env.TM4_MATCH_ENDPOINT;
@@ -11,13 +13,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
 
 (async () => {
   let results;
-  const browser = useWebKit
-    ? await webkit.launch()
-    : await chromium.launch({
-        executablePath: process.env.TM4_CHROME,
-        channel: process.env.TM4_CHROME ? undefined : "chrome",
-        args: ["--enable-unsafe-swiftshader"],
-      });
+  const browser = useWebKit ? await webkit.launch() : await launchBrowser();
   try {
     const errors = [];
     const target = new URL(site);
@@ -109,7 +105,7 @@ assert(endpoint, "A fresh prediction-enabled match server is required");
       }),
       JSON.stringify(final),
     );
-    await players[0].locator("#render-settings > summary").click();
+    await setPanelOpen(players[0], "render-settings", true);
     for (const preset of ["ps1", "ultra"]) {
       await players[0].selectOption("#render-preset", preset);
       assert((await sample(players[0])).timingLocked);

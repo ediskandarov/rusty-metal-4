@@ -1,8 +1,9 @@
 /* global Module, tm4Port */
 /* Ordinary room flows against the actual Worker, native authority and browser simulation. */
+const { togglePanel } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
 const { resolve } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
   if (!process.env.TM4_DISC_DIR) throw new Error("Set TM4_DISC_DIR to your local disc folder");
@@ -18,12 +19,8 @@ const { chromium } = require("playwright");
   try {
     mf = await runtime(true, native.url);
     const origin = (await mf.ready).origin;
-    browser = await chromium.launch({
-      executablePath:
-        process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      headless: true,
+    browser = await launchBrowser({
       args: [
-        "--enable-unsafe-swiftshader",
         "--disable-background-timer-throttling",
         "--disable-renderer-backgrounding",
         "--disable-backgrounding-occluded-windows",
@@ -71,9 +68,9 @@ const { chromium } = require("playwright");
       });
       await page.locator("#room-car").selectOption("Orbital");
       await page.locator("#room-player").scrollIntoViewIfNeeded();
-      await frame.locator("#render-settings summary").click();
+      await togglePanel(frame, "render-settings");
       await frame.locator("#render-scale").selectOption("1");
-      await frame.locator("#render-settings summary").click();
+      await togglePanel(frame, "render-settings");
       return frame;
     };
     const frames = [];

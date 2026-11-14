@@ -16,6 +16,7 @@
     "fmt:check": "bun fmt --no-script --check tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml && bun tools/web/format.ts --check",
     "lint": "bun lint --no-script tools apps packages tests",
     "typecheck": "tsc --noEmit && bun run --filter \"@tm4/*\" typecheck && tsc --noEmit -p tests/rooms/tsconfig.json",
+    "test:player": "bun tests/browser/check_player_ui.cjs",
     "test:pages": "bun tests/browser/check_pages.cjs",
     "test:server": "bun tests/browser/check_server.cjs",
     "build:mod": "bun tools/mods/build.ts",

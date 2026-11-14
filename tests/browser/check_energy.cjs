@@ -1,6 +1,7 @@
 /* global tm4Port, Module */
 /* Actions use ordinary keyboard input. Hooks place a contact target and read state. */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 const actions = [
   { name: "Jump", keys: ["Up", "Up", "Left"], cost: 410, kind: "jump" },
@@ -20,12 +21,7 @@ const actions = [
   },
 ];
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -50,7 +46,7 @@ const actions = [
     });
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.locator("canvas").click();
     for (const action of actions.filter(
       (a) => !process.env.TM4_ENERGY_ACTION || a.name === process.env.TM4_ENERGY_ACTION,

@@ -1,14 +1,10 @@
 /* global tm4Port, setTestGamepad, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -49,7 +45,7 @@ const assert = require("node:assert/strict");
   }
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.evaluate(() => setTestGamepad(true));
     await page.waitForTimeout(300);
     const selected = await page.evaluate(() => tm4Port.selected);

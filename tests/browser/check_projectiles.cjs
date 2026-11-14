@@ -1,6 +1,7 @@
 /* global tm4Port, Module */
 /* Original inventory + keyboard launch; diagnostic placement provides a clear firing lane. */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 const cases = [
   { name: "Fire", slot: 1 },
@@ -14,12 +15,7 @@ const cases = [
   { name: "FreezeRemote", slot: 15, bomb: true },
 ];
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -45,7 +41,7 @@ const cases = [
   };
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.locator("canvas").click();
     const selected = cases.filter(
       (c) => !process.env.TM4_TEST_PROJECTILE || c.name === process.env.TM4_TEST_PROJECTILE,

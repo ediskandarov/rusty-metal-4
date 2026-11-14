@@ -1,5 +1,5 @@
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
   const { runtime, eventually } = await import("../rooms/runtime.ts");
@@ -7,14 +7,7 @@ const { chromium } = require("playwright");
   let browser;
   try {
     const url = (await mf.ready).origin;
-    browser = await chromium.launch({
-      executablePath:
-        process.env.TM4_CHROME ||
-        (process.platform === "darwin"
-          ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-          : undefined),
-      headless: true,
-    });
+    browser = await launchBrowser();
     const hostContext = await browser.newContext();
     const host = await hostContext.newPage();
     const errors = [];

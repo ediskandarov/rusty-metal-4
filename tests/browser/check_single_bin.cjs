@@ -1,3 +1,4 @@
+const { startDiagnosticGame } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { createReadStream, createWriteStream, readFileSync } = require("node:fs");
@@ -5,7 +6,7 @@ const { mkdtemp, rm, writeFile } = require("node:fs/promises");
 const { tmpdir } = require("node:os");
 const { join, resolve } = require("node:path");
 const { pipeline } = require("node:stream/promises");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 function cueTime(sector) {
   return [Math.floor(sector / 4500), Math.floor(sector / 75) % 60, sector % 75]
@@ -39,19 +40,14 @@ function cueTime(sector) {
     }
     const cuePath = join(temporary, "disc.cue");
     await writeFile(cuePath, cue.join("\n") + "\n");
-    browser = await chromium.launch({
-      executablePath:
-        process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      headless: true,
-      args: ["--enable-unsafe-swiftshader"],
-    });
+    browser = await launchBrowser();
     const page = await browser.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8121/");
     await page.waitForFunction(() => !document.getElementById("disc-folder").disabled);
     await page.locator("#disc-folder").setInputFiles(temporary);
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.waitForFunction(
       () =>
         document.getElementById("resource-check").disabled &&

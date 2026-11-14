@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { mkdtempSync, readdirSync, rmdirSync } = require("node:fs");
 const { resolve } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 // Build the server bundle/native binary first. A disc is optional for the setup smoke;
 // TM4_DISC_DIR also exercises administrator provisioning and two local players.
@@ -94,15 +94,7 @@ const { chromium } = require("playwright");
     for (const path of ["/DATA/MAIN.MR", "/api/resources/DATA/MAIN.MR", "/%2e%2e%2fCargo.toml"])
       assert.notEqual((await request(path)).status, 200);
 
-    browser = await chromium.launch({
-      executablePath:
-        process.env.TM4_CHROME ||
-        (process.platform === "darwin"
-          ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-          : undefined),
-      headless: true,
-      args: ["--enable-unsafe-swiftshader", "--mute-audio"],
-    });
+    browser = await launchBrowser({ args: ["--mute-audio"] });
     const page = await browser.newPage();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));

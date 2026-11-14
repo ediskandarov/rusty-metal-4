@@ -1,15 +1,11 @@
 /* global Module, loadingCaptures, tm4Port */
 /* Observe the real display while the normal loading routines yield to the browser. */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
     const errors = [];
@@ -32,7 +28,7 @@ const fs = require("node:fs");
       };
     });
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     async function press(key) {
       await page.keyboard.down(key);
       await page.waitForTimeout(120);

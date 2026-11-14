@@ -1,13 +1,9 @@
 /* global tm4Port, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, togglePanel } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 720 } });
     const errors = [];
@@ -26,7 +22,7 @@ const assert = require("node:assert/strict");
       };
     });
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     assert.equal(await page.locator("#render-scale").inputValue(), "8");
     assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
     assert.equal(await page.locator("#subpixel-vertices").isChecked(), true);
@@ -37,7 +33,7 @@ const assert = require("node:assert/strict");
     assert.equal(await smoothing.isChecked(), true);
     assert.equal(await slider.inputValue(), "7");
     const checkSettings = async (label) => {
-      await page.locator("#render-settings summary").click();
+      await togglePanel(page, "render-settings");
       for (const preset of ["ultra", "ps1"]) {
         await page.selectOption("#render-preset", preset);
         const enhanced = preset === "ultra";
@@ -207,9 +203,9 @@ const assert = require("node:assert/strict");
       console.log("PASS", label, "Escape preserves the renderer and keeps presenting frames");
     };
     await checkSettings("menu");
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.selectOption("#render-scale", "0");
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     for (const [width, height, scale] of [
       [640, 480, 2],
       [320, 480, 1],
@@ -223,7 +219,7 @@ const assert = require("node:assert/strict");
     // Arrow keys in the graphics panel must not select another game-menu item.
     const selection = await page.evaluate(() => tm4Port.selected);
     assert.equal(typeof selection, "number");
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.locator("#render-dithering").focus();
     await page.keyboard.press("ArrowDown");
     await slider.press("ArrowDown");
@@ -251,7 +247,7 @@ const assert = require("node:assert/strict");
     });
     await checkSettings("game");
     await page.setViewportSize({ width: 320, height: 480 });
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.waitForFunction(() => {
       const box = document.getElementById("render-panel").getBoundingClientRect();
       return box.x >= 0 && box.right <= innerWidth && box.bottom <= innerHeight - 12;

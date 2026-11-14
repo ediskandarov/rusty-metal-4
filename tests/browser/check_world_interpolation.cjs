@@ -1,6 +1,7 @@
 /* global Module, tm4Port */
+const { startDiagnosticGame, togglePanel } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 const step = Number(process.env.TM4_SMOOTHING_STEP ?? "7");
 assert(Number.isInteger(step) && step >= 0 && step <= 7, "choose a smoothing slider step");
@@ -22,12 +23,7 @@ function motionPairs(samples, predicate) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader", "--disable-frame-rate-limit"],
-  });
+  const browser = await launchBrowser({ args: ["--disable-frame-rate-limit"] });
   const page = await browser.newPage({ viewport: { width: 720, height: 540 } });
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -54,10 +50,10 @@ function motionPairs(samples, predicate) {
     });
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
-    await page.locator("#render-settings summary").click();
+    await startDiagnosticGame(page);
+    await togglePanel(page, "render-settings");
     await page.selectOption("#render-preset", "ps1");
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.locator("canvas").click();
     await press("x");
     await menu("newgame");
@@ -70,7 +66,7 @@ function motionPairs(samples, predicate) {
 
     assert.equal(await page.evaluate(() => Module._WebTestPlaceMotionPickups()), 2);
     const smoothing = page.locator("#render-smoothing");
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     const verifyOff = async () => {
       await start();
       await page.waitForTimeout(200);
@@ -116,7 +112,7 @@ function motionPairs(samples, predicate) {
       console.log("PICKUP", example);
     }
 
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     await page.locator("canvas").click();
     assert((await page.evaluate(() => Module._WebTestPlaceEnergyTarget(0))) > 0);
     const gunMask = await page.evaluate(() => tm4Port.controlBindings[8]);
@@ -222,7 +218,7 @@ function motionPairs(samples, predicate) {
     }
 
     if (!(await page.locator("#render-settings").evaluate((node) => node.open)))
-      await page.locator("#render-settings summary").click();
+      await togglePanel(page, "render-settings");
     await smoothing.uncheck();
     await page.waitForFunction(() => !tm4Port.renderSmoothing);
     assert.equal(await page.evaluate(() => Module._WebTestPlaceMotionPickups()), 2);

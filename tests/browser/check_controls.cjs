@@ -1,16 +1,10 @@
 /* global setTestPad, Module, tm4Port */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, togglePanel, setPanelOpen } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const startup = require("./browser_startup.cjs");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const url = process.env.TM4_WEB_URL || "http://127.0.0.1:8080/";
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
@@ -47,7 +41,7 @@ const startup = require("./browser_startup.cjs");
     };
   });
   const settings = page.locator("#input-settings");
-  const open = () => settings.locator("summary").click();
+  const open = () => setPanelOpen(page, "input-settings", true);
   const close = () => page.locator("#input-close").click();
   const key = (name) => page.getByRole("button", { name: new RegExp(`^Change ${name} key,`) });
   const pad = (name) =>
@@ -64,7 +58,7 @@ const startup = require("./browser_startup.cjs");
 
   try {
     await page.goto(url);
-    await startup(page);
+    await startDiagnosticGame(page);
     await open();
     assert.equal(await key("Cross").textContent(), "X");
     assert.equal(await pad("Cross").textContent(), "Bottom face");
@@ -195,27 +189,26 @@ const startup = require("./browser_startup.cjs");
     await page.selectOption("#input-player", "0");
     assert.equal(await pad("Cross").textContent(), "Right face");
 
-    await page.locator("#render-settings summary").click();
+    await togglePanel(page, "render-settings");
     assert.equal(await settings.evaluate((el) => el.open), false);
     await open();
     assert.equal(await page.locator("#render-settings").evaluate((el) => el.open), false);
-    fs.mkdirSync("build/web", { recursive: true });
     await page.screenshot({ path: "build/checks/controls-desktop.png" });
     await page.setViewportSize({ width: 320, height: 568 });
-    const narrow = await page.locator("#input-panel").evaluate((el) => ({
-      left: el.getBoundingClientRect().left,
-      right: el.getBoundingClientRect().right,
-      bottom: el.getBoundingClientRect().bottom,
-      overflow: el.scrollWidth > el.clientWidth,
-    }));
-    assert(narrow.left >= 0 && narrow.right <= 320 && narrow.bottom <= 568 && !narrow.overflow);
-    await page.evaluate(
-      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
+    await page.waitForFunction(() => {
+      const el = document.querySelector("#input-panel");
+      const box = el.getBoundingClientRect();
+      return (
+        box.left >= 0 &&
+        box.right <= innerWidth &&
+        box.bottom <= innerHeight - 11 &&
+        el.scrollWidth <= el.clientWidth
+      );
+    });
     await page.screenshot({ path: "build/checks/controls-mobile.png" });
 
     await page.reload();
-    await startup(page);
+    await startDiagnosticGame(page);
     await open();
     assert.equal(await key("Cross").textContent(), "Z");
     assert.equal(await pad("Cross").textContent(), "Right face");
@@ -225,6 +218,7 @@ const startup = require("./browser_startup.cjs");
 
     await page.evaluate(() => localStorage.setItem("tm4-browser-input-v1", "{"));
     await page.reload();
+    await startDiagnosticGame(page);
     await open();
     assert.equal(await key("Cross").textContent(), "X");
     await page.evaluate(() => {

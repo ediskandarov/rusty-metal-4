@@ -1,7 +1,8 @@
 /* global Module, tm4Port */
+const { startDiagnosticGame } = require("./helpers/player.cjs");
 /* Browser integration check. Install Playwright in ignored build/browser-test;
  * run with bun tests/browser/check.cjs. */
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const fs = require("node:fs/promises");
@@ -58,7 +59,7 @@ async function scenario(browser, deathmatch) {
   }
   try {
     await page.goto(url);
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await screen("main");
     await page.locator("canvas").click();
     await observeAudio(page);
@@ -211,7 +212,7 @@ async function remappedControls(browser) {
   }
   try {
     await page.goto(url);
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await screen("main");
     await page.locator("canvas").click();
     await press("x");
@@ -265,7 +266,7 @@ async function remappedControls(browser) {
     await page.keyboard.up("z");
     assert.deepEqual(errors, []);
     await page.reload();
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await screen("main");
     assert.equal((await state()).menuGasBinding, 0x1000);
     console.log("PASS original binding editor -> saved custom gas, reverse and handbrake");
@@ -287,7 +288,7 @@ async function savedSettings(browser) {
   }
   try {
     await page.goto(url);
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.waitForFunction(() => globalThis.tm4Port?.menuReady);
     await page.locator("canvas").click();
     await press("ArrowUp"); // Options.
@@ -315,7 +316,7 @@ async function savedSettings(browser) {
     assert.equal(card.length, 128 * 1024);
     assert.equal(card.subarray(0, 2).toString(), "MC");
     await page.reload();
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.waitForFunction(() => globalThis.tm4Port?.frames > 30);
     assert.equal(await page.evaluate(() => tm4Port.soundVolume), changed);
     assert.deepEqual(errors, []);
@@ -327,12 +328,7 @@ async function savedSettings(browser) {
 
 (async () => {
   await fs.mkdir(output, { recursive: true });
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const results = [];
     for (const deathmatch of [false, true]) results.push(await scenario(browser, deathmatch));

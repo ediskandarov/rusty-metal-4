@@ -1,13 +1,10 @@
 /* global Module, tm4Port */
 /* Direct C adapter checks. Summary equality is not complete-world rollback proof. */
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
 (async () => {
-  const browser = await chromium.launch({
-    channel: "chrome",
-    args: ["--enable-unsafe-swiftshader", "--mute-audio"],
-  });
+  const browser = await launchBrowser({ args: ["--mute-audio"] });
   try {
     const page = await browser.newPage();
     await page.addInitScript(() => {

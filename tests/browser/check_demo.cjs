@@ -1,13 +1,9 @@
 /* global tm4Port */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(String(error)));
@@ -28,7 +24,7 @@ const assert = require("node:assert/strict");
   };
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     // Let the original menu idle counter start its random attract-mode match.
     await page.waitForFunction(() => tm4Port.screen === "level" && tm4Port.levelFrames > 10, null, {
       timeout: 120000,

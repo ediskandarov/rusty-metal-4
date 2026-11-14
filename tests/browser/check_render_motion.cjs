@@ -1,6 +1,7 @@
 /* global Module, tm4Port */
+const { startDiagnosticGame, togglePanel } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 const modes = [
   { name: "Vanilla", step: null, lead: 0 },
@@ -123,11 +124,9 @@ function verifyBridge(samples, mode, name) {
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  const browser = await launchBrowser({
     headless: process.env.TM4_HEADED !== "1",
-    args: ["--enable-unsafe-swiftshader", "--disable-frame-rate-limit"],
+    args: ["--disable-frame-rate-limit"],
   });
   const context = await browser.newContext({ viewport: { width: 720, height: 540 } });
   const errors = [];
@@ -137,16 +136,15 @@ function verifyBridge(samples, mode, name) {
       const page = await context.newPage();
       page.on("pageerror", (error) => errors.push(String(error)));
       await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-      await require("./browser_startup.cjs")(page);
-      const settings = page.locator("#render-settings summary");
-      await settings.click();
+      await startDiagnosticGame(page);
+      await togglePanel(page, "render-settings");
       await page.selectOption("#render-preset", "ps1");
       await page.selectOption("#render-limit", "120");
       if (mode.step !== null) {
         await page.locator("#render-smoothing").check();
         await page.locator("#render-smoothing-delay").fill(String(mode.step));
       }
-      await settings.click();
+      await togglePanel(page, "render-settings");
       await page.locator("canvas").click();
       await page.evaluate(() => {
         tm4Port.testMotionSeed = 743;
@@ -211,7 +209,7 @@ function verifyBridge(samples, mode, name) {
           following.some(({ history }) => history),
           "fresh history resumes after the gap",
         );
-        await settings.click();
+        await togglePanel(page, "render-settings");
         await page.evaluate(() => {
           tm4Port.testMotionPhases.length = 0;
         });
@@ -235,7 +233,7 @@ function verifyBridge(samples, mode, name) {
         );
         assert.equal(toggled.history, false, "reenabling smoothing starts from live poses");
         assert.equal(toggled.lead, 1, "reenabling smoothing restores its delay");
-        await settings.click();
+        await togglePanel(page, "render-settings");
         await page.locator("canvas").click();
         await page.keyboard.press("Enter", { delay: 130 });
         await page.waitForFunction(() => tm4Port.paused);

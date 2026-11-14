@@ -1,20 +1,16 @@
 /* global tm4Port, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, togglePanel } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: process.env.TM4_HEADED !== "1",
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser({ headless: process.env.TM4_HEADED !== "1" });
   try {
     const page = await browser.newPage({ viewport: { width: 720, height: 540 } });
     const errors = [];
     page.on("pageerror", (error) => errors.push(String(error)));
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8195/?fps=1");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     assert.equal(await page.locator("#render-limit").inputValue(), "120");
     assert.equal(await page.locator("#render-preset").inputValue(), "ultra");
     await page.locator("canvas").click();
@@ -52,9 +48,9 @@ const assert = require("node:assert/strict");
         callbacks: globalThis.pacingCallbacks,
       }));
     const select = async (id, value) => {
-      await page.locator("#render-settings summary").click();
+      await togglePanel(page, "render-settings");
       await page.selectOption(`#${id}`, String(value));
-      await page.locator("#render-settings summary").click();
+      await togglePanel(page, "render-settings");
       await page.locator("canvas").click();
       await page.waitForTimeout(1000);
     };

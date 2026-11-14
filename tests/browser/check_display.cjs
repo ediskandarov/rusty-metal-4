@@ -1,13 +1,8 @@
 /* global startupDisplay, Module, tm4DisplayPosition, displayPixels */
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     // A resize must not be needed to initialize the drawing buffer or aspect ratio.
     for (const [width, height, deviceScaleFactor] of [

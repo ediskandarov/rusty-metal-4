@@ -1,15 +1,11 @@
 /* global tm4Port, Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 const contacts = process.env.TM4_TEST_CONTACTS === "1";
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     for (const car of process.env.TM4_TEST_CAR
       ? [process.env.TM4_TEST_CAR]
@@ -42,7 +38,7 @@ const contacts = process.env.TM4_TEST_CONTACTS === "1";
         );
       try {
         await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-        await require("./browser_startup.cjs")(page);
+        await startDiagnosticGame(page);
         await screen("main");
         await page.locator("canvas").click();
         await press("x");

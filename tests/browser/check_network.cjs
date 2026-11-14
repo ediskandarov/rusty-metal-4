@@ -1,18 +1,15 @@
 /* global Module, tm4Port */
 const assert = require("node:assert/strict");
 const { readyInLobby } = require("./network_lobby.cjs");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const { fixtureTape, observeAcceptedFrames } = require("./simulation_reference.cjs");
 
 (async () => {
   const endpoint = process.env.TM4_MATCH_ENDPOINT;
   const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:8120/";
   if (!endpoint) throw new Error("Set TM4_MATCH_ENDPOINT");
-  const browser = await chromium.launch({
-    executablePath: process.env.TM4_CHROME,
-    channel: process.env.TM4_CHROME ? undefined : "chrome",
+  const browser = await launchBrowser({
     args: [
-      "--enable-unsafe-swiftshader",
       "--disable-background-timer-throttling",
       "--disable-renderer-backgrounding",
       "--disable-backgrounding-occluded-windows",

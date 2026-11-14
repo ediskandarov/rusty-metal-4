@@ -1,20 +1,16 @@
+const { startDiagnosticGame } = require("./helpers/player.cjs");
 const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { createReadStream, readdirSync } = require("node:fs");
 const { join, resolve } = require("node:path");
-const { chromium } = require("playwright");
+const { launchBrowser } = require("./helpers/browser.cjs");
 
 (async () => {
   if (!process.env.TM4_CLONECD_DIR) throw new Error("Set TM4_CLONECD_DIR to a CloneCD disc folder");
   const directory = resolve(process.env.TM4_CLONECD_DIR);
   const image = readdirSync(directory).find((name) => /\.img$/i.test(name));
   assert(image, "IMG is required");
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
     const errors = [];
@@ -22,7 +18,7 @@ const { chromium } = require("playwright");
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8121/");
     await page.waitForFunction(() => !document.getElementById("disc-folder").disabled);
     await page.locator("#disc-folder").setInputFiles(directory);
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await page.waitForFunction(
       () =>
         document.getElementById("resource-check").disabled &&

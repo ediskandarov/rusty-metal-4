@@ -1,11 +1,8 @@
 /* global Module */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => {
@@ -33,7 +30,7 @@ const { chromium } = require("playwright");
   }
   try {
     await page.goto("http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await screen("main");
     await page.locator("canvas").click();
     await press("x");

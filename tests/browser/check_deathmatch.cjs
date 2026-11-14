@@ -1,14 +1,10 @@
 /* global Module, tm4Port */
 /* Rule limits are diagnostic inputs; damage, scoring, timers and transitions are original code. */
-const { chromium } = require("playwright");
+const { startDiagnosticGame } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   const page = await browser.newPage({ viewport: { width: 960, height: 800 } });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
@@ -32,7 +28,7 @@ const assert = require("node:assert/strict");
     });
   try {
     await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
-    await require("./browser_startup.cjs")(page);
+    await startDiagnosticGame(page);
     await screen("main");
     await page.locator("canvas").click();
     for (const winsLimit of [false, true]) {

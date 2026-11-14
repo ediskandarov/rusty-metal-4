@@ -1,5 +1,6 @@
 /* global tm4Port, Module, textureProbe, textureBuffers */
-const { chromium } = require("playwright");
+const { startDiagnosticGame, setPanelOpen } = require("./helpers/player.cjs");
+const { launchBrowser } = require("./helpers/browser.cjs");
 const assert = require("node:assert/strict");
 
 async function observeUploads(page) {
@@ -82,7 +83,7 @@ async function openPreview(browser, url) {
   await require("./browser_diagnostics.cjs")(page);
   await observeUploads(page);
   await page.goto(url);
-  await require("./browser_startup.cjs")(page);
+  await startDiagnosticGame(page);
   const press = async (key) => {
     await page.keyboard.down(key);
     await page.waitForTimeout(150);
@@ -104,15 +105,11 @@ async function openPreview(browser, url) {
 }
 
 async function preview(page, angle, scale, stabilize, perspective, baseline = false) {
-  await page.locator("#render-settings").evaluate((node) => {
-    node.open = true;
-  });
+  await setPanelOpen(page, "render-settings", true);
   await page.selectOption("#render-scale", String(scale));
   await page.locator("#subpixel-vertices").setChecked(stabilize);
   if (!baseline) await page.locator("#perspective-textures").setChecked(perspective);
-  await page.locator("#render-settings").evaluate((node) => {
-    node.open = false;
-  });
+  await setPanelOpen(page, "render-settings", false);
   await page.locator("canvas").focus();
   await page.evaluate((angle) => Module._WebTestSetPreviewAngle(angle), angle);
   await page.waitForFunction(
@@ -158,12 +155,7 @@ async function preview(page, angle, scale, stabilize, perspective, baseline = fa
 }
 
 (async () => {
-  const browser = await chromium.launch({
-    executablePath:
-      process.env.TM4_CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    headless: true,
-    args: ["--enable-unsafe-swiftshader"],
-  });
+  const browser = await launchBrowser();
   try {
     const { page, press, errors } = await openPreview(
       browser,
@@ -241,9 +233,7 @@ async function preview(page, angle, scale, stabilize, perspective, baseline = fa
     });
     assert.equal(level.unexpectedDepth, 0);
     console.log("PASS gameplay perspective uploads across both ordering tables", level);
-    await page.locator("#render-settings").evaluate((node) => {
-      node.open = true;
-    });
+    await setPanelOpen(page, "render-settings", true);
     await page.locator("#render-fps").setChecked(true);
     await page.locator("#render-reset").click();
     assert.equal(await page.locator("#perspective-textures").isChecked(), true);
