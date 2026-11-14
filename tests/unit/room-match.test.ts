@@ -107,16 +107,14 @@ describe("room match authority", () => {
 test("running membership advertises vacancies and limits late car selection to the prepared pool", () => {
   const state = fixture();
   const match = freezeRoster(state, "host", 200);
-  expect(match.cars).toEqual(["Orbital"]);
+  expect(match.cars).toEqual(["Orbital", "Pizza Boy"]);
   match.stage = "playing";
   const late = join(state, "late", "Late", 300);
   connect(state, "late", "late-tab");
   expect(snapshot(state, "late").freePlaces).toBe(5);
   expect(snapshot(state, "late").match!.endpoint).toBeNull();
   updatePlayer(state, "late", selected);
-  expect(() =>
-    updatePlayer(state, "late", { ...selected, car: "Pizza Boy", ready: true }),
-  ).toThrow();
+  expect(() => updatePlayer(state, "late", { ...selected, car: "Crusher", ready: true })).toThrow();
   updatePlayer(state, "late", { ...selected, ready: true });
   expect(late.ready).toBe(true);
   expect(match.roster).toHaveLength(2);

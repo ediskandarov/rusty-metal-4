@@ -296,8 +296,9 @@ a death. Other mixed roster/map combinations remain unverified.
 ### Session identity and modes — R1/R2/R7
 
 The current network mode is FFA, epoch 1, a fixed seed and no bots. It retains seats
-and combat results across death and respawns the assigned prepared model. Automatic
-round limits and results remain deferred.
+and combat results across death, selects random prepared models on respawn, and completes
+at immutable time/frag limits with tied leaders preserved. The [participant lifecycle](design/participant-lifecycle.md#first-ffa-delivery-boundary)
+defines the ending policy and remaining results/rematch boundaries.
 For a supported portable roster, the server assigns each participant a random
 bearer credential. The match page retains it for the tab session. Reloading the
 tab can reclaim only the corresponding disconnected slot while the match is

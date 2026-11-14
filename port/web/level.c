@@ -7,6 +7,7 @@
 #include "loading.h"
 #include "movie.h"
 #include "net_match.h"
+#include "ffa.h"
 #include "participant.h"
 #include "render_sync.h"
 #include "rollback_audio.h"
@@ -382,13 +383,16 @@ void WebLevelNetworkStep(void)
     if (rendered)
         WebScreenBeginPredictedTick((u32)MainFrameCount + 1);
     WebCheckpointArenaSelect(checkpoint_arena);
-    process_level_step();
-    GameProcessMode();
+    if (!WebFfaCapture().reasons) {
+        process_level_step();
+        GameProcessMode();
+    }
     WebCheckpointArenaSelect(0);
     if (rendered)
         WebScreenFinishPredictedTick();
     network_frame_pending = 1;
     ++MainFrameCount;
+    WebFfaCompleteTick();
     WEB_BROWSER_REPORT({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     WebNetMatchPublishTick();
 }

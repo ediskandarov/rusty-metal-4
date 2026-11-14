@@ -40,6 +40,7 @@ test("the browser oracle uses exact authority identities, including reused and h
         {
           type: "prediction_prepare",
           mode: "ffa",
+          limits: { timeLimitTicks: 27000, fragLimit: 20 },
           respawnDelayTicks: 90,
           modelPool: ["Orbital", "Pizza Boy", "Crusher"],
           capacity: 8,

@@ -56,7 +56,8 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let (count, selected_world, room_roster, simulator) = if let Some(launcher) = &launcher {
+    let (count, selected_world, room_roster, limits, simulator) = if let Some(launcher) = &launcher
+    {
         loop {
             let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
                 return Ok(());
@@ -71,7 +72,13 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                     let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup() else {
                         return Ok(());
                     };
-                    break (setup.players, Some(setup.world), setup.roster, simulator);
+                    break (
+                        setup.players,
+                        Some(setup.world),
+                        setup.roster,
+                        setup.limits,
+                        simulator,
+                    );
                 }
                 Err(error) => {
                     launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
@@ -83,6 +90,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
             count,
             None,
             Vec::new(),
+            Default::default(),
             simulator::Simulator::from_environment()?,
         )
     };
@@ -106,6 +114,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     if let Err(error) = run_match(
         participants,
         selected_world,
+        limits,
         room_members,
         addr,
         simulator,

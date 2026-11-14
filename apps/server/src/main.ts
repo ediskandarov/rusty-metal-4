@@ -1,3 +1,4 @@
+import { ffaDefaultLimits } from "@tm4/lightyear-client/schemas";
 import { loadDisc } from "@tm4/resources/loader/loader";
 import { directorySources } from "@tm4/resources/loader/sources";
 import { createServerClient } from "@tm4/rustymetal-server-client";
@@ -122,7 +123,11 @@ matchOptions.addEventListener("submit", (event) => {
 });
 
 async function openMatch() {
-  const options = { players: Number(playerCount.value), world: world.value };
+  const options = {
+    players: Number(playerCount.value),
+    world: world.value,
+    limits: ffaDefaultLimits,
+  };
   busy = true;
   start.disabled = true;
   playerCount.disabled = true;

@@ -1,3 +1,4 @@
+#include "port/web/ffa.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
 #include "interpolation.h"
@@ -26,6 +27,7 @@ typedef struct {
 typedef struct {
     Tm4GameInfo game;
     WebParticipantState participants;
+    WebFfaResult ffa;
     Tm4GameOptions options;
     PadCache pads[8];
     u8 gte[256];
@@ -158,6 +160,7 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
     }
     *roots = (SimulationRoots) {
         .game = GameInfo,
+        .ffa = WebFfaCapture(),
         .options = GameOptions,
         .directory = RegGetCurrentDirectoryPtr(),
         .active_cells = ObjectActiveInteractionCells,
@@ -266,6 +269,7 @@ const char* WebCheckpointRestore(u32 tick)
     }
     WebCheckpointGteRestore(roots->gte);
     GameInfo = roots->game;
+    WebFfaRestore(roots->ffa);
     WebParticipantRestore(&roots->participants);
     GameOptions = roots->options;
     memcpy(PadJpad, roots->pads, sizeof(PadJpad));

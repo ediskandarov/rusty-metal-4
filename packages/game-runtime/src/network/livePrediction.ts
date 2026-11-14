@@ -17,6 +17,7 @@ interface Bridge {
   journal_authority_frame(json: string): void;
   apply_live_membership(tick: number, json: string): boolean;
   live_slot_mask(): number;
+  live_match_finished(): boolean;
   live_participant_part(slot: number, part: number): number;
   retain_live_tick(tick: number): number;
   restore_live_tick(tick: number): boolean;
@@ -61,6 +62,7 @@ export function attachLivePrediction(
   });
   globalThis.tm4LivePrediction = {
     apply_live_membership: (tick, json) => applyMembership(engine, tick, JSON.parse(json)),
+    live_match_finished: () => !!port.netMatch?.completion?.reasons,
     live_slot_mask: () => engine.ccall("WebNetSlotMask", "number", [], []),
     live_participant_part: (slot, part) =>
       engine.ccall(

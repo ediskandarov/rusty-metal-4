@@ -158,8 +158,9 @@ Rooms gather players, choose settings and prepare one match at a time. Browsing
 and joining need no disc resources or simulation container. The embedded existing
 player reads each participant's own disc. The host explicitly prepares the private
 server, then every participant readies and the host starts the actual roster.
-FFA keeps running after deaths; automatic limits, results and return to the room
-remain deferred. Explicit departure releases seats, and an empty room releases its
+FFA respawns after deaths and finishes at its immutable time or frag limit; normal
+completion releases the private server and returns members to the same room.
+Explicit departure releases seats, and an empty room releases its
 private server. FFA always provides eight places, independently of the initial roster
 size. During play, a newcomer can load their own disc, select from the explicit startup-prepared model pool and join a free seat;
 explicit room leave schedules native departure. Closing a tab preserves recovery
@@ -184,8 +185,13 @@ only when working on the retained container infrastructure.
   the diagnostic native binary, and `TM4_DISC_DIR`. Its existing combat fixture
   positions a lethal duel, verifies fresh-car respawn and retained combat results,
   then tests reconnect and explicit all-player departure with private resource cleanup.
-  A fresh room and native process exercise a second session. Automatic round results
-  remain deferred. It does not verify deployed Cloudflare containers.
+  A fresh room and native process exercise a second session. It does not verify deployed
+  Cloudflare containers. `check_ffa_completion.mjs` separately uses explicit short limits
+  to verify a tied timeout, confirmed client completion, normal results status and cleanup.
+  Set `TM4_TEST_END_RECOVERY=1` to reconnect the guest immediately before timeout.
+  `bun tests/browser/check_ffa_prediction.mjs` uses the diagnostic bundle to exercise
+  forecast membership beyond a provisional end, native correction undoing a projectile's
+  frag-limit finish, exact corrected C replay and rejection of invalid identities.
 - `TM4_DISC_DIR=<disc folder> bun tests/browser/check_live_membership.mjs`: four
   independent browsers use ordinary room actions to admit, depart, reuse a seat,
   reject retired credentials and recover the same identity. Reloading a preparing

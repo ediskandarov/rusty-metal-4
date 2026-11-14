@@ -50,6 +50,8 @@ async function observeAcceptedFrames(reference, clients) {
                     "string",
                     "number",
                     "string",
+                    "number",
+                    "number",
                   ],
                   [
                     start.capacity,
@@ -62,6 +64,8 @@ async function observeAcceptedFrames(reference, clients) {
                     start.participants.join("\n"),
                     start.respawnDelayTicks,
                     start.modelPool.join("\n"),
+                    start.limits.timeLimitTicks,
+                    start.limits.fragLimit,
                   ],
                 )
               )

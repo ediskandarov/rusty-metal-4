@@ -16,7 +16,7 @@ use tm4_network::{
     },
 };
 
-const MAGIC: &[u8; 8] = b"TM4JRNL\x03";
+const MAGIC: &[u8; 8] = b"TM4JRNL\x04";
 const HEADER_LIMIT: usize = 4096;
 const CACHE_LIMIT: usize = 8 * 1024 * 1024;
 const MAX_FRAME_BYTES: usize = journal_frame_bytes(MAX_PLAYERS);
@@ -104,11 +104,10 @@ fn encode(
     }
     bytes[24..28].copy_from_slice(&state.next_mode.to_le_bytes());
     bytes[28] = u8::from(state.unsupported.is_some());
-    assert!(encode_membership(
-        changes,
-        pool,
-        &mut bytes[29..JOURNAL_FRAME_PREFIX]
-    ));
+    assert!(encode_membership(changes, pool, &mut bytes[29..118]));
+    bytes[118..122].copy_from_slice(&state.completion.tick.to_le_bytes());
+    bytes[122..126].copy_from_slice(&state.completion.reasons.to_le_bytes());
+    bytes[126..130].copy_from_slice(&u32::from(state.completion.winners).to_le_bytes());
     for (part, input) in bytes[JOURNAL_FRAME_PREFIX..]
         .chunks_exact_mut(JOURNAL_INPUT_BYTES)
         .zip(inputs)
@@ -312,15 +311,13 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
     };
     let mut record = [0; MAX_FRAME_BYTES + 4];
     let mut tag = [0; 1];
-    let mut next_mode = 0;
+    let mut finished = false;
     loop {
         if reader.read(&mut tag)? == 0 {
             return Ok(summary);
         }
         let size = match tag[0] {
-            FRAME if summary.ticks < JOURNAL_MAX_TICKS && next_mode == 0 => {
-                summary.bytes_per_tick + 4
-            }
+            FRAME if summary.ticks < JOURNAL_MAX_TICKS && !finished => summary.bytes_per_tick + 4,
             END => 9,
             _ => return Err(invalid("Invalid journal record")),
         };
@@ -339,14 +336,14 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
                 return Err(invalid("Invalid journal footer"));
             }
             summary.end = match data[0] {
-                1 if next_mode != 0 => End::Finished,
+                1 if finished => End::Finished,
                 2 => End::Aborted,
                 _ => return Err(invalid("Invalid journal outcome")),
             };
             return Ok(summary);
         }
         if decode_membership(
-            &data[29..JOURNAL_FRAME_PREFIX],
+            &data[29..118],
             summary.header.start.capacity,
             &summary.header.start.model_pool,
         )
@@ -358,10 +355,20 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
         {
             return Err(invalid("Invalid journal frame flags"));
         }
+        let completion_tick = u32::from_le_bytes(data[118..122].try_into().unwrap());
+        let reasons = u32::from_le_bytes(data[122..126].try_into().unwrap());
+        let winners = u32::from_le_bytes(data[126..130].try_into().unwrap());
+        if reasons > 3
+            || winners > 255
+            || (reasons == 0 && (completion_tick != 0 || winners != 0))
+            || (reasons != 0 && completion_tick != summary.ticks + 1)
+        {
+            return Err(invalid("Invalid journal completion"));
+        }
         if data[28] == 1 {
             summary.first_unsupported_tick.get_or_insert(summary.ticks);
         }
-        next_mode = i32::from_le_bytes(data[24..28].try_into().unwrap());
+        finished = data[24..28] != [0; 4] || data[122..126] != [0; 4];
         summary.ticks += 1;
     }
 }
@@ -398,7 +405,8 @@ mod tests {
         Header {
             start: SessionStart {
                 mode: tm4_network::protocol::MatchMode::Ffa,
-                respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+                limits: tm4_network::protocol::FfaLimits::default(),
+                respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
                 model_pool: vec!["Orbital".into()],
                 capacity: players,
                 slots: (0..players).map(|slot| slot as u8).collect(),
@@ -422,6 +430,11 @@ mod tests {
 
     fn state(tick: u32, next_mode: i32) -> RoundState {
         RoundState {
+            completion: tm4_network::protocol::MatchCompletion {
+                tick: 0,
+                reasons: 0,
+                winners: 0,
+            },
             remaining: 8,
             winner: -1,
             round_finished: false,

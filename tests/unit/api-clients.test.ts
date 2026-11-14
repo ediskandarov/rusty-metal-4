@@ -18,6 +18,7 @@ const status = {
   compatibility: null,
   message: "Upload resources",
   players: 2,
+  limits: { timeLimitTicks: 27000, fragLimit: 20 },
   worlds: [],
   world: null,
   connected: 0,
@@ -100,11 +101,20 @@ test("server client parses status, applies admin headers, and forwards cancellat
   response = new Response("Busy", { status: 503 });
   await expect(client.status()).rejects.toBeInstanceOf(ServerApiError);
   response = new Response(null, { status: 202 });
-  await client.start({ players: 2, world: "Construction Yard" });
-  expect(await requests.at(-1)!.json()).toEqual({ players: 2, world: "Construction Yard" });
+  await client.start({
+    players: 2,
+    limits: { timeLimitTicks: 27000, fragLimit: 20 },
+    world: "Construction Yard",
+  });
+  expect(await requests.at(-1)!.json()).toEqual({
+    players: 2,
+    limits: { timeLimitTicks: 27000, fragLimit: 20 },
+    world: "Construction Yard",
+  });
   await expect(
     client.start({
       players: 2,
+      limits: { timeLimitTicks: 27000, fragLimit: 20 },
       world: "Construction Yard",
       sessionId: crypto.randomUUID(),
       roster: [],
@@ -262,6 +272,7 @@ test("snapshot header limits are enforced at the Lightyear boundary", () => {
     state: {
       remaining: 2,
       winner: -1,
+      completion: { tick: 0, reasons: 0, winners: 0 },
       roundFinished: false,
       acceptsContinue: false,
       nextMode: 0,

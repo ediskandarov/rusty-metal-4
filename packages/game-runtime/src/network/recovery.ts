@@ -41,6 +41,9 @@ function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
     local.unsupported === remote.unsupported &&
     local.remaining === remote.remaining &&
     local.winner === remote.winner &&
+    local.completion?.tick === remote.completion.tick &&
+    local.completion?.reasons === remote.completion.reasons &&
+    local.completion?.winners === remote.completion.winners &&
     local.roundFinished === remote.roundFinished &&
     local.acceptsContinue === remote.acceptsContinue &&
     local.nextMode === remote.nextMode &&

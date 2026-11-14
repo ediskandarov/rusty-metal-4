@@ -61,6 +61,7 @@ afterEach(async () => {
 const compatibility = { protocol: 16, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
   mode: "ffa" as const,
+  limits: { timeLimitTicks: 27000, fragLimit: 20 },
   respawnDelayTicks: 90,
   capacity: 8,
   slots: [0, 1],
@@ -80,6 +81,7 @@ const state = {
   unsupported: null,
   remaining: 2,
   winner: -1,
+  completion: { tick: 0, reasons: 0, winners: 0 },
   roundFinished: false,
   acceptsContinue: false,
   nextMode: 0,
@@ -527,7 +529,7 @@ test("leaving between catch-up batches stops C replay and suppresses its acknowl
   });
   engine._WebNetQueueTick = step;
   engine.ccall = () => 3;
-  const width = 118 + start.capacity * 7;
+  const width = 130 + start.capacity * 7;
   const bytes = new Uint8Array(64 * width);
   const view = new DataView(bytes.buffer);
   for (let row = 0; row < bytes.length; row += width) {
@@ -686,4 +688,39 @@ test("an abandoned initial join resolving after a new match cannot cancel the ne
   expect(port.netMatch).toBeDefined();
   expect(counts()).toEqual({ cancellations: 1, loads: 2 });
   expect(next.readyState).toBe(WebSocket.OPEN);
+});
+
+test("a predicted finish keeps the session until its ending frame is confirmed", async () => {
+  const { first, port, counts, statuses } = await setup();
+  const completion = { tick: 1, reasons: 3, winners: 3 };
+  port.netMatch = { tick: 1, ...state, completion, roundFinished: true };
+  expect(counts().cancellations).toBe(0);
+  expect(first.readyState).toBe(WebSocket.OPEN);
+  first.onmessage({
+    type: "frame",
+    tick: 0,
+    changes: [],
+    inputs: [],
+    state: { ...state, completion, roundFinished: true },
+  });
+  await Promise.resolve();
+  expect(counts().cancellations).toBe(1);
+  expect(first.readyState).toBe(WebSocket.CLOSED);
+  expect(statuses.at(-1)).toEqual(["lobby", "Match finished · Tie: players 1, 2"]);
+});
+
+test("a normal authority finish closes an in-flight reconnect without a recovery error", async () => {
+  const { first, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  beginSnapshot(next);
+  next.onmessage({
+    type: "finished",
+    state: { ...state, completion: { tick: 20, reasons: 1, winners: 2 }, roundFinished: true },
+  });
+  await Promise.resolve();
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  expect(statuses.at(-1)).toEqual(["lobby", "Match finished · Player 2 wins"]);
+  await Bun.sleep(1100);
+  expect(connections).toHaveLength(2);
 });

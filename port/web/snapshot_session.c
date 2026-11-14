@@ -1,3 +1,4 @@
+#include "port/web/ffa.h"
 #include "snapshot_session.h"
 #include "net_match.h"
 #include "participant.h"
@@ -14,7 +15,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 9,
+    SessionVersion = 10,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -53,6 +54,8 @@ typedef struct {
     u32 squares, gte_length;
     u8 gte[256];
     u32 respawn_delay_ticks;
+    u32 time_limit_ticks, frag_limit;
+    WebFfaResult ffa;
     char model_pool[8][64];
     WebParticipantState participants;
     WebParticipantId initial_participants[8];
@@ -161,6 +164,9 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     memset(&record, 0, sizeof(record));
     record.version = SessionVersion;
     record.respawn_delay_ticks = WebNetFfaRespawnDelay();
+    record.time_limit_ticks = WebNetFfaTimeLimit();
+    record.frag_limit = WebNetFfaFragLimit();
+    record.ffa = WebFfaCapture();
     WebNetModelPool(record.model_pool);
     record.participant_count = GameInfo.player_car_count;
     record.car_count = GameInfo.car_count;
@@ -311,6 +317,10 @@ int WebSnapshotSessionPrepare(const u8* input, u32 length)
     WebNetModelPool(pool);
     if (memcmp(pool, record.model_pool, sizeof(pool))
         || record.respawn_delay_ticks != WebNetFfaRespawnDelay()
+        || record.time_limit_ticks != WebNetFfaTimeLimit()
+        || record.frag_limit != WebNetFfaFragLimit()
+        || !WebFfaResultValid(record.ffa, record.tick, record.slot_mask, &record.participants)
+        || (WebFfaActive() && !!record.ffa.reasons != !!record.deathmatch_finished)
         || memcmp(initial, record.initial_participants, sizeof(initial)))
         return 0;
     if (record.version != SessionVersion || record.capacity != WebNetSlotCapacity()
@@ -501,6 +511,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     GameInfo.games_completed = record.games_completed;
     GameInfo.deathmatch_winner = record.deathmatch_winner;
     GameInfo.deathmatch_finished = record.deathmatch_finished;
+    WebFfaRestore(record.ffa);
     GameInfo.deathmatch_next_mode = record.deathmatch_next_mode;
     GameInfo.deathmatch_accept_input = record.deathmatch_accept_input;
     GameInfo.deathmatch_rounds = record.deathmatch_rounds;

@@ -167,6 +167,8 @@ try {
               "string",
               "number",
               "string",
+              "number",
+              "number",
             ],
             [
               8,
@@ -179,6 +181,8 @@ try {
               "0000000000000011\n0000000000000012",
               90,
               "Orbital\nPizza Boy",
+              27000,
+              20,
             ],
           );
           if (

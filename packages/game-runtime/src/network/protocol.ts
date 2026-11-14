@@ -97,6 +97,8 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       "string",
       "number",
       "string",
+      "number",
+      "number",
     ],
     [
       start.capacity,
@@ -109,6 +111,8 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       start.participants.join("\n"),
       start.respawnDelayTicks,
       start.modelPool.join("\n"),
+      start.limits.timeLimitTicks,
+      start.limits.fragLimit,
     ],
   );
 }
@@ -119,6 +123,16 @@ export function applyMembership(engine: NetworkEngine, tick: number, proposed: u
   for (const change of changes) {
     const id = BigInt("0x" + change.identity.participant);
     const values = [tick, change.identity.slot, Number(id & 0xffffffffn), Number(id >> 32n)];
+    if (
+      change.kind === "admit" &&
+      !engine.ccall(
+        "WebNetAdmissionValid",
+        "number",
+        ["number", "number", "number", "number", "string"],
+        [...values, change.car],
+      )
+    )
+      return false;
     const accepted =
       change.kind === "admit"
         ? engine.ccall(

@@ -7,7 +7,7 @@ export type { CatchupChunk } from "@tm4/lightyear-client/schemas";
 
 export const maxResumeTicks = 240;
 const maxChunkTicks = 64;
-const framePrefix = 118;
+const framePrefix = 130;
 const inputBytes = 7;
 const maxBatchTicks = 24;
 const batchBudgetMs = 8;
@@ -139,6 +139,10 @@ export class SnapshotReplay {
       state.digest !== digest ||
       state.unsupported !== null ||
       (frame && state.nextMode !== frame.getInt32(row + 24, true)) ||
+      (frame &&
+        (state.completion?.tick !== frame.getUint32(row + 118, true) ||
+          state.completion?.reasons !== frame.getUint32(row + 122, true) ||
+          state.completion?.winners !== frame.getUint32(row + 126, true))) ||
       differences.length
     ) {
       const detail = state?.unsupported || differences.join(", ");

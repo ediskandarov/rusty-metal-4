@@ -1,4 +1,5 @@
 #include "net_match.h"
+#include "ffa.h"
 #include "cheats.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
@@ -44,6 +45,7 @@ typedef struct NetMatchSetup {
     s32 view_slot;
     u32 flags;
     u32 respawn_delay_ticks;
+    u32 time_limit_ticks, frag_limit;
 } NetMatchSetup;
 
 static struct {
@@ -218,8 +220,7 @@ static int membership_boundary(u32 tick)
         && GameInfo.mode == GAME_MODE_PLAY && !GameInfo.next_mode;
 }
 
-EMSCRIPTEN_KEEPALIVE int WebNetAdmitParticipant(
-    u32 tick, s32 slot, u32 low, u32 high, const char* model)
+static u32 admission_model(u32 tick, s32 slot, u32 low, u32 high, const char* model)
 {
     if (!membership_boundary(tick) || GameInfo.deathmatch_finished || slot < 0
         || slot >= match.setup.capacity || WebNetSlotOccupied(slot) || (!low && !high) || !model)
@@ -235,8 +236,23 @@ EMSCRIPTEN_KEEPALIVE int WebNetAdmitParticipant(
             prepared_model = i + 1;
             break;
         }
+    return prepared_model;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetAdmissionValid(
+    u32 tick, s32 slot, u32 low, u32 high, const char* model)
+{
+    return admission_model(tick, slot, low, high, model) != 0;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetAdmitParticipant(
+    u32 tick, s32 slot, u32 low, u32 high, const char* model)
+{
+    const u32 prepared_model = admission_model(tick, slot, low, high, model);
     if (!prepared_model)
         return 0;
+    WebParticipantState previous;
+    WebParticipantCapture(&previous);
     const u32 serial = ObjectNextSerial;
     const u32 random = randseed(), effects = WebRenderEffectRandomState();
     RegistryDirectory* directory = RegGetCurrentDirectoryPtr();
@@ -284,7 +300,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetAdmitParticipant(
 
 EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u32 high)
 {
-    if (!membership_boundary(tick) || !WebNetSlotOccupied(slot))
+    if (!membership_boundary(tick) || GameInfo.deathmatch_finished || !WebNetSlotOccupied(slot))
         return 0;
     WebParticipantState participants;
     WebParticipantCapture(&participants);
@@ -319,7 +335,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u3
  * selection, failed request or cancelled match can contribute configuration. */
 static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot, u32 flags,
     const char* car_names, const char* participant_ids, u32 respawn_delay_ticks,
-    const char* pool_names)
+    const char* pool_names, u32 time_limit_ticks, u32 frag_limit)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8 || !slots
         || (slots & ~((1u << capacity) - 1)) || __builtin_popcount(slots) < 2 || view_slot < -1
@@ -339,7 +355,9 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
         .seed = seed,
         .view_slot = view_slot,
         .flags = flags,
-        .respawn_delay_ticks = respawn_delay_ticks };
+        .respawn_delay_ticks = respawn_delay_ticks,
+        .time_limit_ticks = time_limit_ticks,
+        .frag_limit = frag_limit };
     const char* cursor = car_names;
     const s32 count = __builtin_popcount(slots);
     for (s32 car = 0; car < count; ++car) {
@@ -423,6 +441,7 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     if (!session_resources_present(&candidate))
         return 0;
     match.setup = candidate;
+    WebFfaRestore((WebFfaResult) { 0 });
     match.initial_participants = participants;
     WebParticipantRestore(&participants);
     match.tick = 0;
@@ -441,17 +460,29 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
  * to diagnostic fixtures that verify the shared lifecycle independently of policy. */
 EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot,
     u32 flags, const char* car_names, const char* participant_ids, u32 delay,
-    const char* model_pool)
+    const char* model_pool, u32 time_limit_ticks, u32 frag_limit)
 {
-    if (capacity != 8 || !delay || delay > 3600 || !model_pool)
+    if (capacity != 8 || !delay || delay > 3600 || !model_pool
+        || !time_limit_ticks || time_limit_ticks > 0x7fffffffu
+        || !frag_limit || frag_limit > 0x7fffffffu)
         return reject_start("Invalid FFA respawn delay or gameplay capacity");
     return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
-        delay, model_pool);
+        delay, model_pool, time_limit_ticks, frag_limit);
 }
 
 int WebNetDeparting(void)
 {
     return match.departing;
+}
+
+u32 WebNetFfaTimeLimit(void)
+{
+    return match.setup.time_limit_ticks;
+}
+
+u32 WebNetFfaFragLimit(void)
+{
+    return match.setup.frag_limit;
 }
 
 u32 WebNetFfaRespawnDelay(void)
@@ -464,7 +495,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
     s32 view_slot, u32 flags, const char* car_names, const char* participant_ids)
 {
     return start_match(
-        capacity, slots, world, seed, view_slot, flags, car_names, participant_ids, 0, NULL);
+        capacity, slots, world, seed, view_slot, flags, car_names, participant_ids, 0, NULL, 0, 0);
 }
 #endif
 
@@ -901,6 +932,9 @@ void WebNetMatchPublishTick(void)
         match.tick, GameInfo.active_player_count, GameInfo.deathmatch_winner,
         GameInfo.deathmatch_finished, GameInfo.deathmatch_accept_input, GameInfo.next_mode, digest,
         state.session, state.cars, state.objects, state.world, state.sound, unsupported);
+    const WebFfaResult result = WebFfaCapture();
+    WEB_BROWSER_REPORT({ tm4Port.netMatch.completion = ({ tick : $0, reasons : $1, winners : $2 }); },
+        result.tick, result.reasons, result.winners);
     WebParticipantState participants;
     WebParticipantCapture(&participants);
     if (match.setup.view_slot >= 0) {
@@ -924,6 +958,7 @@ void WebNetMatchPublishTick(void)
 void WebNetMatchEnd(void)
 {
     memset(&match, 0, sizeof(match));
+    WebFfaRestore((WebFfaResult) { 0 });
     const WebParticipantState empty = { 0 };
     WebParticipantRestore(&empty);
     WEB_BROWSER_REPORT({

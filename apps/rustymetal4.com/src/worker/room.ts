@@ -1,3 +1,4 @@
+import { ffaDefaultLimits } from "@tm4/lightyear-client/schemas";
 import { ffaCapacity, mapLabel } from "@tm4/rooms-client/schemas";
 import { createServerClient } from "@tm4/rustymetal-server-client";
 import { DurableObject } from "cloudflare:workers";
@@ -534,6 +535,7 @@ export class Room extends DurableObject<Env> {
             await this.api().start({
               players: ffaCapacity,
               world: mapLabel(state.settings.mapId),
+              limits: ffaDefaultLimits,
               sessionId: match.id,
               roster: match.roster.map(({ credential, car }) => ({ credential, car })),
             });

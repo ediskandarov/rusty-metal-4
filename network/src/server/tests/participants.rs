@@ -31,6 +31,7 @@ fn game() -> Match {
             worlds: vec!["Construction Yard".into()],
         }),
         selected_world: None,
+        limits: Default::default(),
         room_only: false,
         retired_connections: HashSet::new(),
         initial_digest: Some(123),
@@ -42,7 +43,8 @@ fn game() -> Match {
         last_step_duration: None,
         session: Some(SessionStart {
             mode: tm4_network::protocol::MatchMode::Ffa,
-            respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+            limits: tm4_network::protocol::FfaLimits::default(),
+            respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
             model_pool: vec!["Orbital".into(), "Pizza Boy".into()],
             capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
@@ -55,6 +57,11 @@ fn game() -> Match {
             portable: true,
         }),
         last_state: Some(RoundState {
+            completion: tm4_network::protocol::MatchCompletion {
+                tick: 0,
+                reasons: 0,
+                winners: 0,
+            },
             remaining: 2,
             winner: -1,
             round_finished: false,
@@ -1098,4 +1105,111 @@ fn disconnect_is_not_departure_and_pending_timeout_releases_only_its_reservation
     assert_eq!(game.participants.resolve(&stable), Some(3));
     assert!(!game.participants.joining(usize::from(pending.slot)));
     assert!(game.membership.pending.is_empty());
+}
+
+#[test]
+fn confirmed_ffa_end_seals_journal_and_cancels_scheduled_and_preparing_admissions() {
+    let mut world = World::new();
+    let mut game = live_game();
+    let directory = env::temp_dir().join(format!(
+        "tm4-ffa-end-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let initial = game.session.as_ref().unwrap().clone();
+    let mut journal = journal::Journal::create(
+        &directory,
+        &journal::Header {
+            start: initial,
+            initial_digest: 123,
+        },
+    )
+    .unwrap();
+    for tick in 0..game.tick {
+        journal
+            .append(
+                tick,
+                &[Input::default(); 8],
+                &[],
+                game.last_state.as_ref().unwrap(),
+            )
+            .unwrap();
+    }
+    let path = journal.path.clone();
+    game.journal = Some(journal);
+    world.insert_resource(game);
+    let a = room_change(
+        &mut world,
+        web::RoomMembership::Admit {
+            credential: "de".repeat(32),
+            car: "Orbital".into(),
+        },
+    )
+    .unwrap()
+    .identity
+    .unwrap();
+    let b = room_change(
+        &mut world,
+        web::RoomMembership::Admit {
+            credential: "ef".repeat(32),
+            car: "Pizza Boy".into(),
+        },
+    )
+    .unwrap()
+    .identity
+    .unwrap();
+    world
+        .run_system_once(
+            move |mut game: ResMut<Match>,
+                  mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+                  mut commands: Commands| {
+                let future = game
+                    .schedule_admission(usize::from(a.slot), &mut links)
+                    .unwrap();
+                assert!(future > game.tick);
+                assert_eq!(game.membership.pending.len(), 2);
+                let tick = game.tick;
+                let mut state = game.last_state.clone().unwrap();
+                state.completion = game_protocol::MatchCompletion {
+                    tick: tick + 1,
+                    reasons: 3,
+                    winners: 0x81,
+                };
+                state.round_finished = true;
+                game.completed(
+                    &mut links,
+                    tick,
+                    vec![Input::default(); 8],
+                    vec![],
+                    state,
+                    Instant::now(),
+                );
+                game.maintain_membership(&mut links, &mut commands);
+            },
+        )
+        .unwrap();
+    let game = world.resource::<Match>();
+    assert!(game.ended && game.journal_sealed);
+    assert!(game.membership.pending.is_empty() && game.membership.scheduled.is_empty());
+    assert!(game.participants.resolve(&a).is_none() && game.participants.resolve(&b).is_none());
+    assert_eq!(
+        game.participants.count(),
+        3,
+        "occupied participants retain final score eligibility"
+    );
+    assert_eq!(journal::inspect(&path).unwrap().end, journal::End::Finished);
+    assert!(
+        room_change(
+            &mut world,
+            web::RoomMembership::Admit {
+                credential: "fa".repeat(32),
+                car: "Orbital".into()
+            }
+        )
+        .is_err()
+    );
+    std::fs::remove_dir_all(directory).unwrap();
 }

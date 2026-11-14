@@ -49,7 +49,7 @@ export class ServerJournal {
     if (
       offset !== length ||
       new TextDecoder().decode(bytes.subarray(0, 7)) !== "TM4JRNL" ||
-      bytes[7] !== 3
+      bytes[7] !== 4
     )
       throw new Error("Invalid journal response");
     // Completed chunks never change; the last partial chunk is rewritten when it grows.

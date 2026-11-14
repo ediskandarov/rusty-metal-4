@@ -1,0 +1,5 @@
+{
+  "timeLimitTicks": 27000,
+  "fragLimit": 20,
+  "respawnDelayTicks": 90
+}

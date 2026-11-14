@@ -9,7 +9,13 @@ const sections: [number, number, number, number, number] = [0, 0, 0, 0, 0];
 
 function setup() {
   const port: NetworkPort = {
-    netMatch: { tick: snapshot, digest: 42, sections, unsupported: null },
+    netMatch: {
+      tick: snapshot,
+      digest: 42,
+      sections,
+      unsupported: null,
+      completion: { tick: 0, reasons: 0, winners: 0 },
+    },
   };
   const counts = { steps: 0, ends: 0 };
   const engine: NetworkEngine = {
@@ -25,6 +31,7 @@ function setup() {
         sections,
         unsupported: null,
         nextMode: 0,
+        completion: { tick: 0, reasons: 0, winners: 0 },
       };
       return 1;
     },
@@ -47,7 +54,7 @@ function setup() {
 }
 
 function chunk(start: number, ticks: number, target = head) {
-  const rowBytes = 132;
+  const rowBytes = 130 + 7 * 2;
   const bytes = new Uint8Array(ticks * rowBytes);
   const data = new DataView(bytes.buffer);
   for (let tick = 0; tick < ticks; tick++) data.setUint32(tick * rowBytes, start + tick + 1, true);

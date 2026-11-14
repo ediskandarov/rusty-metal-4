@@ -1,3 +1,4 @@
+#include "port/web/ffa.h"
 #include "net_state.h"
 #include "interpolation.h"
 #include "net_match.h"
@@ -21,8 +22,14 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(13); /* State record schema. */
+    VALUE(14); /* State record schema. */
     VALUE(WebNetFfaRespawnDelay());
+    VALUE(WebNetFfaTimeLimit());
+    VALUE(WebNetFfaFragLimit());
+    const WebFfaResult ffa = WebFfaCapture();
+    VALUE(ffa.tick);
+    VALUE(ffa.reasons);
+    VALUE(ffa.winners);
     VALUE(WebNetModelCount());
     for (u32 i = 0; i < WebNetModelCount(); ++i)
         key(hash, WebNetModelName(i));

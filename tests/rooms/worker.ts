@@ -140,8 +140,30 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
   }
   override async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
-    if (this.env.NATIVE_URL)
-      return fetch(this.env.NATIVE_URL + "/" + this.ctx.id.toString() + path, request);
+    if (this.env.NATIVE_URL) {
+      const base = this.env.NATIVE_URL + "/" + this.ctx.id.toString();
+      const journal = new ServerJournal(this.ctx.storage);
+      if (path === "/_server/journal") {
+        const saved = await journal.download();
+        if (saved.ok) return saved;
+      }
+      if (path === "/_server/stop") {
+        // Exercise the production archive-before-destroy contract with the actual native journal.
+        try {
+          const snapshot = await fetch(base + "/api/journal");
+          if (snapshot.ok) await journal.save(snapshot);
+        } catch (error) {
+          console.error("Native fixture journal archive failed", String(error));
+        }
+        const stopped = await fetch(base + path, request);
+        const meta = await journal.metadata();
+        return new Response(stopped.body, {
+          status: stopped.status,
+          headers: meta ? { "X-Journal-Expires-At": String(meta.expiresAt) } : {},
+        });
+      }
+      return fetch(base + path, request);
+    }
     if (path === "/_server/stop") {
       if (this.failStop) return new Response("Stop temporarily failed", { status: 503 });
       this.stops++;
@@ -178,7 +200,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       this.players = input.players;
       this.phase = "match";
       await new ServerJournal(this.ctx.storage).save(
-        new Response(new Uint8Array([84, 77, 52, 74, 82, 78, 76, 3, 0, 1, 2]), {
+        new Response(new Uint8Array([84, 77, 52, 74, 82, 78, 76, 4, 0, 1, 2]), {
           headers: { "Content-Length": "11" },
         }),
       );

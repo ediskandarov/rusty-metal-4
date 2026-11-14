@@ -340,8 +340,18 @@ impl Match {
             send(
                 links,
                 connection,
-                &Message::Error {
-                    message: "This admission preparation was cancelled.".into(),
+                &if let Some(state) = self
+                    .last_state
+                    .as_ref()
+                    .filter(|state| self.ended && state.completion.reasons != 0)
+                {
+                    Message::Finished {
+                        state: state.clone(),
+                    }
+                } else {
+                    Message::Error {
+                        message: "This admission preparation was cancelled.".into(),
+                    }
                 },
             );
         }

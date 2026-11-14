@@ -485,7 +485,7 @@ try {
   for (
     let offset = 16 + headerLength;
     offset < recorded.length && recorded[offset] === 1;
-    offset += 123 + 7 * header.start.capacity
+    offset += 135 + 7 * header.start.capacity
   ) {
     const row = offset + 1;
     for (let entry = 0; entry < recorded[row + 29]; entry++)

@@ -1,6 +1,7 @@
 import {
   compatibilitySchema,
   controllerIdentitySchema,
+  ffaLimitsSchema,
   sha256Schema,
 } from "@tm4/lightyear-client/schemas";
 import { z } from "zod";
@@ -45,6 +46,7 @@ export const resourceManifestSchema = z.array(
 export type ResourceManifest = z.infer<typeof resourceManifestSchema>;
 export const startOptionsSchema = z
   .object({
+    limits: ffaLimitsSchema,
     players: count.min(2).max(8),
     world: z.string().min(1),
     sessionId: z.string().uuid().optional(),

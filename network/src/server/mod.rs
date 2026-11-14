@@ -73,6 +73,7 @@ struct Match {
     compatibility: Option<Compatibility>,
     catalog: Option<Catalog>,
     selected_world: Option<String>,
+    limits: game_protocol::FfaLimits,
     room_only: bool,
     // Unlink is deferred. These revoked links cannot readmit themselves meanwhile.
     retired_connections: HashSet<Entity>,
@@ -174,7 +175,7 @@ impl Match {
             return;
         }
         self.tick += 1;
-        self.ended = state.next_mode != 0;
+        self.ended = state.completion.reasons != 0 || state.next_mode != 0;
         if self.ended && !self.finish_journal(journal::End::Finished) {
             self.fail(links, "The match journal could not be finalized.");
             return;
@@ -186,7 +187,17 @@ impl Match {
             state: state.clone(),
         };
         for player in &mut self.controls {
-            if let Some(attempt) = player.resume.as_mut() {
+            if self.ended && player.resume.is_some() {
+                if let Some(entity) = player.connection {
+                    send(
+                        links,
+                        entity,
+                        &Message::Finished {
+                            state: state.clone(),
+                        },
+                    );
+                }
+            } else if let Some(attempt) = player.resume.as_mut() {
                 if attempt.target.is_some_and(|target| tick >= target) {
                     if attempt.frames.len() == usize::from(game_protocol::PREDICTION_DEPTH) {
                         attempt.frames.pop_front();

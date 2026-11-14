@@ -1,4 +1,5 @@
 ---
+import { ffaDefaultLimits } from "@tm4/lightyear-client/schemas";
 import { maps, modes } from "@tm4/rooms-client/schemas";
 interface Props {
   prefix: string;
@@ -26,3 +27,8 @@ const { prefix } = Astro.props;
     ))}
   </select>
 </label>
+
+<p>
+  {ffaDefaultLimits.timeLimitTicks / 30 / 60} minutes or {ffaDefaultLimits.fragLimit} frags. Limits
+  are fixed for this match.
+</p>

@@ -23,6 +23,8 @@ extern "C" {
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn live_slot_mask() -> u8;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
+    fn live_match_finished() -> bool;
+    #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn live_participant_part(slot: u8, part: u8) -> u32;
     #[wasm_bindgen(js_namespace = tm4LivePrediction)]
     fn retain_live_tick(tick: u32) -> u32;
@@ -778,7 +780,13 @@ fn step_world(
         state.error = Some("Lightyear shifted beyond the C simulation timeline".into());
         return;
     }
-    if let Some(changes) = state.plans.get(&tick) {
+    // A locally completed C world is provisional until its ending frame is confirmed.
+    // Freeze its membership as well as gameplay, including during rollback replay.
+    // Keep every forecast intact: a correction that unfinishes C must apply the same
+    // plans through the ordinary identity checks at their original ticks.
+    if !live_match_finished()
+        && let Some(changes) = state.plans.get(&tick)
+    {
         if changes.iter().any(|change| matches!(change, MembershipChange::Admit { identity, .. } if !slots.iter().any(|(replicated, _, _)| replicated == identity))) {
             state.error = Some(PredictionFailure::expired("The new participant's native controller has not arrived before admission"));
             return;
@@ -1072,6 +1080,11 @@ mod tests {
             tick: tick - 1,
             inputs: vec![Input::default(); 2],
             state: RoundState {
+                completion: crate::protocol::MatchCompletion {
+                    tick: 0,
+                    reasons: 0,
+                    winners: 0,
+                },
                 remaining: 2,
                 winner: -1,
                 round_finished: false,
@@ -1450,3 +1463,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(feature = "rollback_probe", target_family = "wasm"))]
+mod diagnostic;

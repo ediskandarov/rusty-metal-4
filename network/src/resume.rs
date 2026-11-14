@@ -147,6 +147,11 @@ mod tests {
             tick,
             inputs: Vec::new(),
             state: RoundState {
+                completion: tm4_network::protocol::MatchCompletion {
+                    tick: 0,
+                    reasons: 0,
+                    winners: 0,
+                },
                 remaining: 2,
                 winner: -1,
                 round_finished: false,

@@ -28,6 +28,7 @@ use tm4_network::{
 pub(crate) fn run_match(
     participants: ParticipantRoster,
     selected_world: Option<String>,
+    limits: game_protocol::FfaLimits,
     room_members: Vec<(ControllerIdentity, web::RosterMember)>,
     addr: SocketAddr,
     simulator: simulator::Simulator,
@@ -99,6 +100,7 @@ pub(crate) fn run_match(
         compatibility: Some(compatibility),
         catalog: Some(catalog),
         selected_world,
+        limits,
         room_only: false,
         retired_connections: HashSet::new(),
         initial_digest: None,
@@ -194,7 +196,7 @@ pub(crate) fn run_match(
                     if game
                         .last_state
                         .as_ref()
-                        .is_some_and(|state| state.next_mode != 0)
+                        .is_some_and(|state| state.completion.reasons != 0 || state.next_mode != 0)
                     {
                         status.phase = "results".into();
                         status.message =

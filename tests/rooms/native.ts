@@ -5,7 +5,12 @@ import type { ServerWebSocket, Subprocess } from "bun";
 
 // Local test adapter for the production Room -> TestServer boundary. It launches the
 // real native process with private temp files; no Cloudflare container is deployed.
-export async function nativeBridge(bundle: string, executable: string, fixture?: string) {
+export async function nativeBridge(
+  bundle: string,
+  executable: string,
+  fixture?: string,
+  limits?: { timeLimitTicks: number; fragLimit: number },
+) {
   await mkdir("build/room-tests", { recursive: true });
   const privateRoot = await mkdtemp(resolve("build/room-tests/private-"));
   const processes = new Map<
@@ -106,14 +111,26 @@ export async function nativeBridge(bundle: string, executable: string, fixture?:
       const headers = new Headers(request.headers);
       headers.set("Authorization", "Bearer " + native.secret);
       headers.delete("host");
+      if (path === "/api/start" && limits) headers.delete("content-length");
       const response = await fetch(
         "http://127.0.0.1:" + native.api + (path === "/_server/journal" ? "/api/journal" : path),
         {
           method: request.method,
           headers,
-          body: request.body,
+          body:
+            path === "/api/start" && limits
+              ? JSON.stringify({ ...((await request.json()) as object), limits })
+              : request.body,
         },
       );
+      if (["/api/journal", "/_server/journal"].includes(path) && response.ok) {
+        // Bun's streaming proxy drops the upstream length. Preserve the bounded
+        // fixture's exact response length so the production archive validator runs.
+        const bytes = await response.arrayBuffer();
+        const headers = new Headers(response.headers);
+        headers.set("Content-Length", String(bytes.byteLength));
+        return new Response(bytes, { status: response.status, headers });
+      }
       if (path === "/api/status" && response.ok) {
         const status = (await response.clone().json()) as { phase: string };
         history.push({ id, phase: status.phase });

@@ -11,14 +11,13 @@ Updated 2026-11-14.
 | --- | --- |
 | Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
 | Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
-| Implemented FFA policy | Eight gameplay slots; automatic random-model respawn, independent of surviving-car count. |
-| Deferred mode policy | Time/frag limits, completed-round results and return to room, spectator seats and live replacement of a living car. |
+| Implemented FFA policy | Eight gameplay slots; automatic random-model respawn; immutable time/frag limits and deterministic completion with ties. |
+| Deferred mode policy | Full final scoreboard, polished results presentation, map rotation, same-room rematch flow, spectator seats and live replacement of a living car. |
 
 The first agreed new mode is FFA: eight gameplay slots and joining and leaving
 during play. Car selection belongs to the mode: FFA randomly selects from its prepared
-pool on removal and may choose the same model again. Time and frag limits and their
-settings remain deferred; their defaults are undecided. Other modes
-below are design cases, not commitments to implement them now.
+pool on removal and may choose the same model again. Other modes below are design
+cases, not commitments to implement them now.
 
 ## First FFA delivery boundary
 
@@ -41,9 +40,39 @@ FFA bypasses the original Deathmatch victory/transition driver: one or zero livi
 cars, or explicit departures, never end the round. The mode and delay are immutable
 startup/journal data; portable roots validate the delay, and the existing C checkpoint
 state contains all pending attempts. Lightyear restores and replays that same state.
-Live admission, departure, slot reuse and recovery use the shared mechanisms. Time/frag
-limits, final results and automatic return to the room are a later increment. Until
-then FFA continues until explicit teardown.
+Live admission, departure, slot reuse and recovery use the shared mechanisms.
+
+FFA startup explicitly carries positive `timeLimitTicks` and `fragLimit`. Shared defaults
+in `config/ffa.json` are 27,000 ticks (900 seconds at 30 Hz) or 20 frags, whichever comes
+first. The start API can configure them; room controls currently display the defaults
+without editing them. They are immutable once starting, validated by peers and portable
+roots, and retained with the exact ordered model pool in the journal. Loading and resource
+preparation advance no simulation ticks.
+
+Membership commits before gameplay at a tick; FFA evaluates limits after all of that
+tick's simulation and scoring. The result names the completed simulation tick, records
+both reasons when both limits are reached, and preserves every occupied participant tied
+for the highest frag count. Death count is not a tiebreaker. Disconnected occupied
+participants remain eligible; departed participants retain the existing loss of score
+eligibility. An empty roster has no winner. A last-tick admission that already committed
+participates in that tick; unfinished reservations and future plans are cancelled.
+
+Completion cancels pending respawns, rejects further admission and departure, and freezes
+gameplay. Further diagnostic step calls may advance the timeline and controller samples,
+but cannot change cars, scores or the recorded result. Local rollback and portable restore
+include the result, and replay can cross the ending tick in either direction. No original
+menu transition or continue-input path runs. A predicted end retains its client session
+until confirmation. Membership forecasts beyond a provisional end stay queued without
+changing C ownership; if correction undoes that end, native rollback applies them at their
+original ticks through the ordinary identity checks. Invalid wire plans remain rejected,
+and admission preconditions distinguish invalid decisions from constructor failure.
+A client recovering at the boundary receives normal completion; an
+authenticated reconnect after completion can retrieve the final result until teardown.
+
+The authority seals the journal as finished and publishes `results`. Existing room
+monitoring releases the private server and readiness and returns members to the same room.
+This uses the existing teardown path, not a new rematch lifecycle. A final scoreboard,
+polished results screen, map rotation and a same-room rematch flow remain later work.
 
 Live replacement of an active car, transactional preservation of that car on failed
 replacement, and general transformation policies are deferred. The broader FSMs

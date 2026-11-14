@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { WASI } from "node:wasi";
 try {
   const bytes = fs.readFileSync(process.argv[2]);
-  assert.equal(bytes.subarray(0, 8).toString("hex"), "544d344a524e4c03");
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "544d344a524e4c04");
   const headerLength = bytes.readUInt32LE(8),
     header = JSON.parse(bytes.subarray(12, 12 + headerLength).toString()),
     start = header.start;
@@ -48,6 +48,8 @@ try {
             ids,
             start.respawnDelayTicks,
             pool,
+            start.limits.timeLimitTicks,
+            start.limits.fragLimit,
           ),
           1,
         ),
@@ -60,7 +62,7 @@ try {
   let offset = 16 + headerLength,
     tick = 0,
     events = 0;
-  const width = 118 + 7 * start.capacity;
+  const width = 130 + 7 * start.capacity;
   while (offset < bytes.length && bytes[offset] === 1) {
     assert(offset + width + 5 <= bytes.length, "Truncated published frame");
     const row = offset + 1,
@@ -90,7 +92,7 @@ try {
     const mask = x.WebNetSlotMask();
     for (let slot = 0; slot < start.capacity; slot++)
       if (mask & (1 << slot)) {
-        const input = row + 118 + slot * 7;
+        const input = row + 130 + slot * 7;
         assert.equal(
           x.WebNetSetInput(
             tick,
@@ -116,6 +118,12 @@ try {
         view.getUint32(state + 32 + part * 4, true),
         bytes.readUInt32LE(row + 4 + part * 4),
         `Section ${part} at ${tick + 1}`,
+      );
+    for (let part = 0; part < 3; part++)
+      assert.equal(
+        view.getUint32(state + 120 + part * 4, true),
+        bytes.readUInt32LE(row + 118 + part * 4),
+        `Completion ${part} at ${tick + 1}`,
       );
     tick++;
     offset += width + 5;

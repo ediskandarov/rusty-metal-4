@@ -129,7 +129,8 @@ fn prepare_session(
             tm4_network::protocol::prepared_model_pool(&game.catalog.as_ref().unwrap().cars, &cars);
         let start = SessionStart {
             mode: tm4_network::protocol::MatchMode::Ffa,
-            respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+            limits: game.limits,
+            respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
             capacity: game.controls.len(),
             slots: game.participants.slots().map(|slot| slot as u8).collect(),
             participants: game
@@ -387,10 +388,8 @@ fn advance_simulation(
                         .tick(step_started.elapsed(), lateness);
                     game.tick_schedule = Some(scheduled + STEP);
                 }
-                if game.ended
-                    && let Err(error) = simulator.finish()
-                {
-                    eprintln!("Simulation teardown failed: {error:#}");
+                if game.ended {
+                    game.maintain_membership(links, commands);
                 }
             }
             Err(error) => {

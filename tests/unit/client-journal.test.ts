@@ -73,6 +73,7 @@ describe("client diagnostic journal", () => {
             state: {
               remaining: 2,
               winner: -1,
+              completion: { tick: 0, reasons: 0, winners: 0 },
               roundFinished: false,
               acceptsContinue: false,
               nextMode: 0,

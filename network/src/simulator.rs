@@ -420,21 +420,24 @@ impl Simulator {
         let accepted = self.with_string(&pool, |simulator, pool_address| {
             simulator.with_string(&identities, |simulator, identities_address| {
                 simulator.with_string(&names, |simulator, address| {
-                    simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32, u32), i32>(
-                        "WebNetStartFfa",
-                        (
-                            session.capacity as i32,
-                            u32::from(session.slot_mask()),
-                            world,
-                            session.seed,
-                            -1,
-                            u32::from(session.portable),
-                            address,
-                            identities_address,
-                            session.respawn_delay_ticks,
-                            pool_address,
-                        ),
-                    )
+                    simulator
+                        .call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32, u32, u32, u32), i32>(
+                            "WebNetStartFfa",
+                            (
+                                session.capacity as i32,
+                                u32::from(session.slot_mask()),
+                                world,
+                                session.seed,
+                                -1,
+                                u32::from(session.portable),
+                                address,
+                                identities_address,
+                                session.respawn_delay_ticks,
+                                pool_address,
+                                session.limits.time_limit_ticks,
+                                session.limits.frag_limit,
+                            ),
+                        )
                 })
             })
         })?;
@@ -581,6 +584,7 @@ impl Simulator {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn finish(&mut self) -> Result<()> {
         self.call::<(), ()>("WebNetCancelMatch", ())?;
         self.capacity = 0;
@@ -591,7 +595,7 @@ impl Simulator {
     pub fn state(&mut self) -> Result<RoundState> {
         let address = self.call::<(), u32>("HeadlessState", ())?;
         ensure!(address != 0, "{}", self.error());
-        let mut bytes = [0; 120];
+        let mut bytes = [0; 132];
         self.memory
             .read(&self.store, address as usize, &mut bytes)?;
         let words: Vec<u32> = bytes
@@ -608,6 +612,11 @@ impl Simulator {
             Some(self.string(words[29])?)
         };
         Ok(RoundState {
+            completion: tm4_network::protocol::MatchCompletion {
+                tick: words[30],
+                reasons: words[31],
+                winners: words[32] as u8,
+            },
             remaining: words[2] as u8,
             winner: words[3] as i8,
             round_finished: words[4] != 0,
@@ -639,6 +648,13 @@ impl Simulator {
         let high = (identity.participant.0 >> 32) as u32;
         let accepted = match change {
             MembershipChange::Admit { car, .. } => self.with_string(car, |world, model| {
+                ensure!(
+                    world.call::<(u32, i32, u32, u32, u32), i32>(
+                        "WebNetAdmissionValid",
+                        (tick, i32::from(identity.slot), low, high, model)
+                    )? == 1,
+                    "Invalid authoritative admission"
+                );
                 world.call::<(u32, i32, u32, u32, u32), i32>(
                     "WebNetAdmitParticipant",
                     (tick, i32::from(identity.slot), low, high, model),
@@ -742,13 +758,14 @@ mod tests {
 
     #[derive(Deserialize)]
     struct Record {
-        #[serde(default = "default_world")]
         world: String,
-        #[serde(default = "default_seed")]
         seed: u32,
         cars: Vec<String>,
         #[serde(rename = "modelPool")]
         model_pool: Vec<String>,
+        limits: tm4_network::protocol::FfaLimits,
+        #[serde(rename = "respawnDelayTicks")]
+        respawn_delay_ticks: u32,
         rows: Vec<Row>,
         tape: Vec<Tape>,
         events: Vec<serde_json::Value>,
@@ -761,6 +778,7 @@ mod tests {
             "world": "Construction Yard", "seed": 12345,
             "cars": ["Pizza Boy", "Orbital"],
             "modelPool": ["Pizza Boy", "Orbital"],
+            "limits": { "timeLimitTicks": 27000, "fragLimit": 20 }, "respawnDelayTicks": 90,
             "rows": [], "tape": [], "events": []
         });
         let record: Record = serde_json::from_value(recording.clone()).unwrap();
@@ -789,12 +807,6 @@ mod tests {
         #[serde(default)]
         analog: bool,
     }
-    fn default_world() -> String {
-        "Construction Yard".into()
-    }
-    fn default_seed() -> u32 {
-        12345
-    }
     fn paths() -> Result<(Vec<u8>, PathBuf)> {
         Ok((
             fs::read(env::var("TM4_SIMULATION_WASM")?)?,
@@ -811,7 +823,8 @@ mod tests {
     fn session() -> SessionStart {
         SessionStart {
             mode: tm4_network::protocol::MatchMode::Ffa,
-            respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+            limits: tm4_network::protocol::FfaLimits::default(),
+            respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
             model_pool: vec!["Orbital".into(), "Pizza Boy".into()],
             capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
@@ -1663,6 +1676,8 @@ mod tests {
             world: record.world.clone(),
             cars: record.cars.clone(),
             model_pool: record.model_pool.clone(),
+            limits: record.limits,
+            respawn_delay_ticks: record.respawn_delay_ticks,
             seed: record.seed,
             ..session()
         };

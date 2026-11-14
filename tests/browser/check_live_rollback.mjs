@@ -755,6 +755,8 @@ try {
             "string",
             "number",
             "string",
+            "number",
+            "number",
           ],
           [
             8,
@@ -767,6 +769,8 @@ try {
             "0000000000000001\n0000000000000002",
             90,
             "Orbital\nPizza Boy",
+            27000,
+            20,
           ],
         );
         if (!ready) throw new Error("Could not restart rendered C fixture");

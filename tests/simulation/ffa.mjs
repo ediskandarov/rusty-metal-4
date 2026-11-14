@@ -17,6 +17,7 @@ async function simulation(
   roster = [model, "Pizza Boy", "Crusher", "Crusher"],
   occupied = slots,
   unavailable = null,
+  limits = { timeLimitTicks: 27000, fragLimit: 20 },
 ) {
   const wasi = new WASI({
     version: "preview1",
@@ -71,6 +72,8 @@ async function simulation(
       ids,
       delay,
       models,
+      limits.timeLimitTicks,
+      limits.fragLimit,
     ),
     1,
   );
@@ -405,4 +408,156 @@ test("partial respawn failures replay across retry boundaries without changing t
 test("a known pool model with missing local disc resources is rejected before activation", async () => {
   await assert.rejects(simulation("Orbital", 2, undefined, undefined, slots, "AUGER.MR"));
   await assert.rejects(simulation("Orbital", 2, undefined, undefined, slots, "YARD.MR"));
+});
+
+const completion = (world) => [30, 31, 32].map((field) => status(world, field));
+const limited = (timeLimitTicks, fragLimit = 20) =>
+  simulation("Orbital", 2, ["Orbital", "Pizza Boy"], ["Orbital", "Pizza Boy"], [0, 7], null, {
+    timeLimitTicks,
+    fragLimit,
+  });
+
+test("FFA timeout completes exactly one full tick, preserves ties and freezes terminal gameplay", async () => {
+  const world = await limited(6),
+    x = world.x;
+  const expected = [];
+  for (let tick = 0; tick < 5; tick++) world.step(tick % 2 ? 0x42 : 0);
+  assert.deepEqual(completion(world), [0, 0, 0]);
+  assert.equal(status(world, 4), 0);
+  const before = world.snapshot();
+  assert.ok(x.WebNetCaptureLocalCheckpoint());
+  // A death in the ending tick schedules a later spawn, then completion cancels it.
+  const action = (current) => assert.equal(current.x.WebTestKillParticipant(0), 1);
+  action(world);
+  world.step(0x42);
+  assert.deepEqual(completion(world), [6, 1, 0x81]);
+  assert.equal(status(world, 4), 1);
+  assert.equal(status(world, 5), 0);
+  assert.equal(status(world, 6), 0, "no original menu/transition request");
+  assert.notEqual(pending(world, 0), 2, "completion cancels scheduled respawn");
+  const after = world.snapshot();
+  const cars = [car(world, 0), car(world, 7)];
+  const gameplaySections = [9, 10, 11, 12].map((field) => status(world, field));
+  for (let tick = 6; tick <= 10; tick++) {
+    expected.push(world.canonical());
+    world.step(tick % 2 ? 0x42 : 0);
+    assert.deepEqual(completion(world), [6, 1, 0x81]);
+    assert.deepEqual([car(world, 0), car(world, 7)], cars);
+    assert.deepEqual(
+      [9, 10, 11, 12].map((field) => status(world, field)),
+      gameplaySections,
+      "terminal steps freeze complete cars, objects, world and sound state",
+    );
+    assert.deepEqual(world.results(0).slice(1), [0, 1]);
+  }
+  const model = x.malloc(8);
+  new Uint8Array(x.memory.buffer).set(new TextEncoder().encode("Orbital\0"), model);
+  assert.equal(x.WebNetAdmitParticipant(11, 3, 55, 0, model), 0);
+  assert.equal(x.WebNetDepartParticipant(11, 0, 0xfffffffd, 0xffffffff), 0);
+  x.free(model);
+  assert.equal(x.WebNetRestoreLocalCheckpoint(), 1);
+  assert.deepEqual(completion(world), [0, 0, 0]);
+  action(world);
+  world.step(0x42);
+  for (let tick = 6; tick <= 10; tick++) {
+    assert.deepEqual(world.canonical(), expected[tick - 6], "rollback across end " + tick);
+    world.step(tick % 2 ? 0x42 : 0);
+  }
+  assert.equal(x.WebNetFinishLocalReplay(), 1);
+  for (const [snapshot, first] of [
+    [before, 5],
+    [after, 6],
+  ]) {
+    const restored = await limited(6);
+    restored.restore(snapshot);
+    if (first === 5) {
+      action(restored);
+      restored.step(0x42);
+    }
+    for (let tick = 6; tick <= 10; tick++) {
+      assert.deepEqual(restored.canonical(), expected[tick - 6], "portable across end " + tick);
+      restored.step(tick % 2 ? 0x42 : 0);
+    }
+  }
+  const mismatch = await limited(7);
+  assert.throws(() => mismatch.restore(after), /restore/);
+});
+
+test("FFA 19 to 20 frags evaluates simultaneous scores, including tied time and frag limits", async () => {
+  for (const time of [2, 100]) {
+    const world = await limited(time),
+      x = world.x;
+    assert.equal(x.WebTestSetParticipantResults(0, 19, 5), 1);
+    assert.equal(x.WebTestSetParticipantResults(7, 19, 2), 1);
+    world.step();
+    assert.deepEqual(completion(world), [0, 0, 0]);
+    assert.ok(x.WebNetCaptureLocalCheckpoint());
+    const before = world.snapshot();
+    // Detached effects already carry both identities before the simultaneous deaths.
+    const action = (current) => {
+      const a = current.x.WebTestCreateParticipantProjectile(0);
+      const b = current.x.WebTestCreateParticipantProjectile(7);
+      assert.equal(current.x.WebTestHitParticipant(a, 7), 1);
+      assert.equal(current.x.WebTestHitParticipant(b, 0), 1);
+    };
+    action(world);
+    world.step();
+    assert.deepEqual(world.results(0).slice(1), [20, 6]);
+    assert.deepEqual(world.results(7).slice(1), [20, 3]);
+    assert.deepEqual(completion(world), [2, time === 2 ? 3 : 2, 0x81]);
+    const canonical = world.canonical(),
+      after = world.snapshot();
+    assert.equal(x.WebNetRestoreLocalCheckpoint(), 1);
+    action(world);
+    world.step();
+    assert.deepEqual(world.canonical(), canonical);
+    assert.equal(x.WebNetFinishLocalReplay(), 1);
+    for (const snapshot of [before, after]) {
+      const fresh = await limited(time);
+      fresh.restore(snapshot);
+      if (fresh.x.HeadlessTick() === 1) {
+        action(fresh);
+        fresh.step();
+      }
+      assert.deepEqual(fresh.canonical(), canonical);
+      fresh.step();
+      assert.deepEqual(completion(fresh), [2, time === 2 ? 3 : 2, 0x81]);
+    }
+  }
+});
+
+test("FFA admission on the ending tick participates, while later admission is fenced", async () => {
+  const world = await limited(3),
+    x = world.x;
+  world.step();
+  world.step();
+  const before = world.snapshot();
+  assert.ok(x.WebNetCaptureLocalCheckpoint());
+  const admit = (current) => {
+    const address = current.x.malloc(8);
+    new Uint8Array(current.x.memory.buffer).set(new TextEncoder().encode("Orbital\0"), address);
+    const accepted = current.x.WebNetAdmitParticipant(current.x.HeadlessTick(), 3, 55, 0, address);
+    current.x.free(address);
+    return accepted;
+  };
+  assert.equal(admit(world), 1);
+  world.step(0x42);
+  assert.deepEqual(completion(world), [3, 1, 0x89]);
+  const expected = world.canonical(),
+    after = world.snapshot();
+  assert.equal(x.WebNetRestoreLocalCheckpoint(), 1);
+  assert.equal(admit(world), 1);
+  world.step(0x42);
+  assert.deepEqual(world.canonical(), expected);
+  assert.equal(x.WebNetFinishLocalReplay(), 1);
+  for (const snapshot of [before, after]) {
+    const fresh = await limited(3);
+    fresh.restore(snapshot);
+    if (fresh.x.HeadlessTick() === 2) {
+      assert.equal(admit(fresh), 1);
+      fresh.step(0x42);
+    }
+    assert.deepEqual(fresh.canonical(), expected);
+    assert.equal(admit(fresh), 0);
+  }
 });

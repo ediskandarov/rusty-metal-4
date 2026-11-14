@@ -8,6 +8,7 @@
 !network/src/**
 !config/
 !config/resources.json
+!config/ffa.json
 !build/
 !build/release/
 !build/release/server/

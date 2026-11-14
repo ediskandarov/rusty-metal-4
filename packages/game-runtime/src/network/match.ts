@@ -187,6 +187,19 @@ export async function joinMatch(
   };
 
   const displayOutcome = (state: RoundState, slot: number) => {
+    if (state.completion.reasons) {
+      const winners = Array.from({ length: 8 }, (_, index) => index + 1).filter(
+        (number) => state.completion.winners & (1 << (number - 1)),
+      );
+      const result =
+        winners.length === 1
+          ? "Player " + winners[0] + " wins"
+          : winners.length
+            ? "Tie: players " + winners.join(", ")
+            : "No remaining participants";
+      cleanup("Match finished · " + result, "lobby");
+      return;
+    }
     const respawn = port.netMatch?.respawn;
     if (respawn?.state === 3)
       show("playing", "Respawn failed after three attempts. Leave and rejoin to try again.");
@@ -409,6 +422,10 @@ export async function joinMatch(
           port.netConfirmedTick = message.tick + 1;
           port.netMatchServerState = message.state;
           displayOutcome(message.state, session.match.slot);
+          break;
+        case "finished":
+          port.netMatchServerState = message.state;
+          displayOutcome(message.state, session.phase === "playing" ? session.match.slot : 0);
           break;
         case "error":
           throw new Error(message.message);

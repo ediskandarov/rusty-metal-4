@@ -42,6 +42,7 @@ pub enum SetupRequest {
 #[derive(Debug, PartialEq)]
 pub struct MatchSetup {
     pub roster: Vec<RosterMember>,
+    pub limits: tm4_network::protocol::FfaLimits,
     pub players: usize,
     pub world: String,
 }
@@ -54,6 +55,7 @@ pub struct RosterMember {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartOptions {
+    limits: tm4_network::protocol::FfaLimits,
     #[serde(default)]
     session_id: Option<String>,
     #[serde(default)]
@@ -613,6 +615,11 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
     }
     let bytes = to_bytes(request.into_body(), 8192).await.map_err(invalid)?;
     let options: StartOptions = serde_json::from_slice(&bytes).map_err(invalid)?;
+    if !options.limits.valid() {
+        return Err(invalid(
+            "Expected positive FFA time and frag limits within signed 32-bit range",
+        ));
+    }
     if !(2..=MAX_PLAYERS).contains(&options.players) {
         return Err(invalid("Expected a player count from 2 to 8"));
     }
@@ -649,6 +656,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
     }
     service.send(SetupRequest::Start(MatchSetup {
         roster: options.roster,
+        limits: options.limits,
         players: options.players,
         world: options.world,
     }))?;
@@ -906,7 +914,7 @@ mod tests {
     #[tokio::test]
     async fn browser_options_require_ready_catalog_and_lock_after_start() {
         let fixture = Fixture::new();
-        let valid = r#"{"players":8,"world":"The Oil Rig"}"#;
+        let valid = r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":8,"world":"The Oil Rig"}"#;
         assert_eq!(
             fixture.request("POST", "/api/start", valid).await.status(),
             StatusCode::CONFLICT
@@ -931,11 +939,11 @@ mod tests {
             status.phase = "ready".into();
         }
         for body in [
-            r#"{"players":1,"world":"The Oil Rig"}"#,
-            r#"{"players":9,"world":"The Oil Rig"}"#,
-            r#"{"players":2.5,"world":"The Oil Rig"}"#,
-            r#"{"players":"4","world":"The Oil Rig"}"#,
-            r#"{"players":4,"world":"Invalid map"}"#,
+            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":1,"world":"The Oil Rig"}"#,
+            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":9,"world":"The Oil Rig"}"#,
+            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":2.5,"world":"The Oil Rig"}"#,
+            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":"4","world":"The Oil Rig"}"#,
+            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":4,"world":"Invalid map"}"#,
             "{}",
         ] {
             assert_eq!(
@@ -959,6 +967,7 @@ mod tests {
             fixture.requests.try_recv().unwrap(),
             SetupRequest::Start(MatchSetup {
                 roster: Vec::new(),
+                limits: Default::default(),
                 players: 8,
                 world: "The Oil Rig".into()
             })
@@ -1042,11 +1051,11 @@ mod tests {
             serde_json::json!({"credential": "a".repeat(64), "car": "Orbital"}),
             serde_json::json!({"credential": "b".repeat(64), "car": "Pizza Boy"}),
         ];
-        let valid = serde_json::json!({"players": 8, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster});
+        let valid = serde_json::json!({"limits":{"timeLimitTicks":27000,"fragLimit":20},"players": 8, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster});
         for bad in [
-            serde_json::json!({"players": 2, "world": "Construction Yard", "roster": roster}),
-            serde_json::json!({"players": 1, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster}),
-            serde_json::json!({"players": 2, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": [roster[0], roster[0]]}),
+            serde_json::json!({"limits":{"timeLimitTicks":27000,"fragLimit":20},"players": 2, "world": "Construction Yard", "roster": roster}),
+            serde_json::json!({"limits":{"timeLimitTicks":27000,"fragLimit":20},"players": 1, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": roster}),
+            serde_json::json!({"limits":{"timeLimitTicks":27000,"fragLimit":20},"players": 2, "world": "Construction Yard", "sessionId": "12345678-1234-1234-1234-123456789abc", "roster": [roster[0], roster[0]]}),
         ] {
             assert_eq!(
                 fixture

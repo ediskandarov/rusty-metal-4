@@ -5,12 +5,17 @@ struct WebParticipantState;
 void WebNetInitialParticipantIds(unsigned int output[16]);
 unsigned int WebNetParticipantIdentityPart(int slot, int part);
 /* Authoritative events apply before inputs at the named simulation boundary. */
+/* Read-only preconditions distinguish invalid admission from failed car preparation. */
+int WebNetAdmissionValid(
+    unsigned int tick, int slot, unsigned int low, unsigned int high, const char* model);
 int WebNetAdmitParticipant(
     unsigned int tick, int slot, unsigned int low, unsigned int high, const char* model);
 int WebNetDepartParticipant(unsigned int tick, int slot, unsigned int low, unsigned int high);
 int WebNetParticipantModelsValid(const struct WebParticipantState* state, unsigned int slots);
 void WebNetRestoreParticipantConfiguration(void);
 unsigned int WebNetFfaRespawnDelay(void);
+unsigned int WebNetFfaTimeLimit(void);
+unsigned int WebNetFfaFragLimit(void);
 int WebNetDeparting(void);
 unsigned int WebNetModelCount(void);
 char* WebNetModelName(unsigned int index);

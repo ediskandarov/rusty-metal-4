@@ -198,6 +198,26 @@ impl Match {
                         .find_room_credential(&token)
                         .map(|identity| usize::from(identity.slot))
                 });
+                if requested.is_some()
+                    && self.ended
+                    && self
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| session.compatibility == compatibility)
+                    && let Some(state) = self
+                        .last_state
+                        .as_ref()
+                        .filter(|state| state.completion.reasons != 0)
+                {
+                    send(
+                        links,
+                        entity,
+                        &Message::Finished {
+                            state: state.clone(),
+                        },
+                    );
+                    return;
+                }
                 let session = self.session.as_ref().filter(|session| {
                     session.portable
                         && session.compatibility == compatibility

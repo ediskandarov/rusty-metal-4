@@ -17,7 +17,7 @@ WORKDIR /source
 COPY network/Cargo.toml network/Cargo.lock network/build.rs network/
 COPY network/src network/src
 COPY network/examples network/examples
-COPY config/resources.json config/resources.json
+COPY config/resources.json config/ffa.json config/
 WORKDIR /source/network
 # The binary does not embed the website or simulation. Updating Wasm leaves this layer cached.
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

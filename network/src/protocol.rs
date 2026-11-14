@@ -18,9 +18,9 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 16;
+pub const PROTOCOL_VERSION: u16 = 17;
 
-pub const JOURNAL_FRAME_PREFIX: usize = 118;
+pub const JOURNAL_FRAME_PREFIX: usize = 130;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
 
 pub const fn journal_frame_bytes(capacity: usize) -> usize {
@@ -285,7 +285,18 @@ pub struct Score {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct MatchCompletion {
+    pub tick: u32,
+    /// Bit 1: time, bit 2: frags. Both may be reached on the same completed tick.
+    pub reasons: u32,
+    /// Every occupied participant tied for the highest score; zero for an empty match.
+    pub winners: u8,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RoundState {
+    pub completion: MatchCompletion,
     pub remaining: u8,
     pub winner: i8,
     pub round_finished: bool,
@@ -303,11 +314,50 @@ pub enum MatchMode {
     Ffa,
 }
 
-pub const FFA_RESPAWN_DELAY_TICKS: u32 = 90;
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FfaLimits {
+    pub time_limit_ticks: u32,
+    pub frag_limit: u32,
+}
+
+impl FfaLimits {
+    pub fn valid(self) -> bool {
+        (1..=i32::MAX as u32).contains(&self.time_limit_ticks)
+            && (1..=i32::MAX as u32).contains(&self.frag_limit)
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FfaDefaults {
+    time_limit_ticks: u32,
+    frag_limit: u32,
+    respawn_delay_ticks: u32,
+}
+
+fn ffa_defaults() -> FfaDefaults {
+    serde_json::from_str(include_str!("../../config/ffa.json")).expect("valid FFA defaults")
+}
+
+impl Default for FfaLimits {
+    fn default() -> Self {
+        let defaults = ffa_defaults();
+        Self {
+            time_limit_ticks: defaults.time_limit_ticks,
+            frag_limit: defaults.frag_limit,
+        }
+    }
+}
+
+pub fn ffa_respawn_delay_ticks() -> u32 {
+    ffa_defaults().respawn_delay_ticks
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionStart {
     pub mode: MatchMode,
+    pub limits: FfaLimits,
     #[serde(rename = "respawnDelayTicks")]
     pub respawn_delay_ticks: u32,
     /// Width of slot-addressed input/result rows; independent of participant count.
@@ -345,7 +395,8 @@ pub fn prepared_model_pool(catalog: &[String], cars: &[String]) -> Vec<String> {
 
 impl SessionStart {
     pub fn valid_slots(&self) -> bool {
-        self.capacity == MAX_PLAYERS
+        self.limits.valid()
+            && self.capacity == MAX_PLAYERS
             && (1..=3600).contains(&self.respawn_delay_ticks)
             && (2..=self.capacity).contains(&self.slots.len())
             && self.slots.len() == self.cars.len()
@@ -431,6 +482,9 @@ pub enum Request {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Message {
+    Finished {
+        state: RoundState,
+    },
     Welcome {
         slot: usize,
     },
@@ -604,5 +658,39 @@ mod model_pool_tests {
         assert_eq!(&pool[1..], &catalog[..7]);
         let distinct = catalog[14..].to_vec();
         assert_eq!(prepared_model_pool(&catalog, &distinct), distinct);
+    }
+}
+
+#[cfg(test)]
+mod ffa_limit_tests {
+    use super::*;
+    #[test]
+    fn defaults_and_explicit_limit_validation() {
+        let defaults = FfaLimits::default();
+        assert_eq!(defaults.time_limit_ticks, 900 * 30);
+        assert_eq!(defaults.frag_limit, 20);
+        assert!(defaults.valid());
+        for limits in [
+            FfaLimits {
+                time_limit_ticks: 0,
+                ..defaults
+            },
+            FfaLimits {
+                frag_limit: 0,
+                ..defaults
+            },
+            FfaLimits {
+                time_limit_ticks: u32::MAX,
+                ..defaults
+            },
+            FfaLimits {
+                frag_limit: u32::MAX,
+                ..defaults
+            },
+        ] {
+            assert!(!limits.valid());
+        }
+        assert!(serde_json::from_str::<FfaLimits>(r#"{"timeLimitTicks":27000}"#).is_err());
+        assert!(serde_json::from_str::<FfaLimits>(r#"{"fragLimit":20}"#).is_err());
     }
 }

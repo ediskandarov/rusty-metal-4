@@ -1,10 +1,15 @@
 import { expect, test } from "bun:test";
 
-import { configureMatch, type NetworkEngine } from "@tm4/game-runtime/network/protocol";
+import {
+  applyMembership,
+  configureMatch,
+  type NetworkEngine,
+} from "@tm4/game-runtime/network/protocol";
 import { checksum, SnapshotReplay } from "@tm4/game-runtime/network/replay";
 import { messageSchema, startSchema } from "@tm4/lightyear-client/schemas";
 const start = {
   mode: "ffa" as const,
+  limits: { timeLimitTicks: 27000, fragLimit: 20 },
   respawnDelayTicks: 90,
   capacity: 8,
   slots: [0, 3, 7],
@@ -20,6 +25,11 @@ const start = {
 test("startup validates capacity, unique actual slots and one mode car per occupied slot", () => {
   expect(startSchema.parse(start)).toEqual(start);
   for (const invalid of [
+    { limits: undefined },
+    { limits: { timeLimitTicks: 0, fragLimit: 20 } },
+    { limits: { timeLimitTicks: 27000, fragLimit: 0 } },
+    { limits: { timeLimitTicks: 1.5, fragLimit: 20 } },
+    { limits: { timeLimitTicks: 27000, fragLimit: 0x80000000 } },
     { mode: "deathmatch" },
     { modelPool: undefined },
     { modelPool: [] },
@@ -70,13 +80,24 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     "0000000000000001\n0000000000000002\n0000000000000003",
     90,
     start.modelPool.join("\n"),
+    start.limits.timeLimitTicks,
+    start.limits.fragLimit,
   ]);
   expect(configureMatch(engine, start, 1)).toBe(1);
   expect(() => configureMatch(engine, start, 8)).toThrow();
 });
 test("portable catch-up decodes capacity-width rows but stages only the real occupied slots", async () => {
   const sections: [number, number, number, number, number] = [0, 0, 0, 0, 0];
-  const port = { netMatch: { tick: 10, digest: 42, sections, unsupported: null, nextMode: 0 } };
+  const port = {
+    netMatch: {
+      tick: 10,
+      digest: 42,
+      sections,
+      unsupported: null,
+      nextMode: 0,
+      completion: { tick: 0, reasons: 0, winners: 0 },
+    },
+  };
   const seen: number[][] = [];
   const engine: NetworkEngine = {
     ccall: (name) => (name === "WebNetSlotMask" ? 0x89 : 0),
@@ -87,7 +108,14 @@ test("portable catch-up decodes capacity-width rows but stages only the real occ
       return 1;
     },
     _WebNetQueueTick() {
-      port.netMatch = { tick: 11, digest: 43, sections, unsupported: null, nextMode: 0 };
+      port.netMatch = {
+        tick: 11,
+        digest: 43,
+        sections,
+        unsupported: null,
+        nextMode: 0,
+        completion: { tick: 0, reasons: 0, winners: 0 },
+      };
       return 1;
     },
     _WebNetEndReplay() {},
@@ -101,10 +129,10 @@ test("portable catch-up decodes capacity-width rows but stages only the real occ
     port,
     new AbortController().signal,
   );
-  const data = new Uint8Array(118 + 7 * 8);
+  const data = new Uint8Array(130 + 7 * 8);
   const view = new DataView(data.buffer);
   view.setUint32(0, 43, true);
-  for (let slot = 0; slot < 8; slot++) view.setUint16(118 + 7 * slot, 100 + slot, true);
+  for (let slot = 0; slot < 8; slot++) view.setUint16(130 + 7 * slot, 100 + slot, true);
   await replay.accept({
     type: "catchup_frames",
     attempt: 1,
@@ -119,4 +147,34 @@ test("portable catch-up decodes capacity-width rows but stages only the real occ
     [10, 7, 107],
   ]);
   replay.finish(11);
+});
+
+test("admission preconditions distinguish invalid decisions from constructor failure", () => {
+  const change = {
+    kind: "admit",
+    identity: { slot: 2, participant: "0000000000000003" },
+    car: "Orbital",
+  };
+  for (const [valid, constructed, expected] of [
+    [0, 0, false],
+    [1, 0, true],
+    [1, 1, true],
+  ] as const) {
+    const calls: string[] = [];
+    const engine: NetworkEngine = {
+      ccall(name: string): number {
+        calls.push(name);
+        return name === "WebNetAdmissionValid" ? valid : constructed;
+      },
+      _WebNetSetInput: () => 1,
+      _WebNetQueueTick: () => 1,
+      _WebNetCancelMatch() {},
+      _WebNetEndReplay() {},
+      _WebNetBeginPortableReplay: () => 1,
+    };
+    expect(applyMembership(engine, 12, [change])).toBe(expected);
+    expect(calls).toEqual(
+      valid ? ["WebNetAdmissionValid", "WebNetAdmitParticipant"] : ["WebNetAdmissionValid"],
+    );
+  }
 });

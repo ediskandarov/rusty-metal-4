@@ -1,5 +1,15 @@
 import { z } from "zod";
-export const networkProtocolVersion = 16;
+
+import defaults from "../../../config/ffa.json";
+export const ffaDefaultLimits = Object.freeze({
+  timeLimitTicks: defaults.timeLimitTicks,
+  fragLimit: defaults.fragLimit,
+});
+export const ffaLimitsSchema = z.object({
+  timeLimitTicks: z.number().int().min(1).max(0x7fffffff),
+  fragLimit: z.number().int().min(1).max(0x7fffffff),
+});
+export const networkProtocolVersion = 17;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -19,7 +29,14 @@ export const inputSchema = z.object({
 export type Input = z.infer<typeof inputSchema>;
 export const scoreSchema = z.object({ frags: i32, deaths: i32 });
 export type Score = z.infer<typeof scoreSchema>;
+const matchCompletionSchema = z
+  .object({ tick: u32, reasons: u32.max(3), winners: byte })
+  .refine(
+    (result) => (result.reasons ? result.tick > 0 : result.tick === 0 && result.winners === 0),
+    "Invalid match completion boundary",
+  );
 export const roundStateSchema = z.object({
+  completion: matchCompletionSchema,
   remaining: byte,
   winner: z.number().int().min(-128).max(127),
   roundFinished: z.boolean(),
@@ -52,6 +69,7 @@ export const participantIdSchema = z
 export const startSchema = slotConfigurationSchema
   .safeExtend({
     mode: z.literal("ffa"),
+    limits: ffaLimitsSchema,
     respawnDelayTicks: z.number().int().min(1).max(3600),
     world: z
       .string()
@@ -160,7 +178,7 @@ export const catchupChunkSchema = z.object({
   attempt: u32,
   start: u32,
   head: u32,
-  data: z.array(byte).max(64 * (118 + 7 * 8)),
+  data: z.array(byte).max(64 * (130 + 7 * 8)),
   checksum: u32,
 });
 export type CatchupChunk = z.infer<typeof catchupChunkSchema>;
@@ -169,6 +187,13 @@ export const messageSchema = z.discriminatedUnion("type", [
     type: z.literal("prediction_recovery_required"),
     reason: z.enum(["clock_shift", "history_expired"]),
     message: z.string(),
+  }),
+  z.object({
+    type: z.literal("finished"),
+    state: roundStateSchema.refine(
+      (state) => state.completion.reasons > 0,
+      "A finished match requires its completion result",
+    ),
   }),
   lobbySchema.extend({ type: z.literal("lobby") }),
   startSchema.safeExtend({ type: z.literal("prediction_prepare") }),

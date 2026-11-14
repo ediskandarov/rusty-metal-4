@@ -32,8 +32,7 @@ EMSCRIPTEN_KEEPALIVE unsigned WebTestNetworkSlotBindings(s32 slot)
 }
 /* Focused participant-lifetime fixtures schedule mutations at the existing tick boundary. */
 static u32 participant_kill_slots;
-static s32 participant_hit_slot = -1;
-static u32 participant_hit_projectile;
+static u32 participant_hit_projectiles[8];
 
 EMSCRIPTEN_KEEPALIVE u32 WebTestCreateParticipantProjectile(s32 slot)
 {
@@ -226,8 +225,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestHitParticipant(u32 handle, s32 slot)
     if (!object || strcmp(ObjectGetHeader(object)->name, "weaponProjectile")
         || !WebNetSlotOccupied(slot) || !GameInfo.players[slot].car)
         return 0;
-    participant_hit_projectile = handle;
-    participant_hit_slot = slot;
+    participant_hit_projectiles[slot] = handle;
     return 1;
 }
 
@@ -396,11 +394,10 @@ void WebTestApplyParticipantActions(void)
         respawn_request_failure = -1;
     }
     const u32 kills = participant_kill_slots;
-    const s32 hit = participant_hit_slot;
-    const u32 handle = participant_hit_projectile;
+    u32 hits[8];
+    memcpy(hits, participant_hit_projectiles, sizeof(hits));
     participant_kill_slots = 0;
-    participant_hit_slot = -1;
-    participant_hit_projectile = 0;
+    memset(participant_hit_projectiles, 0, sizeof(participant_hit_projectiles));
     for (s32 slot = 0; slot < 8; ++slot) {
         if (!(kills & (1u << slot)) || !WebNetSlotOccupied(slot))
             continue;
@@ -409,12 +406,14 @@ void WebTestApplyParticipantActions(void)
             CarApplyParticipantDamage(car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff,
                 NULL, "PARTICIPANT TEST");
     }
-    WeaponProjectile* projectile = handle ? WebSnapshotFindLiveObject(handle) : NULL;
-    if (projectile && WebNetSlotOccupied(hit) && GameInfo.players[hit].car) {
-        projectile->bullet.hit_object = GameInfo.players[hit].car;
-        projectile->bullet.hit_pending = 1;
-        projectile->bullet.motion.fields.world_impact = 0;
-        projectile->bullet.impact.fields.world_position
-            = ObjectGetHeader(GameInfo.players[hit].car)->position;
+    for (s32 hit = 0; hit < 8; ++hit) {
+        WeaponProjectile* projectile = hits[hit] ? WebSnapshotFindLiveObject(hits[hit]) : NULL;
+        if (projectile && WebNetSlotOccupied(hit) && GameInfo.players[hit].car) {
+            projectile->bullet.hit_object = GameInfo.players[hit].car;
+            projectile->bullet.hit_pending = 1;
+            projectile->bullet.motion.fields.world_impact = 0;
+            projectile->bullet.impact.fields.world_position
+                = ObjectGetHeader(GameInfo.players[hit].car)->position;
+        }
     }
 }
