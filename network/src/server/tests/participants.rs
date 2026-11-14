@@ -10,7 +10,7 @@ use std::env;
 use tm4_network::protocol::{ParticipantId, Score};
 use tm4_network::{
     input::ControllerCommand,
-    protocol::{ControllerIdentity, Request},
+    protocol::{ControllerIdentity, MAX_PLAYERS, Request},
 };
 
 fn game() -> Match {
@@ -137,6 +137,9 @@ fn buffer(sequence: u32, buttons: u16) -> NativeBuffer<ControllerCommand> {
 fn preparation_cancellation_waits_for_replacement_before_starting() -> anyhow::Result<()> {
     let mut world = World::new();
     let mut game = game();
+    game.participants = ParticipantRoster::new(MAX_PLAYERS, &[0, 1]).unwrap();
+    game.controls
+        .resize_with(MAX_PLAYERS, ControllerState::default);
     game.started = false;
     game.tick = 0;
     game.session = None;
