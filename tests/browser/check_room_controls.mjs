@@ -32,7 +32,7 @@ try {
           addEventListener('message', ({data}) => {
             window.commands.push(data);
             if (data.action === 'status') parent.postMessage({
-              type: 'rm4-player', roomId: data.roomId, status: data.message
+              type: 'rm4-player', roomId: data.roomId, event: 'status', message: data.message
             }, location.origin);
           });
         </script>`,
@@ -70,7 +70,7 @@ try {
           {
             type: "rm4-player",
             roomId: id,
-            loaded: true,
+            event: "loaded",
             compatibility,
             cars: ["Orbital", "Pizza Boy"],
           },
@@ -83,6 +83,44 @@ try {
   await loaded(hostPlayer);
   await eventually(view, (room) => room.participants[0]?.car === "Orbital");
   await host.waitForFunction(() => !document.getElementById("room-car").disabled);
+
+  // Only this frame, this room and a complete resource event may change disc state.
+  await host.evaluate(
+    (id) =>
+      window.postMessage(
+        {
+          type: "rm4-player",
+          roomId: id,
+          event: "unloaded",
+        },
+        location.origin,
+      ),
+    id,
+  );
+  await hostPlayer.evaluate((id) => {
+    for (const message of [
+      null,
+      { type: "rm4-player", roomId: id, event: "loaded", cars: {} },
+      { type: "rm4-player", roomId: id, event: "loaded", cars: ["Fake"] },
+      { type: "rm4-player", roomId: "0".repeat(32), event: "unloaded" },
+      { type: "rm4-player", roomId: id, loaded: false },
+    ])
+      parent.postMessage(message, location.origin);
+    parent.postMessage(
+      { type: "rm4-player", roomId: id, event: "status", message: "Boundary checked" },
+      location.origin,
+    );
+  }, id);
+  await host.locator("#player-status").filter({ hasText: "Boundary checked" }).waitFor();
+  assert.equal(await host.locator("#room-car").inputValue(), "Orbital");
+  assert.deepEqual(await host.locator("#room-car option").allTextContents(), [
+    "Orbital",
+    "Pizza Boy",
+  ]);
+  assert(!(await host.locator("#room-car").isDisabled()));
+  console.log(
+    "PASS malformed, old-shape and unrelated player messages cannot change the room's loaded disc",
+  );
 
   let release;
   let intercepted;

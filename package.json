@@ -65,6 +65,7 @@
     "@tm4/rooms-client": "workspace:*",
     "@tm4/rustymetal-server-client": "workspace:*",
     "@tm4/lightyear-client": "workspace:*",
-    "@tm4/dev-server-client": "workspace:*"
+    "@tm4/dev-server-client": "workspace:*",
+    "@tm4/room-player-protocol": "workspace:*"
   }
 }

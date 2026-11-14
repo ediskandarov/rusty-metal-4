@@ -9,6 +9,7 @@
         "@tm4/game-runtime": "workspace:*",
         "@tm4/lightyear-client": "workspace:*",
         "@tm4/resources": "workspace:*",
+        "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
         "@tm4/rustymetal-server-client": "workspace:*",
       },
@@ -33,6 +34,7 @@
       "dependencies": {
         "@tm4/game-runtime": "workspace:*",
         "@tm4/resources": "workspace:*",
+        "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
         "zustand": "5.1.0",
       },
@@ -41,6 +43,7 @@
       "name": "@tm4/rustymetal4.com",
       "dependencies": {
         "@tm4/lightyear-client": "workspace:*",
+        "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
         "@tm4/rustymetal-server-client": "workspace:*",
         "posthog-js": "1.448.0",
@@ -77,6 +80,14 @@
       "name": "@tm4/resources",
       "dependencies": {
         "@tm4/dev-server-client": "workspace:*",
+      },
+    },
+    "packages/room-player-protocol": {
+      "name": "@tm4/room-player-protocol",
+      "dependencies": {
+        "@tm4/lightyear-client": "workspace:*",
+        "@tm4/rooms-client": "workspace:*",
+        "zod": "4.6.7",
       },
     },
     "packages/rooms-client": {
@@ -407,6 +418,8 @@
     "@tm4/player": ["@tm4/player@workspace:apps/player"],
 
     "@tm4/resources": ["@tm4/resources@workspace:packages/resources"],
+
+    "@tm4/room-player-protocol": ["@tm4/room-player-protocol@workspace:packages/room-player-protocol"],
 
     "@tm4/rooms-client": ["@tm4/rooms-client@workspace:packages/rooms-client"],
 

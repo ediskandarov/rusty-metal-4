@@ -1,0 +1,16 @@
+{
+  "name": "@tm4/room-player-protocol",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tm4/lightyear-client": "workspace:*",
+    "@tm4/rooms-client": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

@@ -1,16 +1,7 @@
 import { getBuildManifest } from "@tm4/lightyear-client";
-import type { Compatibility } from "@tm4/rooms-client/schemas";
+import { playerMessageSchema, type RoomAction, type RoomCommand } from "@tm4/room-player-protocol";
 
 import { roomCarChoices, roomMember, roomSelectedCar, type RoomStore } from "./state/room.ts";
-
-interface PlayerMessage {
-  type: "rm4-player";
-  roomId: string;
-  status?: string;
-  loaded?: boolean;
-  compatibility?: Compatibility;
-  cars?: string[];
-}
 
 export function matchControls(id: string, store: RoomStore) {
   const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -25,8 +16,11 @@ export function matchControls(id: string, store: RoomStore) {
   // These track deliveries to this frame, not a second copy of the room state.
   let sentSession: string | null = null;
   let sentStatus: string | null = null;
-  const send = (value: object) =>
-    frame.contentWindow?.postMessage({ type: "rm4-room", roomId: id, ...value }, location.origin);
+  const send = (value: RoomAction) =>
+    frame.contentWindow?.postMessage(
+      { type: "rm4-room", roomId: id, ...value } satisfies RoomCommand,
+      location.origin,
+    );
   const enter = () => {
     const { room, disc } = store.getState();
     const match = room?.match;
@@ -146,28 +140,23 @@ export function matchControls(id: string, store: RoomStore) {
     sentSession = null;
     enter();
   };
-  const receive = (event: MessageEvent<PlayerMessage | null>) => {
-    if (
-      event.origin !== location.origin ||
-      event.source !== frame.contentWindow ||
-      event.data?.type !== "rm4-player" ||
-      event.data.roomId !== id
-    )
-      return;
-    const message = event.data;
-    if (typeof message.status === "string") store.getState().playerReported(message.status);
-    if (typeof message.loaded === "boolean") {
-      if (!message.loaded) {
+  const receive = (event: MessageEvent<unknown>) => {
+    if (event.origin !== location.origin || event.source !== frame.contentWindow) return;
+    const parsed = playerMessageSchema.safeParse(event.data);
+    if (!parsed.success || parsed.data.roomId !== id) return;
+    const message = parsed.data;
+    switch (message.event) {
+      case "status":
+        store.getState().playerReported(message.message);
+        break;
+      case "unloaded":
         sentSession = null;
         sentStatus = null;
-      }
-      store
-        .getState()
-        .playerLoaded(
-          message.loaded && message.compatibility
-            ? { compatibility: message.compatibility, cars: message.cars ?? [] }
-            : null,
-        );
+        store.getState().playerLoaded(null);
+        break;
+      case "loaded":
+        store.getState().playerLoaded({ compatibility: message.compatibility, cars: message.cars });
+        break;
     }
   };
   window.addEventListener("message", receive);
