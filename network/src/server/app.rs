@@ -37,7 +37,7 @@ pub(crate) fn run_match(
     let count = participants.count();
     let capacity = participants.capacity();
     if !(MIN_PARTICIPANTS..=capacity).contains(&count) {
-        return Err("FFA needs at least two prepared participants".into());
+        return Err("FFA needs at least one prepared participant".into());
     }
     let compatibility = simulator.compatibility.clone();
     let catalog = simulator.catalog.clone();

@@ -31,7 +31,7 @@ impl Match {
         if self.started
             || self.ended
             || self.room_only
-            || members.len() < 2
+            || members.is_empty()
             || members.len() != self.participants.count()
             || self
                 .controls

@@ -30,7 +30,7 @@ use tm4_network::{
 
 const TICK_RATE: u64 = 30;
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / TICK_RATE);
-const MIN_PARTICIPANTS: usize = 2;
+const MIN_PARTICIPANTS: usize = 1;
 
 // Connection, synchronization and command acceptance outlive individual links,
 // but are independent of participant data and its gameplay-slot binding.

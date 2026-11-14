@@ -38,8 +38,8 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let count: usize = first.parse()?;
-    if !(2..=MAX_PLAYERS).contains(&count) {
-        return Err("Expected a player count from 2 to 8".into());
+    if !(1..=MAX_PLAYERS).contains(&count) {
+        return Err("Expected a player count from 1 to 8".into());
     }
     let addr: SocketAddr = env::var("TM4_MATCH_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8122".into())
@@ -101,7 +101,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     };
     let participants =
         ParticipantRoster::new(MAX_PLAYERS, &(0..initial_count).collect::<Vec<_>>())?;
-    if !room_roster.is_empty() && !(2..=count).contains(&room_roster.len()) {
+    if !room_roster.is_empty() && !(1..=count).contains(&room_roster.len()) {
         return Err("Room members do not match the prepared participant roster".into());
     }
     // The mode assigns initial room members once. Admission uses these bindings,

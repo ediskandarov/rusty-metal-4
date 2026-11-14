@@ -465,7 +465,7 @@ impl Simulator {
             let fixture: Fixture = serde_json::from_slice(&fs::read(path)?)?;
             if let Some(cars) = fixture.cars {
                 ensure!(
-                    cars.len() >= 2
+                    !cars.is_empty()
                         && cars.len() <= 8
                         && cars.iter().all(|car| self.catalog.cars.contains(car)),
                     "Invalid diagnostic roster"
@@ -921,7 +921,7 @@ mod tests {
     #[ignore = "requires private resources and diagnostic Wasm"]
     fn sparse_slots_start_rollback_and_portable_continuation() -> Result<()> {
         let (wasm, resources) = paths()?;
-        for slots in [vec![0, 3, 7], vec![0, 3], vec![3, 6]] {
+        for slots in [vec![0], vec![7], vec![0, 3, 7], vec![0, 3], vec![3, 6]] {
             let count = slots.len();
             let winner = i32::from(*slots.last().unwrap());
             let setup = SessionStart {

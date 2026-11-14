@@ -143,7 +143,7 @@ export function matchControls(id: string, store: RoomStore) {
     start.hidden = !host || match?.stage !== "ready";
     start.disabled =
       busy ||
-      room.participants.length < 2 ||
+      room.participants.length < 1 ||
       room.participants.some((member) => !member.ready || !member.connected);
     reconnect.hidden = !match?.endpoint;
     reconnect.disabled = !disc || busy;

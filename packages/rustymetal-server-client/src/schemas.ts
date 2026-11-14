@@ -25,7 +25,7 @@ export const serverStatusSchema = z.object({
   cars: z.array(z.string()),
   compatibility: compatibilitySchema.nullable(),
   message: z.string(),
-  players: count.min(2).max(8),
+  players: count.min(1).max(8),
   worlds: z.array(z.string()),
   world: z.string().nullable(),
   connected: count.max(8),
@@ -49,7 +49,7 @@ export type ResourceManifest = z.infer<typeof resourceManifestSchema>;
 export const startOptionsSchema = z
   .object({
     limits: ffaLimitsSchema,
-    players: count.min(2).max(8),
+    players: count.min(1).max(8),
     world: z.string().min(1),
     sessionId: z.string().uuid().optional(),
     roster: z.array(z.object({ credential: sha256Schema, car: z.string().min(1) })).optional(),
@@ -59,7 +59,7 @@ export const startOptionsSchema = z
       (value.sessionId === undefined && value.roster === undefined) ||
       (value.sessionId !== undefined &&
         value.roster !== undefined &&
-        value.roster.length >= 2 &&
+        value.roster.length >= 1 &&
         value.roster.length <= value.players &&
         new Set(value.roster.map((member) => member.credential)).size === value.roster.length),
     "Invalid initial room roster",

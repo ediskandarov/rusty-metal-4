@@ -178,3 +178,17 @@ test("admission preconditions distinguish invalid decisions from constructor fai
     );
   }
 });
+
+test("solo FFA keeps eight slots and rejects an empty initial roster", () => {
+  const solo = {
+    ...start,
+    slots: [7],
+    participants: [start.participants[0]!],
+    cars: ["Orbital"],
+    portable: true,
+  };
+  expect(startSchema.parse(solo)).toEqual(solo);
+  expect(startSchema.safeParse({ ...solo, slots: [], participants: [], cars: [] }).success).toBe(
+    false,
+  );
+});

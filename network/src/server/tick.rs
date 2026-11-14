@@ -147,7 +147,7 @@ fn prepare_session(
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,
-            portable: (2..=8).contains(&game.participants.count()),
+            portable: (1..=8).contains(&game.participants.count()),
         };
         game.session = Some(start.clone());
         match simulator.start(&start) {

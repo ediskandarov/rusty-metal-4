@@ -17,13 +17,13 @@ await runCli(async () => {
     },
   });
   if (values.help) {
-    console.log("Usage: bun run match [2–8] [--diagnostic]");
+    console.log("Usage: bun run match [1–8] [--diagnostic]");
     return;
   }
   const mode = values.diagnostic ? "diagnostic" : "dev";
   const players = Number(positionals[0] ?? "2");
-  if (positionals.length > 1 || !Number.isInteger(players) || players < 2 || players > 8)
-    throw new UsageError("Usage: bun run match [2–8] [--diagnostic]");
+  if (positionals.length > 1 || !Number.isInteger(players) || players < 1 || players > 8)
+    throw new UsageError("Usage: bun run match [1–8] [--diagnostic]");
   const site = new URL(process.env.TM4_WEB_URL ?? "http://127.0.0.1:8120/");
   const listen = process.env.TM4_MATCH_LISTEN ?? "127.0.0.1:8122";
   const endpoint = process.env.TM4_MATCH_ENDPOINT ?? "ws://127.0.0.1:8122";

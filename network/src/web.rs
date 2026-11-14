@@ -651,8 +651,8 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
             "Expected positive FFA time and frag limits within signed 32-bit range",
         ));
     }
-    if !(2..=MAX_PLAYERS).contains(&options.players) {
-        return Err(invalid("Expected a player count from 2 to 8"));
+    if !(1..=MAX_PLAYERS).contains(&options.players) {
+        return Err(invalid("Expected a player count from 1 to 8"));
     }
     {
         let mut status = service.status.lock().unwrap();
@@ -661,7 +661,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         }
         if options.session_id.is_some() || !options.roster.is_empty() {
             if options.session_id.as_ref().is_none_or(|id| id.len() != 36)
-                || !(2..=options.players).contains(&options.roster.len())
+                || !(1..=options.players).contains(&options.roster.len())
                 || options.roster.iter().any(|member| {
                     member.credential.len() != 64
                         || !member
@@ -946,7 +946,7 @@ mod tests {
     #[tokio::test]
     async fn browser_options_require_ready_catalog_and_lock_after_start() {
         let fixture = Fixture::new();
-        let valid = r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":8,"world":"The Oil Rig"}"#;
+        let valid = r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":1,"world":"The Oil Rig"}"#;
         assert_eq!(
             fixture.request("POST", "/api/start", valid).await.status(),
             StatusCode::CONFLICT
@@ -971,7 +971,7 @@ mod tests {
             status.phase = "ready".into();
         }
         for body in [
-            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":1,"world":"The Oil Rig"}"#,
+            r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":0,"world":"The Oil Rig"}"#,
             r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":9,"world":"The Oil Rig"}"#,
             r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":2.5,"world":"The Oil Rig"}"#,
             r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":"4","world":"The Oil Rig"}"#,
@@ -990,7 +990,7 @@ mod tests {
             fixture.request("POST", "/api/start", valid).await.status(),
             StatusCode::ACCEPTED
         );
-        assert_eq!(fixture.service.status.lock().unwrap().players, 8);
+        assert_eq!(fixture.service.status.lock().unwrap().players, 1);
         assert_eq!(
             fixture.service.status.lock().unwrap().world.as_deref(),
             Some("The Oil Rig")
@@ -1000,7 +1000,7 @@ mod tests {
             SetupRequest::Start(MatchSetup {
                 roster: Vec::new(),
                 limits: Default::default(),
-                players: 8,
+                players: 1,
                 world: "The Oil Rig".into()
             })
         );

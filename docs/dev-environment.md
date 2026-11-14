@@ -54,7 +54,7 @@ For the native web launcher, run `bun run build:server --mode dev` after a match
 full build, then set `TM4_ADMIN_SECRET` to a private startup secret of at least 24
 characters and run `bun run server 2`. Open `http://127.0.0.1:8120/`, enter that
 secret in administrator setup, select your disc folder and prepare resources.
-Then choose a map from the native simulation catalog, choose 2–8 players and
+Then choose a map from the native simulation catalog, choose 1–8 players and
 open the match. The command-line count supplies the initial selection; opening
 the match locks both settings. The browser extracts
 the required files; Rust checks exact stock sizes/hashes, validates the sector

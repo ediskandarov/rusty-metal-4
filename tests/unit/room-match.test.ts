@@ -205,3 +205,16 @@ test("a new host can prepare while the previous host remains named in the last r
   expect(snapshot(state, "guest").result).toEqual(result);
   expect(state.result!.participants[0]!.name).toBe("Host");
 });
+
+test("a ready host can start alone and keep seven places for late entrants", () => {
+  const state = fixture();
+  removeMember(state, state.members[1]!.id, 150);
+  updatePlayer(state, "host", { ...selected, ready: true });
+  const match = freezeRoster(state, "host", 200);
+  expect(match.roster).toHaveLength(1);
+  expect(state.settings.capacity).toBe(8);
+  match.stage = "playing";
+  expect(snapshot(state, "host").freePlaces).toBe(7);
+  join(state, "late", "Late", 300);
+  expect(snapshot(state, "late").freePlaces).toBe(6);
+});

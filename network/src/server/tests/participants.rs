@@ -142,7 +142,7 @@ fn buffer(sequence: u32, buttons: u16) -> NativeBuffer<ControllerCommand> {
 
 #[test]
 #[ignore = "requires private resources and diagnostic Wasm"]
-fn preparation_cancellation_waits_for_replacement_before_starting() -> anyhow::Result<()> {
+fn preparation_cancellation_allows_the_ready_single_participant_to_start() -> anyhow::Result<()> {
     let mut world = World::new();
     let mut game = game();
     game.participants = ParticipantRoster::new(MAX_PLAYERS, &[0, 1]).unwrap();
@@ -174,7 +174,7 @@ fn preparation_cancellation_waits_for_replacement_before_starting() -> anyhow::R
     assert!(!world.resource::<Match>().ended);
     assert!(world.resource::<Match>().session.is_none());
 
-    // Two reservations exist, but cancelling one must not start the ready survivor.
+    // A reserved unready participant blocks start; releasing it allows solo FFA.
     for slot in [0, 1] {
         world
             .resource_mut::<Match>()
@@ -204,36 +204,16 @@ fn preparation_cancellation_waits_for_replacement_before_starting() -> anyhow::R
         })
         .unwrap();
     world.run_system_once(update).unwrap();
-    assert!(!world.resource::<Match>().started);
-    assert!(!world.resource::<Match>().ended);
-    assert!(world.resource::<Match>().session.is_none());
-
-    // This operation also proves the preceding updates did not freeze preparation.
-    world
-        .resource_mut::<Match>()
-        .reserve_preparation(1)
-        .unwrap();
-    let replacement = connection(&mut world, 72);
-    request(&mut world, replacement, Request::Join { compatibility });
-    request(
-        &mut world,
-        replacement,
-        Request::SelectCar {
-            car: "Pizza Boy".into(),
-            ready: true,
-        },
-    );
-    world.run_system_once(update).unwrap();
     let game = world.resource::<Match>();
     assert!(game.started && !game.ended);
-    assert_eq!(game.session.as_ref().unwrap().slots, vec![0, 1]);
+    assert_eq!(game.session.as_ref().unwrap().slots, vec![0]);
     assert!(game.initial_digest.is_some());
     assert_eq!(
         world
             .non_send_mut::<simulator::Simulator>()
             .state()?
             .remaining,
-        2
+        1
     );
     Ok(())
 }

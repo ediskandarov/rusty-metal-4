@@ -363,7 +363,7 @@ export function freezeRoster(state: RoomState, key: string, now: number): RoomMa
   if (!match || match.stage !== "ready")
     throw new RoomError(409, "Prepare server resources first.");
   if (
-    state.members.length < 2 ||
+    state.members.length < 1 ||
     state.members.some(
       (member) =>
         !member.ready ||
@@ -372,7 +372,7 @@ export function freezeRoster(state: RoomState, key: string, now: number): RoomMa
         !sameCompatibility(member.compatibility, match.compatibility),
     )
   )
-    throw new RoomError(409, "At least two players must be present, with every participant ready.");
+    throw new RoomError(409, "At least one player must be present, with every participant ready.");
   match.roster = state.members.map((member) => ({
     id: member.id,
     pending: false,

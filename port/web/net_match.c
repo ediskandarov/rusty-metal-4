@@ -338,7 +338,7 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     const char* pool_names, u32 time_limit_ticks, u32 frag_limit)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8 || !slots
-        || (slots & ~((1u << capacity) - 1)) || __builtin_popcount(slots) < 2 || view_slot < -1
+        || (slots & ~((1u << capacity) - 1)) || view_slot < -1
         || view_slot >= capacity || world < 0 || world >= GameGetNumberOfWorlds() || flags > 3
         || !car_names || ((flags & 2) && (view_slot < 0 || WebSimulationOnly())))
         return reject_start("Invalid explicit match configuration or session already running");

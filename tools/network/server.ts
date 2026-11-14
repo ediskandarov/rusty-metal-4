@@ -15,15 +15,15 @@ await runCli(async () => {
     options: { help: { type: "boolean", short: "h" }, mode: { type: "string", default: "dev" } },
   });
   if (values.help) {
-    console.log("Usage: bun run server [2–8] [--mode dev|release|diagnostic]");
+    console.log("Usage: bun run server [1–8] [--mode dev|release|diagnostic]");
     return;
   }
   const mode = values.mode;
   if (mode !== "dev" && mode !== "release" && mode !== "diagnostic")
     throw new UsageError("Choose --mode release, dev or diagnostic");
   const players = Number(positionals[0] ?? "2");
-  if (positionals.length > 1 || !Number.isInteger(players) || players < 2 || players > 8)
-    throw new UsageError("Usage: bun run server [2–8] [--mode dev|release|diagnostic]");
+  if (positionals.length > 1 || !Number.isInteger(players) || players < 1 || players > 8)
+    throw new UsageError("Usage: bun run server [1–8] [--mode dev|release|diagnostic]");
   if (!process.env.TM4_ADMIN_SECRET || process.env.TM4_ADMIN_SECRET.length < 24)
     throw new Error("Set TM4_ADMIN_SECRET to a private startup secret of at least 24 characters");
   const target = join(root, "build/network-native");

@@ -349,7 +349,7 @@ export class Room extends DurableObject<Env> {
         match.cars = status.cars;
         match.stage = "ready";
         match.message =
-          "Server ready. Choose cars and ready every participant; the host can start with 2–8 players.";
+          "Server ready. Choose cars and ready every participant; the host can start with 1–8 players.";
         invalidateReady(state);
         await this.commit();
         return;

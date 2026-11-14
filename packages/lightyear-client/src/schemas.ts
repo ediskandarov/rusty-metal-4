@@ -51,7 +51,7 @@ export type RoundState = z.infer<typeof roundStateSchema>;
 export const slotConfigurationSchema = z
   .object({
     capacity: z.number().int().min(2).max(8),
-    slots: z.array(z.number().int().min(0).max(7)).min(2).max(8),
+    slots: z.array(z.number().int().min(0).max(7)).min(1).max(8),
   })
   .refine(
     (start) =>
@@ -82,7 +82,7 @@ export const startSchema = slotConfigurationSchema
           .min(1)
           .regex(/^[^\0\n]+$/),
       )
-      .min(2)
+      .min(1)
       .max(8),
     modelPool: z
       .array(
@@ -94,7 +94,7 @@ export const startSchema = slotConfigurationSchema
       )
       .min(1)
       .max(8),
-    participants: z.array(participantIdSchema).min(2).max(8),
+    participants: z.array(participantIdSchema).min(1).max(8),
     seed: u32,
     epoch: u32,
     compatibility: compatibilitySchema,

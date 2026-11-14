@@ -561,3 +561,43 @@ test("FFA admission on the ending tick participates, while later admission is fe
     assert.equal(admit(fresh), 0);
   }
 });
+
+test("solo FFA supports late admission across rollback and portable recovery", async () => {
+  const create = () => simulation("Orbital", 2, ["Orbital", "Pizza Boy"], ["Orbital"], [0]);
+  const world = await create();
+  for (let i = 0; i < 3; i++) world.step();
+  assert.deepEqual(completion(world), [0, 0, 0]);
+  const before = world.snapshot();
+  assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+  const admit = (current) => {
+    const model = current.x.malloc(10);
+    new Uint8Array(current.x.memory.buffer).set(new TextEncoder().encode("Pizza Boy\0"), model);
+    assert.equal(current.x.WebNetAdmitParticipant(3, 7, 55, 0, model), 1);
+    current.x.free(model);
+  };
+  admit(world);
+  const expected = [];
+  for (let i = 3; i < 10; i++) {
+    world.step();
+    expected.push(world.canonical());
+  }
+  assert.equal(world.x.WebNetSlotMask(), 129);
+  const after = world.snapshot();
+  assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+  admit(world);
+  for (let i = 3; i < 10; i++) {
+    world.step();
+    assert.deepEqual(world.canonical(), expected[i - 3]);
+  }
+  assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+  const restored = await create();
+  restored.restore(before);
+  admit(restored);
+  for (let i = 3; i < 10; i++) {
+    restored.step();
+    assert.deepEqual(restored.canonical(), expected[i - 3]);
+  }
+  const joined = await create();
+  joined.restore(after);
+  assert.deepEqual(joined.canonical(), world.canonical());
+});

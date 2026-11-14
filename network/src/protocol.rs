@@ -398,7 +398,7 @@ impl SessionStart {
         self.limits.valid()
             && self.capacity == MAX_PLAYERS
             && (1..=3600).contains(&self.respawn_delay_ticks)
-            && (2..=self.capacity).contains(&self.slots.len())
+            && (1..=self.capacity).contains(&self.slots.len())
             && self.slots.len() == self.cars.len()
             && self.participants.len() == self.slots.len()
             && self
