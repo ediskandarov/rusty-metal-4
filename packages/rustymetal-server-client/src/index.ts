@@ -1,4 +1,5 @@
 import {
+  authoritativeResultSchema,
   healthSnapshotSchema,
   type MembershipLookup,
   membershipLookupSchema,
@@ -66,6 +67,9 @@ export function createServerClient(options: ClientOptions) {
   const request = requests(options);
   return {
     ...createResourceClient(options),
+    async results(signal?: AbortSignal) {
+      return authoritativeResultSchema.parse(await (await request("results", { signal })).json());
+    },
     async status(signal?: AbortSignal) {
       return serverStatusSchema.parse(await (await request("status", { signal })).json());
     },

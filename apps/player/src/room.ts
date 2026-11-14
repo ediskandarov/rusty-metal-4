@@ -31,9 +31,13 @@ export async function roomPlayerReady(engine: NetworkEngine, sources: DiscSource
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   const view = matchStatus(document.getElementById("status")!);
-  const show: typeof view = (state, message) => {
+  const show = (
+    state: Parameters<typeof view>[0],
+    message: string,
+    sessionId: string | null = null,
+  ) => {
     view(state, message);
-    notify({ event: "status", message });
+    notify({ event: "status", message, sessionId });
   };
   const resources = createRoomsClient({ baseURL: new URL("/api/", location.href) });
   const id = roomId;

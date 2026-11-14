@@ -45,6 +45,8 @@ export async function joinMatch(
 ) {
   signal?.throwIfAborted();
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
+  delete port.netMatchServerState;
+  delete port.netConfirmedTick;
   show("lobby", "Connecting to Free for all…");
 
   const journal = startClientJournal();
@@ -111,6 +113,11 @@ export async function joinMatch(
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (session.phase === "closed") return;
     signal?.removeEventListener("abort", cancelled);
+    try {
+      if (state === "lobby") sessionStorage.removeItem(credentialKey);
+    } catch {
+      // Session storage is optional.
+    }
     journal.freeze(message, diagnostics);
     document.removeEventListener("visibilitychange", visibilityChanged);
     window.removeEventListener("pagehide", pageHidden);

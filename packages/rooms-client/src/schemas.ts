@@ -1,4 +1,10 @@
-import { compatibilitySchema, sha256Schema } from "@tm4/lightyear-client/schemas";
+import {
+  compatibilitySchema,
+  controllerIdentitySchema,
+  matchCompletionSchema,
+  scoreSchema,
+  sha256Schema,
+} from "@tm4/lightyear-client/schemas";
 import { z } from "zod";
 export { compatibilitySchema };
 export type { Compatibility } from "@tm4/lightyear-client/schemas";
@@ -73,6 +79,22 @@ export const matchSnapshotSchema = z.object({
   credential: sha256Schema.nullable(),
 });
 export type MatchSnapshot = z.infer<typeof matchSnapshotSchema>;
+export const roomResultSchema = z.object({
+  matchId: matchIdSchema,
+  completion: matchCompletionSchema.refine((value) => value.reasons > 0),
+  participants: z
+    .array(
+      z.object({
+        memberId: z.string().uuid(),
+        name: text(24),
+        identity: controllerIdentitySchema,
+        score: scoreSchema,
+        winner: z.boolean(),
+      }),
+    )
+    .max(8),
+});
+export type RoomResult = z.infer<typeof roomResultSchema>;
 export const roomSnapshotSchema = roomSummarySchema.extend({
   version: count,
   hostId: z.string().uuid().nullable(),
@@ -90,6 +112,7 @@ export const roomSnapshotSchema = roomSummarySchema.extend({
     )
     .max(ffaCapacity),
   match: matchSnapshotSchema.nullable(),
+  result: roomResultSchema.nullable().optional(),
   journal: z.object({ matchId: matchIdSchema, expiresAt: count }).nullable().optional(),
   notice: z.string(),
   emptyUntil: count.nullable(),

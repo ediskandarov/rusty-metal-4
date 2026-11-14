@@ -192,6 +192,13 @@ only when working on the retained container infrastructure.
   `bun tests/browser/check_ffa_prediction.mjs` uses the diagnostic bundle to exercise
   forecast membership beyond a provisional end, native correction undoing a projectile's
   frag-limit finish, exact corrected C replay and rejection of invalid identities.
+- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_ffa_rematch.mjs`: real native
+  authority and local Room/Miniflare with explicit short test limits. Verifies combat,
+  respawn, late admission, reconnect, the named authoritative scoreboard after server
+  release and a second match in the same pages and loaded runtime. Checks fresh sessions,
+  admission credentials, zero initial scores, retained room identities and no surviving
+  match process. The server bundle and native binary use the same diagnostic inputs as
+  the match browser test; no deployed container is involved.
 - `TM4_DISC_DIR=<disc folder> bun tests/browser/check_live_membership.mjs`: four
   independent browsers use ordinary room actions to admit, depart, reuse a seat,
   reject retired credentials and recover the same identity. Reloading a preparing

@@ -12,7 +12,8 @@ Updated 2026-11-14.
 | Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
 | Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
 | Implemented FFA policy | Eight gameplay slots; automatic random-model respawn; immutable time/frag limits and deterministic completion with ties. |
-| Deferred mode policy | Full final scoreboard, polished results presentation, map rotation, same-room rematch flow, spectator seats and live replacement of a living car. |
+| Implemented room lifecycle | Authoritative named final scoreboard retained after private server release; return to the same room and fresh match startup in the loaded player. |
+| Deferred mode policy | Map rotation, spectator seats and live replacement of a living car. |
 
 The first agreed new mode is FFA: eight gameplay slots and joining and leaving
 during play. Car selection belongs to the mode: FFA randomly selects from its prepared
@@ -69,10 +70,23 @@ and admission preconditions distinguish invalid decisions from constructor failu
 A client recovering at the boundary receives normal completion; an
 authenticated reconnect after completion can retrieve the final result until teardown.
 
-The authority seals the journal as finished and publishes `results`. Existing room
-monitoring releases the private server and readiness and returns members to the same room.
-This uses the existing teardown path, not a new rematch lifecycle. A final scoreboard,
-polished results screen, map rotation and a same-room rematch flow remain later work.
+The authority seals the journal as finished and publishes `results`. Before releasing the
+private server, Room reads its authenticated final-result API and persists one named result
+with the match ID. That API binds C scores to the occupied participant identities and
+private room credentials; credentials never appear in the public room result. Room keeps
+immutable name receipts for match entrants so a departure racing the ending tick cannot
+attribute a score to a replacement or erase the original name. Explicitly departed score
+eligibility still follows the authority's committed roster.
+
+The result remains available after server release and room reconnection. Return to room
+reveals preparation controls while retaining the scoreboard. Preparation and its failures
+retain the last result; starting the next roster clears it. The room resets readiness and
+allocates a fresh private server for each match. The existing player frame retains its disc
+and runtime, while session teardown closes transport, rollback/recovery callbacks and timers,
+cancels C gameplay and removes completed recovery credentials. Room member IDs and names
+survive; the fresh authority owns new match-local identities. Commands and player status are
+match-scoped, and Room accepts results only for its current match ID. A stopped or failed
+server does not become a successful completion.
 
 Live replacement of an active car, transactional preservation of that car on failed
 replacement, and general transformation policies are deferred. The broader FSMs

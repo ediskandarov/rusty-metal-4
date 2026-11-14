@@ -4,8 +4,16 @@ import { z } from "zod";
 
 const roomEnvelope = z.strictObject({ type: z.literal("rm4-room"), roomId: roomIdSchema });
 export const roomCommandSchema = z.discriminatedUnion("action", [
-  roomEnvelope.extend({ action: z.literal("stop"), message: z.string().optional() }),
-  roomEnvelope.extend({ action: z.literal("status"), message: z.string() }),
+  roomEnvelope.extend({
+    action: z.literal("stop"),
+    sessionId: matchIdSchema.nullable(),
+    message: z.string().optional(),
+  }),
+  roomEnvelope.extend({
+    action: z.literal("status"),
+    sessionId: matchIdSchema.nullable(),
+    message: z.string(),
+  }),
   roomEnvelope.extend({ action: z.literal("upload"), sessionId: matchIdSchema }),
   roomEnvelope
     .extend({
@@ -23,7 +31,11 @@ export const roomCommandSchema = z.discriminatedUnion("action", [
 
 const playerEnvelope = z.strictObject({ type: z.literal("rm4-player"), roomId: roomIdSchema });
 export const playerMessageSchema = z.discriminatedUnion("event", [
-  playerEnvelope.extend({ event: z.literal("status"), message: z.string() }),
+  playerEnvelope.extend({
+    event: z.literal("status"),
+    sessionId: matchIdSchema.nullable(),
+    message: z.string(),
+  }),
   playerEnvelope.extend({ event: z.literal("unloaded") }),
   playerEnvelope.extend({
     event: z.literal("loaded"),

@@ -29,7 +29,7 @@ export const inputSchema = z.object({
 export type Input = z.infer<typeof inputSchema>;
 export const scoreSchema = z.object({ frags: i32, deaths: i32 });
 export type Score = z.infer<typeof scoreSchema>;
-const matchCompletionSchema = z
+export const matchCompletionSchema = z
   .object({ tick: u32, reasons: u32.max(3), winners: byte })
   .refine(
     (result) => (result.reasons ? result.tick > 0 : result.tick === 0 && result.winners === 0),

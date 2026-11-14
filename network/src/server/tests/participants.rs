@@ -1213,3 +1213,55 @@ fn confirmed_ffa_end_seals_journal_and_cancels_scheduled_and_preparing_admission
     );
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn final_result_uses_authority_scores_and_current_sparse_identity_not_dense_order() {
+    let mut game = game();
+    game.participants = ParticipantRoster::new(8, &[0, 3, 7]).unwrap();
+    game.participants.freeze();
+    let departed = game.participants.binding(3);
+    game.participants.release_live(departed).unwrap();
+    let replacement = game.participants.reserve_live().unwrap();
+    game.participants.commit_live(replacement).unwrap();
+    let pending = game.participants.reserve_live().unwrap();
+    game.participants.at_slot_mut(7).room_credential = Some("guest".into());
+    let state = game.last_state.as_mut().unwrap();
+    state.scores = (0..8)
+        .map(|slot| Score {
+            frags: slot,
+            deaths: 8 - slot,
+        })
+        .collect();
+    state.completion = game_protocol::MatchCompletion {
+        tick: 600,
+        reasons: 1,
+        winners: 128,
+    };
+    assert!(game.final_result("match").is_none());
+    game.ended = true;
+    let result = game.final_result("match").unwrap();
+    assert_eq!(result.session_id, "match");
+    assert_eq!(
+        result
+            .participants
+            .iter()
+            .map(|row| row.identity.slot)
+            .collect::<Vec<_>>(),
+        [0, 1, 7]
+    );
+    assert_eq!(result.participants[1].identity, replacement);
+    assert_ne!(
+        result.participants[1].identity.participant,
+        departed.participant
+    );
+    assert!(
+        !result
+            .participants
+            .iter()
+            .any(|row| row.identity == pending)
+    );
+    assert_eq!(result.participants[2].credential.as_deref(), Some("guest"));
+    assert_eq!(result.participants[2].score.frags, 7);
+    assert_eq!(result.participants[2].score.deaths, 1);
+    assert_eq!(result.completion.winners, 128);
+}

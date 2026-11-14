@@ -2,6 +2,8 @@ import {
   compatibilitySchema,
   controllerIdentitySchema,
   ffaLimitsSchema,
+  matchCompletionSchema,
+  scoreSchema,
   sha256Schema,
 } from "@tm4/lightyear-client/schemas";
 import { z } from "zod";
@@ -115,3 +117,37 @@ export const membershipLookupSchema = z.object({
   credential: sha256Schema,
 });
 export type MembershipLookup = z.infer<typeof membershipLookupSchema>;
+
+// Private authority API: credentials bind final identities to room membership, never sent to players.
+export const authoritativeResultSchema = z
+  .object({
+    sessionId: z.string().uuid(),
+    completion: matchCompletionSchema.refine((value) => value.reasons > 0),
+    participants: z
+      .array(
+        z.object({
+          identity: controllerIdentitySchema,
+          credential: sha256Schema.nullable(),
+          score: scoreSchema,
+        }),
+      )
+      .max(8),
+  })
+  .refine((result) => {
+    const rows = result.participants;
+    const occupied = rows.reduce((mask, row) => mask | (1 << row.identity.slot), 0);
+    const best = Math.max(...rows.map((row) => row.score.frags));
+    const winners = rows.reduce(
+      (mask, row) => mask | (row.score.frags === best ? 1 << row.identity.slot : 0),
+      0,
+    );
+    return (
+      new Set(rows.map((row) => row.identity.participant)).size === rows.length &&
+      new Set(rows.map((row) => row.identity.slot)).size === rows.length &&
+      new Set(rows.map((row) => row.credential).filter((value) => value !== null)).size ===
+        rows.filter((row) => row.credential !== null).length &&
+      (result.completion.winners & ~occupied) === 0 &&
+      result.completion.winners === winners
+    );
+  }, "Invalid final participant identities or winners");
+export type AuthoritativeResult = z.infer<typeof authoritativeResultSchema>;

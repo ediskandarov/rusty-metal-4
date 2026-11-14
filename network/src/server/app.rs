@@ -198,6 +198,15 @@ pub(crate) fn run_match(
                         .as_ref()
                         .is_some_and(|state| state.completion.reasons != 0 || state.next_mode != 0)
                     {
+                        let mut result = launcher.results.lock().unwrap();
+                        if result.is_none() {
+                            *result = game.final_result(
+                                status
+                                    .session_id
+                                    .as_deref()
+                                    .expect("a started match has an identity"),
+                            );
+                        }
                         status.phase = "results".into();
                         status.message =
                             "Match finished. Restart the server to prepare the next match.".into();

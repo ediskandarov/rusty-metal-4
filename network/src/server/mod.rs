@@ -97,6 +97,26 @@ struct Match {
 }
 
 impl Match {
+    fn final_result(&self, session_id: &str) -> Option<web::MatchResult> {
+        let state = self.last_state.as_ref()?;
+        if !self.ended || state.completion.reasons == 0 {
+            return None;
+        }
+        Some(web::MatchResult {
+            session_id: session_id.into(),
+            completion: state.completion.clone(),
+            participants: self
+                .participants
+                .slots()
+                .map(|slot| web::ResultParticipant {
+                    identity: self.participants.binding(slot),
+                    credential: self.participants.at_slot(slot).room_credential.clone(),
+                    score: state.scores[slot].clone(),
+                })
+                .collect(),
+        })
+    }
+
     fn broadcast(
         &self,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,

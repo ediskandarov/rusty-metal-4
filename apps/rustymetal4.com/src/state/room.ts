@@ -33,6 +33,8 @@ interface RoomState {
   carDraft: string | undefined;
   playerNeedsSync: boolean;
   playerStatus: string;
+  returnedResult: string | null;
+  returnToRoom: () => void;
   journal: { downloading: boolean; message: string };
   receive: (room: RoomSnapshot) => void;
   connectionChanged: (live: boolean) => void;
@@ -96,6 +98,10 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     carDraft: undefined,
     playerNeedsSync: false,
     playerStatus: "",
+    returnedResult: null,
+    returnToRoom() {
+      set({ returnedResult: get().room?.result?.matchId ?? null });
+    },
     journal: { downloading: false, message: "" },
     receive(room) {
       const state = get();
@@ -108,6 +114,16 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       )
         return;
       const memberChanged = state.room?.you !== room.you;
+      const previousMember = roomMember(state);
+      const incomingMember = room.participants.find((member) => member.id === room.you);
+      // A fresh room tab has no loaded disc; it must not strand another tab's retained resources.
+      const retainedDiscNeedsSync =
+        !memberChanged &&
+        !!state.disc &&
+        !!previousMember?.loaded &&
+        !incomingMember?.loaded &&
+        !room.match?.endpoint;
+
       const reset = memberChanged || room.closed;
       const roomError = room.closed
         ? "This room has closed. Find another room in the directory."
@@ -129,7 +145,14 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
             }
           : {}),
         ...(room.match?.endpoint ? { playerNeedsSync: false } : {}),
+        ...(retainedDiscNeedsSync
+          ? {
+              playerNeedsSync: true,
+              carDraft: state.carDraft ?? previousMember?.car ?? undefined,
+            }
+          : {}),
       });
+      if (retainedDiscNeedsSync && !get().operation) void syncPlayer();
     },
     connectionChanged(live) {
       if (get().departed || get().connection === "expired" || get().room?.closed) return;

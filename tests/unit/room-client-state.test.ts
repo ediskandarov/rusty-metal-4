@@ -273,3 +273,25 @@ test("journal downloading is independent of room operations and cannot be duplic
   api.journal = () => Promise.resolve({ bytes: new Blob(["journal"]), savedAt: 1000 });
   expect((await store.getState().downloadJournal())?.matchId).toBe(match.id);
 });
+
+test("another room tab cannot strand this tab's retained disc and selection between matches", async () => {
+  const { api, store } = setup();
+  const selected = snapshot(2);
+  selected.participants[0]!.car = "Quatro";
+  store.getState().receive(selected);
+  let published = 0;
+  api.player = (_id, input) => {
+    published++;
+    expect(input).toEqual({ car: "Quatro", compatibility, ready: false });
+    return Promise.resolve({ ...selected, version: 4 });
+  };
+  const unloaded = snapshot(3);
+  unloaded.participants[0]!.loaded = false;
+  unloaded.participants[0]!.car = null;
+  store.getState().receive(unloaded);
+  await settled(store);
+  expect(published).toBe(1);
+  expect(store.getState().disc).toBe(disc);
+  expect(roomSelectedCar(store.getState())).toBe("Quatro");
+  expect(store.getState().room?.participants[0]!.loaded).toBe(true);
+});

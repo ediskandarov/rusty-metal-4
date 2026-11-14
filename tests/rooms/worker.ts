@@ -114,6 +114,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
   >();
   private nextParticipant = 8;
   private lookupFailure = false;
+  private resultsFailure: "http" | "malformed" | "binding" | null = null;
   cancelAdmissionsForTest() {
     for (const [credential, lease] of this.leases)
       if (lease.pending) this.leases.delete(credential);
@@ -125,6 +126,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
     failStop?: boolean;
     statusFailure?: "http" | "timeout" | null;
     lookupFailure?: boolean;
+    resultsFailure?: "http" | "malformed" | "binding" | null;
     sessionId?: string;
   }) {
     Object.assign(this, options);
@@ -231,6 +233,23 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       return Response.json({
         ...(this.leases.get(change.credential) ?? { identity: null, pending: false }),
         tick: null,
+      });
+    }
+    if (path === "/api/results") {
+      if (this.resultsFailure === "http")
+        return new Response("Temporary result retrieval outage", { status: 503 });
+      if (this.resultsFailure === "malformed") return Response.json({ completion: null });
+      return Response.json({
+        sessionId: this.sessionId,
+        completion: { tick: 600, reasons: 1, winners: 3 },
+        participants: this.roster.map((value, slot) => ({
+          identity: { participant: (slot + 1).toString(16).padStart(16, "0"), slot },
+          credential:
+            this.resultsFailure === "binding" && slot === 0
+              ? "f".repeat(64)
+              : (value as { credential: string }).credential,
+          score: { frags: 0, deaths: 0 },
+        })),
       });
     }
     if (path === "/api/status") {

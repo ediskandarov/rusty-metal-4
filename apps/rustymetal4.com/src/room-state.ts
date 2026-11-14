@@ -5,10 +5,13 @@ import {
   maps,
   type MatchSnapshot,
   modes,
+  type RoomResult,
+  roomResultSchema,
   type RoomSettings,
   type RoomSnapshot,
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
+import type { AuthoritativeResult } from "@tm4/rustymetal-server-client/schemas";
 
 export const reconnectGrace = 45_000;
 export const emptyGrace = 30_000;
@@ -69,6 +72,8 @@ export interface RoomMatch {
   compatibility: Compatibility | null;
   roster: { id: string; credential: string; car: string; pending: boolean }[];
   message: string;
+  // Name receipts survive an in-flight departure; scores still come only from the authority.
+  resultMembers: Record<string, { id: string; name: string }>;
 }
 export interface Member {
   id: string;
@@ -83,6 +88,7 @@ export interface Member {
 export interface RoomState {
   id: string;
   match: RoomMatch | null;
+  result?: RoomResult;
   journal?: { matchId: string; expiresAt: number };
   notice: string;
   creatorKey: string;
@@ -256,6 +262,7 @@ export function snapshot(state: RoomState, key: string): RoomSnapshot {
               ?.credential ?? null,
         }
       : null,
+    result: state.result ?? null,
     journal: state.journal && state.journal.expiresAt > Date.now() ? state.journal : null,
     notice: state.notice,
     emptyUntil: state.emptyUntil,
@@ -346,6 +353,7 @@ export function beginPreparation(state: RoomState, key: string, now: number): Ro
     cars: [],
     compatibility: null,
     roster: [],
+    resultMembers: {},
     message: "Host: upload your disc resources to the private server.",
   });
 }
@@ -371,6 +379,12 @@ export function freezeRoster(state: RoomState, key: string, now: number): RoomMa
     car: member.car!,
     credential: (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", ""),
   }));
+  for (const entry of match.roster) {
+    const member = state.members.find((member) => member.id === entry.id)!;
+    match.resultMembers[entry.credential] = { id: member.id, name: member.name };
+  }
+  // Preparation failures leave the previous result available. Starting a new match replaces it.
+  delete state.result;
   match.stage = "starting";
   match.deadline = now + preparationLimit;
   match.message = "Connecting the prepared participants…";
@@ -382,4 +396,27 @@ export function resetMatch(state: RoomState, message: string, now: number): void
   invalidateReady(state);
   for (const member of state.members)
     if (!member.connections.length) member.disconnectedUntil = now + reconnectGrace;
+}
+
+export function retainResult(
+  state: RoomState,
+  matchId: string,
+  result: AuthoritativeResult,
+): boolean {
+  const match = state.match;
+  if (!match || match.id !== matchId || result.sessionId !== matchId) return false;
+  if (state.result?.matchId === matchId) return true;
+  const participants = result.participants.map((row) => {
+    const member = row.credential ? match.resultMembers[row.credential] : undefined;
+    if (!member) throw new RoomError(502, "The final participant could not be bound to this room.");
+    return {
+      memberId: member.id,
+      name: member.name,
+      identity: row.identity,
+      score: row.score,
+      winner: !!(result.completion.winners & (1 << row.identity.slot)),
+    };
+  });
+  state.result = roomResultSchema.parse({ matchId, completion: result.completion, participants });
+  return true;
 }

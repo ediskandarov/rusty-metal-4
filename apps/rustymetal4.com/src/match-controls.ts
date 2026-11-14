@@ -38,7 +38,49 @@ export function matchControls(id: string, store: RoomStore) {
     const state = store.getState();
     const { room, disc, operation } = state;
     const self = roomMember(state);
-    el("match-panel").hidden = !self || !!room?.closed || state.departed;
+    const result = room?.result;
+    const viewingResults = !!result && state.returnedResult !== result.matchId;
+    el("results-panel").hidden = !result || !self || state.departed || !!room?.closed;
+    el("return-to-room").hidden = !viewingResults;
+    if (result) {
+      const reason =
+        result.completion.reasons === 3
+          ? "Time and frag limits reached"
+          : result.completion.reasons === 2
+            ? "Frag limit reached"
+            : "Time limit reached";
+      const winners = result.participants.filter((row) => row.winner);
+      el("results-reason").textContent =
+        reason +
+        " · " +
+        (winners.length > 1
+          ? "Tied winners: "
+          : winners.length
+            ? "Winner: "
+            : "No remaining participants") +
+        winners.map((row) => row.name).join(", ");
+      el("results-rows").replaceChildren(
+        ...[...result.participants]
+          .sort((a, b) => b.score.frags - a.score.frags || a.identity.slot - b.identity.slot)
+          .map((row) => {
+            const tr = document.createElement("tr");
+            tr.dataset.participant = row.identity.participant;
+            tr.dataset.member = row.memberId;
+            for (const value of [
+              row.name,
+              row.score.frags,
+              row.score.deaths,
+              row.winner ? (winners.length > 1 ? "Tied winner" : "Winner") : "",
+            ]) {
+              const td = document.createElement("td");
+              td.textContent = String(value);
+              tr.append(td);
+            }
+            return tr;
+          }),
+      );
+    }
+    el("match-panel").hidden = !self || !!room?.closed || state.departed || viewingResults;
     el("player-status").textContent =
       state.errors.player ??
       (state.runtime === "unavailable"
@@ -73,7 +115,7 @@ export function matchControls(id: string, store: RoomStore) {
       delivered &&
       (delivered.sessionId !== match?.id || (delivered.action === "join" && !match.endpoint))
     ) {
-      send({ action: "stop", message: room.notice });
+      send({ action: "stop", sessionId: delivered.sessionId, message: room.notice });
       delivered = null;
     }
     const status =
@@ -82,7 +124,7 @@ export function matchControls(id: string, store: RoomStore) {
         : null;
     if (status !== sentStatus) {
       sentStatus = status;
-      if (status) send({ action: "status", message: status });
+      if (status) send({ action: "status", sessionId: match?.id ?? null, message: status });
     }
     if (
       car.options.length !== choices.length ||
@@ -113,6 +155,7 @@ export function matchControls(id: string, store: RoomStore) {
     () => store.getState().runtimeChecked(true),
     () => store.getState().runtimeChecked(false),
   );
+  el("return-to-room").onclick = () => store.getState().returnToRoom();
   journal.onclick = async () => {
     const result = await store.getState().downloadJournal();
     if (!result) return;
@@ -144,7 +187,7 @@ export function matchControls(id: string, store: RoomStore) {
     void store.getState().start();
   };
   reconnect.onclick = () => {
-    send({ action: "stop" });
+    send({ action: "stop", sessionId: store.getState().room?.match?.id ?? null });
     delivered = null;
     enter();
   };
@@ -155,7 +198,8 @@ export function matchControls(id: string, store: RoomStore) {
     const message = parsed.data;
     switch (message.event) {
       case "status":
-        store.getState().playerReported(message.message);
+        if (message.sessionId === (store.getState().room?.match?.id ?? null))
+          store.getState().playerReported(message.message);
         break;
       case "unloaded":
         delivered = null;

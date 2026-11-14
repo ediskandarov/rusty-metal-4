@@ -154,6 +154,13 @@ select {
   border-collapse: collapse;
   font-size: 0.9rem;
 }
+.scoreboard {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.scoreboard th,
+.scoreboard td,
 .room-table th,
 .room-table td {
   padding: 12px;

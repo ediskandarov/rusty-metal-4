@@ -57,7 +57,7 @@ test("stop and immediate rejoin of the same match keep the new attempt", async (
   session.handle(command("one"));
   session.handle(command("one"));
   expect(joins).toHaveLength(1);
-  session.handle({ action: "stop" });
+  session.handle({ action: "stop", sessionId: "one" });
   expect(joins[0]!.signal.aborted).toBe(true);
   session.handle(command("one"));
   expect(joins).toHaveLength(2);
@@ -103,7 +103,7 @@ test("cancelled upload cannot report progress or completion into its replacement
   session.handle({ action: "upload", sessionId: "one" });
   session.handle({ action: "upload", sessionId: "one" });
   expect(uploads).toHaveLength(1);
-  session.handle({ action: "stop", message: "Preparation cancelled" });
+  session.handle({ action: "stop", sessionId: "one", message: "Preparation cancelled" });
   session.handle({ action: "upload", sessionId: "two" });
   expect(uploads[0]!.signal.aborted).toBe(true);
   uploads[1]!.progress("Uploading second match");
@@ -112,7 +112,7 @@ test("cancelled upload cannot report progress or completion into its replacement
   await Promise.resolve();
   expect(statuses.at(-1)).toEqual(["lobby", "Uploading second match"]);
   expect(uploads[1]!.signal.aborted).toBe(false);
-  session.handle({ action: "status", message: "Server ready" });
+  session.handle({ action: "status", sessionId: "two", message: "Server ready" });
   expect(statuses.at(-1)).toEqual(["lobby", "Uploading second match"]);
   uploads[1]!.pending.resolve();
   await Promise.resolve();
@@ -131,7 +131,7 @@ test("a failed upload releases the operation so the same preparation can retry",
   uploads[1]!.pending.resolve();
   await Promise.resolve();
   expect(statuses.at(-1)).toEqual(["lobby", "Server upload complete. Waiting for validation…"]);
-  session.handle({ action: "status", message: "Validation complete" });
+  session.handle({ action: "status", sessionId: "one", message: "Validation complete" });
   expect(statuses.at(-1)).toEqual(["lobby", "Validation complete"]);
   session.dispose();
 });
@@ -146,7 +146,7 @@ test("entering the match supersedes preparation and ignores its late failure", a
   expect(uploads).toHaveLength(1);
   expect(joins[0]!.signal.aborted).toBe(false);
   uploads[0]!.pending.reject(new Error("Old upload failed"));
-  session.handle({ action: "status", message: "Old preparation status" });
+  session.handle({ action: "status", sessionId: "one", message: "Old preparation status" });
   await Promise.resolve();
   expect(statuses.at(-1)).toEqual(["playing", "Playing"]);
   session.dispose();
@@ -160,10 +160,22 @@ test("disposing the frame cancels its operation and ignores all later commands",
   uploads[0]!.pending.reject(new Error("Cancelled"));
   session.handle(command("two"));
   session.handle({ action: "upload", sessionId: "two" });
-  session.handle({ action: "status", message: "Late status" });
-  session.handle({ action: "stop" });
+  session.handle({ action: "status", sessionId: "one", message: "Late status" });
+  session.handle({ action: "stop", sessionId: "one" });
   await Promise.resolve();
   expect(joins).toHaveLength(0);
   expect(uploads).toHaveLength(1);
   expect(statuses).toEqual([]);
+});
+
+test("late stop and status from match one cannot interrupt match two", () => {
+  const { session, joins, statuses } = setup();
+  session.handle(command("one"));
+  session.handle(command("two"));
+  joins[1]!.status("playing", "Second match");
+  session.handle({ action: "stop", sessionId: "one", message: "Old completion" });
+  session.handle({ action: "status", sessionId: "one", message: "Old error" });
+  expect(joins[1]!.signal.aborted).toBe(false);
+  expect(statuses.at(-1)).toEqual(["playing", "Second match"]);
+  session.dispose();
 });

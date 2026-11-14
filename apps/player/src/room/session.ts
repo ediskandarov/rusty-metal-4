@@ -20,10 +20,16 @@ export function createRoomSession({
     signal: AbortSignal,
     progress: (message: string) => void,
   ) => Promise<void>;
-  show: MatchStatus;
+  show: (phase: Parameters<MatchStatus>[0], message: string, sessionId: string | null) => void;
 }) {
   let state: SessionState = { phase: "idle" };
 
+  const currentSessionId = () =>
+    "operation" in state
+      ? state.operation.sessionId
+      : "sessionId" in state
+        ? state.sessionId
+        : null;
   const replace = (next: SessionState) => {
     const previous = state;
     state = next;
@@ -32,7 +38,11 @@ export function createRoomSession({
   const failed = (active: SessionState & { operation: Operation }, error: unknown) => {
     if (state !== active) return;
     replace({ phase: "failed", sessionId: active.operation.sessionId });
-    show("error", error instanceof Error ? error.message : String(error));
+    show(
+      "error",
+      error instanceof Error ? error.message : String(error),
+      active.operation.sessionId,
+    );
   };
 
   return {
@@ -40,12 +50,14 @@ export function createRoomSession({
       if (state.phase === "disposed") return;
       switch (command.action) {
         case "status":
+          if (command.sessionId !== currentSessionId()) return;
           if (state.phase === "uploading") state.serverStatus = command.message;
-          else if (state.phase !== "session") show("lobby", command.message);
+          else if (state.phase !== "session") show("lobby", command.message, command.sessionId);
           break;
         case "stop":
+          if (command.sessionId !== currentSessionId()) return;
           replace({ phase: "idle" });
-          show("lobby", command.message || "Back in the room. Ready when you are.");
+          show("lobby", command.message || "Back in the room. Ready when you are.", null);
           break;
         case "join": {
           if (state.phase === "session" && state.operation.sessionId === command.sessionId) return;
@@ -58,7 +70,7 @@ export function createRoomSession({
           void join(command, active.operation.abort.signal, (phase, message) => {
             if (state !== active) return;
             if (phase === "error") failed(active, message);
-            else show(phase, message);
+            else show(phase, message, command.sessionId);
           }).catch((error: unknown) => failed(active, error));
           break;
         }
@@ -72,7 +84,7 @@ export function createRoomSession({
           };
           replace(active);
           void upload(command.sessionId, active.operation.abort.signal, (message) => {
-            if (state === active) show("lobby", message);
+            if (state === active) show("lobby", message, command.sessionId);
           }).then(
             () => {
               if (state !== active) return;
@@ -80,6 +92,7 @@ export function createRoomSession({
               show(
                 "lobby",
                 active.serverStatus ?? "Server upload complete. Waiting for validation…",
+                command.sessionId,
               );
             },
             (error: unknown) => failed(active, error),

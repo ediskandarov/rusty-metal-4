@@ -157,6 +157,9 @@ export async function nativeBridge(
     get log() {
       return log;
     },
+    get active() {
+      return processes.size;
+    },
     get starts() {
       return starts;
     },

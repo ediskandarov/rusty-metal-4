@@ -75,6 +75,24 @@ import Settings from "../components/Settings.astro";
         <button type="submit">Join room</button>
       </form>
     </section>
+    <section id="results-panel" hidden>
+      <h2>Final scoreboard</h2>
+      <p id="results-reason"></p>
+      <table class="scoreboard">
+        <thead>
+          <tr>
+            <th scope="col">Player</th>
+            <th scope="col">Frags</th>
+            <th scope="col">Deaths</th>
+            <th scope="col">Result</th>
+          </tr>
+        </thead>
+        <tbody id="results-rows"></tbody>
+      </table>
+      <button id="return-to-room" type="button">
+        Return to room
+      </button>
+    </section>
     <section id="match-panel" hidden>
       <h2>Match preparation</h2>
       <p id="match-status" role="status"></p>

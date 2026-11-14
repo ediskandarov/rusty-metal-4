@@ -25,6 +25,7 @@ import {
   removeMember,
   requireHost,
   resetMatch,
+  retainResult,
   RoomError,
   type RoomState,
   snapshot,
@@ -293,11 +294,16 @@ export class Room extends DurableObject<Env> {
           inspections.push({ entry, lease });
         }
       }
-      // General status alone cannot recover a pending-lease monitoring outage.
+      if (status.phase === "results") {
+        const result = await this.api().results();
+        if (!retainResult(state, match.id, result)) throw new Error("Stale match result");
+      }
+      // General status alone cannot recover a membership or final-result outage.
       // Clear the first deadline only after all required checks have succeeded,
       // including before any state-transition or reconciliation commit returns.
       match.monitoringUnavailableUntil = null;
       if (status.phase === "results") {
+        await this.commit();
         await this.stopMatch("Match finished. You are back in the same room.");
         return;
       }
@@ -498,6 +504,7 @@ export class Room extends DurableObject<Env> {
                 change: { kind: "admit", credential, car: member.car! },
               });
               match.roster.push({ id: member.id, credential, car: member.car!, pending: true });
+              match.resultMembers[credential] = { id: member.id, name: member.name };
             } catch (error) {
               member.ready = false;
               // A lost HTTP response cannot leave an indefinite reservation.

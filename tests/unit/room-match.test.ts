@@ -10,7 +10,9 @@ import {
   edit,
   freezeRoster,
   join,
+  removeMember,
   resetMatch,
+  retainResult,
   snapshot,
   updatePlayer,
 } from "../../apps/rustymetal4.com/src/room-state.ts";
@@ -119,4 +121,87 @@ test("running membership advertises vacancies and limits late car selection to t
   expect(late.ready).toBe(true);
   expect(match.roster).toHaveLength(2);
   expect(() => updatePlayer(state, "host", selected)).toThrow("locked");
+});
+
+test("authoritative sparse identities preserve names and ties after teardown and reconnect", () => {
+  const state = fixture();
+  const match = freezeRoster(state, "host", 200);
+  match.stage = "playing";
+  const oldGuest = state.members[1]!;
+  const result = {
+    sessionId: match.id,
+    completion: { tick: 600, reasons: 3, winners: 129 },
+    participants: [
+      {
+        identity: { participant: "0000000000000009", slot: 7 },
+        credential: match.roster[1]!.credential,
+        score: { frags: 20, deaths: 12 },
+      },
+      {
+        identity: { participant: "0000000000000001", slot: 0 },
+        credential: match.roster[0]!.credential,
+        score: { frags: 20, deaths: 0 },
+      },
+    ],
+  };
+  // A room leave can race the ending tick. Its name receipt survives without awarding a replacement.
+  state.members.splice(1, 1);
+  match.roster.splice(1, 1);
+  join(state, "replacement", "Replacement", 250);
+  expect(retainResult(state, match.id, result)).toBe(true);
+  expect(
+    state.result!.participants.map((row) => [row.name, row.identity.slot, row.winner]),
+  ).toEqual([
+    ["Guest", 7, true],
+    ["Host", 0, true],
+  ]);
+  expect(state.result!.participants[0]!.memberId).toBe(oldGuest.id);
+  const saved = structuredClone(state.result);
+  expect(retainResult(state, match.id, { ...result, participants: [] })).toBe(true);
+  expect(state.result).toEqual(saved);
+  resetMatch(state, "Finished", 300);
+  expect(snapshot(state, "host").result).toEqual(saved);
+  disconnect(state, state.members[0]!.id, "host-tab", 320);
+  connect(state, "host", "new-tab");
+  expect(snapshot(state, "host").result).toEqual(saved);
+  const next = beginPreparation(state, "host", 400);
+  expect(snapshot(state, "host").result).toEqual(saved);
+  expect(retainResult(state, match.id, result)).toBe(false);
+  resetMatch(state, "Preparation failed", 450);
+  expect(state.result).toEqual(saved);
+  const retry = beginPreparation(state, "host", 500);
+  retry.stage = "ready";
+  retry.compatibility = compatibility;
+  retry.cars = ["Orbital"];
+  connect(state, "replacement", "replacement-tab");
+  for (const key of ["host", "replacement"]) {
+    updatePlayer(state, key, selected);
+    updatePlayer(state, key, { ...selected, ready: true });
+  }
+  const started = freezeRoster(state, "host", 550);
+  expect(started.id).not.toBe(next.id);
+  expect(state.result).toBeUndefined();
+  expect(retainResult(state, match.id, result)).toBe(false);
+  expect(snapshot(state, "host").result).toBeNull();
+});
+
+test("a new host can prepare while the previous host remains named in the last result", () => {
+  const state = fixture();
+  const match = freezeRoster(state, "host", 200);
+  retainResult(state, match.id, {
+    sessionId: match.id,
+    completion: { tick: 600, reasons: 1, winners: 3 },
+    participants: match.roster.map((entry, slot) => ({
+      identity: { participant: (slot + 1).toString(16).padStart(16, "0"), slot },
+      credential: entry.credential,
+      score: { frags: 0, deaths: 0 },
+    })),
+  });
+  resetMatch(state, "Finished", 300);
+  const result = structuredClone(state.result);
+  removeMember(state, state.hostId!, 350);
+  expect(state.hostId).toBe(state.members[0]!.id);
+  beginPreparation(state, "guest", 400);
+  expect(snapshot(state, "guest").result).toEqual(result);
+  expect(state.result!.participants[0]!.name).toBe("Host");
 });

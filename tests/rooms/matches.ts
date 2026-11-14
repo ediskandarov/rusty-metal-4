@@ -12,7 +12,11 @@ const compatibility = {
   build: "a".repeat(64),
   content: "b".repeat(64),
 };
-const sockets: { close(): void }[] = [];
+const sockets: { send(message: string): void; close(): void }[] = [];
+// Keep these fixture clients connected while sustained-outage cases await the real grace.
+const heartbeat = setInterval(() => {
+  for (const socket of sockets) socket.send("ping");
+}, 20_000);
 const browsers = Array.from({ length: 3 }, () => {
   let cookie = "";
   return async (
@@ -235,13 +239,58 @@ try {
   console.log(
     "PASS transient HTTP 503, real status timeout and reservation RPC failure recover without changing the match, roster or container",
   );
-  await firstServer.configureForTest({ statusFailure: "http" });
-  assert((await room.checkMatchForTest())!.monitoringUnavailableUntil);
-  await firstServer.configureForTest({ phase: "results", failStop: true, statusFailure: null });
+  // General status stays healthy throughout this result-only outage. All required
+  // result steps share the same first-failure deadline, including after durable reload.
+  await firstServer.configureForTest({ phase: "results", resultsFailure: "http", failStop: true });
+  const resultOutage = (await room.checkMatchForTest())!;
+  const resultDeadline = resultOutage.monitoringUnavailableUntil;
+  assert(resultDeadline !== null && resultDeadline > Date.now());
+  for (const failure of ["http", "malformed", "binding"] as const) {
+    await firstServer.configureForTest({ resultsFailure: failure });
+    await room.restoreMatchFromStorageForTest();
+    await Bun.sleep(30);
+    const retry = (await room.checkMatchForTest())!;
+    assert.equal(
+      retry.monitoringUnavailableUntil,
+      resultDeadline,
+      failure + " result failures must not renew the original outage deadline",
+    );
+    assert.equal(retry.stage, "playing");
+    assert.equal(
+      (await view()).result,
+      null,
+      "an unavailable or invalid result is not a completion",
+    );
+    assert.equal((await firstServer.inspectForTest()).stops, 0);
+    assert.equal((await directory.reservationForTest(initial.id))?.session, firstId);
+  }
+  await firstServer.configureForTest({ resultsFailure: null });
+  const resultRecovered = (await room.checkMatchForTest())!;
+  assert.equal(
+    resultRecovered.monitoringUnavailableUntil,
+    null,
+    "successful result retrieval and binding clear the outage deadline before teardown",
+  );
   await eventually(view, (state) => state.match?.stage === "stopping");
+  console.log(
+    "PASS healthy status cannot reset result retrieval, validation or binding outage deadlines; valid results recover",
+  );
+  const capturedResult = (await view()).result;
+  assert.equal(capturedResult?.matchId, firstId);
+  assert.deepEqual(
+    capturedResult?.participants.map((row) => row.name),
+    ["Host", "Guest"],
+  );
+  await room.restoreMatchFromStorageForTest();
+  assert.deepEqual(
+    (await view()).result,
+    capturedResult,
+    "result persists before a failed stop retry",
+  );
   assert.equal((await host(path + "/prepare", {})).status, 409);
   await firstServer.configureForTest({ failStop: false });
   const returned = await eventually(view, (state) => state.match === null);
+  assert.deepEqual(returned.result, capturedResult);
   assert.equal(returned.journal?.matchId, firstId);
   assert.deepEqual(await (await host(journalPath)).arrayBuffer(), journalBytes);
   assert.equal((await guest(journalPath)).status, 403);
@@ -262,12 +311,55 @@ try {
   );
   assert.equal((await view()).match, null);
   assert.equal((await failedServer.inspectForTest()).stops, 1);
+  assert.deepEqual(
+    (await view()).result,
+    capturedResult,
+    "failed next preparation retains last completed result",
+  );
   assert.equal((await host(path + "/prepare", {})).status, 200);
   match = (await view()).match!;
   const timeoutServer = server();
   await room.expireMatchForTest();
   await eventually(view, (state) => state.match === null);
   assert.equal((await timeoutServer.inspectForTest()).stops, 1);
+  assert.equal((await host(path + "/prepare", {})).status, 200);
+  match = (await view()).match!;
+  assert.equal((await host(path + "/match/" + match.id + "/prepare", {})).status, 202);
+  await eventually(view, (state) => state.match?.stage === "ready");
+  for (const browser of [host, guest])
+    assert.equal(
+      (await browser(path + "/player", { car: "Orbital", compatibility, ready: true })).status,
+      200,
+    );
+  assert.equal((await host(path + "/start", {})).status, 200);
+  await eventually(view, (state) => state.match?.stage === "playing");
+  const invalidResultsServer = server();
+  const invalidResultsId = match.id;
+  await invalidResultsServer.configureForTest({ phase: "results", resultsFailure: "malformed" });
+  const invalidResultOutage = (await room.checkMatchForTest())!;
+  const invalidResultDeadline = invalidResultOutage.monitoringUnavailableUntil;
+  assert(invalidResultDeadline !== null && invalidResultDeadline > Date.now());
+  await room.restoreMatchFromStorageForTest();
+  await Bun.sleep(30);
+  assert.equal((await room.checkMatchForTest())!.monitoringUnavailableUntil, invalidResultDeadline);
+  assert.equal((await directory.reservationForTest(initial.id))?.session, invalidResultsId);
+  const invalidResultStopped = await eventually(
+    view,
+    (state) => state.match === null,
+    monitoringGrace + 5000,
+  );
+  assert.equal(
+    invalidResultStopped.result,
+    null,
+    "sustained result failure must not invent a successful result",
+  );
+  assert.match(invalidResultStopped.notice, /remained unavailable/);
+  assert(invalidResultStopped.participants.every((member) => !member.ready));
+  assert.equal((await invalidResultsServer.inspectForTest()).stops, 1);
+  assert.equal(await directory.reservationForTest(initial.id), undefined);
+  console.log(
+    "PASS sustained result-only validation failure releases the server and reservation within the original grace",
+  );
   assert.equal((await host(path + "/prepare", {})).status, 200);
   match = (await view()).match!;
   assert.equal((await host(path + "/match/" + match.id + "/prepare", {})).status, 202);
@@ -358,6 +450,7 @@ try {
     "PASS room match authority: scoped setup, fixed roster/start race, native results return, stop retries, upload failure, timeout and fresh session",
   );
 } finally {
+  clearInterval(heartbeat);
   for (const socket of sockets) socket.close();
   await mf.dispose();
 }

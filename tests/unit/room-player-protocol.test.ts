@@ -22,9 +22,9 @@ const join = {
 
 test("each room command has its own required fields", () => {
   for (const command of [
-    { ...room, action: "stop" },
-    { ...room, action: "stop", message: "Back in the room" },
-    { ...room, action: "status", message: "Preparing" },
+    { ...room, action: "stop", sessionId: null },
+    { ...room, action: "stop", sessionId: null, message: "Back in the room" },
+    { ...room, action: "status", sessionId: null, message: "Preparing" },
     { ...room, action: "upload", sessionId },
     join,
   ] satisfies RoomCommand[])
@@ -37,13 +37,13 @@ test("each room command has its own required fields", () => {
     { ...room, action: "upload" },
     { ...room, action: "join", sessionId },
     { ...room, action: "unknown" },
-    { ...room, action: "stop", message: {} },
+    { ...room, action: "stop", sessionId: null, message: {} },
     { ...join, credential: "" },
     { ...join, credential: 123 },
     { ...room, action: "upload", sessionId: "-".repeat(36) },
     { ...join, type: "rm4-player" },
     { ...join, roomId: "not-a-room" },
-    { ...join, action: "stop" },
+    { ...join, action: "stop", sessionId: null },
   ])
     expect(roomCommandSchema.safeParse(command).success).toBe(false);
 });
@@ -65,7 +65,7 @@ test("a join command cannot redirect the player to another room, match, or origi
 test("loaded, unloaded and status events cannot be mixed or omit loaded resource metadata", () => {
   for (const event of [
     { ...player, event: "unloaded" },
-    { ...player, event: "status", message: "Uploading" },
+    { ...player, event: "status", sessionId: null, message: "Uploading" },
     { ...player, event: "loaded", compatibility, cars: ["Orbital", "Pizza Boy"] },
     { ...player, event: "loaded", compatibility, cars: [] },
   ] satisfies PlayerMessage[])
@@ -82,9 +82,9 @@ test("loaded, unloaded and status events cannot be mixed or omit loaded resource
     { ...player, event: "loaded", compatibility, cars: [1] },
     { ...player, event: "loaded", compatibility: { ...compatibility, build: "bad" }, cars: [] },
     { ...player, event: "unloaded", compatibility, cars: [] },
-    { ...player, event: "status", message: "Loaded", cars: [] },
+    { ...player, event: "status", sessionId: null, message: "Loaded", cars: [] },
     { ...player, event: "loaded", compatibility, cars: [], roomId: null },
-    { ...player, event: "status", message: "Wrong direction", type: "rm4-room" },
+    { ...player, event: "status", sessionId: null, message: "Wrong direction", type: "rm4-room" },
   ])
     expect(playerMessageSchema.safeParse(event).success).toBe(false);
 });

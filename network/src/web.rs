@@ -138,12 +138,28 @@ impl Drop for PrivateDirectory {
     }
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchResult {
+    pub session_id: String,
+    pub completion: tm4_network::protocol::MatchCompletion,
+    pub participants: Vec<ResultParticipant>,
+}
+#[derive(Clone, Serialize)]
+pub struct ResultParticipant {
+    pub identity: tm4_network::protocol::ControllerIdentity,
+    pub credential: Option<String>,
+    pub score: tm4_network::protocol::Score,
+}
+pub type SharedResult = Arc<Mutex<Option<MatchResult>>>;
+
 pub struct Launcher {
     pub wasm: Simulation,
     pub stopped: Arc<AtomicBool>,
     pub status: Arc<Mutex<Status>>,
     pub health: crate::health::Shared,
     pub journal: crate::journal::SharedExport,
+    pub results: SharedResult,
     requests: Receiver<SetupRequest>,
     pub membership: MembershipQueue,
     _private: PrivateDirectory,
@@ -216,6 +232,7 @@ impl Launcher {
         }));
         let health = crate::health::Shared::default();
         let journal = crate::journal::SharedExport::default();
+        let results = SharedResult::default();
         let (sender, requests) = mpsc::channel();
         let (membership_sender, membership_receiver) = mpsc::sync_channel(8);
         let membership = Arc::new(Mutex::new(membership_receiver));
@@ -226,6 +243,7 @@ impl Launcher {
             status: status.clone(),
             health: health.clone(),
             journal: journal.clone(),
+            results: results.clone(),
             sender,
             membership: membership_sender,
             mutation: Arc::new(AsyncMutex::new(())),
@@ -238,6 +256,7 @@ impl Launcher {
             status,
             health,
             journal,
+            results,
             requests,
             membership,
             _private: private,
@@ -325,6 +344,7 @@ struct Service {
     status: Arc<Mutex<Status>>,
     health: crate::health::Shared,
     journal: crate::journal::SharedExport,
+    results: SharedResult,
     sender: Sender<SetupRequest>,
     membership: mpsc::SyncSender<MembershipCommand>,
     mutation: Arc<AsyncMutex<()>>,
@@ -363,6 +383,7 @@ fn router(service: Arc<Service>) -> Router {
         .route("/api/metrics", get(metrics))
         .route("/api/system-metrics", get(system_metrics))
         .route("/api/journal", get(journal))
+        .route("/api/results", get(results))
         .route("/api/resources", get(manifest))
         .route("/api/resources/{*path}", put(upload))
         .route("/api/prepare", post(prepare))
@@ -391,6 +412,16 @@ async fn system_metrics() -> ApiResult {
         })?
         .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?;
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body).into_response())
+}
+
+async fn results(State(service): State<Arc<Service>>) -> ApiResult {
+    let result = service
+        .results
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or((StatusCode::CONFLICT, "No completed match result".into()))?;
+    Ok(Json(result).into_response())
 }
 
 async fn journal(State(service): State<Arc<Service>>) -> ApiResult {
@@ -796,6 +827,7 @@ mod tests {
                 status,
                 health: crate::health::Shared::default(),
                 journal: crate::journal::SharedExport::default(),
+                results: SharedResult::default(),
                 sender,
                 membership,
                 mutation: Arc::new(AsyncMutex::new(())),
@@ -1226,6 +1258,43 @@ mod tests {
         assert!(fixture.requests.try_recv().is_err());
     }
 
+    #[tokio::test]
+    async fn final_results_require_admin_authorization_and_a_completed_match() {
+        let fixture = Fixture::new();
+        assert_eq!(
+            fixture
+                .request("GET", "/api/results", Body::empty())
+                .await
+                .status(),
+            StatusCode::CONFLICT
+        );
+        let unauthorized = router(fixture.service.clone())
+            .oneshot(
+                Request::builder()
+                    .uri("/api/results")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
+        *fixture.service.results.lock().unwrap() = Some(MatchResult {
+            session_id: "test-match".into(),
+            completion: tm4_network::protocol::MatchCompletion {
+                tick: 1,
+                reasons: 1,
+                winners: 0,
+            },
+            participants: vec![],
+        });
+        let response = fixture.request("GET", "/api/results", Body::empty()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let bytes = to_bytes(response.into_body(), 4096).await.unwrap();
+        let result: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(result["sessionId"], "test-match");
+        assert_eq!(result["completion"]["tick"], 1);
+    }
+
     #[test]
     fn shutdown_joins_http_before_removing_private_uploads() {
         let fixture = Fixture::new();
@@ -1247,6 +1316,7 @@ mod tests {
             status,
             health: fixture.service.health.clone(),
             journal: fixture.service.journal.clone(),
+            results: fixture.service.results.clone(),
             requests: fixture.requests,
             membership: Arc::new(Mutex::new(mpsc::sync_channel(8).1)),
             _private: PrivateDirectory(path.clone()),
