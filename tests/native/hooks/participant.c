@@ -1,4 +1,5 @@
 #include "pending.h"
+#include "port/web/carpart.h"
 #include "port/web/checkpoint_memory.h"
 #include "port/web/net_match.h"
 #include "port/web/snapshot_types.h"
@@ -217,6 +218,24 @@ EMSCRIPTEN_KEEPALIVE int WebTestKillParticipant(s32 slot)
         return 0;
     participant_kill_slots |= 1u << slot;
     return 1;
+}
+
+/* Poison only the alignment gap, never rotation coefficients or translation. */
+EMSCRIPTEN_KEEPALIVE u32 WebTestSetDebrisMatrixPadding(u8 value)
+{
+    const size_t begin = sizeof(((MATRIX*)0)->m);
+    const size_t length = offsetof(MATRIX, t) - begin;
+    u32 count = 0;
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_DEFAULT].first; object;
+         object = object->next) {
+        if (strcmp(object->name, "carpart"))
+            continue;
+        Carpart* part = ObjectGetPayload(object);
+        memset((u8*)&part->rotation_step + begin, value, length);
+        memset((u8*)&part->local_to_world + begin, value, length);
+        ++count;
+    }
+    return count;
 }
 
 EMSCRIPTEN_KEEPALIVE int WebTestHitParticipant(u32 handle, s32 slot)

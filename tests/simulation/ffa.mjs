@@ -660,3 +660,42 @@ for (const [shieldTick, deathTick] of [
     }
   });
 }
+
+test("debris matrix padding cannot change hashes, snapshots or replay after a death", async () => {
+  const world = await simulation("Super Auger");
+  for (let i = 0; i < 10; ++i) world.step();
+  assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+  const kill = (current) => {
+    assert.equal(current.x.WebTestKillParticipant(0), 1);
+    current.step();
+  };
+  kill(world);
+  const initial = world.canonical();
+  const snapshot = world.snapshot();
+  for (const value of [0x66, 0xff, 0]) {
+    assert.ok(world.x.WebTestSetDebrisMatrixPadding(value) > 0, "death created debris");
+    assert.deepEqual(world.canonical(), initial, "padding must not affect the checksum");
+    assert.deepEqual(world.snapshot(), snapshot, "padding must not enter portable snapshots");
+  }
+  assert.ok(world.x.WebTestSetDebrisMatrixPadding(0x66) > 0);
+  const expected = [];
+  for (let i = 0; i < 120; ++i) {
+    world.step();
+    expected.push(world.canonical());
+  }
+  assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+  kill(world);
+  assert.deepEqual(world.canonical(), initial);
+  for (let i = 0; i < expected.length; ++i) {
+    world.step();
+    assert.deepEqual(world.canonical(), expected[i], "rollback tick " + i);
+  }
+  assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+  const restored = await simulation("Super Auger");
+  restored.restore(snapshot);
+  assert.deepEqual(restored.canonical(), initial);
+  for (let i = 0; i < expected.length; ++i) {
+    restored.step();
+    assert.deepEqual(restored.canonical(), expected[i], "portable recovery tick " + i);
+  }
+});

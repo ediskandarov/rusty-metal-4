@@ -22,7 +22,7 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(15); /* State record schema. */
+    VALUE(16); /* State record schema. */
     VALUE(WebNetFfaRespawnDelay());
     VALUE(WebNetFfaTimeLimit());
     VALUE(WebNetFfaFragLimit());

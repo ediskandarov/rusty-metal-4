@@ -317,7 +317,7 @@ if(TM4_STANDALONE)
         _HeadlessPortableRestore _WebNetEndReplay)
     if(TM4_WEB_TEST_HOOKS)
         list(APPEND exports _WebNetStartMatch _WebTestFailSimulationAllocation _WebTestSimulationAllocationSize _WebTestCrusherRespawnAllocationBytes _WebTestCarResource _WebTestRestartNetworkReplay _WebTestSimulationFreeBytes _WebTestScheduleRespawn _WebTestCarHandle _WebTestRespawnState _WebTestCreateParticipantWaveTimer _WebTestFlameContact _WebTestBurnIdentity _WebTestBurnOwnContact _WebTestParticipantDamageContract
-            _WebTestCreateParticipantProjectile _WebTestSetParticipantResults _WebTestKillParticipant
+            _WebTestCreateParticipantProjectile _WebTestSetParticipantResults _WebTestKillParticipant _WebTestSetDebrisMatrixPadding
             _WebTestHitParticipant _WebTestBindCaptureTarget _WebTestCaptureTarget _WebTestProjectileProvenance _WebTestAttributedWaves _WebTestTeleportCamera _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget
             _WebTestAimAtWeakDestroyable _WebTestAimAtDestroyable _WebTestPlaceProjectileTarget

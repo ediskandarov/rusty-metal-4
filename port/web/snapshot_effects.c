@@ -566,8 +566,10 @@ static const SnapshotField carpart_fields[] = {
     SNAP_POD(WebCarpart, part.world_position_q12),
     SNAP_POD(WebCarpart, part.frame_displacement_q12),
     SNAP_POD(WebCarpart, part.gravity_step_q12),
-    SNAP_POD(WebCarpart, part.rotation_step),
-    SNAP_POD(WebCarpart, part.local_to_world),
+    SNAP_POD(WebCarpart, part.rotation_step.m),
+    SNAP_POD(WebCarpart, part.rotation_step.t),
+    SNAP_POD(WebCarpart, part.local_to_world.m),
+    SNAP_POD(WebCarpart, part.local_to_world.t),
     SNAP_POD(WebCarpart, part.collision_countdown),
     { 0 },
 };

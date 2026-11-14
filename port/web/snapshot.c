@@ -12,7 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { SnapshotVersion = 9, MaxObjects = 2048 };
+enum { SnapshotVersion = 10, MaxObjects = 2048 };
 
 typedef struct {
     u32 version, count, session_bytes, world_bytes;
