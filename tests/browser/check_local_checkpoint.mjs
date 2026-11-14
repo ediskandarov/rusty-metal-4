@@ -26,7 +26,8 @@ try {
     };
     const random = ({ bytes }) => {
       const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-      return [data.getUint32(4, true), data.getUint32(8, true)];
+      check(data.getUint32(0, true) === 12, "Unexpected canonical state schema");
+      return [data.getUint32(8, true), data.getUint32(12, true)];
     };
     const compare = (expected) => {
       const actual = read();
