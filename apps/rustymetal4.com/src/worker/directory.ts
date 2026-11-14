@@ -70,7 +70,7 @@ export class RoomDirectory extends DurableObject<Env> {
       await this.expire();
       const key = `room:${id}`;
       if (summary) {
-        if (!this.listings.has(key) && this.listings.size >= 200) return false;
+        if (!this.listings.has(key) && this.listings.size >= 10) return false;
         const entry = { summary, expiresAt: Date.now() + directoryLease };
         const previous = this.listings.get(key);
         await this.ctx.storage.put(key, entry);
