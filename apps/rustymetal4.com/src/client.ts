@@ -1,15 +1,8 @@
 import { createRoomsClient, RoomsApiError as ApiError } from "@tm4/rooms-client";
-import {
-  ffaCapacity,
-  mapLabel,
-  modeLabel,
-  type RoomSettings,
-  roomSettingsSchema,
-  type RoomSnapshot,
-  type RoomSummary,
-} from "@tm4/rooms-client/schemas";
+import { mapLabel, modeLabel, type RoomSummary } from "@tm4/rooms-client/schemas";
 
 import { matchControls } from "./match-controls.ts";
+import { createRoomStore, roomConnectionLabel } from "./state/room.ts";
 
 const rooms = createRoomsClient({ baseURL: new URL("/api/", location.href) });
 
@@ -51,19 +44,6 @@ function fillName(id: string): void {
   } catch {
     /* Cookies still carry membership. */
   }
-}
-function formSettings(form: HTMLFormElement): RoomSettings {
-  const data = new FormData(form);
-  const field = (name: string) => {
-    const value = data.get(name);
-    return typeof value === "string" ? value : "";
-  };
-  return roomSettingsSchema.parse({
-    name: field("name"),
-    modeId: field("modeId"),
-    mapId: field("mapId"),
-    capacity: ffaCapacity,
-  });
 }
 function submit(form: HTMLFormElement, errorId: string, action: () => Promise<void>): void {
   form.addEventListener("submit", (event) => {
@@ -178,27 +158,37 @@ async function room(): Promise<void> {
     errorAt("room-error", "This invite link is incomplete. Open a room from the directory.");
     return;
   }
-  let current: RoomSnapshot | undefined;
+  const store = createRoomStore(id, rooms, session);
   let stop: (() => void) | undefined;
-  let editing = false;
-  let leaving = false;
-  let expired = false;
   let recovery: Promise<boolean> | undefined;
   const settingsForm = element<HTMLFormElement>("settings-form");
-  const renderMatch = matchControls(id, (room) => render(room));
-  const render = (room: RoomSnapshot) => {
-    if (current && room.version < current.version) return;
-    current = room;
-    renderMatch(room);
-    errorAt("room-error");
-    element("room-content").hidden = room.closed;
-    element("room-name").textContent = room.name;
+  const joinForm = element<HTMLFormElement>("join-form");
+  const stopWatching = () => {
+    const close = stop;
+    stop = undefined;
+    close?.();
+  };
+  const render = () => {
+    const state = store.getState();
+    const { room, operation } = state;
+    errorAt("room-error", state.errors.room);
+    errorAt("join-error", state.errors.join);
+    errorAt("settings-error", state.errors.settings);
+    element("settings-status").textContent = state.settingsSaved
+      ? "Settings saved for everyone."
+      : "";
+    element("room-status").textContent = roomConnectionLabel(state);
+    element("room-content").hidden = !room || room.closed || state.departed;
+    element("room-name").textContent =
+      room?.name ??
+      (state.connection === "expired"
+        ? "Room closed"
+        : state.connection === "unavailable"
+          ? "Room unavailable"
+          : "Opening room…");
+    if (!room || !room.you || room.closed || state.departed) stopWatching();
+    if (!room || room.closed || state.departed) return;
     document.title = `${room.name} · Rusty Metal 4`;
-    if (room.closed) {
-      errorAt("room-error", "This room has closed. Find another room in the directory.");
-      stop?.();
-      return;
-    }
     element("room-mode").textContent = modeLabel(room.modeId);
     element("room-map").textContent = mapLabel(room.mapId);
     element("room-capacity").textContent = `${room.participantCount} / ${room.capacity} players`;
@@ -226,45 +216,40 @@ async function room(): Promise<void> {
     const host = room.you !== null && room.you === room.hostId;
     element("settings-panel").hidden = !host || !!room.match;
     element("join-panel").hidden = room.you !== null;
-    element("leave-button").hidden = !room.you;
-    const joinButton =
-      element<HTMLFormElement>("join-form").querySelector<HTMLButtonElement>("button")!;
-    joinButton.disabled = !room.freePlaces;
+    const leave = element<HTMLButtonElement>("leave-button");
+    leave.hidden = !room.you;
+    leave.disabled = operation !== null;
+    const joinButton = joinForm.querySelector<HTMLButtonElement>("button")!;
+    joinButton.disabled = operation !== null || !room.freePlaces;
     joinButton.textContent = room.freePlaces ? "Join room" : "Room full";
-    if (!editing)
-      for (const key of ["name", "modeId", "mapId"] as const)
-        (settingsForm.elements.namedItem(key) as HTMLInputElement).value = String(room[key]);
-    if (!room.you) element("room-status").textContent = "Viewing room";
-    if (!room.you && stop) {
-      const close = stop;
-      stop = undefined;
-      close();
+    settingsForm.querySelector<HTMLButtonElement>("button[type=submit]")!.disabled =
+      operation !== null;
+    const settings = state.settingsDraft ?? room;
+    for (const key of ["name", "modeId", "mapId"] as const) {
+      const field = settingsForm.elements.namedItem(key) as HTMLInputElement;
+      if (field.value !== settings[key]) field.value = settings[key];
     }
   };
+  store.subscribe(render);
+  matchControls(id, store);
+  render();
   const refresh = (): Promise<boolean> => {
     if (recovery) return recovery;
+    if (
+      store.getState().departed ||
+      store.getState().connection === "expired" ||
+      store.getState().room?.closed
+    )
+      return Promise.resolve(false);
     recovery = (async () => {
       try {
         await session();
-        const result = await rooms.get(id);
-        render(result);
-        if (!result.you) element("room-status").textContent = "Viewing room";
+        store.getState().receive(await rooms.get(id));
         watch();
-        return Boolean(result.you);
+        return Boolean(store.getState().room?.you);
       } catch (error) {
-        if (!(error instanceof ApiError) || (error.status !== 404 && error.status !== 410)) {
-          element("room-status").textContent = current ? "Reconnecting…" : "Unavailable";
-          errorAt("room-error", error);
-          throw error;
-        }
-        expired = true;
-        current = undefined;
-        stop?.();
-        stop = undefined;
-        element("room-content").hidden = true;
-        element("room-name").textContent = "Room closed";
-        element("room-status").textContent = "Expired";
-        errorAt("room-error", error);
+        store.getState().loadFailed(error);
+        if (store.getState().connection !== "expired") throw error;
         return false;
       }
     })().finally(() => {
@@ -273,36 +258,30 @@ async function room(): Promise<void> {
     return recovery;
   };
   const watch = () => {
-    if (stop || !current?.you || leaving) return;
+    const state = store.getState();
+    if (
+      stop ||
+      !state.room?.you ||
+      state.room.closed ||
+      state.departed ||
+      state.operation === "leave"
+    )
+      return;
     stop = rooms.watchRoom(id, {
-      update: render,
-      status: (live) => {
-        element("room-status").textContent = live
-          ? "Live room"
-          : current?.you
-            ? "Reconnecting…"
-            : "Viewing room";
-      },
+      update: (room) => store.getState().receive(room),
+      status: (live) => store.getState().connectionChanged(live),
       recover: refresh,
     });
   };
   try {
     await refresh();
-  } catch (error) {
-    element("room-name").textContent = "Room unavailable";
-    element("room-status").textContent = "Unavailable";
-    errorAt("room-error", error);
+  } catch {
+    /* The store displays the error; polling retries. */
   }
   // The same recovery path handles initial failures and membership found in another tab.
   setInterval(() => {
-    void (async () => {
-      if (stop || leaving || expired) return;
-      try {
-        await refresh();
-      } catch (error) {
-        errorAt("room-error", error);
-      }
-    })();
+    const state = store.getState();
+    if (!stop && state.operation !== "leave") void refresh().catch(() => {});
   }, 5000);
   fillName("join-player");
   const invite = element<HTMLInputElement>("invite-link");
@@ -318,36 +297,38 @@ async function room(): Promise<void> {
       }
     })();
   };
-  submit(element<HTMLFormElement>("join-form"), "join-error", async () => {
-    const form = element<HTMLFormElement>("join-form");
-    await session();
-    render(await rooms.join(id, rememberName(form)));
-    watch();
+  joinForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void store
+      .getState()
+      .join(rememberName(joinForm))
+      .then((joined) => {
+        if (joined) watch();
+      });
   });
   settingsForm.addEventListener("input", () => {
-    editing = true;
-    element("settings-status").textContent = "";
+    const field = (name: string) =>
+      (settingsForm.elements.namedItem(name) as HTMLInputElement).value;
+    store.getState().editSettings({
+      name: field("name"),
+      modeId: field("modeId"),
+      mapId: field("mapId"),
+    });
   });
-  submit(settingsForm, "settings-error", async () => {
-    const result = await rooms.settings(id, formSettings(settingsForm));
-    editing = false;
-    render(result);
-    element("settings-status").textContent = "Settings saved for everyone.";
+  settingsForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void store.getState().saveSettings();
   });
   element<HTMLButtonElement>("leave-button").onclick = () => {
-    void (async () => {
-      const button = element<HTMLButtonElement>("leave-button");
-      button.disabled = true;
-      try {
-        await rooms.leave(id);
-        leaving = true;
-        stop?.();
-        location.assign("/");
-      } catch (error) {
-        errorAt("room-error", error);
-        button.disabled = false;
-      }
-    })();
+    void store
+      .getState()
+      .leave()
+      .then((left) => {
+        if (left) {
+          stopWatching();
+          location.assign("/");
+        }
+      });
   };
 }
 if (document.querySelector('[data-page="directory"]')) void directory();

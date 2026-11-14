@@ -35,7 +35,7 @@
     "test:room-matches": "bun test tests/unit/room-match.test.ts && bun tests/rooms/matches.ts",
     "test:room-matches:browser": "bun tests/browser/check_room_matches.mjs",
     "test:rooms": "bun tests/rooms/integration.ts",
-    "test:rooms:browser": "bun run build:rustymetal4.com && bun tests/browser/check_rooms.mjs && bun tests/browser/check_room_recovery.mjs",
+    "test:rooms:browser": "bun run build:rustymetal4.com && bun tests/browser/check_rooms.mjs && bun tests/browser/check_room_recovery.mjs && bun tests/browser/check_room_controls.mjs",
     "setup:cache": "bun tools/cache/setup.ts",
     "postinstall": "bun run setup:cache",
     "test:cache": "bun tests/cache/shared-cargo.ts"

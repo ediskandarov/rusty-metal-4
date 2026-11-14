@@ -1,6 +1,7 @@
 import { getBuildManifest } from "@tm4/lightyear-client";
-import { createRoomsClient } from "@tm4/rooms-client";
-import type { Compatibility, RoomSnapshot } from "@tm4/rooms-client/schemas";
+import type { Compatibility } from "@tm4/rooms-client/schemas";
+
+import { roomCarChoices, roomMember, roomSelectedCar, type RoomStore } from "./state/room.ts";
 
 interface PlayerMessage {
   type: "rm4-player";
@@ -11,7 +12,7 @@ interface PlayerMessage {
   cars?: string[];
 }
 
-export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
+export function matchControls(id: string, store: RoomStore) {
   const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const frame = el<HTMLIFrameElement>("room-player");
   const car = el<HTMLSelectElement>("room-car");
@@ -21,38 +22,15 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
   const cancel = el<HTMLButtonElement>("cancel-preparation");
   const reconnect = el<HTMLButtonElement>("reconnect-match");
   const journal = el<HTMLButtonElement>("download-server-journal");
-  let downloading = false;
-  let current: RoomSnapshot | undefined;
-  let compatibility: Compatibility | null = null;
-  let cars: string[] = [];
+  // These track deliveries to this frame, not a second copy of the room state.
   let sentSession: string | null = null;
-  let busy = false;
-  let runtimeAvailable: boolean | null = null;
+  let sentStatus: string | null = null;
   const send = (value: object) =>
     frame.contentWindow?.postMessage({ type: "rm4-room", roomId: id, ...value }, location.origin);
-  const rooms = createRoomsClient({ baseURL: new URL("/api/", location.href) });
-  const update = async (operation: Promise<RoomSnapshot>) => {
-    const room = await operation;
-    apply(room);
-    return room;
-  };
-  const action = (operation: () => Promise<unknown>) => {
-    if (busy) return;
-    busy = true;
-    void operation()
-      .catch((error) => {
-        el("player-status").textContent = String(error);
-      })
-      .finally(() => {
-        busy = false;
-        if (current) render(current);
-      });
-  };
-  const player = (isReady: boolean) =>
-    update(rooms.player(id, { car: car.value || null, compatibility, ready: isReady }));
   const enter = () => {
-    const match = current?.match;
-    if (!compatibility || !match?.endpoint || !match.credential || sentSession === match.id) return;
+    const { room, disc } = store.getState();
+    const match = room?.match;
+    if (!disc || !match?.endpoint || !match.credential || sentSession === match.id) return;
     sentSession = match.id;
     send({
       action: "join",
@@ -61,49 +39,64 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
       credential: match.credential,
     });
   };
-  const render = (room: RoomSnapshot) => {
-    current = room;
-    el("match-panel").hidden = !room.you;
-    if (!room.you) {
+  const render = () => {
+    const state = store.getState();
+    const { room, disc, operation } = state;
+    const self = roomMember(state);
+    el("match-panel").hidden = !self || !!room?.closed || state.departed;
+    el("player-status").textContent =
+      state.errors.player ??
+      (state.runtime === "unavailable"
+        ? "The game player is unavailable in this build."
+        : state.playerStatus);
+    el("server-journal-status").textContent = state.journal.message;
+    if (!room || !self || room.closed || state.departed) {
       frame.hidden = true;
       frame.removeAttribute("src");
-      compatibility = null;
       sentSession = null;
+      sentStatus = null;
       return;
     }
-    if (runtimeAvailable && !frame.hasAttribute("src")) {
+    if (state.runtime === "available" && !frame.hasAttribute("src")) {
       frame.src = "/play/?room=" + id;
       frame.hidden = false;
     }
-    const self = room.participants.find((member) => member.id === room.you)!;
+    const busy = operation !== null;
     const host = room.you === room.hostId;
     const match = room.match;
     journal.hidden = !host || !(match || room.journal);
-    journal.disabled = downloading;
+    journal.disabled = state.journal.downloading;
     const joining = match?.stage === "playing" && !match.endpoint;
     const locked =
       !!match &&
       ["starting", "connecting", "playing", "stopping"].includes(match.stage) &&
       !joining;
-    const choices = joining ? cars.filter((name) => match.cars.includes(name)) : cars;
+    const choices = roomCarChoices(state);
     el("match-status").textContent =
       match?.message || room.notice || "Load your disc, then the host can prepare the server.";
-    if (compatibility && !match?.endpoint)
-      send({
-        action: "status",
-        message: match?.message || room.notice || "Disc loaded. Choose your car in the room.",
-      });
+    if (!match?.endpoint && sentSession) {
+      send({ action: "stop", message: room.notice });
+      sentSession = null;
+    }
+    const status =
+      disc && !match?.endpoint
+        ? match?.message || room.notice || "Disc loaded. Choose your car in the room."
+        : null;
+    if (status !== sentStatus) {
+      sentStatus = status;
+      if (status) send({ action: "status", message: status });
+    }
     if (
       car.options.length !== choices.length ||
       choices.some((name, index) => car.options[index]?.value !== name)
     )
       car.replaceChildren(...choices.map((name) => new Option(name, name)));
-    if (self.car && choices.includes(self.car)) car.value = self.car;
-    car.disabled = busy || !compatibility || locked;
-    ready.disabled = busy || !compatibility || (match?.stage !== "ready" && !joining) || !self.car;
+    car.value = roomSelectedCar(state) ?? "";
+    car.disabled = busy || !disc || locked;
+    ready.disabled = busy || !disc || (match?.stage !== "ready" && !joining) || !self.car;
     ready.textContent = joining ? "Join match" : self.ready ? "Not ready" : "Ready";
     prepare.hidden = !host || (!!match && match.stage !== "uploading");
-    prepare.disabled = busy || !compatibility;
+    prepare.disabled = busy || !disc;
     prepare.textContent = match ? "Resume resource upload" : "Prepare server from my disc";
     cancel.hidden = !host || !match || locked;
     cancel.disabled = busy;
@@ -113,67 +106,47 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
       room.participants.length < 2 ||
       room.participants.some((member) => !member.ready || !member.connected);
     reconnect.hidden = !match?.endpoint;
-    reconnect.disabled = !compatibility || busy;
-    if (!match?.endpoint && sentSession) {
-      send({ action: "stop", message: room.notice });
-      sentSession = null;
-    }
+    reconnect.disabled = !disc || busy;
     enter();
   };
-  void getBuildManifest(new URL("/play/simulation-build.json", location.href))
-    .then(() => {
-      runtimeAvailable = true;
-    })
-    .catch(() => {
-      runtimeAvailable = false;
-    })
-    .finally(() => {
-      if (current) render(current);
-      if (!runtimeAvailable)
-        el("player-status").textContent = "The game player is unavailable in this build.";
-    });
+  const unsubscribe = store.subscribe(render);
+  render();
+  void getBuildManifest(new URL("/play/simulation-build.json", location.href)).then(
+    () => store.getState().runtimeChecked(true),
+    () => store.getState().runtimeChecked(false),
+  );
   journal.onclick = async () => {
-    const matchId = current?.match?.id ?? current?.journal?.matchId;
-    if (!matchId || downloading) return;
-    downloading = true;
-    journal.disabled = true;
-    const status = el("server-journal-status");
-    status.textContent = "Downloading server journal…";
-    try {
-      const result = await rooms.journal(id, matchId);
-      const url = URL.createObjectURL(result.bytes);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "rustymetal4-server-" + matchId + ".tm4j";
-      link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      status.textContent =
-        "Journal saved through " +
-        new Date(result.savedAt).toLocaleTimeString() +
-        ". Archives remain available for 24 hours while this room exists.";
-    } catch (error) {
-      status.textContent = String(error);
-    } finally {
-      downloading = false;
-      if (current) render(current);
-    }
+    const result = await store.getState().downloadJournal();
+    if (!result) return;
+    const url = URL.createObjectURL(result.bytes);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "rustymetal4-server-" + result.matchId + ".tm4j";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  car.addEventListener("change", () => action(() => player(false)));
-  ready.onclick = () =>
-    action(() => player(!current?.participants.find((member) => member.id === current.you)?.ready));
-  prepare.onclick = () =>
-    action(async () => {
-      const room = current?.match ? current : await update(rooms.prepare(id));
-      if (room.match) send({ action: "upload", sessionId: room.match.id });
-    });
-  cancel.onclick = () => action(() => update(rooms.cancel(id, current!.match!.id)));
-  start.onclick = () => action(() => update(rooms.start(id)));
+  car.onchange = () => {
+    void store.getState().selectCar(car.value);
+  };
+  ready.onclick = () => {
+    void store.getState().toggleReady();
+  };
+  prepare.onclick = async () => {
+    const sessionId = await store.getState().prepare();
+    if (sessionId) send({ action: "upload", sessionId });
+  };
+  cancel.onclick = () => {
+    void store.getState().cancel();
+  };
+  start.onclick = () => {
+    void store.getState().start();
+  };
   reconnect.onclick = () => {
     send({ action: "stop" });
     sentSession = null;
     enter();
   };
-  window.addEventListener("message", (event: MessageEvent<PlayerMessage | null>) => {
+  const receive = (event: MessageEvent<PlayerMessage | null>) => {
     if (
       event.origin !== location.origin ||
       event.source !== frame.contentWindow ||
@@ -182,14 +155,24 @@ export function matchControls(id: string, apply: (room: RoomSnapshot) => void) {
     )
       return;
     const message = event.data;
-    if (typeof message.status === "string") el("player-status").textContent = message.status;
+    if (typeof message.status === "string") store.getState().playerReported(message.status);
     if (typeof message.loaded === "boolean") {
-      compatibility = message.loaded ? (message.compatibility ?? null) : null;
-      cars = message.loaded ? (message.cars ?? []) : [];
-      if (current) render(current);
-      if (!current?.match?.endpoint && current?.you) action(() => player(false));
-      enter();
+      if (!message.loaded) {
+        sentSession = null;
+        sentStatus = null;
+      }
+      store
+        .getState()
+        .playerLoaded(
+          message.loaded && message.compatibility
+            ? { compatibility: message.compatibility, cars: message.cars ?? [] }
+            : null,
+        );
     }
-  });
-  return render;
+  };
+  window.addEventListener("message", receive);
+  return () => {
+    unsubscribe();
+    window.removeEventListener("message", receive);
+  };
 }

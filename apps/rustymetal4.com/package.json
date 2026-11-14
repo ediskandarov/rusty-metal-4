@@ -13,6 +13,7 @@
     "@tm4/lightyear-client": "workspace:*",
     "@tm4/rooms-client": "workspace:*",
     "@tm4/rustymetal-server-client": "workspace:*",
-    "posthog-js": "1.448.0"
+    "posthog-js": "1.448.0",
+    "zustand": "5.1.0"
   }
 }
