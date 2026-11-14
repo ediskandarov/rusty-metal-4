@@ -19,8 +19,8 @@ await Bun.write(
   }),
 );
 const native = await nativeBridge(
-  resolve("build/diagnostic/server"),
-  resolve("build/network-native/debug/tm4-deathmatch-server"),
+  resolve(process.env.TM4_SERVER_BUNDLE ?? "build/diagnostic/server"),
+  resolve(process.env.TM4_SERVER_EXECUTABLE ?? "build/network-native/debug/tm4-deathmatch-server"),
   fixture,
 );
 const mf = await runtime(true, native.url);
@@ -196,6 +196,24 @@ try {
       await frames[0].waitForFunction(() => tm4Port.netConfirmedTick > 1000, null, {
         timeout: 60000,
       });
+      const hostTick = await frames[0].evaluate(() => tm4Port.netConfirmedTick);
+      await frames[0].evaluate(() => {
+        globalThis.roomLifecycleMarker = true;
+      });
+      await a.locator("#reconnect-match").evaluate((button) => {
+        button.click();
+        button.click();
+      });
+      await frames[0].waitForFunction(
+        (tick) => tm4Port.netConfirmedTick > tick && tm4Port.netDiagnostics?.recoveredTick > 0,
+        hostTick,
+        { timeout: 60000 },
+      );
+      assert(await frames[0].evaluate(() => globalThis.roomLifecycleMarker));
+      assert.equal(await frames[0].locator("#status").getAttribute("data-match-state"), "playing");
+      console.log(
+        "PASS immediate repeated reconnect keeps the same loaded player and resumes confirmation",
+      );
       await b.reload();
       await b.locator("#match-panel").waitFor({ state: "visible" });
       frames[1] = await load(b, "Quatro", true);

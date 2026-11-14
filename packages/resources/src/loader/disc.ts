@@ -28,15 +28,18 @@ export class Disc {
     );
   }
   async read(lba: number, size: number, options?: ReadOptions) {
+    options?.signal?.throwIfAborted();
     const output = new Uint8Array(size);
     // Read contiguous chunks: HTTP ranges and local File slices use the same path.
     for (let first = 0; first < sectorCount(size); first += 512) {
+      options?.signal?.throwIfAborted();
       const count = Math.min(512, sectorCount(size) - first);
       const bytes = await this.source.read(
         (this.index + lba + first) * RAW_SECTOR,
         count * RAW_SECTOR,
         options,
       );
+      options?.signal?.throwIfAborted();
       for (let i = 0; i < count; i++) {
         const sector = bytes.subarray(i * RAW_SECTOR, (i + 1) * RAW_SECTOR);
         if (
@@ -75,8 +78,8 @@ export class Disc {
       name: decoder.decode(bytes.subarray(33, 33 + bytes[32]!)),
     };
   }
-  async entries() {
-    const pvd = await this.read(16, DATA_SECTOR);
+  async entries(options?: ReadOptions) {
+    const pvd = await this.read(16, DATA_SECTOR, options);
     if (decoder.decode(pvd.subarray(0, 7)) !== "\x01CD001\x01")
       throw new Error("Not a supported ISO 9660 data track");
     const root = this.record(pvd.subarray(156, 156 + pvd[156]!));
@@ -91,7 +94,7 @@ export class Disc {
       )
         throw new Error("Invalid ISO directory tree");
       visited.add(directory.lba);
-      const bytes = await this.read(directory.lba, directory.size);
+      const bytes = await this.read(directory.lba, directory.size, options);
       for (let offset = 0; offset < bytes.length;) {
         const length = bytes[offset]!;
         if (!length) {

@@ -87,7 +87,7 @@ const state = {
     { frags: 0, deaths: 0 },
   ],
 };
-async function setup(diagnostics?: Connection["diagnostics"]) {
+async function setup(diagnostics?: Connection["diagnostics"], signal?: AbortSignal) {
   const page = Object.assign(new EventTarget(), { hidden: false });
   const window = new EventTarget();
   global("document", page);
@@ -138,6 +138,8 @@ async function setup(diagnostics?: Connection["diagnostics"]) {
       statuses.push([status, text]);
     },
     () => {},
+    undefined,
+    signal,
   );
   if (diagnostics) connections[0]!.diagnostics = diagnostics;
   stop = await joining;
@@ -581,4 +583,106 @@ test("a late connection after leaving is closed without restarting the session",
   expect(next.readyState).toBe(WebSocket.CLOSED);
   expect(next.sent).toEqual([]);
   expect(statuses.at(-1)).toEqual(["lobby", "Returned to room"]);
+});
+
+test("cancelling initial connection closes its late transport without attaching prediction", async () => {
+  let release!: () => void;
+  connectionPending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const controller = new AbortController();
+  const joining = setup(undefined, controller.signal);
+  controller.abort(new Error("Room cancelled"));
+  release();
+  await expect(joining).rejects.toThrow("Room cancelled");
+  expect(connections[0]!.readyState).toBe(WebSocket.CLOSED);
+  expect(connections[0]!.sent).toEqual([]);
+  expect(globalThis.tm4LivePrediction).toBeUndefined();
+});
+
+test("abort followed by a new join cannot tear down the replacement match", async () => {
+  const controller = new AbortController();
+  const { first, engine, port, counts } = await setup(undefined, controller.signal);
+  controller.abort();
+  const statuses: [string, string][] = [];
+  stop = await joinMatch(
+    engine,
+    "wss://game.test/match",
+    (phase, message) => {
+      statuses.push([phase, message]);
+    },
+    () => {},
+  );
+  const next = connections[1]!;
+  next.onopen();
+  next.onmessage({ type: "welcome", slot: 0 });
+  next.onmessage({ type: "prediction_prepare", ...start });
+  next.onmessage({ type: "prediction_offer", anchor: 100 });
+  next.onmessage({ type: "prediction_begin", anchor: 100 });
+  first.onerror(new Error("Old transport failed"));
+  await Promise.resolve();
+  expect(counts()).toEqual({ cancellations: 1, loads: 2 });
+  expect(globalThis.tm4LivePrediction).toBeDefined();
+  expect(port.netMatch).toBeDefined();
+  expect(next.readyState).toBe(WebSocket.OPEN);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+});
+
+test("external cancellation stops snapshot recovery and scheduled reconnects", async () => {
+  const controller = new AbortController();
+  const { first, engine, port } = await setup(undefined, controller.signal);
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  await downloadSnapshot(next);
+  const end = mock(() => {});
+  engine._WebNetEndReplay = end;
+  controller.abort();
+  await Promise.resolve();
+  expect(end).toHaveBeenCalledTimes(1);
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  expect(port.netMatchInput).toBeUndefined();
+  expect(globalThis.tm4LivePrediction).toBeUndefined();
+  await Bun.sleep(1100);
+  expect(connections).toHaveLength(2);
+});
+
+test("an abandoned initial join resolving after a new match cannot cancel the new C state", async () => {
+  const { engine, port, counts } = await setup();
+  stop!();
+  await Promise.resolve();
+  let release!: () => void;
+  connectionPending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const controller = new AbortController();
+  const abandoned = joinMatch(
+    engine,
+    "wss://game.test/old",
+    () => {},
+    () => {},
+    undefined,
+    controller.signal,
+  );
+  controller.abort(new Error("Superseded"));
+  connectionPending = undefined;
+  stop = await joinMatch(
+    engine,
+    "wss://game.test/new",
+    () => {},
+    () => {},
+  );
+  const next = connections[2]!;
+  next.onopen();
+  next.onmessage({ type: "welcome", slot: 0 });
+  next.onmessage({ type: "prediction_prepare", ...start });
+  next.onmessage({ type: "prediction_offer", anchor: 100 });
+  next.onmessage({ type: "prediction_begin", anchor: 100 });
+  const prediction = globalThis.tm4LivePrediction;
+  release();
+  await expect(abandoned).rejects.toThrow("Superseded");
+  expect(connections[1]!.readyState).toBe(WebSocket.CLOSED);
+  expect(globalThis.tm4LivePrediction).toBe(prediction);
+  expect(port.netMatch).toBeDefined();
+  expect(counts()).toEqual({ cancellations: 1, loads: 2 });
+  expect(next.readyState).toBe(WebSocket.OPEN);
 });

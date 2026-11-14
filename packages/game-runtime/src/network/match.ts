@@ -41,7 +41,9 @@ export async function joinMatch(
   show: MatchStatus,
   lobby: LobbyView,
   admission?: string,
+  signal?: AbortSignal,
 ) {
+  signal?.throwIfAborted();
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
   show("lobby", "Connecting to Free for all…");
 
@@ -57,6 +59,10 @@ export async function joinMatch(
   let socket: Awaited<ReturnType<typeof connectNetwork>>;
   try {
     socket = await connectNetwork(endpoint);
+    if (signal?.aborted) {
+      socket.close();
+      signal.throwIfAborted();
+    }
   } catch (error) {
     journal.freeze(String(error), null);
     throw error;
@@ -99,6 +105,7 @@ export async function joinMatch(
   };
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (session.phase === "closed") return;
+    signal?.removeEventListener("abort", cancelled);
     journal.freeze(message, diagnostics);
     document.removeEventListener("visibilitychange", visibilityChanged);
     window.removeEventListener("pagehide", pageHidden);
@@ -108,6 +115,7 @@ export async function joinMatch(
     stopAttempt("closed");
     show(state, message);
   };
+  const cancelled = () => cleanup("Returned to room", "lobby");
   const fail = (error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
     cleanup(message, "error");
@@ -433,6 +441,7 @@ export async function joinMatch(
       return true;
     };
   };
+  signal?.addEventListener("abort", cancelled, { once: true });
   bindSocket();
   document.addEventListener("visibilitychange", visibilityChanged);
   window.addEventListener("pagehide", pageHidden);

@@ -14,7 +14,7 @@ export function matchControls(id: string, store: RoomStore) {
   const reconnect = el<HTMLButtonElement>("reconnect-match");
   const journal = el<HTMLButtonElement>("download-server-journal");
   // These track deliveries to this frame, not a second copy of the room state.
-  let sentSession: string | null = null;
+  let delivered: { sessionId: string; action: "upload" | "join" } | null = null;
   let sentStatus: string | null = null;
   const send = (value: RoomAction) =>
     frame.contentWindow?.postMessage(
@@ -24,8 +24,9 @@ export function matchControls(id: string, store: RoomStore) {
   const enter = () => {
     const { room, disc } = store.getState();
     const match = room?.match;
-    if (!disc || !match?.endpoint || !match.credential || sentSession === match.id) return;
-    sentSession = match.id;
+    if (!disc || !match?.endpoint || !match.credential) return;
+    if (delivered?.sessionId === match.id && delivered.action === "join") return;
+    delivered = { sessionId: match.id, action: "join" };
     send({
       action: "join",
       sessionId: match.id,
@@ -47,7 +48,7 @@ export function matchControls(id: string, store: RoomStore) {
     if (!room || !self || room.closed || state.departed) {
       frame.hidden = true;
       frame.removeAttribute("src");
-      sentSession = null;
+      delivered = null;
       sentStatus = null;
       return;
     }
@@ -68,9 +69,12 @@ export function matchControls(id: string, store: RoomStore) {
     const choices = roomCarChoices(state);
     el("match-status").textContent =
       match?.message || room.notice || "Load your disc, then the host can prepare the server.";
-    if (!match?.endpoint && sentSession) {
+    if (
+      delivered &&
+      (delivered.sessionId !== match?.id || (delivered.action === "join" && !match.endpoint))
+    ) {
       send({ action: "stop", message: room.notice });
-      sentSession = null;
+      delivered = null;
     }
     const status =
       disc && !match?.endpoint
@@ -127,7 +131,11 @@ export function matchControls(id: string, store: RoomStore) {
   };
   prepare.onclick = async () => {
     const sessionId = await store.getState().prepare();
-    if (sessionId) send({ action: "upload", sessionId });
+    const match = store.getState().room?.match;
+    if (sessionId && match?.id === sessionId && match.stage === "uploading") {
+      delivered = { sessionId, action: "upload" };
+      send({ action: "upload", sessionId });
+    }
   };
   cancel.onclick = () => {
     void store.getState().cancel();
@@ -137,7 +145,7 @@ export function matchControls(id: string, store: RoomStore) {
   };
   reconnect.onclick = () => {
     send({ action: "stop" });
-    sentSession = null;
+    delivered = null;
     enter();
   };
   const receive = (event: MessageEvent<unknown>) => {
@@ -150,7 +158,7 @@ export function matchControls(id: string, store: RoomStore) {
         store.getState().playerReported(message.message);
         break;
       case "unloaded":
-        sentSession = null;
+        delivered = null;
         sentStatus = null;
         store.getState().playerLoaded(null);
         break;

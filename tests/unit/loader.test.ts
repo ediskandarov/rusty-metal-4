@@ -198,3 +198,46 @@ test("remote disc sources work without browser globals and resolve manifest-rela
     await server.stop(true);
   }
 });
+
+test("ISO directory reads forward cancellation and stop before using a late read", async () => {
+  const abort = new AbortController();
+  let reads = 0;
+  const disc = new Disc({
+    name: "data.bin",
+    size: 64 * 2352,
+    read(_offset, _length, options) {
+      reads++;
+      expect(options?.signal).toBe(abort.signal);
+      abort.abort(new Error("Cancelled ISO read"));
+      return Promise.resolve(new Uint8Array());
+    },
+  });
+  await expect(disc.entries({ signal: abort.signal })).rejects.toThrow("Cancelled ISO read");
+  expect(reads).toBe(1);
+  await expect(disc.entries({ signal: abort.signal })).rejects.toThrow("Cancelled ISO read");
+  expect(reads).toBe(1);
+});
+
+test("disc loading stops when its descriptor read is cancelled", async () => {
+  const { loadDisc } = await import("@tm4/resources/loader/loader");
+  const abort = new AbortController();
+  const sources = localSources([
+    new File(['FILE "data.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00'], "disc.cue"),
+    new File([new Uint8Array(64 * 2352)], "data.bin"),
+  ]);
+  const descriptor = sources.get("disc.cue")!;
+  const read = descriptor.read.bind(descriptor);
+  descriptor.read = async (offset, length, options) => {
+    expect(options?.signal).toBe(abort.signal);
+    const bytes = await read(offset, length, options);
+    abort.abort(new Error("Cancelled disc load"));
+    return bytes;
+  };
+  let imageReads = 0;
+  sources.get("data.bin")!.read = () => {
+    imageReads++;
+    return Promise.resolve(new Uint8Array());
+  };
+  await expect(loadDisc(sources, { signal: abort.signal })).rejects.toThrow("Cancelled disc load");
+  expect(imageReads).toBe(0);
+});

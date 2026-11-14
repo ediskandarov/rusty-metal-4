@@ -7,8 +7,14 @@ import {
 import type { ResourceReference } from "../compatibility/index.ts";
 import { Disc } from "./disc.ts";
 import { discTracks } from "./tracks.ts";
-import type { DiscAssets, DiscReference, DiscSources, LoaderProgress } from "./types.ts";
-export interface DiscLoaderOptions extends LoaderProgress {
+import type {
+  DiscAssets,
+  DiscReference,
+  DiscSources,
+  LoaderProgress,
+  ReadOptions,
+} from "./types.ts";
+export interface DiscLoaderOptions extends LoaderProgress, ReadOptions {
   discReference?: DiscReference;
   resourceReference?: ResourceReference[];
 }
@@ -16,18 +22,20 @@ export interface DiscLoaderOptions extends LoaderProgress {
 export async function loadDisc(
   sources: DiscSources,
   {
+    signal,
     progress = () => {},
     warn = () => {},
     discReference = defaultDiscReference,
     resourceReference = defaultResourceReference,
   }: DiscLoaderOptions = {},
 ): Promise<DiscAssets> {
+  signal?.throwIfAborted();
   progress("Reading disc directory…");
-  const { tracks, leadout } = await discTracks(sources, discReference, warn);
+  const { tracks, leadout } = await discTracks(sources, discReference, warn, { signal });
   const first = tracks[0];
   if (!first?.source) throw new Error("Required data track missing");
   const disc = new Disc(first.source, first.index);
-  const entries = await disc.entries();
+  const entries = await disc.entries({ signal });
   const candidates = entries
     .filter(
       (entry) =>
@@ -44,16 +52,18 @@ export async function loadDisc(
   const files = new Map<string, Uint8Array<ArrayBuffer>>();
   const manifest = [];
   for (const [i, entry] of data.entries()) {
+    signal?.throwIfAborted();
     progress(`Reading ${entry.path} (${i + 1}/${data.length})…`);
     if (entry.path.toUpperCase() === "/SCUS_945.60" && entry.size > 4 * 1024 * 1024)
       throw new Error("Main EXE is too large");
-    const bytes = await disc.read(entry.lba, entry.size);
+    const bytes = await disc.read(entry.lba, entry.size, { signal });
     const result = await checkResource({
       id: entry.path.toUpperCase(),
       bytes,
       available,
       reference: expected.get(entry.path.toUpperCase()),
     });
+    signal?.throwIfAborted();
     if (result.status === "uncompatible") throw new Error(`${entry.path}: ${result.message}`);
     if (result.status === "warning") warn(`${entry.path}: ${result.message}`);
     if (entry.path.toUpperCase() === "/SCUS_945.60") continue;

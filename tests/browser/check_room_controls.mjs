@@ -201,6 +201,9 @@ try {
   assert(match);
   await host.locator("#cancel-preparation").click();
   await eventually(view, (room) => !room.match);
+  await hostPlayer.waitForFunction(() =>
+    window.commands.some((command) => command.action === "stop"),
+  );
   await host.waitForFunction(() => !document.getElementById("prepare-match").disabled);
   await host.locator("#prepare-match").click();
   await hostPlayer.waitForFunction(
@@ -227,7 +230,8 @@ try {
     await hostPlayer.evaluate(
       () => window.commands.filter((command) => command.action === "stop").length,
     ),
-    1,
+    2,
+    "Both cancelled preparation and reconnect must stop the player operation",
   );
   const download = host.waitForEvent("download");
   await host.locator("#download-server-journal").click();
