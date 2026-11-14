@@ -27,7 +27,10 @@ NetworkClient.prototype.update = function() {
       const ccall = engine.ccall;
       engine.ccall = (name, ...args) => {
         const result = ccall(name, ...args);
-        if (name === "WebNetStartMatch" && result && !engine._WebTestUnsupportedCarCallback()) throw new Error("Callback fixture rejected");
+        if (name === "WebNetStartFfa" && result) {
+          if (!engine._WebTestUnsupportedCarCallback()) throw new Error("Callback fixture rejected");
+          globalThis.testAdmissionInjected = (globalThis.testAdmissionInjected || 0) + 1;
+        }
         return result;
       };
     }
@@ -49,7 +52,7 @@ NetworkClient.prototype.update = function() {
     assert.equal(await page.evaluate(() => globalThis.tm4Port.netConfirmedTick ?? 0), 0);
   }
   const expected =
-    scenario === "map" ? /session resources are missing locally/i : /roster|car callback state/i;
+    scenario === "map" ? /session map is missing locally/i : /roster|car callback state/i;
   assert(
     statuses.some((status) => expected.test(status)),
     JSON.stringify(statuses),
@@ -60,6 +63,27 @@ NetworkClient.prototype.update = function() {
     ),
     JSON.stringify(statuses),
   );
+  if (scenario === "roster") {
+    const injections = await Promise.all(
+      clients.map((page) =>
+        page.evaluate(() => ({
+          count: globalThis.testAdmissionInjected ?? 0,
+          unsupported: globalThis.tm4Port.netDiagnostics?.receivedFrames ?? 0,
+          prediction: !!globalThis.tm4LivePrediction,
+          steps: globalThis.tm4Port.netPredictionCost?.steps ?? 0,
+        })),
+      ),
+    );
+    assert(
+      injections.some(({ count }) => count === 1),
+      JSON.stringify(injections),
+    );
+    for (const state of injections) {
+      assert.equal(state.unsupported, 0, "unsupported roster never receives a gameplay frame");
+      assert.equal(state.prediction, false, "unsupported callback is rejected before prediction");
+      assert.equal(state.steps, 0, "unsupported roster never advances a predicted C tick");
+    }
+  }
   console.log(
     "PASS unsupported client " + scenario + " rejected before prediction",
     JSON.stringify(statuses),

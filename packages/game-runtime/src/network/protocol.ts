@@ -43,7 +43,7 @@ export interface NetworkPort {
   catalog?: { worlds: string[]; cars: string[] };
   menuReady?: boolean;
   netSession?: { status: "loading" | "ready" | "error"; message?: string };
-  netMatch?: { tick: number } & Partial<RoundState>;
+  netMatch?: { tick: number; respawn?: { state: number; dueTick: number } } & Partial<RoundState>;
   portableCheckpoint?: Uint8Array<ArrayBuffer>;
   portableCheckpointError?: string | null;
   netMatchInput?: (buttons: number, axes: number, analog: boolean) => void;
@@ -82,9 +82,9 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
   if (world < 0) throw new Error("Session map is missing locally");
   return engine.ccall(
-    "WebNetStartMatch",
+    "WebNetStartFfa",
     "number",
-    ["number", "number", "number", "number", "number", "number", "string", "string"],
+    ["number", "number", "number", "number", "number", "number", "string", "string", "number"],
     [
       start.capacity,
       start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
@@ -94,6 +94,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       2 | (start.portable ? 1 : 0),
       start.cars.join("\n"),
       start.participants.join("\n"),
+      start.respawnDelayTicks,
     ],
   );
 }

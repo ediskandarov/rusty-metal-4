@@ -75,23 +75,32 @@ const HeadlessRoundState* HeadlessState(void)
     round_state.digest = round_state.sections[0];
     for (u32 i = 1; i < 5; ++i)
         round_state.digest = (round_state.digest ^ round_state.sections[i]) * 16777619u;
+    WebParticipantState participants;
+    WebParticipantCapture(&participants);
     for (u32 i = 0; i < round_state.capacity; ++i) {
-        round_state.scores[i][0] = GameInfo.players[i].wins;
-        round_state.scores[i][1] = GameInfo.players[i].losses;
+        round_state.scores[i][0] = participants.slots[i].frags;
+        round_state.scores[i][1] = participants.slots[i].deaths;
     }
     last_error = digest.unsupported;
     return &round_state;
 }
 
-u32 HeadlessWorldCount(void) { return GameGetNumberOfWorlds(); }
+u32 HeadlessWorldCount(void)
+{
+    return GameGetNumberOfWorlds();
+}
 const char* HeadlessWorldName(u32 index)
 {
     return index < (u32)GameGetNumberOfWorlds() ? GameGetWorldName(index) : NULL;
 }
-u32 HeadlessCarCount(void) { return RegGetNumberOfDirectoriesS("/objects/car/characters"); }
+u32 HeadlessCarCount(void)
+{
+    return RegGetNumberOfDirectoriesS("/objects/car/characters");
+}
 const char* HeadlessCarName(u32 index)
 {
-    return index < HeadlessCarCount() ? RegGetDirectoryNameSN("/objects/car/characters", index) : NULL;
+    return index < HeadlessCarCount() ? RegGetDirectoryNameSN("/objects/car/characters", index)
+                                      : NULL;
 }
 _Static_assert(sizeof(WebParticipantResult) == 16, "headless participant result ABI");
 static WebParticipantState participant_state;
@@ -100,8 +109,14 @@ const WebParticipantResult* HeadlessParticipants(void)
     WebParticipantCapture(&participant_state);
     return participant_state.slots;
 }
-const char* HeadlessError(void) { return last_error; }
-u8* HeadlessPortableBuffer(void) { return portable_bytes; }
+const char* HeadlessError(void)
+{
+    return last_error;
+}
+u8* HeadlessPortableBuffer(void)
+{
+    return portable_bytes;
+}
 u32 HeadlessPortableCapture(void)
 {
     u32 length = 0;

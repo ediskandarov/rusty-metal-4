@@ -4,6 +4,8 @@ import { configureMatch, type NetworkEngine } from "@tm4/game-runtime/network/pr
 import { checksum, SnapshotReplay } from "@tm4/game-runtime/network/replay";
 import { messageSchema, startSchema } from "@tm4/lightyear-client/schemas";
 const start = {
+  mode: "ffa" as const,
+  respawnDelayTicks: 90,
   capacity: 8,
   slots: [0, 3, 7],
   participants: ["0000000000000001", "0000000000000002", "0000000000000003"],
@@ -12,11 +14,15 @@ const start = {
   seed: 12345,
   epoch: 1,
   portable: false,
-  compatibility: { protocol: 14, build: "a".repeat(64), content: "b".repeat(64) },
+  compatibility: { protocol: 15, build: "a".repeat(64), content: "b".repeat(64) },
 };
 test("startup validates capacity, unique actual slots and one mode car per occupied slot", () => {
   expect(startSchema.parse(start)).toEqual(start);
   for (const invalid of [
+    { mode: "deathmatch" },
+    { respawnDelayTicks: undefined },
+    { respawnDelayTicks: 0 },
+    { respawnDelayTicks: 3601 },
     { slots: [0, 3, 3] },
     { slots: [0, 3, 8] },
     { capacity: 7 },
@@ -46,7 +52,7 @@ test("startup validates capacity, unique actual slots and one mode car per occup
   } as NetworkEngine;
   expect(configureMatch(engine, start, 7)).toBe(1);
   expect(calls).toContainEqual([
-    "WebNetStartMatch",
+    "WebNetStartFfa",
     8,
     0x89,
     0,
@@ -55,6 +61,7 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     2,
     "Orbital\nPizza Boy\nCrusher",
     "0000000000000001\n0000000000000002\n0000000000000003",
+    90,
   ]);
   expect(configureMatch(engine, start, 1)).toBe(1);
   expect(() => configureMatch(engine, start, 8)).toThrow();

@@ -36,7 +36,7 @@ try {
   arg(start.cars.join("\n"), (cars) =>
     arg(start.participants.join("\n"), (ids) =>
       assert.equal(
-        x.WebNetStartMatch(
+        x.WebNetStartFfa(
           start.capacity,
           start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
           world,
@@ -45,11 +45,15 @@ try {
           1,
           cars,
           ids,
+          start.respawnDelayTicks,
         ),
         1,
       ),
     ),
   );
+  const fixture = process.env.TM4_TEST_ACTIONS
+    ? JSON.parse(fs.readFileSync(process.env.TM4_TEST_ACTIONS, "utf8"))
+    : { actions: [] };
   let offset = 16 + headerLength,
     tick = 0,
     events = 0;
@@ -94,6 +98,11 @@ try {
           ),
           1,
         );
+      }
+    for (const action of fixture.actions ?? [])
+      if (action.tick === tick) {
+        assert.equal(action.name, "kill", "Unsupported diagnostic replay action");
+        assert.equal(x.WebTestKillParticipant(...action.args), 1);
       }
     assert.equal(x.WebNetQueueTick(tick), 1);
     const state = x.HeadlessState(),

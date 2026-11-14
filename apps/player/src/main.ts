@@ -68,7 +68,7 @@ async function launch(
     const status = element("status", HTMLElement);
     const showMatchStatus = matchStatus(status);
     if (endpoint || inRoom) {
-      showMatchStatus("lobby", "Preparing Deathmatch…");
+      showMatchStatus("lobby", "Preparing Free for all…");
     }
     const runtime = await startGame(assets, canvas, {
       resourceMods: selectedMods.length,

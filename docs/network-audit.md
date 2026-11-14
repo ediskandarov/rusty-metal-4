@@ -25,8 +25,9 @@ plugin buffers tick-indexed records and validates controlled targets. The server
 reads every newly received buffer record before fixed-step trimming, then applies
 an explicit game-tick acceptance policy. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
-live. Network play uses native prediction and rollback for supported stock
-Deathmatch rosters. The authority tests portable capture
+live. Network FFA uses native prediction and rollback for supported stock rosters;
+its implemented and deferred policies are defined in the
+[participant lifecycle](design/participant-lifecycle.md#first-ffa-delivery-boundary). The authority tests portable capture
 at startup before the server issues reconnect credentials. The diagnostic build
 includes a smaller native rollback probe.
 
@@ -54,12 +55,12 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   edges, and expires held input after nine ticks. Future acceptance and the queue
   are bounded to 60 ticks and 60 records. Prediction verifies C results against
   accepted inputs at the same native tick.
-- A departed client loses queued controls immediately; its car remains in combat
-  under original game rules. Survivors continue. Finished/error paths release C resources,
+- A disconnected client loses queued controls immediately; its participant and car
+  remain available for recovery. Explicit departure retires the participant and removes
+  its car through the shared membership path. Survivors continue. Finished/error paths release C resources,
   input queues and callbacks, permitting another direct initialization in the page.
 - The server journals startup identity, accepted controls, per-tick checksums and
-  mode transitions to an append-only file. Inputs are the only externally
-  scheduled gameplay commands in the current mode. The first 8 MiB of packed
+  mode transitions and committed membership changes to an append-only file. The first 8 MiB of packed
   rows are cached in memory. Additional rows are read from disk during replay.
   A 1 GiB worst-case per-match disk budget ends the match explicitly if reached.
 - Network sound emitters expire and fade on simulation ticks. SPU completion, voice
@@ -83,8 +84,8 @@ Equality here covers the published gameplay checksums.
 rejection of an unsupported map and roster before the first predicted tick.
 
 [Rendered gameplay checks](../tests/browser/check_network.mjs) exercise nonzero-slot
-control, car contact, weapon damage, a lethal hit, scoring, round completion and
-same-page C reinitialization.
+control, car contact, a keyboard-fired lethal weapon hit, C-owned combat scores,
+automatic fresh-car respawn, explicit departure/teardown and same-page C reinitialization.
 The diagnostic fixture places cars and adjusts target health identically in each
 instance. It is controlled gameplay evidence, not arbitrary-world determinism.
 
@@ -294,16 +295,19 @@ a death. Other mixed roster/map combinations remain unverified.
 
 ### Session identity and modes — R1/R2/R7
 
-The experiment remains a single fixed Deathmatch, epoch 1, a fixed seed and no bots.
+The current network mode is FFA, epoch 1, a fixed seed and no bots. It retains seats
+and combat results across death and respawns the assigned prepared model. Automatic
+round limits and results remain deferred.
 For a supported portable roster, the server assigns each participant a random
 bearer credential. The match page retains it for the tab session. Reloading the
 tab can reclaim only the corresponding disconnected slot while the match is
 active and the local build and content match. Live connections retain control
 and disconnected cars follow the existing missing-input policy. Participant identity,
 slot binding and replaceable control ownership are separated as described in the
-[fixed-roster boundary](design/participant-lifecycle.md#current-fixed-roster-boundary).
-Any nonzero `next_mode` is treated as session completion. A second direct C
-initialization works, but this does not establish a second server-managed match.
+[participant lifecycle](design/participant-lifecycle.md#preparation-and-live-membership).
+Any nonzero `next_mode` is treated as session completion. Browser checks cover
+explicit teardown followed by another direct C initialization, and separate room
+sessions with fresh private authorities.
 Tournament's seed order has been fixed at the common initialization point; its
 configuration, capacity and gameplay have not been verified in this path. HUD/audio
 ownership is patched, but per-slot audible/message presentation still needs explicit
@@ -355,7 +359,7 @@ with that endpoint and site URL. Stop the fixture process afterwards.
 For authenticated room coverage, start `sparse_room_match_browser_fixture` instead
 and set `TM4_SPARSE_ROOM=1` on the browser command. The focused Wasmtime test is
 `sparse_slots_start_rollback_and_portable_continuation`; it also verifies capacity
-mismatch rejection and sparse Deathmatch winner/loss attribution.
+and respawn-delay mismatch rejection, C-owned combat attribution and continued FFA play.
 `explicit_startup_rejects_missing_or_malformed_configuration_without_sticky_state`
 checks rejection, cancellation and a later startup with different slots/capacity. Generated results
 remain under ignored build output.

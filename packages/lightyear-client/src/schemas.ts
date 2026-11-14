@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const networkProtocolVersion = 14;
+export const networkProtocolVersion = 15;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -17,7 +17,7 @@ export const inputSchema = z.object({
   analog: z.boolean(),
 });
 export type Input = z.infer<typeof inputSchema>;
-export const scoreSchema = z.object({ wins: i32, losses: i32 });
+export const scoreSchema = z.object({ frags: i32, deaths: i32 });
 export type Score = z.infer<typeof scoreSchema>;
 export const roundStateSchema = z.object({
   remaining: byte,
@@ -51,6 +51,8 @@ export const participantIdSchema = z
   .refine((id) => id !== "0000000000000000");
 export const startSchema = slotConfigurationSchema
   .safeExtend({
+    mode: z.literal("ffa"),
+    respawnDelayTicks: z.number().int().min(1).max(3600),
     world: z
       .string()
       .min(1)
@@ -72,6 +74,7 @@ export const startSchema = slotConfigurationSchema
   })
   .refine(
     (start) =>
+      start.capacity === 8 &&
       start.cars.length === start.slots.length &&
       start.participants.length === start.slots.length &&
       new Set(start.participants).size === start.participants.length,

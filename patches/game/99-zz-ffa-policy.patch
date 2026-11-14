@@ -1,0 +1,44 @@
+--- a/src/main/deathmatch.c
++++ b/src/main/deathmatch.c
+@@ -8,6 +8,7 @@
+  * GameGetFirstDeathmatchWorldName describe inferred behavior. */
+ #include "tm4/main/deathmatch.h"
+ #include "port/web/net_match.h"
++#include "port/web/ffa.h"
+ #include "tm4/modules/car.h"
+ 
+ #include "tm4/main/font.h"
+@@ -172,6 +173,8 @@
+ void DeathmatchProcess(Tm4GameInfo* game)
+ {
+     s32 winner, index;
++    if (WebFfaActive())
++        return;
+     if (GameInfo.mode == GAME_MODE_DEMO)
+         return;
+     if (game->deathmatch_next_mode) {
+@@ -372,5 +375,7 @@
+ void DeathmatchUnregisterCar(Tm4GameInfo* game, s32 index, s32 team)
+ {
++    if (WebFfaActive())
++        return;
+     if (game->active && index < game->player_car_count && GameInfo.mode != GAME_MODE_DEMO
+         && !game->deathmatch_finished)
+         ScreenLocalMessageRegister(team, "YOU LOST THE MATCH");
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -8,6 +8,7 @@
+ /* Shared game/session services; mode-specific rules remain separate. */
+ #include "port/web/net_match.h"
+ #include "port/web/participant.h"
++#include "port/web/ffa.h"
+ #include "tm4/main/game.h"
+ #include "tm4/modules/car.h"
+ 
+@@ -619,5 +620,6 @@
+     } else
+         --GameInfo.active_computer_count;
+     WebParticipantCarRemoved(car);
++    WebFfaCarRemoved(car->controller_index);
+ }
+ #endif

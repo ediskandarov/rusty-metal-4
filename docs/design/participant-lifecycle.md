@@ -1,9 +1,9 @@
 # Slots, participants and cars
 
 Design and implementation boundaries for dynamic membership. This extends the identity
-model in [network requirements v0.1](../network-requirements-v0.1.md). The shared live
-membership foundation uses original Deathmatch for validation; a complete FFA mode
-remains separate work. Updated 2026-11-13.
+model in [network requirements v0.1](../network-requirements-v0.1.md). The first network
+FFA builds on the live membership foundation. Offline modes retain the original rules.
+Updated 2026-11-14.
 
 ## Evidence and scope
 
@@ -11,14 +11,14 @@ remains separate work. Updated 2026-11-13.
 | --- | --- |
 | Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
 | Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
-| Deferred mode policy | Complete FFA rounds, automatic respawn, random model selection, match limits, spectator seats and live replacement of a living car. |
+| Implemented FFA policy | Eight gameplay slots; automatic same-model respawn, independent of surviving-car count. |
+| Deferred mode policy | Random model selection, time/frag limits, completed-round results and return to room, spectator seats and live replacement of a living car. |
 
 The first agreed new mode is FFA: eight gameplay slots and joining and leaving
-during play. Car selection belongs to the mode: FFA supports a fixed car or random
-selection after death, which may choose the same model again. Time and frag limits
-are settings, but host editing remains disabled in the first UI. Their defaults
-are undecided. Other modes below are design cases, not commitments to implement
-them now.
+during play. Car selection belongs to the mode: this increment keeps the assigned
+model; the planned random selection may choose the same model again. Time and frag
+limits and their settings remain deferred; their defaults are undecided. Other modes
+below are design cases, not commitments to implement them now.
 
 ## First FFA delivery boundary
 
@@ -26,15 +26,24 @@ The first network FFA uses its own round and participant rules while retaining t
 original physics, weapons and collision. It does not emulate Tournament or the
 original Deathmatch round organization. Standalone offline modes remain unchanged.
 
-The approved scope is eight gameplay slots, participant-owned frags/deaths, a bounded
-respawn delay, and a fresh car after death. Selection is a mode policy: fixed or
-random from an agreed compatible pool; random may select the previous model. Live
-admission, departure, slot reuse, reconnect, match limits and return to the room
-belong to this delivery. Membership changes commit as authoritative tick events and
-must survive rollback, portable recovery and journal replay. Spawn failure retains
-the waiting participant, results and lease with bounded retries and a clear terminal
-outcome. Time and frag defaults remain undecided; tests specify them explicitly.
-Host editing of limits remains disabled in the first UI.
+FFA rooms always offer eight player places, matching the eight gameplay slots; capacity
+is not configurable. Two prepared participants can start, and later arrivals can join
+the remaining places. The first increment uses C-owned participant frags/deaths and
+a fresh car of the currently assigned prepared model after death. Its explicit
+startup parameter defaults to 90 simulation ticks (three seconds at 30 Hz), measured
+from removal. It retries a failed spawn after 30 ticks, at most three attempts total.
+Exhaustion leaves that participant in a terminal waiting state with identity, results
+and lease retained; the player can explicitly leave and rejoin with a fresh identity.
+Other participants continue. The client displays waiting and failure without owning
+the policy or results.
+
+FFA bypasses the original Deathmatch victory/transition driver: one or zero living
+cars, or explicit departures, never end the round. The mode and delay are immutable
+startup/journal data; portable roots validate the delay, and the existing C checkpoint
+state contains all pending attempts. Lightyear restores and replays that same state.
+Live admission, departure, slot reuse and recovery use the shared mechanisms. Random
+selection is the next increment; time/frag limits, final results and automatic return
+to the room are a later increment. Until then FFA continues until explicit teardown.
 
 Live replacement of an active car, transactional preservation of that car on failed
 replacement, and general transformation policies are deferred. The broader FSMs
@@ -123,8 +132,8 @@ fire; contact with the car's own attached flame does not refresh it. Shielded/fr
 ignitions do not change it. This is provenance for one burning interval, not an
 assist or generic last-attacker system. AI damage reaction keeps its original
 attacker argument. The participant-aware raw damage export has a distinct name;
-the old calling convention is not silently accepted. Original Deathmatch still owns
-its round wins/losses and victory rules.
+the old calling convention is not silently accepted. Offline Deathmatch retains its round wins/losses and victory rules; network FFA
+publishes the participant combat counters directly.
 
 ### Same-participant respawn foundation
 
@@ -142,11 +151,10 @@ checkpoints and portable session roots. Portable recovery supports dead/waiting 
 new car lifetimes and their debris; resource preparation creates no duplicate runtime children.
 Constructor RNG consumption is deterministic and restored through the existing state paths.
 
-Automatic production respawn policy is deliberately unwired pending the network round-policy
-decision. Original Deathmatch can still finish when only one car remains; focused fixtures
-keep enough other cars alive and request respawns at explicit deterministic tick boundaries.
-Automatic FFA respawn and live replacement remain outside this foundation.
-Offline round rules are unchanged.
+FFA schedules the shared respawn operation when removal commits. The original-rule
+and manual-respawn startup entry point exists only in diagnostic builds for focused
+foundation fixtures. Production network startup accepts FFA only. Live replacement
+remains deferred; offline round rules are unchanged.
 
 ## Authoritative event boundary
 
@@ -154,7 +162,7 @@ Membership uses the existing Lightyear clock, reliable session channel, input bu
 and C rollback checkpoints. A scheduled batch is the complete ordered membership plan
 for one tick; an empty replacement cancels its pending changes. At that tick, departures
 precede admissions in slot order, then accepted inputs and ordinary gameplay run.
-Original Deathmatch still decides deaths and round completion through its own code.
+C still decides combat deaths; the selected mode owns respawn and round policy.
 
 A reserved controller has no accepted gameplay input history. Admission establishes its
 neutral pre-activation boundary; retirement preserves the old native history for the
@@ -275,8 +283,8 @@ after the match has ended.
 
 | Mode | Join during play | After death | Departure consequences |
 | --- | --- | --- | --- |
-| FFA, agreed direction | Reserve any free seat, catch up, spawn | Keep results and slot; fixed or random car according to the mode setting | Free seat; old effects must not become the next occupant's |
-| Current Deathmatch validation | Prepared-pool admission while the round is active | Existing game rules | Retire at the event tick; original victory rules can finish the round |
+| FFA, first increment | Reserve any free seat, catch up, spawn | Keep results and slot; fresh same-model car after the configured delay | Free seat; old effects never become the next occupant's |
+| Diagnostic original-rule fixture | Prepared-pool admission while the round is active | Existing game rules | Retire at the event tick; original victory rules can finish the round |
 | Team deathmatch, candidate | Also assign a team | Preserve team and results | Preserve team results independently of occupancy |
 | Capture the flag, candidate | Also assign a team | Respawn under mode rules | Resolve a carried objective before removing the car |
 | Elimination or limited lives, candidate | May wait for the next round | Wait, spend a life or become eliminated | Decide forfeit and victory rules explicitly |
@@ -416,8 +424,8 @@ a rollback boundary, and after portable snapshot recovery in another instance.
   current validation ends their score eligibility and never transfers attribution.
 - Spectator capacity, late admission into round-based modes, and minimum players
   needed to start or continue an otherwise empty match.
-- Admission and respawn retry limits and terminal policies. Live replacement
-  preserves the old car on failure.
+- Retry and preservation policy for future live replacement. FFA respawn has the
+  bounded terminal-waiting policy above.
 - Car-local state transfer rules for each live replacement event, including
   capture links and carried objectives. These belong to the mode or mod.
 

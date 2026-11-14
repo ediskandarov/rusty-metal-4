@@ -58,9 +58,11 @@ afterEach(async () => {
   connectionPending = undefined;
 });
 
-const compatibility = { protocol: 14, build: "a".repeat(64), content: "b".repeat(64) };
+const compatibility = { protocol: 15, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
-  capacity: 2,
+  mode: "ffa" as const,
+  respawnDelayTicks: 90,
+  capacity: 8,
   slots: [0, 1],
   world: "Road Rage",
   participants: ["0000000000000001", "0000000000000002"],
@@ -81,8 +83,8 @@ const state = {
   acceptsContinue: false,
   nextMode: 0,
   scores: [
-    { wins: 0, losses: 0 },
-    { wins: 0, losses: 0 },
+    { frags: 0, deaths: 0 },
+    { frags: 0, deaths: 0 },
   ],
 };
 async function setup(diagnostics?: Connection["diagnostics"]) {
@@ -107,7 +109,7 @@ async function setup(diagnostics?: Connection["diagnostics"]) {
   const engine = {
     ccall(name: string) {
       if (name === "WebNetWorldIndex") return 0;
-      if (name === "WebNetStartMatch") {
+      if (name === "WebNetStartFfa") {
         loads++;
         port.netMatch = { tick: 0, ...state };
         return 1;

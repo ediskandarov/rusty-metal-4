@@ -21,7 +21,8 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(11); /* State record schema. */
+    VALUE(12); /* State record schema. */
+    VALUE(WebNetFfaRespawnDelay());
     const Tm4GameInfo* game = &GameInfo;
     WebParticipantState participants;
     WebParticipantCapture(&participants);

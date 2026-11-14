@@ -411,8 +411,8 @@ impl Simulator {
             .join("\n");
         let accepted = self.with_string(&identities, |simulator, identities_address| {
             simulator.with_string(&names, |simulator, address| {
-                simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
-                    "WebNetStartMatch",
+                simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32), i32>(
+                    "WebNetStartFfa",
                     (
                         session.capacity as i32,
                         u32::from(session.slot_mask()),
@@ -422,6 +422,7 @@ impl Simulator {
                         u32::from(session.portable),
                         address,
                         identities_address,
+                        session.respawn_delay_ticks,
                     ),
                 )
             })
@@ -527,6 +528,14 @@ impl Simulator {
                 );
                 continue;
             }
+            if action.name == "kill" {
+                ensure!(action.args.len() == 1, "Invalid kill fixture arguments");
+                ensure!(
+                    self.call::<i32, i32>("WebTestKillParticipant", action.args[0])? == 1,
+                    "Kill fixture rejected at tick {tick}"
+                );
+                continue;
+            }
             let (name, argument) = match action.name.as_str() {
                 "contact" => ("WebTestPlaceWeaponTarget", 128),
                 "target" => ("WebTestPlaceWeaponTarget", action.distance.unwrap_or(500)),
@@ -598,8 +607,8 @@ impl Simulator {
             unsupported,
             scores: (0..words[1] as usize)
                 .map(|slot| Score {
-                    wins: words[13 + slot * 2] as i32,
-                    losses: words[14 + slot * 2] as i32,
+                    frags: words[13 + slot * 2] as i32,
+                    deaths: words[14 + slot * 2] as i32,
                 })
                 .collect(),
         })
@@ -772,7 +781,9 @@ mod tests {
     }
     fn session() -> SessionStart {
         SessionStart {
-            capacity: 2,
+            mode: tm4_network::protocol::MatchMode::Ffa,
+            respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+            capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
             participants: vec![
                 tm4_network::protocol::ParticipantId(1),
@@ -960,16 +971,16 @@ mod tests {
             if winner < 7 {
                 let mut mismatched = Simulator::new(&wasm, &resources, compatibility())?;
                 mismatched.start(&SessionStart {
-                    capacity: 7,
+                    respawn_delay_ticks: 91,
                     ..setup.clone()
                 })?;
                 ensure!(
                     mismatched.restore_portable(&snapshot).is_err(),
-                    "Snapshot accepted a different declared capacity"
+                    "Snapshot accepted a different mode delay"
                 );
                 ensure!(
-                    mismatched.state()?.scores.len() == 7,
-                    "Rejected restore corrupted destination capacity"
+                    mismatched.state()?.scores.len() == 8,
+                    "Rejected restore corrupted destination state"
                 );
             }
             ensure!(
@@ -984,22 +995,25 @@ mod tests {
                 }
             }
             ensure!(
-                state.round_finished && i32::from(state.winner) == winner && state.remaining == 1,
-                "Sparse victory counted vacancies or changed winner: {:?}",
+                !state.round_finished
+                    && state.winner == -1
+                    && state.remaining == 1
+                    && state.next_mode == 0,
+                "FFA ended with a single surviving car: {:?}",
                 state
             );
             ensure!(
-                state.scores[winner as usize].wins == 1
+                state.scores[winner as usize].frags == count as i32 - 1
                     && setup
                         .slots
                         .iter()
                         .filter(|slot| i32::from(**slot) != winner)
-                        .all(|slot| state.scores[usize::from(*slot)].losses == 1),
-                "Sparse results attribution"
+                        .all(|slot| state.scores[usize::from(*slot)].deaths == 1),
+                "FFA combat results attribution"
             );
             for slot in (0..setup.capacity).filter(|slot| !setup.slots.contains(&(*slot as u8))) {
                 ensure!(
-                    state.scores[slot].wins == 0 && state.scores[slot].losses == 0,
+                    state.scores[slot].frags == 0 && state.scores[slot].deaths == 0,
                     "Vacancy scored"
                 );
             }
@@ -1378,13 +1392,13 @@ mod tests {
         world.step(0, &vec![Input::default(); 8])?;
         world.finish()?;
         let (state, _) = world.start(&SessionStart {
-            capacity: 4,
+            capacity: 8,
             slots: vec![1, 3],
             portable: false,
             ..session()
         })?;
         ensure!(
-            state.scores.len() == 4
+            state.scores.len() == 8
                 && state.remaining == 2
                 && world.call::<(), u32>("HeadlessTick", ())? == 0,
             "Cancellation retained old configuration"

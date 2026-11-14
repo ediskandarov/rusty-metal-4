@@ -41,7 +41,7 @@ type Namespace = { idFromName(name: string): DurableObjectId; get(id: DurableObj
 const namespace = (await mf.getDurableObjectNamespace("SERVER")) as unknown as Namespace;
 type Server = {
   configureForTest(value: object): Promise<void>;
-  inspectForTest(): Promise<{ stops: number; roster: unknown[] }>;
+  inspectForTest(): Promise<{ stops: number; roster: unknown[]; players: number }>;
   cancelAdmissionsForTest(): Promise<void>;
 };
 try {
@@ -100,6 +100,11 @@ try {
   assert.equal((await stranger(path + "/join", { playerName: "Late" })).status, 409);
   assert.equal((await guest(path + "/join", { playerName: "Guest" })).status, 200);
   assert.equal((await server().inspectForTest()).roster.length, 2);
+  assert.equal(
+    (await server().inspectForTest()).players,
+    8,
+    "two prepared participants start an eight-place native authority",
+  );
   await eventually(view, (state) => state.match?.stage === "playing");
   assert.equal((await stranger(path + "/join", { playerName: "Late" })).status, 200);
   assert.equal(

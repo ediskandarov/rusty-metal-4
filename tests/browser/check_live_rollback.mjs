@@ -2,7 +2,8 @@
 import assert from "node:assert/strict";
 
 import { launchBrowser } from "./helpers/browser.mjs";
-import { readyInLobby } from "./network_lobby.mjs";
+import { closeSettings, setPanelOpen } from "./helpers/player.mjs";
+import { leaveMatch, readyInLobby } from "./network_lobby.mjs";
 import { fixtureTape, observeAcceptedFrames } from "./simulation_reference.mjs";
 
 const site = process.env.TM4_WEB_URL ?? "http://127.0.0.1:18180/";
@@ -32,6 +33,11 @@ async function load(page, url) {
 }
 
 async function instruments(page, client) {
+  if (client) {
+    await setPanelOpen(page, "render-settings", true);
+    await page.locator("#render-scale").selectOption("1");
+    await closeSettings(page);
+  }
   await page.evaluate(
     async ({ client, latency, jitter, targetDistance, testGrab, projectileTarget }) => {
       const trace = (globalThis.tm4LiveTrace = {
@@ -570,12 +576,22 @@ try {
     } else {
       const world = await fixture("world");
       await Promise.all(players.map((page) => waitConfirmed(page, world + 2)));
+      const pulseSteering = async () => {
+        for (let pulse = 0; pulse < 24; ++pulse) {
+          await remoteDriver.keyboard.down("ArrowRight");
+          await remoteDriver.waitForTimeout(40);
+          await remoteDriver.keyboard.up("ArrowRight");
+          await remoteDriver.waitForTimeout(40);
+        }
+      };
+      const steering = pulseSteering();
       await shooter.keyboard.down("e");
       await reference.waitForFunction(() => globalThis.tm4LiveTrace.destroyed, null, {
         timeout: 12_000,
         polling: 100,
       });
       await shooter.keyboard.up("e");
+      await steering;
       const destroyed = await summary(reference);
       await Promise.all(players.map((page) => waitConfirmed(page, destroyed.head + sustain)));
 
@@ -646,7 +662,17 @@ try {
       });
       await stalled.waitForFunction(() => !tm4Port.netMatch, null, { timeout: 7000 });
       const stalledState = await summary(stalled);
-      assert.match(stalledState.status, /retained|resynchronized|simulation timeline|confirmation/);
+      assert.match(
+        stalledState.status,
+        /paused|reconnect|current match|retained|resynchronized|simulation timeline|confirmation/i,
+      );
+      await stalled.waitForFunction(
+        (head) =>
+          tm4Port.netDiagnostics?.recoveredTick > head && tm4Port.netConfirmedTick > head + 35,
+        before.head,
+        { timeout: 45000 },
+      );
+      assert.equal(await stalled.evaluate(() => tm4Port.netViewSlot), stalledState.slot);
       await waitConfirmed(survivor, before.head + 35);
       const after = await validate(survivor);
       const now = await summary(reference);
@@ -659,24 +685,77 @@ try {
       );
       assert(rate > 27 && rate < 33, "Accepted stream advanced at " + rate);
       const late = await browser.newPage();
+      late.on("pageerror", (error) => errors.push(error.message));
       try {
-        await late.goto(target.href);
-        const error = late.locator('#status[data-match-state="error"]');
-        await error
-          .filter({ hasText: "This match has already started" })
-          .waitFor({ timeout: 60_000 });
-        assert(await error.isVisible());
+        await late.bringToFront();
+        await load(late, target);
+        await late.locator("#car-lobby").waitFor({ state: "visible", timeout: 60000 });
+        await late.waitForTimeout(250);
+        assert(
+          await late.locator("#car-lobby").isVisible(),
+          "reserved player can choose before receiving live confirmations",
+        );
+        assert.equal(await late.evaluate(() => tm4Port.netDiagnostics.receivedFrames), 0);
+        await readyInLobby(late);
+        await late.waitForFunction(
+          () =>
+            tm4Port.netConfirmedTick > 30 &&
+            tm4Port.netViewSlot === 2 &&
+            Module._WebNetSlotMask() === 7,
+          null,
+          { timeout: 60000 },
+        );
+        assert.equal(await late.evaluate(() => Module._WebNetSlotMask()), 7);
+        const admissionHead = await late.evaluate(() => tm4Port.netMatch.tick);
+        await waitConfirmed(late, admissionHead);
+        await waitConfirmed(survivor, admissionHead);
+        await validate(survivor);
+        await leaveMatch(late);
+        await survivor.waitForFunction(() => Module._WebNetSlotMask() === 3, null, {
+          timeout: 15000,
+        });
+      } catch (error) {
+        console.error(
+          "LATE STATE",
+          await late.evaluate(() => ({
+            status: document.querySelector("#status").textContent,
+            phase: document.querySelector("#status").dataset.matchState,
+            lobby: document.querySelector("#car-lobby").hidden,
+            visibility: document.visibilityState,
+            slot: tm4Port.netViewSlot,
+            tick: tm4Port.netConfirmedTick,
+          })),
+        );
+        throw error;
       } finally {
         await late.close();
       }
       await stalled.bringToFront();
+      await leaveMatch(stalled);
+      await stalled.waitForFunction(() => !tm4Port.netMatch, null, { timeout: 15000 });
+      await survivor.waitForFunction(
+        () => Module._WebNetSlotMask() === 1 << tm4Port.netViewSlot,
+        null,
+        { timeout: 15000 },
+      );
+      assert.equal(await survivor.evaluate(() => tm4Port.netMatchServerState.roundFinished), false);
       const restart = await stalled.evaluate(async () => {
         const retained = Module._WebNetLocalCheckpointStorageBytes();
         const ready = Module.ccall(
-          "WebNetStartMatch",
+          "WebNetStartFfa",
           "number",
-          ["number", "number", "number", "number", "number", "number", "string", "string"],
-          [2, 3, 0, 12345, 0, 2, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
+          [
+            "number",
+            "number",
+            "number",
+            "number",
+            "number",
+            "number",
+            "string",
+            "string",
+            "number",
+          ],
+          [8, 3, 0, 12345, 0, 2, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002", 90],
         );
         if (!ready) throw new Error("Could not restart rendered C fixture");
         globalThis.tm4LiveTrace.fixtures = {};

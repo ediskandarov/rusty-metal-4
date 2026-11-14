@@ -55,10 +55,30 @@ try {
           const started = performance.now();
           assert(
             Module.ccall(
-              "WebNetStartMatch",
+              "WebNetStartFfa",
               "number",
-              ["number", "number", "number", "number", "number", "number", "string", "string"],
-              [2, 3, world, 12345, -1, 0, cars.join("\n"), "0000000000000001\n0000000000000002"],
+              [
+                "number",
+                "number",
+                "number",
+                "number",
+                "number",
+                "number",
+                "string",
+                "string",
+                "number",
+              ],
+              [
+                8,
+                3,
+                world,
+                12345,
+                -1,
+                0,
+                cars.join("\n"),
+                "0000000000000001\n0000000000000002",
+                90,
+              ],
             ),
             "start",
           );
@@ -71,12 +91,17 @@ try {
             const action =
               tick === 220 && worldName !== "Construction Yard" ? null : fixtureAction(tick);
             if (action) assert(Module[action[0]](action[1]), `action ${tick}`);
-            const inputs = fixtureCommands(tick);
+            const inputs = [
+              ...fixtureCommands(tick),
+              ...Array.from({ length: 6 }, () => ({ buttons: 0, axes: 0, analog: false })),
+            ];
             tape.push({ action, inputs });
             const start = performance.now();
-            inputs.forEach((input, slot) =>
-              assert(Module._WebNetSetInput(tick, slot, input.buttons, 0, 0), "input"),
-            );
+            inputs
+              .slice(0, 2)
+              .forEach((input, slot) =>
+                assert(Module._WebNetSetInput(tick, slot, input.buttons, 0, 0), "input"),
+              );
             assert(Module._WebNetQueueTick(tick), "step");
             stepMs.push(performance.now() - start);
             rows.push(read());
@@ -96,7 +121,7 @@ try {
             tape,
             startupMs,
             stepMs,
-            cars: tm4Port.cars.map((car) => car.name),
+            cars,
             health: tm4Port.cars.map((car) => car.health),
             frames: tm4Port.levelFrames,
             memoryBytes: null,

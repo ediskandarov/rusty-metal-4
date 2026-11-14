@@ -1,5 +1,5 @@
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
-import type { RoomSummary } from "@tm4/rooms-client/schemas";
+import { ffaCapacity, type RoomSummary } from "@tm4/rooms-client/schemas";
 import { DurableObject } from "cloudflare:workers";
 
 import type { RoomState } from "../../apps/rustymetal4.com/src/room-state.ts";
@@ -107,6 +107,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
   private failStop = false;
   private statusFailure: "http" | "timeout" | null = null;
   private roster: unknown[] = [];
+  private players: number = ffaCapacity;
   private leases = new Map<
     string,
     { identity: { participant: string; slot: number }; pending: boolean }
@@ -129,7 +130,13 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
     Object.assign(this, options);
   }
   inspectForTest() {
-    return { phase: this.phase, starts: this.starts, stops: this.stops, roster: this.roster };
+    return {
+      phase: this.phase,
+      starts: this.starts,
+      stops: this.stops,
+      roster: this.roster,
+      players: this.players,
+    };
   }
   override async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
@@ -161,9 +168,14 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
     }
     if (path === "/_server/journal") return new ServerJournal(this.ctx.storage).download();
     if (path === "/api/start") {
-      const input = (await request.json()) as { sessionId: string; roster: unknown[] };
+      const input = (await request.json()) as {
+        sessionId: string;
+        roster: unknown[];
+        players: number;
+      };
       this.sessionId = input.sessionId;
       this.roster = input.roster;
+      this.players = input.players;
       this.phase = "match";
       await new ServerJournal(this.ctx.storage).save(
         new Response(new Uint8Array([84, 77, 52, 74, 82, 78, 76, 3, 0, 1, 2]), {
@@ -205,7 +217,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       if (this.statusFailure === "timeout") await scheduler.wait(6000);
       return Response.json({
         phase: this.phase,
-        players: 2,
+        players: this.players,
         worlds: ["Construction Yard"],
         world: "Construction Yard",
         connected: 2,

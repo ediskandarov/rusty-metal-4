@@ -26,22 +26,30 @@ async function observeAcceptedFrames(reference, clients) {
   let error;
   const pending = new Map();
   let started = false;
-  let occupied = [];
   let head = 0;
   const receive = (messages) => {
     tail = tail
       .then(async () => {
         for (const message of messages) {
           if (message.type === "prediction_prepare" && !started) {
-            occupied = message.slots;
             await reference.evaluate((start) => {
               const { Module } = globalThis;
               const world = Module.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
               if (
                 !Module.ccall(
-                  "WebNetStartMatch",
+                  "WebNetStartFfa",
                   "number",
-                  ["number", "number", "number", "number", "number", "number", "string", "string"],
+                  [
+                    "number",
+                    "number",
+                    "number",
+                    "number",
+                    "number",
+                    "number",
+                    "string",
+                    "string",
+                    "number",
+                  ],
                   [
                     start.capacity,
                     start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
@@ -51,6 +59,7 @@ async function observeAcceptedFrames(reference, clients) {
                     start.portable ? 1 : 0,
                     start.cars.join("\n"),
                     start.participants.join("\n"),
+                    start.respawnDelayTicks,
                   ],
                 )
               )
@@ -63,25 +72,47 @@ async function observeAcceptedFrames(reference, clients) {
         while (started && pending.has(head)) {
           const frame = pending.get(head);
           pending.delete(head);
-          await reference.evaluate(
-            ({ tick, inputs, state, occupied }) => {
-              const { Module, tm4Port } = globalThis;
-              inputs.forEach((input, slot) => {
-                if (!occupied.includes(slot)) return;
-                if (!Module._WebNetSetInput(tick, slot, input.buttons, input.axes, +input.analog))
-                  throw new Error("Reference input rejected");
-              });
-              if (!Module._WebNetQueueTick(tick)) throw new Error("Reference tick rejected");
-              const actual = tm4Port.netMatch;
-              if (
-                actual.digest !== state.digest ||
-                actual.sections.some((value, i) => value !== state.sections[i])
-              )
-                throw new Error("Rust/browser reference diverged at " + tick);
-              if (state.nextMode) Module._WebNetCancelMatch();
-            },
-            { ...frame, occupied },
-          );
+          await reference.evaluate(({ tick, inputs, state, changes }) => {
+            const { Module, tm4Port } = globalThis;
+            for (const change of changes ?? []) {
+              const id = BigInt("0x" + change.identity.participant);
+              const values = [
+                tick,
+                change.identity.slot,
+                Number(id & 0xffffffffn),
+                Number(id >> 32n),
+              ];
+              const accepted =
+                change.kind === "depart"
+                  ? Module.ccall(
+                      "WebNetDepartParticipant",
+                      "number",
+                      ["number", "number", "number", "number"],
+                      values,
+                    )
+                  : Module.ccall(
+                      "WebNetAdmitParticipant",
+                      "number",
+                      ["number", "number", "number", "number", "string"],
+                      [...values, change.car],
+                    );
+              if (!accepted) throw new Error("Reference membership rejected at " + tick);
+            }
+            const occupied = Module._WebNetSlotMask();
+            inputs.forEach((input, slot) => {
+              if (!(occupied & (1 << slot))) return;
+              if (!Module._WebNetSetInput(tick, slot, input.buttons, input.axes, +input.analog))
+                throw new Error("Reference input rejected");
+            });
+            if (!Module._WebNetQueueTick(tick)) throw new Error("Reference tick rejected");
+            const actual = tm4Port.netMatch;
+            if (
+              actual.digest !== state.digest ||
+              actual.sections.some((value, i) => value !== state.sections[i])
+            )
+              throw new Error("Rust/browser reference diverged at " + tick);
+            if (state.nextMode) Module._WebNetCancelMatch();
+          }, frame);
           head++;
         }
       })

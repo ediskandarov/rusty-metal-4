@@ -228,7 +228,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestDetonationCheckpointIdentity(void)
         node->weapon = weapon;
         ObjectDestroy(device);
         return !before.unsupported && !reassigned.unsupported && before.cars != reassigned.cars
-            && unresolved.unsupported && !strcmp(unresolved.unsupported, "detonation device reference");
+            && unresolved.unsupported
+            && !strcmp(unresolved.unsupported, "detonation device reference");
     }
     return 0;
 }
@@ -257,7 +258,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestProjectileCheckpointCallbacks(void)
         projectile->on_destroy = on_destroy;
         const WebNetStateDigest restored = WebNetCaptureDigest(1);
         return !before.unsupported && !restored.unsupported && restored.objects == before.objects
-            && altered_physics.unsupported && !strcmp(altered_physics.unsupported, "weaponProjectile")
+            && altered_physics.unsupported
+            && !strcmp(altered_physics.unsupported, "weaponProjectile")
             && altered_destructor.unsupported
             && !strcmp(altered_destructor.unsupported, "weaponProjectile");
     }
@@ -282,11 +284,12 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableExtenderFixture(void)
     WebCheckpointArenaSelect(0);
     if (!root || !root->seen || !other)
         return 0;
-    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_INTERACTION_EXTENDERS].first;
-         object; object = object->next) {
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_INTERACTION_EXTENDERS].first; object;
+         object = object->next) {
         if (object->owner == first && ObjectGetPayload(object) != root) {
-            EM_ASM({ tm4Port.testPortableExtenders = ([ $0, $1 ]); },
-                object->serial + 1, ObjectGetHeader(other)->serial + 1);
+            EM_ASM(
+                { tm4Port.testPortableExtenders = ([ $0, $1 ]); }, object->serial + 1,
+                ObjectGetHeader(other)->serial + 1);
             WebNetMatchPublishTick();
             return 1;
         }
@@ -296,7 +299,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableExtenderFixture(void)
 
 static WeaponProjectile* test_portable_projectile(void)
 {
-    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_DEFAULT].first; object; object = object->next)
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_DEFAULT].first; object;
+         object = object->next)
         if (!strcmp(object->name, "weaponProjectile"))
             return ObjectGetPayload(object);
     return NULL;
@@ -309,19 +313,22 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestPortableProjectileCapture(void)
         return 0;
     u8 bytes[1024], header[256];
     const SnapshotType* type = WebSnapshotObjectType(ObjectGetHeader(projectile));
-    const u32 length
-        = type ? WebSnapshotFieldsCapture(type, projectile, bytes, sizeof(bytes)) : 0;
-    const u32 header_length = WebSnapshotObjectCapture(ObjectGetHeader(projectile), header, sizeof(header));
+    const u32 length = type ? WebSnapshotFieldsCapture(type, projectile, bytes, sizeof(bytes)) : 0;
+    const u32 header_length
+        = WebSnapshotObjectCapture(ObjectGetHeader(projectile), header, sizeof(header));
     if (length && header_length) {
-        EM_ASM({
-            tm4Port.testPortableProjectile = ({
-                bytes : HEAPU8.slice($0, $0 + $1),
-                header : HEAPU8.slice($2, $2 + $3),
-                projectile : $4,
-                owner : $5,
-                target : $6
-            });
-        }, bytes, length, header, header_length, projectile, projectile->owner, projectile->target);
+        EM_ASM(
+            {
+                tm4Port.testPortableProjectile = ({
+                    bytes : HEAPU8.slice($0, $0 + $1),
+                    header : HEAPU8.slice($2, $2 + $3),
+                    projectile : $4,
+                    owner : $5,
+                    target : $6
+                });
+            },
+            bytes, length, header, header_length, projectile, projectile->owner,
+            projectile->target);
         return length;
     }
     return 0;
@@ -338,8 +345,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableProjectilePerturb(void)
     return 1;
 }
 
-static void test_replace_projectile_header(Tm4ObjectHeader* old, Tm4ObjectHeader* replacement,
-    s32 square_count)
+static void test_replace_projectile_header(
+    Tm4ObjectHeader* old, Tm4ObjectHeader* replacement, s32 square_count)
 {
     for (unsigned i = 0; i < OBJECT_LIST_COUNT; ++i) {
         for (Tm4ObjectHeader* object = ObjectLists[i].first; object; object = object->next) {
@@ -376,15 +383,18 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableProjectileRestore(void)
         return (tm4Port.testPortableProjectile && tm4Port.testPortableProjectile.bytes.length) || 0;
     });
     const u32 header_length = EM_ASM_INT({
-        return (tm4Port.testPortableProjectile && tm4Port.testPortableProjectile.header.length) || 0;
+        return (tm4Port.testPortableProjectile && tm4Port.testPortableProjectile.header.length)
+            || 0;
     });
-    if (!projectile || !square_count || !length || length > sizeof(bytes)
-        || !header_length || header_length > sizeof(header))
+    if (!projectile || !square_count || !length || length > sizeof(bytes) || !header_length
+        || header_length > sizeof(header))
         return 0;
-    EM_ASM({
-        HEAPU8.set(tm4Port.testPortableProjectile.bytes, $0);
-        HEAPU8.set(tm4Port.testPortableProjectile.header, $1);
-    }, bytes, header);
+    EM_ASM(
+        {
+            HEAPU8.set(tm4Port.testPortableProjectile.bytes, $0);
+            HEAPU8.set(tm4Port.testPortableProjectile.header, $1);
+        },
+        bytes, header);
     WebCheckpointArenaSelect(1);
     Tm4ObjectHeader* object = WebSnapshotObjectAllocate(header, header_length);
     Tm4ObjectHeader* old = ObjectGetHeader(projectile);
@@ -410,7 +420,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableProjectileRestore(void)
 
 static SoundEmitter* test_portable_emitter(int loop)
 {
-    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object; object = object->next) {
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
+         object = object->next) {
         SoundEmitter* emitter = ObjectGetPayload(object);
         if (emitter->voice_count > 0 && (emitter->voices[0].duration_frames < 0) == loop)
             return emitter;
@@ -425,12 +436,12 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestPortableSoundCapture(int loop)
     const SnapshotType* type = emitter ? WebSnapshotObjectType(ObjectGetHeader(emitter)) : NULL;
     const u32 length = type ? WebSnapshotFieldsCapture(type, emitter, bytes, sizeof(bytes)) : 0;
     if (length) {
-        EM_ASM({
-            tm4Port.testPortableSound = ({
-                bytes : HEAPU8.slice($0, $0 + $1),
-                allocation : $2
-            });
-        }, bytes, length, emitter->voices);
+        EM_ASM(
+            {
+                tm4Port.testPortableSound
+                    = ({ bytes : HEAPU8.slice($0, $0 + $1), allocation : $2 });
+            },
+            bytes, length, emitter->voices);
     }
     return length;
 }
@@ -449,9 +460,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableSoundRestore(int loop)
 {
     SoundEmitter* emitter = test_portable_emitter(loop);
     u8 bytes[2048];
-    const u32 length = EM_ASM_INT({
-        return (tm4Port.testPortableSound && tm4Port.testPortableSound.bytes.length) || 0;
-    });
+    const u32 length = EM_ASM_INT(
+        { return (tm4Port.testPortableSound && tm4Port.testPortableSound.bytes.length) || 0; });
     if (!emitter || !length || length > sizeof(bytes))
         return 0;
     EM_ASM({ HEAPU8.set(tm4Port.testPortableSound.bytes, $0); }, bytes);
@@ -462,8 +472,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableSoundRestore(int loop)
     if (result) {
         for (s32 i = 0; i < restored.voice_count; ++i) {
             const SoundEmitterVoice* voice = &restored.voices[i];
-            const s32 expected = voice->duration_frames < 0 ? SOUND_VOICE_UNASSIGNED
-                                                           : WebAudioPlaybackFinished;
+            const s32 expected
+                = voice->duration_frames < 0 ? SOUND_VOICE_UNASSIGNED : WebAudioPlaybackFinished;
             if (voice->voice_id != expected)
                 result = 0;
         }
@@ -511,9 +521,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableCarRestore(s32 slot)
         return 0;
     Car* car = GameInfo.players[slot].car;
     u8 bytes[4096];
-    const u32 length = EM_ASM_INT({
-        return (tm4Port.testPortableCar && tm4Port.testPortableCar.length) || 0;
-    });
+    const u32 length
+        = EM_ASM_INT({ return (tm4Port.testPortableCar && tm4Port.testPortableCar.length) || 0; });
     if (!car || !length || length > sizeof(bytes))
         return 0;
     EM_ASM({ HEAPU8.set(tm4Port.testPortableCar, $0); }, bytes);
@@ -521,8 +530,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableCarRestore(s32 slot)
         return 0;
     WebCheckpointArenaSelect(1);
     const SnapshotType* type = WebSnapshotObjectType(ObjectGetHeader(car));
-    int result = type && WebSnapshotFieldsRestore(
-        type, car, bytes, length, WebSnapshotFindLiveObject);
+    int result
+        = type && WebSnapshotFieldsRestore(type, car, bytes, length, WebSnapshotFindLiveObject);
     WebCheckpointArenaSelect(0);
     if (!result)
         WebCheckpointRestore(MainFrameCount);
@@ -558,9 +567,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestPortableSessionPerturb(void)
 
 EMSCRIPTEN_KEEPALIVE int WebTestPortableSessionRestore(void)
 {
-    const u32 length = EM_ASM_INT({
-        return (tm4Port.testPortableSession && tm4Port.testPortableSession.length) || 0;
-    });
+    const u32 length = EM_ASM_INT(
+        { return (tm4Port.testPortableSession && tm4Port.testPortableSession.length) || 0; });
     if (!length || length > TestSessionCapacity)
         return 0;
     u8* bytes = malloc(length);
@@ -711,16 +719,25 @@ EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerProjectileTarget(
         return 0;
     for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
         for (Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next) {
-            if (strcmp(header->name, "weaponProjectile"))
-                continue;
-            const WeaponProjectile* projectile = ObjectGetPayload(header);
-            if (projectile->owner != shooter || strcasecmp(projectile->type->name, name))
+            const Bullet* bullet = NULL;
+            if (!strcmp(header->name, "bullet") && !strcasecmp(name, "bullet")) {
+                if (header->owner != shooter)
+                    continue;
+                bullet = ObjectGetPayload(header);
+                if (bullet->motion.fields.world_impact || bullet->hit_object)
+                    continue;
+            } else if (!strcmp(header->name, "weaponProjectile")) {
+                const WeaponProjectile* projectile = ObjectGetPayload(header);
+                if (projectile->owner != shooter || strcasecmp(projectile->type->name, name))
+                    continue;
+                bullet = &projectile->bullet;
+            } else
                 continue;
             MATRIX placement;
             IdentifyMatrix(&placement);
-            placement.t[0] = projectile->bullet.current_world.vx - target->collision_box.center.vx;
-            placement.t[1] = projectile->bullet.current_world.vy - target->collision_box.center.vy;
-            placement.t[2] = projectile->bullet.current_world.vz - target->collision_box.center.vz;
+            placement.t[0] = bullet->current_world.vx - target->collision_box.center.vx;
+            placement.t[1] = bullet->current_world.vy - target->collision_box.center.vy;
+            placement.t[2] = bullet->current_world.vz - target->collision_box.center.vz;
             CarOrientWithMatrix(target, &placement);
             ObjectSetPosition(
                 target, target->position.vx, target->position.vy, target->position.vz);
@@ -1279,8 +1296,9 @@ static int test_destroy_map_scenery(void)
                 }
             SVECTOR position;
             ObjectCopyPosition(&position, object);
-            return !DestroyableApplyDamage(object, object->hit_points, position.vx, position.vy,
-                       position.vz) && !WebTestDestroyablePresent();
+            return !DestroyableApplyDamage(
+                       object, object->hit_points, position.vx, position.vy, position.vz)
+                && !WebTestDestroyablePresent();
         }
     }
     return 0;
@@ -1502,7 +1520,8 @@ EMSCRIPTEN_KEEPALIVE void WebTestScheduleRollbackAudio(unsigned mask)
 
 EMSCRIPTEN_KEEPALIVE unsigned WebTestStopRollbackAudio(s32 serial)
 {
-    for (Tm4ObjectHeader* header = ObjectLists[OBJECT_LIST_SOUND].first; header; header = header->next) {
+    for (Tm4ObjectHeader* header = ObjectLists[OBJECT_LIST_SOUND].first; header;
+         header = header->next) {
         if (header->serial != serial)
             continue;
         SoundEmitter* emitter = ObjectGetPayload(header);
@@ -1526,8 +1545,10 @@ static void test_rollback_audio(void)
     EM_ASM({ tm4Port.testAudioSerials = []; });
     for (unsigned i = 0; i < ArrayCount(programs); ++i) {
         void* emitter = test_audio_pending & (1 << i)
-            ? ObjectCreate("soundEmitter", 0, programs[i], 0) : NULL;
-        EM_ASM({ tm4Port.testAudioSerials.push($0); },
+            ? ObjectCreate("soundEmitter", 0, programs[i], 0)
+            : NULL;
+        EM_ASM(
+            { tm4Port.testAudioSerials.push($0); },
             emitter ? ObjectGetHeader(emitter)->serial : -1);
     }
     test_audio_pending = 0;
@@ -1543,7 +1564,7 @@ EMSCRIPTEN_KEEPALIVE void WebTestNetworkHudMessages(s32 slot, s32 count)
 }
 
 /* Focused participant-lifetime fixtures schedule mutations at the existing tick boundary. */
-static s32 participant_kill_slot = -1;
+static u32 participant_kill_slots;
 static s32 participant_hit_slot = -1;
 static u32 participant_hit_projectile;
 
@@ -1728,7 +1749,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestKillParticipant(s32 slot)
 {
     if (!WebNetSlotOccupied(slot) || !GameInfo.players[slot].car)
         return 0;
-    participant_kill_slot = slot;
+    participant_kill_slots |= 1u << slot;
     return 1;
 }
 
@@ -1905,13 +1926,16 @@ static void test_participant_actions(void)
         respawn_request_slot = -1;
         respawn_request_failure = -1;
     }
-    const s32 kill = participant_kill_slot;
+    const u32 kills = participant_kill_slots;
     const s32 hit = participant_hit_slot;
     const u32 handle = participant_hit_projectile;
-    participant_kill_slot = participant_hit_slot = -1;
+    participant_kill_slots = 0;
+    participant_hit_slot = -1;
     participant_hit_projectile = 0;
-    if (WebNetSlotOccupied(kill)) {
-        Car* car = GameInfo.players[kill].car;
+    for (s32 slot = 0; slot < 8; ++slot) {
+        if (!(kills & (1u << slot)) || !WebNetSlotOccupied(slot))
+            continue;
+        Car* car = GameInfo.players[slot].car;
         if (car)
             CarApplyParticipantDamage(car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff,
                 NULL, "PARTICIPANT TEST");

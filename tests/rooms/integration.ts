@@ -56,15 +56,15 @@ try {
     initial.id,
     "creation retry is idempotent",
   );
-  assert.equal(initial.modeId, "deathmatch");
+  assert.equal(initial.modeId, "ffa");
   assert.equal(initial.mapId, "construction-yard");
   assert.equal(initial.capacity, 8);
   assert.equal(initial.freePlaces, 7);
   const configured = {
     name: options.name,
-    modeId: "deathmatch",
+    modeId: "ffa",
     mapId: "construction-yard",
-    capacity: 2,
+    capacity: 8,
   };
   const id = initial.id,
     path = `rooms/${id}`;
@@ -92,6 +92,18 @@ try {
     (await a.request(`${path}/settings`, { ...configured, modeId: "future-mode" })).status,
     400,
   );
+  for (let capacity = 2; capacity < 8; capacity++)
+    assert.equal((await a.request(`${path}/settings`, { ...configured, capacity })).status, 400);
+  const fillers = Array.from({ length: 6 }, browser);
+  for (const [index, client] of fillers.entries()) {
+    assert.equal((await client.request("session", {})).status, 200);
+    assert.equal(
+      (await client.request(`${path}/join`, { playerName: `Place ${index + 2}` })).status,
+      200,
+    );
+  }
+  assert.equal((await view()).participantCount, 7);
+  assert.equal((await view()).freePlaces, 1);
   const [joinB, joinC] = await Promise.all([
     b.request(`${path}/join`, { playerName: "Guest B" }),
     c.request(`${path}/join`, { playerName: "Guest C" }),
@@ -99,8 +111,22 @@ try {
   assert.deepEqual(
     [joinB.status, joinC.status].sort(),
     [200, 409],
-    "only one concurrent join wins the last slot",
+    "only one concurrent join wins the eighth place",
   );
+  const full = await view();
+  assert.equal(full.capacity, 8);
+  assert.equal(full.participantCount, 8);
+  assert.equal(full.freePlaces, 0);
+  const listing = (
+    (await (await a.request("rooms")).json()) as { rooms: RoomSummary[] }
+  ).rooms.find((room) => room.id === id)!;
+  assert.equal(listing.participantCount, 8);
+  assert.equal(listing.capacity, 8);
+  assert.equal(listing.freePlaces, 0);
+  const rejected = joinB.ok ? c : b;
+  assert.equal((await rejected.request(`${path}/join`, { playerName: "Ninth" })).status, 409);
+  for (const client of fillers)
+    assert.equal((await client.request(`${path}/leave`, {})).status, 200);
   const guest = joinB.ok ? b : c;
   const guestSocket = await socket(guest);
   assert.equal((await view()).participantCount, 2);
@@ -141,7 +167,7 @@ try {
   assert.equal((await a.request(`${path}/leave`, {})).status, 200);
   const transferred = await view(guest);
   assert.equal(transferred.hostId, transferred.you, "explicit host leave transfers ownership");
-  assert.equal(transferred.freePlaces, 1);
+  assert.equal(transferred.freePlaces, 7);
   assert.equal((await a.request(`${path}/settings`, options)).status, 403);
   reconnect.close();
   guestSocket.close();

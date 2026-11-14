@@ -50,9 +50,9 @@ function sameOutcome(local: Partial<RoundState>, remote: RoundState): boolean {
     local.acceptsContinue === remote.acceptsContinue &&
     local.nextMode === remote.nextMode &&
     local.scores?.length === remote.scores.length &&
-    remote.scores.every(({ wins, losses }, slot) => {
+    remote.scores.every(({ frags, deaths }, slot) => {
       const score = local.scores?.[slot];
-      return score?.wins === wins && score.losses === losses;
+      return score?.frags === frags && score.deaths === deaths;
     })
   );
 }
@@ -67,7 +67,7 @@ export async function joinMatch(
   admission?: string,
 ) {
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
-  show("lobby", "Connecting to Deathmatch…");
+  show("lobby", "Connecting to Free for all…");
 
   const journal = startClientJournal();
   const path = new URL(endpoint, location.href).pathname;
@@ -208,14 +208,14 @@ export async function joinMatch(
   };
 
   const displayOutcome = (state: RoundState) => {
-    if (state.roundFinished) {
-      const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      show("playing", state.acceptsContinue ? result + " · Press Cross to continue" : result);
-    }
-    if (state.nextMode) {
-      const result = state.winner < 0 ? "Draw" : state.winner === slot ? "You won" : "You lost";
-      cleanup("Match finished · " + result, "lobby");
-    }
+    const respawn = port.netMatch?.respawn;
+    if (respawn?.state === 3)
+      show("playing", "Respawn failed after three attempts. Leave and rejoin to try again.");
+    else if (respawn?.state === 2) {
+      const seconds = Math.max(0, Math.ceil((respawn.dueTick - port.netMatch!.tick) / 30));
+      show("playing", "Respawning in " + seconds + "s…");
+    } else show("playing", "Player " + (slot + 1) + " · Live prediction");
+    if (state.nextMode) cleanup("Match finished", "lobby");
   };
 
   const onopen = () => {
@@ -318,7 +318,7 @@ export async function joinMatch(
         case "resume_prepare":
         case "prediction_prepare": {
           lobby(null);
-          show("lobby", "Loading Deathmatch…");
+          show("lobby", "Loading Free for all…");
           if (prediction || slot < 0 || slot >= message.capacity)
             throw new Error("Invalid live prediction setup");
           journal.identify({

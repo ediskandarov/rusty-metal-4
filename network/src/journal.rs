@@ -397,6 +397,8 @@ mod tests {
     fn header(players: usize) -> Header {
         Header {
             start: SessionStart {
+                mode: tm4_network::protocol::MatchMode::Ffa,
+                respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
                 capacity: players,
                 slots: (0..players).map(|slot| slot as u8).collect(),
                 participants: (1..=players)
@@ -434,11 +436,11 @@ mod tests {
     #[test]
     fn export_freezes_a_complete_prefix_while_the_writer_keeps_appending() {
         let directory = TestDirectory::new();
-        let mut journal = Journal::create(&directory.0, &header(2)).unwrap();
+        let mut journal = Journal::create(&directory.0, &header(8)).unwrap();
         let export = SharedExport::default();
         journal.attach_export(export.clone());
         let header_length = export.lock().unwrap().as_ref().unwrap().length;
-        let inputs = [Input::default(); 2];
+        let inputs = [Input::default(); 8];
         for tick in 0..30 {
             journal.append(tick, &inputs, &[], &state(tick, 0)).unwrap();
         }
@@ -519,9 +521,9 @@ mod tests {
     #[test]
     fn verifies_spilled_chunks_and_detects_truncation_and_corruption() {
         let directory = TestDirectory::new();
-        let width = journal_frame_bytes(2);
-        let mut journal = Journal::with_cache_limit(&directory.0, &header(2), width).unwrap();
-        let inputs = [Input::default(); 2];
+        let width = journal_frame_bytes(8);
+        let mut journal = Journal::with_cache_limit(&directory.0, &header(8), width).unwrap();
+        let inputs = [Input::default(); 8];
         for tick in 0..3 {
             let mut frame = state(tick, 0);
             if tick == 1 {

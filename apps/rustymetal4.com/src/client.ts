@@ -1,5 +1,6 @@
 import { createRoomsClient, RoomsApiError as ApiError } from "@tm4/rooms-client";
 import {
+  ffaCapacity,
   mapLabel,
   modeLabel,
   type RoomSettings,
@@ -61,7 +62,7 @@ function formSettings(form: HTMLFormElement): RoomSettings {
     name: field("name"),
     modeId: field("modeId"),
     mapId: field("mapId"),
-    capacity: Number(field("capacity")),
+    capacity: ffaCapacity,
   });
 }
 function submit(form: HTMLFormElement, errorId: string, action: () => Promise<void>): void {
@@ -231,10 +232,8 @@ async function room(): Promise<void> {
     joinButton.disabled = !room.freePlaces;
     joinButton.textContent = room.freePlaces ? "Join room" : "Room full";
     if (!editing)
-      for (const key of ["name", "modeId", "mapId", "capacity"] as const)
+      for (const key of ["name", "modeId", "mapId"] as const)
         (settingsForm.elements.namedItem(key) as HTMLInputElement).value = String(room[key]);
-    for (const option of element<HTMLSelectElement>("edit-capacity").options)
-      option.disabled = Number(option.value) < room.participantCount;
     if (!room.you) element("room-status").textContent = "Viewing room";
     if (!room.you && stop) {
       const close = stop;

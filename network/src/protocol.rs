@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 14;
+pub const PROTOCOL_VERSION: u16 = 15;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 118;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -279,8 +279,8 @@ pub struct LobbyPlayer {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Score {
-    pub wins: i32,
-    pub losses: i32,
+    pub frags: i32,
+    pub deaths: i32,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -297,8 +297,19 @@ pub struct RoundState {
     pub scores: Vec<Score>,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MatchMode {
+    Ffa,
+}
+
+pub const FFA_RESPAWN_DELAY_TICKS: u32 = 90;
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionStart {
+    pub mode: MatchMode,
+    #[serde(rename = "respawnDelayTicks")]
+    pub respawn_delay_ticks: u32,
     /// Width of slot-addressed input/result rows; independent of participant count.
     pub capacity: usize,
     /// Occupied gameplay slots, in the same order as the mode-selected cars.
@@ -315,7 +326,8 @@ pub struct SessionStart {
 
 impl SessionStart {
     pub fn valid_slots(&self) -> bool {
-        (2..=MAX_PLAYERS).contains(&self.capacity)
+        self.capacity == MAX_PLAYERS
+            && (1..=3600).contains(&self.respawn_delay_ticks)
             && (2..=self.capacity).contains(&self.slots.len())
             && self.slots.len() == self.cars.len()
             && self.participants.len() == self.slots.len()
@@ -368,7 +380,8 @@ pub enum Request {
         digest: u32,
         unsupported: Option<String>,
     },
-    Leave,
+    // The browser bridge represents every request payload as an object.
+    Leave {},
     Progress {
         tick: u32,
     },

@@ -1,6 +1,7 @@
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
 import {
   type Compatibility,
+  ffaCapacity,
   maps,
   type MatchSnapshot,
   modes,
@@ -40,18 +41,16 @@ export function text(value: unknown, label: string, max: number): string {
     throw new RoomError(400, `${label} must contain 1–${max} printable characters.`);
   return trimmed;
 }
-export function settings(value: unknown, members = 0): RoomSettings {
+export function settings(value: unknown): RoomSettings {
   const input = object(value);
   const name = text(input.name, "Room name", 48);
   const mode = modes.find((entry) => entry.id === input.modeId);
   const map = maps.find((entry) => entry.id === input.mapId);
   if (!mode) throw new RoomError(400, "Choose a supported game mode.");
   if (!map) throw new RoomError(400, "Choose a supported map.");
-  if (!Number.isInteger(input.capacity) || Number(input.capacity) < 2 || Number(input.capacity) > 8)
-    throw new RoomError(400, "Capacity must be a whole number from 2 to 8.");
-  if (Number(input.capacity) < members)
-    throw new RoomError(409, "Capacity cannot be lower than the number of participants.");
-  return { name, modeId: mode.id, mapId: map.id, capacity: Number(input.capacity) };
+  if (input.capacity !== ffaCapacity)
+    throw new RoomError(400, "Free for all always has eight player places.");
+  return { name, modeId: mode.id, mapId: map.id, capacity: ffaCapacity };
 }
 export const preparationLimit = 5 * 60_000;
 export const emptyMatchGrace = 120_000;
@@ -115,9 +114,9 @@ export function createState(id: string, key: string, value: unknown, now: number
     notice: "",
     settings: {
       name: text(input.name, "Room name", 48),
-      modeId: "deathmatch",
+      modeId: "ffa",
       mapId: "construction-yard",
-      capacity: 8,
+      capacity: ffaCapacity,
     },
     members: [member],
     hostId: member.id,
@@ -137,8 +136,7 @@ export function join(state: RoomState, key: string, name: unknown, now: number):
   if (existing) return existing;
   if (state.match?.roster.length && state.match.stage !== "playing")
     throw new RoomError(409, "The match is still preparing. Wait for play to begin.");
-  if (state.members.length >= state.settings.capacity)
-    throw new RoomError(409, "This room is full.");
+  if (state.members.length >= ffaCapacity) throw new RoomError(409, "This room is full.");
   const member: Member = {
     id: crypto.randomUUID(),
     key,
@@ -211,19 +209,20 @@ export function edit(state: RoomState, key: string, value: unknown): void {
     throw new RoomError(403, "Only the host can change room settings.");
   if (state.match)
     throw new RoomError(409, "Cancel preparation or finish the match before changing settings.");
-  state.settings = settings(value, state.members.length);
+  state.settings = settings(value);
   invalidateReady(state);
 }
 export function summary(state: RoomState): RoomSummary {
   return {
     ...state.settings,
+    capacity: ffaCapacity,
     id: state.id,
     host: state.members.find((member) => member.id === state.hostId)?.name ?? "Waiting for a host",
     participantCount: state.members.length,
     freePlaces:
       state.match?.roster.length && state.match.stage !== "playing"
         ? 0
-        : state.settings.capacity - state.members.length,
+        : ffaCapacity - state.members.length,
   };
 }
 export function snapshot(state: RoomState, key: string): RoomSnapshot {

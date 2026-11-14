@@ -35,7 +35,7 @@ function fixture() {
   return state;
 }
 describe("room match authority", () => {
-  test("capacity is an upper bound and preparation locks the initial roster", () => {
+  test("eight places allow a two-participant start and later admission", () => {
     const state = fixture();
     expect(state.settings.capacity).toBe(8);
     const match = freezeRoster(state, "host", 200);
@@ -44,6 +44,11 @@ describe("room match authority", () => {
     expect(join(state, "host", "Host", 200).id).toBe(match.roster[0]!.id);
     expect(() => updatePlayer(state, "host", selected)).toThrow("locked");
     expect(() => freezeRoster(state, "host", 200)).toThrow();
+    match.stage = "playing";
+    join(state, "third", "Third", 300);
+    expect(snapshot(state, "third").capacity).toBe(8);
+    expect(snapshot(state, "third").freePlaces).toBe(5);
+    expect(match.roster).toHaveLength(2);
   });
   test("car and resources changes require separate readiness confirmation", () => {
     const state = fixture();

@@ -10,26 +10,14 @@ const { prefix } = Astro.props;
   Room name
   <input id={`${prefix}-name`} name="name" maxlength="48" required />
 </label>
-<div class="field-pair">
-  <label for={`${prefix}-mode`}>
-    Game mode
-    <select id={`${prefix}-mode`} name="modeId">
-      {modes.map((mode) => (
-        <option value={mode.id}>{mode.label}</option>
-      ))}
-    </select>
-  </label>
-  <label for={`${prefix}-capacity`}>
-    Player limit
-    <select id={`${prefix}-capacity`} name="capacity">
-      {Array.from({ length: 7 }, (_, i) => i + 2).map((count) => (
-        <option value={count} selected={count === 4}>
-          {count} players
-        </option>
-      ))}
-    </select>
-  </label>
-</div>
+<label for={`${prefix}-mode`}>
+  Game mode
+  <select id={`${prefix}-mode`} name="modeId">
+    {modes.map((mode) => (
+      <option value={mode.id}>{mode.label}</option>
+    ))}
+  </select>
+</label>
 <label for={`${prefix}-map`}>
   Map
   <select id={`${prefix}-map`} name="mapId">

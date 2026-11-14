@@ -2,16 +2,27 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
 import { launchBrowser } from "./helpers/browser.mjs";
+import { setPanelOpen } from "./helpers/player.mjs";
+
 /* global Module, tm4Port */
 /* Ordinary room flows against the actual Worker, native authority and browser simulation. */
-import { togglePanel } from "./helpers/player.mjs";
-
 if (!process.env.TM4_DISC_DIR) throw new Error("Set TM4_DISC_DIR to your local disc folder");
 const { nativeBridge } = await import("../rooms/native.ts");
 const { runtime } = await import("../rooms/runtime.ts");
+const ffa = process.env.TM4_TEST_FFA === "1";
+const actions = ffa
+  ? Array.from({ length: 22 }, (_, index) => ({
+      tick: 120 + index * 180,
+      name: "kill",
+      args: [0],
+    }))
+  : [];
+const fixture = ffa ? resolve("build/room-tests/ffa-actions.json") : undefined;
+if (fixture) await Bun.write(fixture, JSON.stringify({ actions }));
 const native = await nativeBridge(
   resolve("build/diagnostic/server"),
   resolve("build/network-native/debug/tm4-deathmatch-server"),
+  fixture,
 );
 let mf;
 let browser;
@@ -68,9 +79,53 @@ try {
     });
     await page.locator("#room-car").selectOption("Orbital");
     await page.locator("#room-player").scrollIntoViewIfNeeded();
-    await togglePanel(frame, "render-settings");
+    await setPanelOpen(frame, "render-settings", true);
     await frame.locator("#render-scale").selectOption("1");
-    await togglePanel(frame, "render-settings");
+    await setPanelOpen(frame, "render-settings", false);
+    if (ffa)
+      await frame.evaluate(async (actions) => {
+        const trace = (globalThis.ffaTrace = { rows: {}, restores: [] });
+        const step = Module._WebNetQueueTick;
+        Module._WebNetQueueTick = (tick) => {
+          for (const action of actions)
+            if (action.tick === tick) {
+              if (!Module._WebTestKillParticipant(action.args[0]))
+                throw new Error("FFA kill fixture rejected");
+            }
+          const result = step(tick);
+          trace.rows[tick + 1] = {
+            car: Module._WebTestCarHandle(0),
+            pending: Module._WebTestRespawnState(0, 0),
+            due: Module._WebTestRespawnState(0, 1),
+            scores: structuredClone(tm4Port.netMatch?.scores),
+            next: tm4Port.netMatch?.nextMode,
+            finished: tm4Port.netMatch?.roundFinished,
+          };
+          return result;
+        };
+        const { NetworkClient } = await import(
+          new URL("network/tm4_network.js", document.baseURI).href
+        );
+        const update = NetworkClient.prototype.update;
+        NetworkClient.prototype.update = function () {
+          if (this.connected() && !this.ffaConditioned) {
+            this.condition(90, 8);
+            this.ffaConditioned = true;
+          }
+          const bridge = globalThis.tm4LivePrediction;
+          if (bridge && !bridge.ffaObserved) {
+            bridge.ffaObserved = true;
+            const restore = bridge.restore_live_tick;
+            bridge.restore_live_tick = (tick) => {
+              const from = tm4Port.netMatch.tick;
+              const result = restore(tick);
+              trace.restores.push({ from, tick, result });
+              return result;
+            };
+          }
+          return update.call(this);
+        };
+      }, actions);
     return frame;
   };
   const frames = [];
@@ -125,10 +180,56 @@ try {
   for (const page of pages.slice(0, 3)) await page.locator("#room-ready").click();
   await host.waitForFunction(() => !document.getElementById("start-match").disabled);
   await host.locator("#start-match").click();
-  for (const frame of frames)
-    await frame.waitForFunction(() => globalThis.tm4Port?.netConfirmedTick > 30, null, {
-      timeout: 90000,
+  try {
+    for (const frame of frames)
+      await frame.waitForFunction(() => globalThis.tm4Port?.netConfirmedTick > 30, null, {
+        timeout: 30000,
+      });
+  } catch (error) {
+    const states = await Promise.all(
+      frames.map((frame) =>
+        frame.evaluate(() => ({
+          text: document.body.innerText,
+          compatibility: tm4Port.compatibility,
+          net: tm4Port.netDiagnostics,
+          state: tm4Port.netSession,
+        })),
+      ),
+    );
+    console.log("PLAYER STATES", JSON.stringify(states));
+    throw error;
+  }
+  if (ffa) {
+    await frames[1].locator("canvas").click();
+    await frames[1].waitForFunction(() => tm4Port.netMatch.tick >= 201, null, {
+      timeout: 15000,
+      polling: 5,
     });
+    for (let pulse = 0; pulse < 16; ++pulse) {
+      await guest.keyboard.down("ArrowRight");
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      await guest.keyboard.up("ArrowRight");
+      await new Promise((resolve) => setTimeout(resolve, 35));
+    }
+    for (const frame of frames)
+      await frame.waitForFunction(() => tm4Port.netConfirmedTick > 222, null, { timeout: 20000 });
+    const observed = await frames[0].evaluate(() => globalThis.ffaTrace);
+    assert.equal(observed.rows[121].car, 0);
+    assert.equal(observed.rows[121].due, 210);
+    assert(observed.rows[211].car > observed.rows[120].car);
+    assert.equal(observed.rows[211].scores[0].deaths, 1);
+    assert(Object.values(observed.rows).every((row) => !row.finished && !row.next));
+    assert(
+      observed.restores.some(
+        (restore) => restore.result && restore.from > 210 && restore.tick <= 210,
+      ),
+      JSON.stringify(observed.restores),
+    );
+    console.log(
+      "PASS automatic FFA respawn and real Lightyear rollback across tick 210",
+      JSON.stringify(observed.restores),
+    );
+  }
   const identity = async (frame, slot) =>
     frame.evaluate((slot) => {
       const lo = Module._WebNetParticipantIdentityPart(slot, 0) >>> 0,
@@ -192,17 +293,18 @@ try {
     ),
     JSON.stringify(rollback),
   );
-  await late.waitForFunction(
+  const cancellation = await late.waitForFunction(
     async () => {
       const room = (await (await fetch("/api" + location.pathname)).json()).room;
-      return room.match.endpoint === null && room.you !== null;
+      return room.match.endpoint === null && room.match.credential === null && room.you !== null
+        ? room
+        : null;
     },
     null,
     { timeout: 20000 },
   );
-  const canceledRoom = await late.evaluate(
-    async () => (await (await fetch("/api" + location.pathname)).json()).room,
-  );
+  const canceledRoom = await cancellation.jsonValue();
+  await cancellation.dispose();
   assert.equal(canceledRoom.you, pendingRoom.you);
   assert.equal(canceledRoom.match.credential, null);
   lateFrame = await load(late);
@@ -246,9 +348,23 @@ try {
   });
   assert(oldToken);
   console.log("Late participant admitted", slot, oldId);
+  if (ffa)
+    await frames[0].waitForFunction(
+      () =>
+        Module._WebTestRespawnState(0, 0) === 2 &&
+        Module._WebTestRespawnState(0, 1) - tm4Port.netMatch.tick > 45,
+      null,
+      { timeout: 15000, polling: 5 },
+    );
   await late.locator("#leave-button").click();
   await late.waitForURL(origin + "/");
   await frames[0].waitForFunction(() => Module._WebNetSlotMask() === 7, null, { timeout: 15000 });
+  if (ffa)
+    assert.equal(
+      await frames[0].evaluate(() => Module._WebTestRespawnState(0, 0)),
+      2,
+      "departure committed while another participant waited to respawn",
+    );
   console.log("Explicit departure committed without ending the other players");
   await join(late, "Fresh entry");
   lateFrame = await load(late);
@@ -308,6 +424,43 @@ try {
   assert.equal(await identity(lateFrame, 3), newId);
   for (const frame of frames)
     assert.equal(await frame.evaluate(() => Module._WebNetSlotMask()), 15);
+  if (ffa) {
+    const head = await frames[0].evaluate(() => tm4Port.netMatch.tick);
+    const death = 120 + Math.ceil((head - 120 + 12) / 180) * 180;
+    await frames[0].waitForFunction((death) => tm4Port.netMatch.tick >= death - 8, death, {
+      timeout: 15000,
+      polling: 5,
+    });
+    const oldCar = await frames[0].evaluate(() => Module._WebTestCarHandle(0));
+    assert(oldCar);
+    await frames[0].evaluate(() => {
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await frames[1].waitForFunction((death) => tm4Port.netConfirmedTick > death + 100, death, {
+      timeout: 15000,
+    });
+    await frames[0].evaluate(() => {
+      delete document.hidden;
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await frames[0].waitForFunction(
+      (death) =>
+        tm4Port.netDiagnostics?.recoveredTick > death + 90 &&
+        tm4Port.netConfirmedTick > death + 100,
+      death,
+      { timeout: 45000 },
+    );
+    assert.equal(await identity(frames[0], 0), initial[0]);
+    assert((await frames[0].evaluate(() => Module._WebTestCarHandle(0))) > oldCar);
+    const results = await frames[0].evaluate(() => tm4Port.netMatch.scores[0]);
+    assert.equal(results.deaths, Math.floor((death - 120) / 180) + 1);
+    console.log(
+      "PASS same-identity portable recovery after disconnected death and respawn",
+      death,
+      JSON.stringify(results),
+    );
+  }
   const response = await host.evaluate(async () => {
     const room = (await (await fetch("/api" + location.pathname)).json()).room;
     const response = await fetch(
@@ -339,7 +492,9 @@ try {
     [oldId, oldId, newId],
     "canceled prediction must never become a committed journal event",
   );
-  const journal = resolve("build/room-tests/live-membership.tm4j");
+  const journal = resolve(
+    ffa ? "build/room-tests/ffa.tm4j" : "build/room-tests/live-membership.tm4j",
+  );
   await Bun.write(journal, Uint8Array.from(response));
   assert.deepEqual(errors, []);
   console.log(

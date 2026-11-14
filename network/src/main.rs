@@ -519,7 +519,8 @@ impl Match {
                     }
                     attempt.frames.push_back(message.clone());
                 }
-            } else if player.receives_live()
+            } else if player.ready
+                && player.receives_live()
                 && let Some(entity) = player.connection
             {
                 send(links, entity, &message);
@@ -659,7 +660,7 @@ impl Match {
                     self.live_lobby(slot, links);
                 }
             }
-            Request::Leave if self.started && !self.ended && slot.is_some() => {
+            Request::Leave {} if self.started && !self.ended && slot.is_some() => {
                 let slot = slot.unwrap();
                 if !self.participants.joining(slot) {
                     let identity = self.participants.binding(slot);
@@ -889,6 +890,7 @@ impl Match {
                         return;
                     }
                     let attempt = player.resume.take().unwrap();
+                    player.ready = true;
                     player.progress_tick = head;
                     send(links, entity, &Message::ResumeActive { head });
                     for frame in attempt.frames {
@@ -1177,6 +1179,8 @@ fn update(
         game.started = true;
         game.loading_since = Instant::now();
         let start = SessionStart {
+            mode: tm4_network::protocol::MatchMode::Ffa,
+            respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
             capacity: game.controls.len(),
             slots: game.participants.slots().map(|slot| slot as u8).collect(),
             participants: game
@@ -1644,7 +1648,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     } else {
         room_roster.len()
     };
-    let participants = ParticipantRoster::new(count, &(0..initial_count).collect::<Vec<_>>())?;
+    let participants =
+        ParticipantRoster::new(MAX_PLAYERS, &(0..initial_count).collect::<Vec<_>>())?;
     if !room_roster.is_empty() && !(2..=count).contains(&room_roster.len()) {
         return Err("Room members do not match the prepared participant roster".into());
     }
@@ -1689,7 +1694,7 @@ fn run_match(
     let count = participants.count();
     let capacity = participants.capacity();
     if !(MIN_PARTICIPANTS..=capacity).contains(&count) {
-        return Err("Deathmatch needs at least two prepared participants".into());
+        return Err("FFA needs at least two prepared participants".into());
     }
     let compatibility = simulator.compatibility.clone();
     let catalog = simulator.catalog.clone();
@@ -2101,7 +2106,9 @@ mod participant_control_tests {
             loading_since: Instant::now(),
             last_step_duration: None,
             session: Some(SessionStart {
-                capacity: 2,
+                mode: tm4_network::protocol::MatchMode::Ffa,
+                respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+                capacity: 8,
                 slots: (0..2).map(|slot| slot as u8).collect(),
                 participants: vec![ParticipantId(1), ParticipantId(2)],
                 world: "Construction Yard".into(),
@@ -2120,7 +2127,16 @@ mod participant_control_tests {
                 digest: 123,
                 sections: [0; 5],
                 unsupported: None,
-                scores: vec![Score { wins: 3, losses: 1 }, Score { wins: 0, losses: 3 }],
+                scores: vec![
+                    Score {
+                        frags: 3,
+                        deaths: 1,
+                    },
+                    Score {
+                        frags: 0,
+                        deaths: 3,
+                    },
+                ],
             }),
             journal_directory: PathBuf::new(),
             journal: None,
@@ -2683,7 +2699,7 @@ mod participant_control_tests {
             assert_eq!(game.controls[0].controller, Some(controller));
             assert_eq!(game.controls[0].received_sequence, 41);
             assert_eq!(game.participants.at_slot(0).car.as_deref(), Some("Orbital"));
-            assert_eq!(game.last_state.as_ref().unwrap().scores[0].wins, 3);
+            assert_eq!(game.last_state.as_ref().unwrap().scores[0].frags, 3);
         }
         request(
             &mut world,

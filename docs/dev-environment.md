@@ -153,9 +153,10 @@ Rooms gather players, choose settings and prepare one match at a time. Browsing
 and joining need no disc resources or simulation container. The embedded existing
 player reads each participant's own disc. The host explicitly prepares the private
 server, then every participant readies and the host starts the actual roster.
-Native completion returns everyone to the same room and releases the server. Room
-capacity is independent of the initial roster size. During play, a newcomer can load
-their own disc, select from the startup-prepared model pool and join a free seat;
+FFA keeps running after deaths; automatic limits, results and return to the room
+remain deferred. Explicit departure releases seats, and an empty room releases its
+private server. FFA always provides eight places, independently of the initial roster
+size. During play, a newcomer can load their own disc, select from the startup-prepared model pool and join a free seat;
 explicit room leave schedules native departure. Closing a tab preserves recovery
 identity rather than releasing its gameplay seat.
 
@@ -176,8 +177,10 @@ only when working on the retained container infrastructure.
 - `bun run test:room-matches:browser`: two independent identities against the real
   native process through local room DOs. Requires a diagnostic server/client bundle,
   the diagnostic native binary, and `TM4_DISC_DIR`. Its existing combat fixture
-  positions a lethal duel; normal engine results release the process and a second
-  match uses the same room. It does not verify deployed Cloudflare containers.
+  positions a lethal duel, verifies fresh-car respawn and retained combat results,
+  then tests reconnect and explicit all-player departure with private resource cleanup.
+  A fresh room and native process exercise a second session. Automatic round results
+  remain deferred. It does not verify deployed Cloudflare containers.
 - `TM4_DISC_DIR=<disc folder> bun tests/browser/check_live_membership.mjs`: four
   independent browsers use ordinary room actions to admit, depart, reuse a seat,
   reject retired credentials and recover the same identity. Reloading a preparing
@@ -188,6 +191,9 @@ only when working on the retained container infrastructure.
   `TM4_SIMULATION_WASM=<authority Wasm> TM4_RESOURCE_DIR=<resource root> node
 tests/simulation/replay-membership-journal.mjs <journal>` checks every recorded
   subsystem digest in a fresh simulation instance.
+  The `check_ffa.mjs` variant adds repeated deaths and rollback/recovery across automatic
+  respawn. It writes `build/room-tests/ffa.tm4j`; replay it with
+  `TM4_TEST_ACTIONS=build/room-tests/ffa-actions.json` and the same simulation inputs.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
   admission, creation retries, permissions, reconnect/hibernation, host succession,
   directory outages and complete empty-room cleanup. Allow about 90 seconds.

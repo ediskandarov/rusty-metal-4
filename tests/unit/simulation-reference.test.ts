@@ -39,6 +39,8 @@ test("the browser oracle uses exact authority identities, including reused and h
       receive([
         {
           type: "prediction_prepare",
+          mode: "ffa",
+          respawnDelayTicks: 90,
           capacity: 8,
           slots: [0, 3, 7],
           participants,
@@ -49,7 +51,7 @@ test("the browser oracle uses exact authority identities, including reused and h
         },
       ]);
       await observer.settled();
-      expect(calls.find(({ name }) => name === "WebNetStartMatch")?.values[7]).toBe(
+      expect(calls.find(({ name }) => name === "WebNetStartFfa")?.values[7]).toBe(
         participants.join("\n"),
       );
     } finally {

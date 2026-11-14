@@ -2,7 +2,8 @@ import { compatibilitySchema, sha256Schema } from "@tm4/lightyear-client/schemas
 import { z } from "zod";
 export { compatibilitySchema };
 export type { Compatibility } from "@tm4/lightyear-client/schemas";
-export const modes = [{ id: "deathmatch", label: "Deathmatch" }] as const;
+export const ffaCapacity = 8;
+export const modes = [{ id: "ffa", label: "Free for all" }] as const;
 
 // Names come from the native GameGetWorldName catalog; IDs remain stable if labels change.
 export const maps = [
@@ -42,16 +43,16 @@ const text = (length: number) =>
     );
 export const roomSettingsSchema = z.object({
   name: text(48),
-  modeId: z.enum(["deathmatch"]),
+  modeId: z.enum(["ffa"]),
   mapId: z.enum(maps.map((map) => map.id)),
-  capacity: count.min(2).max(8),
+  capacity: z.literal(ffaCapacity),
 });
 export type RoomSettings = z.infer<typeof roomSettingsSchema>;
 export const roomSummarySchema = roomSettingsSchema.extend({
   id: roomIdSchema,
   host: z.string(),
-  participantCount: count.max(8),
-  freePlaces: count.max(8),
+  participantCount: count.max(ffaCapacity),
+  freePlaces: count.max(ffaCapacity),
 });
 export type RoomSummary = z.infer<typeof roomSummarySchema>;
 export const matchSnapshotSchema = z.object({
@@ -87,7 +88,7 @@ export const roomSnapshotSchema = roomSummarySchema.extend({
         loaded: z.boolean(),
       }),
     )
-    .max(8),
+    .max(ffaCapacity),
   match: matchSnapshotSchema.nullable(),
   journal: z.object({ matchId: matchIdSchema, expiresAt: count }).nullable().optional(),
   notice: z.string(),

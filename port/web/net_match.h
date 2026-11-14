@@ -10,6 +10,7 @@ int WebNetAdmitParticipant(
 int WebNetDepartParticipant(unsigned int tick, int slot, unsigned int low, unsigned int high);
 int WebNetParticipantModelsValid(const struct WebParticipantState* state, unsigned int slots);
 void WebNetRestoreParticipantConfiguration(void);
+unsigned int WebNetFfaRespawnDelay(void);
 int WebNetSlotCapacity(void);
 int WebNetSlotMask(void);
 int WebNetParticipantSlot(int index);

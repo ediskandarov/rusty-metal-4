@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
+import { roomSettingsSchema } from "@tm4/rooms-client/schemas";
+
 import { readJson } from "../../apps/rustymetal4.com/src/http.ts";
 import {
   connect,
@@ -19,9 +21,9 @@ import {
 
 const options = {
   name: "Wrecking crew",
-  modeId: "deathmatch",
+  modeId: "ffa",
   mapId: "construction-yard",
-  capacity: 2,
+  capacity: 8,
   playerName: "Host",
 };
 const make = () => {
@@ -45,7 +47,7 @@ describe("authoritative room transitions", () => {
     );
     expect(state.settings).toEqual({
       name: "New room",
-      modeId: "deathmatch",
+      modeId: "ffa",
       mapId: "construction-yard",
       capacity: 8,
     });
@@ -70,26 +72,28 @@ describe("authoritative room transitions", () => {
     const guest = join(state, "guest", "Guest", 1000);
     expect(join(state, "guest", "Other name", 2000).id).toBe(guest.id);
     expect(state.members).toHaveLength(2);
-    expect(() => join(state, "third", "Third", 1000)).toThrow("full");
+    join(state, "third", "Third", 1000);
+    expect(summary(state).freePlaces).toBe(5);
+    for (let place = 4; place <= 8; place++) join(state, `guest-${place}`, `Guest ${place}`, 1000);
+    expect(state.members).toHaveLength(8);
+    expect(() => join(state, "ninth", "Ninth", 1000)).toThrow("full");
+    expect(join(state, "guest", "Guest", 2000).id).toBe(guest.id);
     expect(summary(state).freePlaces).toBe(0);
   });
-  test("only the host can edit and capacity may never strand a participant", () => {
+  test("only the host can edit and FFA capacity cannot be configured", () => {
     const state = make();
     expect(() => edit(state, "unknown", options)).toThrow("Only the host");
-    edit(state, "private-host-key", { ...options, capacity: 3 });
+    edit(state, "private-host-key", { ...options, name: "New name" });
     join(state, "one", "One", 1000);
     join(state, "two", "Two", 1000);
-    expect(() => edit(state, "private-host-key", options)).toThrow("lower");
-    expect(state.settings.capacity).toBe(3);
-    for (const invalid of [
-      { capacity: 1 },
-      { capacity: 9 },
-      { capacity: 2.5 },
-      { capacity: "4" },
-      { modeId: "racing" },
-      { mapId: "unknown" },
-      { name: "\n" },
-    ])
+    for (const capacity of [1, 2, 3, 4, 5, 6, 7, 9, 2.5, "8", undefined]) {
+      const invalid = { ...options, capacity };
+      expect(() => edit(state, "private-host-key", invalid)).toThrow("eight player places");
+      expect(roomSettingsSchema.safeParse(invalid).success).toBe(false);
+    }
+    expect(state.settings.capacity).toBe(8);
+    expect(state.settings.name).toBe("New name");
+    for (const invalid of [{ modeId: "racing" }, { mapId: "unknown" }, { name: "\n" }])
       expect(() => settings({ ...options, ...invalid })).toThrow();
   });
   test("tabs, reconnects and stale socket callbacks cannot evict a live member", () => {

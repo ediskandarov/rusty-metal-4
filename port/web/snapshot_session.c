@@ -14,7 +14,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 7,
+    SessionVersion = 8,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -52,6 +52,7 @@ typedef struct {
     u32 lists[OBJECT_LIST_COUNT], active_cells;
     u32 squares, gte_length;
     u8 gte[256];
+    u32 respawn_delay_ticks;
     WebParticipantState participants;
     WebParticipantId initial_participants[8];
     u32 car_order[MaxPlayers];
@@ -158,6 +159,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     SessionRecord record;
     memset(&record, 0, sizeof(record));
     record.version = SessionVersion;
+    record.respawn_delay_ticks = WebNetFfaRespawnDelay();
     record.participant_count = GameInfo.player_car_count;
     record.car_count = GameInfo.car_count;
     record.capacity = WebNetSlotCapacity();
@@ -303,7 +305,8 @@ int WebSnapshotSessionPrepare(const u8* input, u32 length)
     memcpy(&record, input, sizeof(record));
     WebParticipantId initial[8];
     WebNetInitialParticipantIds((u32*)initial);
-    if (memcmp(initial, record.initial_participants, sizeof(initial)))
+    if (record.respawn_delay_ticks != WebNetFfaRespawnDelay()
+        || memcmp(initial, record.initial_participants, sizeof(initial)))
         return 0;
     if (record.version != SessionVersion || record.capacity != WebNetSlotCapacity()
         || record.participant_count != (u32)__builtin_popcount(record.slot_mask)

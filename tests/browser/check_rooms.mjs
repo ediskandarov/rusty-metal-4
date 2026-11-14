@@ -39,14 +39,19 @@ try {
   await a.locator("#settings-panel").waitFor();
   await a.getByText("Ada (you)", { exact: true }).waitFor();
   assert.equal(await a.locator("#edit-mode option").count(), 1);
-  assert.equal(await a.locator("#edit-mode").inputValue(), "deathmatch");
+  assert.equal(await a.locator("#edit-mode").inputValue(), "ffa");
   assert.equal(await a.locator("#edit-map").inputValue(), "construction-yard");
-  assert.equal(await a.locator("#edit-capacity").inputValue(), "8");
+  assert.equal(
+    await a.locator('[name="capacity"]').count(),
+    0,
+    "FFA has no configurable player limit",
+  );
+  assert.equal(await a.locator("#room-capacity").textContent(), "1 / 8 players");
   const invite = await a.locator("#invite-link").inputValue();
   assert.match(invite, /^http:\/\/[^/]+\/rooms\/[a-f0-9]{32}$/);
   await b.goto(url);
   await b.getByRole("link", { name: "Night shift", exact: true }).waitFor();
-  assert.equal(await b.locator(".room-mode").textContent(), "Deathmatch");
+  assert.equal(await b.locator(".room-mode").textContent(), "Free for all");
   assert.equal(await b.locator(".room-map").textContent(), "Construction Yard");
   assert.equal(await b.locator("#rooms .room-players").textContent(), "1 / 8");
   await b.screenshot({ path: "build/room-tests/directory.png", fullPage: true });
@@ -68,14 +73,13 @@ try {
   assert(await b.locator("#settings-panel").isHidden());
   await a.locator("#edit-name").fill("Oil crew");
   await a.locator("#edit-map").selectOption("the-oil-rig");
-  await a.locator("#edit-capacity").selectOption("2");
   await a.locator("#settings-form button").click();
   await b.locator("#room-name").filter({ hasText: "Oil crew" }).waitFor();
   assert.equal(await b.locator("#room-map").textContent(), "The Oil Rig");
   await a.reload();
   await a.locator("#settings-panel").waitFor();
   assert.equal(await a.locator("#participants li").count(), 2);
-  assert.equal(await a.locator("#room-capacity").textContent(), "2 / 2 players");
+  assert.equal(await a.locator("#room-capacity").textContent(), "2 / 8 players");
   assert.equal(await a.evaluate(() => document.cookie), "", "session credential is HttpOnly");
   const cookies = await contextA.cookies();
   assert(cookies.find((cookie) => cookie.name === "rm4_session").httpOnly);
@@ -93,10 +97,10 @@ try {
   await b.locator("#settings-panel").waitFor();
   await a.locator("#join-panel").waitFor();
   assert.equal(await b.locator("#participants li").count(), 1);
-  assert.equal(await b.locator("#room-free").textContent(), "1 place free");
+  assert.equal(await b.locator("#room-free").textContent(), "7 places free");
   await eventually(
     () => secondTab.locator("#rooms .room-players").textContent(),
-    (count) => count === "1 / 2",
+    (count) => count === "1 / 8",
   );
   assert.equal(await secondTab.locator("#rooms .room-name").textContent(), "Oil crew");
   assert.equal(await secondTab.locator("#rooms .room-map").textContent(), "The Oil Rig");
