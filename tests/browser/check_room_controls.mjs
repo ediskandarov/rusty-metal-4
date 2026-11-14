@@ -32,7 +32,8 @@ try {
           addEventListener('message', ({data}) => {
             window.commands.push(data);
             if (data.action === 'status') parent.postMessage({
-              type: 'rm4-player', roomId: data.roomId, event: 'status', message: data.message
+              type: 'rm4-player', roomId: data.roomId, event: 'status',
+              sessionId: data.sessionId, message: data.message
             }, location.origin);
           });
         </script>`,
@@ -107,7 +108,13 @@ try {
     ])
       parent.postMessage(message, location.origin);
     parent.postMessage(
-      { type: "rm4-player", roomId: id, event: "status", message: "Boundary checked" },
+      {
+        type: "rm4-player",
+        roomId: id,
+        event: "status",
+        sessionId: null,
+        message: "Boundary checked",
+      },
       location.origin,
     );
   }, id);
