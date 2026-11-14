@@ -34,7 +34,8 @@ h1 {
   margin: 0 0 28px;
   line-height: 1.1;
 }
-h2 {
+h2,
+h3 {
   margin-top: 0;
   font-size: 1.3rem;
 }
@@ -50,11 +51,27 @@ h2 {
   line-height: 1.05;
   text-decoration: none;
 }
-.single-player {
+.intro {
   margin-bottom: 48px;
 }
-.single-player p {
-  margin: 12px 0 0;
+.intro h1 {
+  max-width: 28ch;
+  margin-bottom: 16px;
+  font-size: clamp(1.6rem, 4vw, 2.1rem);
+  line-height: 1.2;
+}
+.intro p {
+  max-width: 60ch;
+  margin: 0 0 24px;
+}
+.intro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.network-heading {
+  font-size: 1.75rem;
+  scroll-margin-top: 24px;
 }
 section {
   background: #1d232c;
@@ -89,6 +106,11 @@ button,
   border-radius: 6px;
   cursor: pointer;
   text-decoration: none;
+}
+.button-secondary {
+  background: #1d232c;
+  color: #e6ebf3;
+  box-shadow: inset 0 0 0 1px #354151;
 }
 button:disabled {
   opacity: 0.6;

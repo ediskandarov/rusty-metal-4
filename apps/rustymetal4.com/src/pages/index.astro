@@ -1,21 +1,29 @@
 ---
 import Page from "../layouts/Page.astro";
+import { Content as Intro } from "../content/intro.md";
 import { Content as RoomHelp } from "../content/rooms.md";
 ---
 
 <Page title="Play">
-  <div class="single-player">
-    <a class="button" href="/play/">
-      Play Disk
-    </a>
-    <p>Play single-player using your own game disc.</p>
+  <div class="intro">
+    <Intro />
+    <div class="intro-actions">
+      <a class="button" href="/play/">
+        Play Disk
+      </a>
+      <a class="button button-secondary" href="#network-play">
+        Play Online
+      </a>
+    </div>
   </div>
-  <h1>Network Play</h1>
+  <h2 id="network-play" class="network-heading" tabindex="-1">
+    Network Play
+  </h2>
   <RoomHelp />
   <section data-page="directory" aria-labelledby="directory-heading">
-    <h2 id="directory-heading">
+    <h3 id="directory-heading">
       Available rooms (<span id="room-count">0</span>)
-    </h2>
+    </h3>
     <p id="directory-status" role="status">
       Connecting…
     </p>
@@ -25,7 +33,7 @@ import { Content as RoomHelp } from "../content/rooms.md";
     </div>
   </section>
   <section aria-labelledby="create-heading">
-    <h2 id="create-heading">Create room</h2>
+    <h3 id="create-heading">Create room</h3>
     <form id="create-form">
       <label for="create-player">
         Your name
