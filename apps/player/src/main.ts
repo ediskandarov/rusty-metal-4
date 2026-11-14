@@ -22,6 +22,9 @@ import { initializeSettings } from "./ui/settings.ts";
 import { initializeStartup } from "./ui/startup.ts";
 import { initializeTroubleshoot } from "./ui/troubleshoot.ts";
 
+const endpoint = new URLSearchParams(location.search).get("match");
+document.documentElement.classList.toggle("network-game", inRoom || !!endpoint);
+
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
 initializeFullscreen(canvas);
@@ -64,7 +67,6 @@ async function launch(
     prepareMods();
     await installCarMods(assets, selectedMods);
     startRuntime();
-    const endpoint = new URLSearchParams(location.search).get("match");
     const status = element("status", HTMLElement);
     const showMatchStatus = matchStatus(status);
     if (endpoint || inRoom) {

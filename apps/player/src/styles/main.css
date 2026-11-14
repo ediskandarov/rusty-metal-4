@@ -44,6 +44,9 @@ body {
 #video-controls[hidden] {
   display: none;
 }
+html.network-game :is(#cheat-settings, #mods, #startup-mods, #mod-drop-hint) {
+  display: none;
+}
 #video-controls select,
 #video-controls button {
   font: inherit;
