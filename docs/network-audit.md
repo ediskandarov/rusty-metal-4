@@ -74,15 +74,15 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   experiment safeguards, not proof against hostile public traffic; native-input
   amplification and all library-internal queue limits still need adversarial review.
 
-[Direct-startup checks](../tests/browser/check_network_startup.cjs) cover zero presented
+[Direct-startup checks](../tests/browser/check_network_startup.mjs) cover zero presented
 frames, 60 accepted steps repeated after stop/start, all eight control slots, a missing
 resource followed by retry, stale/incomplete tick rejection and blocked local cheats.
 Equality here covers the published gameplay checksums.
 
-[Admission checks](../tests/browser/check_network_admission.cjs) cover explicit
+[Admission checks](../tests/browser/check_network_admission.mjs) cover explicit
 rejection of an unsupported map and roster before the first predicted tick.
 
-[Rendered gameplay checks](../tests/browser/check_network.cjs) exercise nonzero-slot
+[Rendered gameplay checks](../tests/browser/check_network.mjs) exercise nonzero-slot
 control, car contact, weapon damage, a lethal hit, scoring, round completion and
 same-page C reinitialization.
 The diagnostic fixture places cars and adjusts target health identically in each
@@ -101,7 +101,7 @@ Detonation devices use a car handle and weapon slot. Stock projectile callbacks
 must agree with the loaded resource type. Keys and numeric IDs replace process pointers. Presentation voice IDs and GPU state
 stay out of the record.
 
-[The replay browser check](../tests/browser/check_network_replay.cjs) compares those
+[The replay browser check](../tests/browser/check_network_replay.mjs) compares those
 checksums per tick and encoded bytes at selected ticks across reset and a separate
 instance. Its scripted contact, target and crane setup runs identically on each direct
 simulation. The disk tests exercise an eight-slot 15-minute recording, forced
@@ -128,7 +128,7 @@ releases the history. The headless checkpoint test and the rendered live mode us
 the same allocator and world undo log. Bots, car packs, independent Wasm
 modules and sanitizer builds are outside the checkpoint scope.
 
-[The local checkpoint check](../tests/browser/check_local_checkpoint.cjs) uses
+[The local checkpoint check](../tests/browser/check_local_checkpoint.mjs) uses
 Orbital and Pizza Boy in an offline diagnostic browser reference. It restores tick 80 with a live projectile
 and compares the canonical bytes and all five subsystem checksums on each of 180
 replayed ticks, three times. Combat exercises steering, contact, weapon damage and
@@ -170,10 +170,10 @@ with Orbital and Pizza Boy. The checks include live weapon and grab state,
 Minion's freeze and thaw, the Oil Rig helicopter and its pickup drops, Neon City's
 train and UFO, The Carnival's coaster, and shared destructibles, jump pads,
 teleporters and fall hazards. The
-[independent browser check](../tests/browser/check_portable_checkpoint.cjs)
+[independent browser check](../tests/browser/check_portable_checkpoint.mjs)
 relocates both resource and simulation allocations and compares canonical bytes
 and all five checksums on each replayed tick.
-[Ground-fire coverage](../tests/browser/check_fire_ring_checkpoint.cjs) checks eight-player
+[Ground-fire coverage](../tests/browser/check_fire_ring_checkpoint.mjs) checks eight-player
 Oil Rig ignition, particle subdivision and expiry through repeated local replay and
 fresh-instance portable restoration, including terrain and child-animation links.
 
@@ -233,7 +233,7 @@ later mutations and discards later checkpoints. Eviction releases log entries ol
 than the oldest retained tick. Lightyear refuses corrections beyond 12 ticks, and
 the adapter stops the probe when that happens.
 
-[The browser probe check](../tests/browser/check_lightyear_rollback.cjs) compares
+[The browser probe check](../tests/browser/check_lightyear_rollback.mjs) compares
 canonical bytes and all five subsystem checksums on every repeated tick against an
 independent run of the final inputs. The peer releases scripted inputs over
 Lightyear on loopback, with the browser test advancing the fixed clock. This
@@ -318,10 +318,10 @@ fingerprints, accepted controls, outcomes and checksums.
 ## Running focused checks
 
 Build `bun run build:diagnostic`, then serve `bun run dev:diagnostic --port 18180`
-with separately configured local files. Run `bun tests/browser/check_local_checkpoint.cjs`
+with separately configured local files. Run `bun tests/browser/check_local_checkpoint.mjs`
 against that site to test same-instance rollback without a match server. For the
 native probe, run `cargo run --manifest-path network/Cargo.toml --features rollback_probe
---example rollback_peer -- 19326` and then `bun tests/browser/check_lightyear_rollback.cjs`.
+--example rollback_peer -- 19326` and then `bun tests/browser/check_lightyear_rollback.mjs`.
 Set `TM4_ROLLBACK_ENDPOINT` if using a different loopback port.
 To play a rendered match, start the site with your local disc and run
 `TM4_WEB_URL=http://127.0.0.1:18180/ bun run match 2`.
@@ -330,27 +330,27 @@ Set `TM4_MATCH_CARS='Microblast,Pizza Boy'` to choose stock cars by name or
 Open the printed match link in two browser windows. An empty lobby waits for
 the first player. After someone joins, the other players have five minutes to
 arrive. Start a new match server after the match has been played. The test
-`bun tests/browser/check_live_rollback.cjs` uses a fresh
+`bun tests/browser/check_live_rollback.mjs` uses a fresh
 embedded Rust match server. Supply its endpoint; the browser reference consumes
 accepted Frame records only and never sends simulation results to the server. It conditions client receive traffic
 at 72±12 ms by default and uses real keyboard input in both rendered clients.
-Run `bun tests/browser/check_prediction_start.cjs` with a fresh server to
-exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.cjs`
+Run `bun tests/browser/check_prediction_start.mjs` with a fresh server to
+exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.mjs`
 with a fresh server to exercise the embedded authority and both clients' default
 render settings. Set `TM4_MANUAL_BROWSER=webkit` for Playwright WebKit
 and `TM4_MANUAL_WINDOW_WAIT=1` to exercise pause and resume at the bound. Set `TM4_CLOCK_FREEZE_MS=700` to
 suspend the receiving tab during the first offer. The standalone rendered browser check
-`bun tests/browser/check_rollback_audio.cjs` uses the real mixer to check finite
+`bun tests/browser/check_rollback_audio.mjs` uses the real mixer to check finite
 sounds and an ongoing loop across repeated C restores. Set `TM4_LIVE_DELAY_MS` and `TM4_LIVE_JITTER_MS` to try other profiles. Set
 `TM4_LIVE_SCREENSHOT_DIR` to save compositor screenshots.
 
-Run `bun tests/browser/check_portable_checkpoint.cjs` against the diagnostic
-site. Run `bun tests/browser/check_fire_ring_checkpoint.cjs` on the same site for
+Run `bun tests/browser/check_portable_checkpoint.mjs` against the diagnostic
+site. Run `bun tests/browser/check_fire_ring_checkpoint.mjs` on the same site for
 terrain-bound and radius-limited fire rings. The sparse preparation fixture uses the ordinary match path without a production
 roster override. With matching diagnostic build/resources, start
 `cargo +1.95.0 test --manifest-path network/Cargo.toml --features rollback_probe sparse_match_browser_fixture -- --ignored --nocapture`
 from the pinned Rust environment, supplying `TM4_MATCH_LISTEN` and the usual
-simulation/resource paths and an absolute checkout-local `TM4_JOURNAL_DIR`. Then run `bun tests/browser/check_sparse_slots.cjs`
+simulation/resource paths and an absolute checkout-local `TM4_JOURNAL_DIR`. Then run `bun tests/browser/check_sparse_slots.mjs`
 with that endpoint and site URL. Stop the fixture process afterwards.
 For authenticated room coverage, start `sparse_room_match_browser_fixture` instead
 and set `TM4_SPARSE_ROOM=1` on the browser command. The focused Wasmtime test is
@@ -369,7 +369,7 @@ On Road Rage, use `TM4_PORTABLE_SCENERY=1` with
 Set `TM4_TEST_CAR` to a stock car name to select it in the combat fixture.
 For the helicopter test, set `TM4_TEST_WORLD='The Oil Rig'`, optionally with
 `TM4_PORTABLE_OIL_DESTROYED=1` to capture after the destruction and debris.
-Run `node tests/browser/check_snapshot_reconnect.cjs` with a fresh embedded
+Run `node tests/browser/check_snapshot_reconnect.mjs` with a fresh embedded
 server's endpoint. Set `TM4_MATCH_PLAYERS` to match its roster size and
 `TM4_RESUME_SLOT` to the zero-based participant to reconnect. Set
 `TM4_RESUME_COMBAT=1` to exercise a second native rollback through the imported
@@ -382,7 +382,7 @@ retarget budget, then verify a fresh retry. Set `TM4_RESUME_TEST_TICKS=3600` for
 two-minute live prelude or `TM4_RESUME_EXACT_WINDOW=1` to test handoff at the
 12-tick prediction limit.
 
-`node tests/browser/check_network_rosters.cjs` exercises rendered rosters with
+`node tests/browser/check_network_rosters.mjs` exercises rendered rosters with
 `TM4_MATCH_PLAYERS`, `TM4_LIVE_DELAY_MS`, `TM4_LIVE_JITTER_MS` and
 `TM4_ROSTER_TICKS`. Set `TM4_ROSTER_COMBAT=1` for sustained firing and
 `TM4_MIXED_COMBAT=1` with `TM4_MATCH_CARS='Minion,Super Auger'` and
@@ -401,9 +401,9 @@ Start a fresh match server for each network test with
 `TM4_MATCH_ENDPOINT=ws://127.0.0.1:18182` and
 `TM4_WEB_URL=http://127.0.0.1:18180/` to the browser fixtures. Run
 
-`bun tests/browser/check_network_admission.cjs` for unknown-map refusal, or set
+`bun tests/browser/check_network_admission.mjs` for unknown-map refusal, or set
 `TM4_ADMISSION_SCENARIO=roster` on a fresh server for the car callback refusal.
-`bun tests/browser/check_network_replay.cjs` runs direct replay diagnostics without
+`bun tests/browser/check_network_replay.mjs` runs direct replay diagnostics without
 a match server.
 
 The server writes to `build/network-journals` by default. Set `TM4_JOURNAL_DIR`
@@ -472,8 +472,8 @@ client, presentation, Lightyear rollback and reconnect tests retain their own co
 
 For synchronized live combat fixtures, explicitly use the diagnostic server build:
 `TM4_TEST_ACTIONS=build/live-actions.json bun run match 2 --diagnostic`, with the same
-absolute or checkout-relative `TM4_TEST_ACTIONS` path passed to `check_network.cjs` or
-`check_live_rollback.cjs`. This local file contains only stock selections and scheduled
+absolute or checkout-relative `TM4_TEST_ACTIONS` path passed to `check_network.mjs` or
+`check_live_rollback.mjs`. This local file contains only stock selections and scheduled
 fixture calls. The Rust `rollback_probe` feature and diagnostic C exports are both
 required; the ordinary server rejects the setting. It creates no debug socket or
 remote control protocol. The live fixture's independent browser C oracle replays

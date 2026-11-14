@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { observeAcceptedFrames } from "../browser/simulation_reference.cjs";
+import { observeAcceptedFrames } from "../browser/simulation_reference.mjs";
 
 test("the browser oracle uses exact authority identities, including reused and high IDs", async () => {
   for (const participants of [

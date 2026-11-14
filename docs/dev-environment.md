@@ -119,7 +119,7 @@ the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 ## Browser checks
 
 Run from the repository root. All Chromium scenarios use
-`tests/browser/helpers/browser.cjs`: `TM4_CHROME` selects an executable; otherwise
+`tests/browser/helpers/browser.mjs`: `TM4_CHROME` selects an executable; otherwise
 macOS uses installed Chrome when available and other hosts use Playwright Chromium.
 Install the latter with `bunx playwright install chromium` if needed. Specialized
 scenario flags (timing, audio, background tabs) remain local to their tests.
@@ -128,11 +128,11 @@ scenario flags (timing, audio, background tabs) remain local to their tests.
   control capture/persistence, panel switching and narrow layouts. Point
   `TM4_WEB_URL` at a running dev or release site (default: port 8080). Dev can use
   its configured local disc; for release set `TM4_DISC_DIR` to select a folder.
-- `check_loader.cjs` and `check_resources.cjs` use the release folder picker and
+- `check_loader.mjs` and `check_resources.mjs` use the release folder picker and
   need a local disc (`TM4_DISC_DIR` or `.local/dev.json`). They do not require
   diagnostic exports. Set `TM4_WEB_URL` explicitly for these scenarios.
-- Gameplay checks such as `check_controls.cjs`, `check_render_settings.cjs` and
-  `check_render_scale.cjs` require `bun run build:diagnostic`. Serve that site's
+- Gameplay checks such as `check_controls.mjs`, `check_render_settings.mjs` and
+  `check_render_scale.mjs` require `bun run build:diagnostic`. Serve that site's
   directory and pass its URL through `TM4_WEB_URL`. Their shared
   `startDiagnosticGame` rejects ordinary Wasm with a build hint instead of waiting
   for nonexistent game counters. Match scenarios additionally need the server
@@ -178,7 +178,7 @@ only when working on the retained container infrastructure.
   the diagnostic native binary, and `TM4_DISC_DIR`. Its existing combat fixture
   positions a lethal duel; normal engine results release the process and a second
   match uses the same room. It does not verify deployed Cloudflare containers.
-- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_live_membership.cjs`: four
+- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_live_membership.mjs`: four
   independent browsers use ordinary room actions to admit, depart, reuse a seat,
   reject retired credentials and recover the same identity. Reloading a preparing
   iframe after predicted admission verifies cancellation through Lightyear's actual

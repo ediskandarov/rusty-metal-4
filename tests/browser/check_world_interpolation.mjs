@@ -1,0 +1,227 @@
+import assert from "node:assert/strict";
+
+/* global Module, tm4Port */
+import diagnostics from "./browser_diagnostics.mjs";
+import { launchBrowser } from "./helpers/browser.mjs";
+import { startDiagnosticGame, togglePanel } from "./helpers/player.mjs";
+
+const step = Number(process.env.TM4_SMOOTHING_STEP ?? "7");
+assert(Number.isInteger(step) && step >= 0 && step <= 7, "choose a smoothing slider step");
+const lead = step === 7 ? 0 : 1 - (step * 5) / (1000 / 30);
+
+function motionPairs(samples, predicate) {
+  const pairs = [];
+  const first = new Map();
+  for (const sample of samples.filter(predicate)) {
+    const key = sample.address + "/" + sample.id + "/" + sample.tick;
+    const previous = first.get(key);
+    if (!previous) first.set(key, sample);
+    else if (previous.frame !== sample.frame) {
+      assert.deepEqual(sample.live, previous.live, "rendering changed the live pose");
+      pairs.push([previous, sample]);
+    }
+  }
+  return pairs;
+}
+
+const browser = await launchBrowser({ args: ["--disable-frame-rate-limit"] });
+const page = await browser.newPage({ viewport: { width: 720, height: 540 } });
+const errors = [];
+page.on("pageerror", (error) => errors.push(String(error)));
+await diagnostics(page);
+const menu = (name) =>
+  page.waitForFunction((name) => tm4Port.screen === name && tm4Port.menuReady, name, {
+    timeout: 30000,
+  });
+const press = async (key, down = 150) => {
+  await page.keyboard.down(key);
+  await page.waitForTimeout(down);
+  await page.keyboard.up(key);
+  await page.waitForTimeout(150);
+};
+const start = () =>
+  page.evaluate(() => {
+    tm4Port.motionSamples = [];
+    Module._WebTestCaptureMotion(1);
+  });
+const stop = () =>
+  page.evaluate(() => {
+    Module._WebTestCaptureMotion(0);
+    return tm4Port.motionSamples;
+  });
+try {
+  await page.goto(process.env.TM4_WEB_URL || "http://127.0.0.1:8080/");
+  await startDiagnosticGame(page);
+  await togglePanel(page, "render-settings");
+  await page.selectOption("#render-preset", "ps1");
+  await togglePanel(page, "render-settings");
+  await page.locator("canvas").click();
+  await press("x");
+  await menu("newgame");
+  await press("x");
+  await menu("carsel");
+  await press("x");
+  await page.waitForFunction(() => tm4Port.screen === "level" && tm4Port.levelFrames > 30, null, {
+    timeout: 30000,
+  });
+
+  assert.equal(await page.evaluate(() => Module._WebTestPlaceMotionPickups()), 2);
+  const smoothing = page.locator("#render-smoothing");
+  await togglePanel(page, "render-settings");
+  const verifyOff = async () => {
+    await start();
+    await page.waitForTimeout(200);
+    const samples = await stop();
+    assert(samples.some(({ pickup }) => pickup));
+    for (const { live, render, history } of samples) {
+      assert.deepEqual(live, render);
+      assert.equal(history, false);
+    }
+  };
+  assert.equal(await smoothing.isChecked(), false);
+  await verifyOff();
+  await page.selectOption("#render-limit", "120");
+  await smoothing.check();
+  await page.locator("#render-smoothing-delay").fill(String(step));
+  await page.waitForFunction(
+    (lead) => tm4Port.renderSmoothing && tm4Port.renderSmoothingLead === lead,
+    lead,
+  );
+  await start();
+  await page.waitForTimeout(1700);
+  const pickups = await stop();
+  for (const [name, isPickup] of [
+    ["health", (sample) => sample.pickup && sample.name.startsWith("health")],
+    ["weapon", (sample) => sample.pickup && !/^(health|turbo)/i.test(sample.name)],
+  ]) {
+    const pairs = motionPairs(pickups, isPickup);
+    const example = pairs.find(([a, b]) => a.render[3] !== b.render[3]);
+    assert(example, name + " has different rendered angles during one simulation tick");
+    assert(
+      pairs.some(([a]) => Math.abs(a.live[3] - a.render[3]) > 3896),
+      name + " crosses angle wrap on the shorter arc",
+    );
+    for (const { live, render, fraction } of pickups.filter(isPickup)) {
+      const angleDelta = ((render[3] - live[3] + 2048) & 4095) - 2048;
+      assert(Math.abs(angleDelta) <= 200);
+      assert(angleDelta * (fraction - 1) >= 0, "pickup rotates in the sampling direction");
+    }
+    assert(
+      pairs.some(([a, b]) => a.render[1] !== b.render[1]),
+      name + " has an intermediate bob height",
+    );
+    console.log("PICKUP", example);
+  }
+
+  await togglePanel(page, "render-settings");
+  await page.locator("canvas").click();
+  assert((await page.evaluate(() => Module._WebTestPlaceEnergyTarget(0))) > 0);
+  const gunMask = await page.evaluate(() => tm4Port.controlBindings[8]);
+  const keys = [
+    "w",
+    "e",
+    "q",
+    "r",
+    "s",
+    "d",
+    "x",
+    "z",
+    "Backspace",
+    "1",
+    "2",
+    "Enter",
+    "ArrowUp",
+    "ArrowRight",
+    "ArrowDown",
+    "ArrowLeft",
+  ];
+  const gun = keys[Math.log2(gunMask)];
+  assert(gun, "machine guns have one digital binding");
+  const impacts = await page.evaluate(() => tm4Port.bulletImpacts || 0);
+  await start();
+  await press(gun, 700);
+  await page.waitForFunction((impacts) => tm4Port.bulletImpacts > impacts, impacts);
+  await page.waitForTimeout(350);
+  const tracers = await stop();
+  verifyFlight(tracers, "bullet head");
+  verifyFlight(tracers, "bullet tail");
+  for (const shot of tracers.filter(
+    (sample) => sample.name.startsWith("bullet ") && sample.impact,
+  )) {
+    assert.deepEqual(shot.live, shot.render, "clipped tracer uses its impact segment");
+    assert.equal(shot.history, false);
+  }
+  for (const [slot, name] of [
+    [6, "Speed"],
+    [7, "Rain"],
+  ]) {
+    assert((await page.evaluate((slot) => Module._WebTestSupplyWeapon(slot), slot)) > 0);
+    for (let i = 0; i < 21 && (await page.evaluate(() => tm4Port.carSelectedWeapon)) !== slot; ++i)
+      await press("r");
+    assert.equal(await page.evaluate(() => tm4Port.carSelectedWeapon), slot);
+    await start();
+    await press("w", 60);
+    await page.waitForFunction((name) => tm4Port.playerProjectileRemoved?.[name] > 0, name, {
+      timeout: 15000,
+    });
+    const removalFrame = await page.evaluate(() => tm4Port.levelFrames);
+    await page.waitForFunction((frame) => tm4Port.levelFrames >= frame + 4, removalFrame);
+    const projectiles = await stop();
+    const shot = projectiles.filter((sample) => sample.name === name);
+    assert(shot.length, name + " was drawn");
+    assert.equal(shot[0].history, false, name + " starts at its actual spawn pose");
+    assert.deepEqual(shot[0].live, shot[0].render);
+    assert(
+      shot.every((sample) => sample.frame <= removalFrame),
+      name + " leaves no ghost",
+    );
+    for (const sample of shot.filter((sample) => sample.impact)) {
+      assert.equal(sample.history, false, name + " cuts on impact");
+      assert.deepEqual(sample.live, sample.render);
+    }
+    verifyFlight(projectiles, name);
+  }
+
+  await start();
+  const address = await page.evaluate(() => Module._WebTestSpawnMotionFireball());
+  assert(address > 0);
+  const frame = await page.evaluate(() => tm4Port.levelFrames);
+  await page.waitForFunction((frame) => tm4Port.levelFrames >= frame + 20, frame);
+  const fireballs = (await stop()).filter((sample) => sample.address === address);
+  assert(fireballs.length, "diagnostic fireball was drawn");
+  assert.equal(fireballs[0].history, false);
+  verifyFlight(fireballs, "weaponFireball");
+
+  function verifyFlight(samples, name) {
+    const poses = new Map();
+    for (const sample of samples.filter((sample) => sample.name === name))
+      poses.set(sample.address + "/" + sample.id + "/" + sample.tick, sample.live);
+    const pairs = motionPairs(samples, (sample) => sample.name === name);
+    const example = pairs.find(([a, b]) => {
+      const before = poses.get(a.address + "/" + a.id + "/" + (a.tick - 1));
+      if (!before || !a.history || !b.history) return false;
+      const atPhase = ({ render, live, fraction }) =>
+        render
+          .slice(0, 3)
+          .every(
+            (value, i) => Math.abs(value - (before[i] + fraction * (live[i] - before[i]))) <= 1,
+          );
+      return (
+        atPhase(a) && atPhase(b) && a.render.slice(0, 3).some((value, i) => value !== b.render[i])
+      );
+    });
+    assert(example, name + " has different rendered positions during one simulation tick");
+    console.log("PROJECTILE", example);
+  }
+
+  if (!(await page.locator("#render-settings").evaluate((node) => node.open)))
+    await togglePanel(page, "render-settings");
+  await smoothing.uncheck();
+  await page.waitForFunction(() => !tm4Port.renderSmoothing);
+  assert.equal(await page.evaluate(() => Module._WebTestPlaceMotionPickups()), 2);
+  await verifyOff();
+  assert.deepEqual(errors, []);
+  console.log("PASS world motion, spawn/despawn, unchanged live poses and toggle");
+} finally {
+  await browser.close();
+}
