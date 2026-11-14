@@ -307,7 +307,7 @@
      return 1;
  }
 
-@@ -465,8 +484,7 @@
+@@ -465,9 +484,8 @@
      }
  }
 
@@ -317,6 +317,7 @@
 -    Car* car = payload;
      void (*destructor)(Car*, void*);
      CarCollisionHistory *node, *next;
+     CarAiDestructor(car);
 @@ -492,6 +509,12 @@
          node = next;
      }

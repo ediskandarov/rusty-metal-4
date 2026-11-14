@@ -27,7 +27,7 @@
          s32 object_distance_squared, world_distance_squared;
          {
              const Tm4ShortVectorXYZ* a = &object->impact.fields.world_position;
-@@ -149,8 +150,9 @@
+@@ -149,9 +150,10 @@
          }
          world_distance_squared = hit_delta.vx * hit_delta.vx + hit_delta.vy * hit_delta.vy
              + hit_delta.vz * hit_delta.vz;
@@ -39,7 +39,8 @@
 +        } else
              object->motion.fields.world_impact = 0;
      }
-@@ -162,10 +164,10 @@
+     if (object->motion.fields.world_impact) {
+@@ -162,11 +164,11 @@
                  ObjectGetHeader(payload), ObjectGetHeader(object->collision.owner));
          return 0;
      }
@@ -52,6 +53,7 @@
 +        if (!object->hit_object || !ObjectValidObject(object->hit_object))
              return 0;
          if (!strcmp(ObjectGetHeader(object->hit_object)->name, BulletCarClassName)) {
+             Car* car = object->hit_object;
 @@ -235,7 +238,7 @@
      material = WorldTrackData[object->collision.surface.fields.material].kind;
      Import_SpawnExplosion(
@@ -112,7 +114,7 @@
  
 --- a/src/modules/weap/effects.c
 +++ b/src/modules/weap/effects.c
-@@ -79,7 +79,7 @@
+@@ -79,8 +79,8 @@
  void ProjectileApplyImpact(WeaponProjectile* projectile)
  {
      Bullet* bullet = &projectile->bullet;
@@ -122,9 +124,10 @@
 +        if (projectile->bullet.hit_object && GameIsCarRegistered(projectile->bullet.hit_object)) {
              SVECTOR position, forward;
              VECTOR force;
+             Tm4ObjectHeader* header;
 --- a/src/modules/weap/fireball.c
 +++ b/src/modules/weap/fireball.c
-@@ -141,11 +141,11 @@
+@@ -141,13 +141,13 @@
      SVECTOR direction;
      VECTOR velocity;
      s32 collisions, dot, speed;
@@ -138,6 +141,8 @@
 -        if (GameIsCarRegistered(projectile->bullet.hit_object))
 +        if (projectile->bullet.hit_object && GameIsCarRegistered(projectile->bullet.hit_object))
              WeapImports.car_apply_damage(projectile->bullet.hit_object,
+                 ObjectGetHeader(projectile)->owner, projectile->damage,
+                 &projectile->bullet.impact.vector, TextWeaponKillMessage,
 --- a/src/main/object/object.c
 +++ b/src/main/object/object.c
 @@ -1,6 +1,7 @@

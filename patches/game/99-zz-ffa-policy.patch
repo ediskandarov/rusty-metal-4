@@ -35,10 +35,12 @@
  #include "tm4/main/game.h"
  #include "tm4/modules/car.h"
  
-@@ -619,5 +620,6 @@
+@@ -619,7 +620,8 @@
      } else
          --GameInfo.active_computer_count;
      WebParticipantCarRemoved(car);
 +    WebFfaCarRemoved(car->controller_index);
  }
  #endif
+
+ #if !defined(TM4_GAME_FUNCTION) || TM4_GAME_FUNCTION == 0x80038410
