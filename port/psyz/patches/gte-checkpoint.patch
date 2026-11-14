@@ -1,14 +1,15 @@
 --- a/psyz/libgte.c
 +++ b/psyz/libgte.c
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,8 @@
  #include <assert.h>
 +#ifdef __EMSCRIPTEN__
++#include <stddef.h>
 +#include <string.h>
 +#endif
  #ifdef _MSC_VER
  #include <intrin.h>
  #endif
-@@ -1255,6 +1258,23 @@
+@@ -1255,6 +1259,65 @@
  static MATRIX s_matrixStack[20];
  static int s_matrixStackDepth = 0;
  
@@ -27,6 +28,48 @@
 +    assert(s_matrixStackDepth == 0);
 +    memcpy(&gte, input, sizeof(gte));
 +}
++
++static void web_matrix_padding(MATRIX* matrix, unsigned char value)
++{
++    memset((unsigned char*)matrix + sizeof(matrix->m), value,
++        offsetof(MATRIX, t) - sizeof(matrix->m));
++}
++
++static void web_gte_padding(__typeof__(gte)* state, unsigned char value)
++{
++    memset(&state->v0.pad, value, sizeof(state->v0.pad));
++    memset(&state->v1.pad, value, sizeof(state->v1.pad));
++    memset(&state->v2.pad, value, sizeof(state->v2.pad));
++    web_matrix_padding(&state->m, value);
++    web_matrix_padding(&state->l1, value);
++    web_matrix_padding(&state->l2, value);
++    const size_t begin = offsetof(__typeof__(gte), sz3) + sizeof(state->sz3);
++    memset((unsigned char*)state + begin, value, offsetof(__typeof__(gte), mac0) - begin);
++}
++
++/* Portable snapshots omit padding values without changing live GTE/checkpoint state. */
++unsigned int WebSnapshotGteCapture(void* output, unsigned int capacity)
++{
++    __typeof__(gte) state;
++    if (!WebCheckpointGteCapture(&state, sizeof(state)) || capacity < sizeof(state))
++        return 0;
++    web_gte_padding(&state, 0);
++    memcpy(output, &state, sizeof(state));
++    return sizeof(state);
++}
++
++#ifdef TM4_WEB_TEST_HOOKS
++unsigned int WebTestGtePadding(unsigned int value)
++{
++    if (value < 256)
++        web_gte_padding(&gte, value);
++    unsigned int hash = 2166136261u;
++    const unsigned char* bytes = (const unsigned char*)&gte;
++    for (size_t i = 0; i < sizeof(gte); ++i)
++        hash = (hash ^ bytes[i]) * 16777619u;
++    return hash;
++}
++#endif
 +#endif
 +
  void PushMatrix(void) {

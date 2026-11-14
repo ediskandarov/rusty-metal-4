@@ -15,7 +15,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 10,
+    SessionVersion = 11,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -67,7 +67,7 @@ typedef struct {
     HealthRecord health[ArrayCount(CarHealthPickups)];
 } SessionRecord;
 
-u32 WebCheckpointGteCapture(void* output, u32 capacity);
+u32 WebSnapshotGteCapture(void* output, u32 capacity);
 void WebCheckpointGteRestore(const void* input);
 void WebCheckpointSetRandomState(u32 random, u32 effects);
 
@@ -181,7 +181,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
         return 0;
     int depth = registry_path(
         RegGetDirectoryPtrS("/"), RegGetCurrentDirectoryPtr(), record.registry_path, 0);
-    record.gte_length = WebCheckpointGteCapture(record.gte, sizeof(record.gte));
+    record.gte_length = WebSnapshotGteCapture(record.gte, sizeof(record.gte));
     if (depth < 0 || !record.gte_length)
         return 0;
     record.registry_depth = depth;
@@ -214,6 +214,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
             .camera_distance_preset = player->camera_distance_preset,
             .input = PadJpad[slot],
         };
+        record.players[slot].input.reserved03 = 0;
     }
     for (unsigned i = 0; i < OBJECT_LIST_COUNT; ++i)
         record.lists[i] = object_handle(ObjectLists[i].first);
@@ -349,7 +350,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         || record.device_count > MaxDevices || record.health_count > ArrayCount(record.health)
         || !record.squares || record.squares != square_count()
         || length != sizeof(record) + record.squares * sizeof(SquareRecord) || !record.gte_length
-        || record.gte_length != WebCheckpointGteCapture(current_gte, sizeof(current_gte)))
+        || record.gte_length != WebSnapshotGteCapture(current_gte, sizeof(current_gte)))
         return 0;
     RegistryDirectory* directory = RegGetDirectoryPtrS("/");
     for (u32 i = 0; directory && i < record.registry_depth; ++i) {
@@ -505,6 +506,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         GameInfo.players[slot].eliminated = player->eliminated;
         GameInfo.players[slot].camera_distance_preset = player->camera_distance_preset;
         PadJpad[slot] = player->input;
+        PadJpad[slot].reserved03 = 0;
     }
     WebParticipantRestore(&record.participants);
     WebNetRestoreParticipantConfiguration();

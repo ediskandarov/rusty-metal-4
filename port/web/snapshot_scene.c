@@ -103,9 +103,12 @@ static const SnapshotField teleporter_fields[] = {
 };
 
 static const SnapshotField camera_fields[] = {
-    SNAP_POD(Camera, camera_to_world),
-    SNAP_POD(Camera, world_to_camera),
-    SNAP_POD(Camera, previous_camera_to_world),
+    SNAP_POD(Camera, camera_to_world.m),
+    SNAP_POD(Camera, camera_to_world.t),
+    SNAP_POD(Camera, world_to_camera.m),
+    SNAP_POD(Camera, world_to_camera.t),
+    SNAP_POD(Camera, previous_camera_to_world.m),
+    SNAP_POD(Camera, previous_camera_to_world.t),
     SNAP_DERIVED(Camera, object),
     SNAP_DERIVED(Camera, data),
     SNAP_DERIVED(Camera, process),
@@ -181,8 +184,14 @@ static const SnapshotCustomClass car_jump_class = {
 
 static const SnapshotField car_jump_fields[] = {
     SNAP_REQUIRED(CarJump, car, "car"),
-    SNAP_POD(CarJump, world_position),
-    SNAP_POD(CarJump, frame_displacement),
+    SNAP_POD(CarJump, world_position.vx),
+    SNAP_POD(CarJump, world_position.vy),
+    SNAP_POD(CarJump, world_position.vz),
+    SNAP_TRANSIENT(CarJump, world_position.pad),
+    SNAP_POD(CarJump, frame_displacement.vx),
+    SNAP_POD(CarJump, frame_displacement.vy),
+    SNAP_POD(CarJump, frame_displacement.vz),
+    SNAP_TRANSIENT(CarJump, frame_displacement.pad),
     SNAP_POD(CarJump, frames_left),
     { 0 },
 };

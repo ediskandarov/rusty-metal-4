@@ -737,3 +737,126 @@ test("unused effect bytes cannot change hashes, snapshots or subsequent ticks", 
     assert.deepEqual(restored.canonical(), expected[tick], `portable recovery tick ${tick}`);
   }
 });
+
+test("portable padding is canonical while local rollback retains raw state", async () => {
+  const world = await simulation();
+  for (let tick = 0; tick < 10; ++tick) world.step();
+  const canonical = world.canonical();
+  const snapshot = world.snapshot();
+  const fields = [
+    "car matrices",
+    "camera matrices",
+    "car positions",
+    "particles",
+    "springs",
+    "car lights",
+    "input history",
+    "PadCache",
+    "crane",
+  ];
+  for (let field = 0; field < fields.length; ++field) {
+    for (const value of [0x66, 0xff, 0]) {
+      assert.ok(world.x.WebTestSetSnapshotPadding(field, value), fields[field]);
+      assert.deepEqual(world.canonical(), canonical, `${fields[field]} checksum`);
+      assert.deepEqual(world.snapshot(), snapshot, `${fields[field]} portable bytes`);
+    }
+    world.x.WebTestSetSnapshotPadding(field, 0xff);
+  }
+  for (const value of [0x66, 0xff, 0]) {
+    const raw = world.x.WebTestGtePadding(value);
+    assert.deepEqual(world.canonical(), canonical, "GTE checksum");
+    assert.deepEqual(world.snapshot(), snapshot, "GTE portable bytes");
+    assert.equal(world.x.WebTestGtePadding(0xffffffff), raw, "capture must not mutate live GTE");
+  }
+  const poisonedGte = world.x.WebTestGtePadding(0xff);
+  assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+  const expected = [];
+  for (let tick = 0; tick < 120; ++tick) {
+    world.step();
+    expected.push(world.canonical());
+  }
+  assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+  assert.equal(world.x.WebTestGtePadding(0xffffffff), poisonedGte, "rollback restores raw GTE");
+  for (let field = 0; field < fields.length; ++field) world.x.WebTestSetSnapshotPadding(field, 0);
+  world.x.WebTestGtePadding(0);
+  for (let tick = 0; tick < expected.length; ++tick) {
+    world.step();
+    assert.deepEqual(world.canonical(), expected[tick], `normalized rollback tick ${tick}`);
+  }
+  assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+  const restored = await simulation();
+  restored.restore(snapshot);
+  restored.x.WebNetEndReplay();
+  assert.deepEqual(restored.snapshot(), snapshot, "canonical round trip");
+  for (let tick = 0; tick < expected.length; ++tick) {
+    restored.step();
+    assert.deepEqual(restored.canonical(), expected[tick], `portable recovery tick ${tick}`);
+  }
+});
+
+for (const [kind, name, fields] of [
+  [0, "bomb", [0]],
+  [1, "ray", [1, 2, 3]],
+  [2, "lightning", [4, 5, 6, 7]],
+  [3, "light emitter", [8, 9, 10]],
+  [4, "jump", [11, 12]],
+]) {
+  test(`rare effect padding: ${name} survives rollback and portable recovery`, async () => {
+    const world = await simulation();
+    for (let tick = 0; tick < 10; ++tick) world.step();
+    assert.equal(world.x.WebTestCreateRarePaddingEffect(kind), 1, "real constructor succeeds");
+    const canonical = world.canonical();
+    const snapshot = world.snapshot();
+    assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+    for (const field of fields) {
+      for (const value of [0x66, 0xff, 0]) {
+        assert.ok(world.x.WebTestRareEffectPadding(field, value), `field ${field} is live`);
+        assert.deepEqual(world.canonical(), canonical, `field ${field} checksum`);
+        assert.deepEqual(world.snapshot(), snapshot, `field ${field} portable bytes`);
+      }
+    }
+    const expected = [],
+      coverage = [],
+      snapshots = [[0, snapshot]];
+    for (let tick = 0; tick < 120; ++tick) {
+      // Re-poison each tick: game code may copy or overwrite these bytes.
+      coverage.push(fields.map((field) => world.x.WebTestRareEffectPadding(field, 0xff)));
+      world.step();
+      expected.push(world.canonical());
+      if ([0, 2, 5, 15, 60].includes(tick)) snapshots.push([tick + 1, world.snapshot()]);
+    }
+    assert.ok(
+      coverage[1].every((count) => count > 0),
+      "effect remains live after processing",
+    );
+    if (kind === 4)
+      assert.ok(
+        coverage[8].every((count) => count === 0),
+        "jump expires normally",
+      );
+    assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+    for (let tick = 0; tick < expected.length; ++tick) {
+      for (const [index, field] of fields.entries())
+        assert.equal(world.x.WebTestRareEffectPadding(field, 0), coverage[tick][index]);
+      world.step();
+      assert.deepEqual(world.canonical(), expected[tick], `normalized rollback tick ${tick}`);
+    }
+    assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+    for (const [nextTick, bytes] of snapshots) {
+      const restored = await simulation();
+      restored.restore(bytes);
+      restored.x.WebNetEndReplay();
+      assert.deepEqual(restored.snapshot(), bytes, `round trip at ${nextTick}`);
+      for (let tick = nextTick; tick < expected.length; ++tick) {
+        for (const [index, field] of fields.entries())
+          assert.equal(restored.x.WebTestRareEffectPadding(field, 0), coverage[tick][index]);
+        restored.step();
+        assert.deepEqual(
+          restored.canonical(),
+          expected[tick],
+          `portable tick ${tick} from ${nextTick}`,
+        );
+      }
+    }
+  });
+}

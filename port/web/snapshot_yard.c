@@ -8,12 +8,16 @@ static const SnapshotCustomClass crane_control_class = {
 };
 
 static const SnapshotField crane_fields[] = {
-    SNAP_POD(Crane, transform),
+    SNAP_POD(Crane, transform.m),
+    SNAP_POD(Crane, transform.t),
     SNAP_POD(Crane, rotation_angle),
     SNAP_LOCAL(Crane, pivot),
     SNAP_LOCAL(Crane, rotation_speed_per_second),
     SNAP_LOCAL(Crane, camera_pose),
-    SNAP_POD(Crane, magnet_position),
+    SNAP_POD(Crane, magnet_position.vx),
+    SNAP_POD(Crane, magnet_position.vy),
+    SNAP_POD(Crane, magnet_position.vz),
+    SNAP_TRANSIENT(Crane, magnet_position.pad),
     SNAP_LOCAL(Crane, magnet_radius),
     SNAP_LOCAL(Crane, spring_force_scale),
     SNAP_LOCAL(Crane, damping_force_scale),

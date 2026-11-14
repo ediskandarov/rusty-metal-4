@@ -186,9 +186,18 @@ static const SnapshotField light_fields[] = {
     SNAP_POD(LightEmitter, flags),
     SNAP_POD(LightEmitter, color),
     SNAP_POD(LightEmitter, intensity_q12),
-    SNAP_POD(LightEmitter, previous_world_position),
-    SNAP_POD(LightEmitter, world_position),
-    SNAP_POD(LightEmitter, direction_world),
+    SNAP_POD(LightEmitter, previous_world_position.vx),
+    SNAP_POD(LightEmitter, previous_world_position.vy),
+    SNAP_POD(LightEmitter, previous_world_position.vz),
+    SNAP_TRANSIENT(LightEmitter, previous_world_position.pad),
+    SNAP_POD(LightEmitter, world_position.vx),
+    SNAP_POD(LightEmitter, world_position.vy),
+    SNAP_POD(LightEmitter, world_position.vz),
+    SNAP_TRANSIENT(LightEmitter, world_position.pad),
+    SNAP_POD(LightEmitter, direction_world.vx),
+    SNAP_POD(LightEmitter, direction_world.vy),
+    SNAP_POD(LightEmitter, direction_world.vz),
+    SNAP_TRANSIENT(LightEmitter, direction_world.pad),
     { 0 },
 };
 
@@ -198,7 +207,8 @@ static const SnapshotKeyBinding bomb_keys = { offsetof(WeaponBombType, name), fi
 
 static const SnapshotField bomb_fields[] = {
     SNAP_KEY(WeaponBomb, type, &bomb_keys),
-    SNAP_POD(WeaponBomb, transform),
+    SNAP_POD(WeaponBomb, transform.m),
+    SNAP_POD(WeaponBomb, transform.t),
     SNAP_REF(WeaponBomb, flare, "afc"),
     SNAP_POD(WeaponBomb, age_ticks),
     SNAP_POD(WeaponBomb, health),
@@ -235,8 +245,10 @@ static void* find_ray(char* key) { return RayFindClass(key); }
 static const SnapshotKeyBinding ray_keys = { offsetof(RayClass, name), find_ray };
 
 static const SnapshotField ray_fields[] = {
-    SNAP_POD(RayBeam, placement),
-    SNAP_POD(RayBeam, beam_to_world),
+    SNAP_POD(RayBeam, placement.m),
+    SNAP_POD(RayBeam, placement.t),
+    SNAP_POD(RayBeam, beam_to_world.m),
+    SNAP_POD(RayBeam, beam_to_world.t),
     SNAP_POD(RayBeam, damage),
     SNAP_POD(RayBeam, duration_frames),
     SNAP_POD(RayBeam, length),
@@ -249,7 +261,10 @@ static const SnapshotField ray_fields[] = {
     SNAP_DERIVED(RayBeam, animation),
     SNAP_POD(RayBeam, animation_frame),
     SNAP_POD(RayBeam, has_animation),
-    SNAP_POD(RayBeam, hit_world),
+    SNAP_POD(RayBeam, hit_world.vx),
+    SNAP_POD(RayBeam, hit_world.vy),
+    SNAP_POD(RayBeam, hit_world.vz),
+    SNAP_TRANSIENT(RayBeam, hit_world.pad),
     { 0 },
 };
 
@@ -293,16 +308,34 @@ static int lightning_emitter_valid(const void* payload)
         && emitter->bolt_count <= emitter->type->max_bolts;
 }
 
+static const SnapshotField lightning_point_fields[] = {
+    SNAP_POD(SVECTOR, vx),
+    SNAP_POD(SVECTOR, vy),
+    SNAP_POD(SVECTOR, vz),
+    SNAP_TRANSIENT(SVECTOR, pad),
+    { 0 },
+};
+static const SnapshotArray lightning_points = {
+    lightning_point_fields, sizeof(SVECTOR), NULL, ArrayCount(((Lightning*)0)->points),
+};
+
 static const SnapshotField lightning_fields[] = {
-    SNAP_POD(Lightning, matrix),
+    SNAP_POD(Lightning, matrix.m),
+    SNAP_POD(Lightning, matrix.t),
     SNAP_WEAK_REF(Lightning, target, "car"),
-    SNAP_POD(Lightning, start),
-    SNAP_POD(Lightning, end),
+    SNAP_POD(Lightning, start.vx),
+    SNAP_POD(Lightning, start.vy),
+    SNAP_POD(Lightning, start.vz),
+    SNAP_TRANSIENT(Lightning, start.pad),
+    SNAP_POD(Lightning, end.vx),
+    SNAP_POD(Lightning, end.vy),
+    SNAP_POD(Lightning, end.vz),
+    SNAP_TRANSIENT(Lightning, end.pad),
     SNAP_POD(Lightning, point_count),
     SNAP_POD(Lightning, damage),
     SNAP_POD(Lightning, rotation_tick),
     SNAP_KEY(Lightning, type, &lightning_keys),
-    SNAP_POD(Lightning, points),
+    SNAP_ARRAY(Lightning, points, &lightning_points),
     SNAP_TRANSIENT(Lightning, unknown_b8),
     { 0 },
 };
