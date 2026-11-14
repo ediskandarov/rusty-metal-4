@@ -107,7 +107,7 @@ async function setup(diagnostics?: Connection["diagnostics"]) {
   let cancellations = 0;
   let loads = 0;
   const engine = {
-    ccall(name: string) {
+    ccall(name: string): number {
       if (name === "WebNetWorldIndex") return 0;
       if (name === "WebNetStartFfa") {
         loads++;
@@ -122,7 +122,7 @@ async function setup(diagnostics?: Connection["diagnostics"]) {
     },
     _WebNetLocalRollbackDepth: () => 12,
     _WebNetSetInput: () => 1,
-    _WebNetQueueTick: () => 1,
+    _WebNetQueueTick: (_tick: number) => 1,
     _WebNetConfirmPresentationTick: () => 1,
     _WebNetEndReplay() {},
     _WebNetBeginPortableReplay() {
@@ -148,7 +148,7 @@ async function setup(diagnostics?: Connection["diagnostics"]) {
   first.onmessage({ type: "prediction_prepare", ...start });
   first.onmessage({ type: "prediction_offer", anchor: 100 });
   first.onmessage({ type: "prediction_begin", anchor: 100 });
-  return { page, window, port, first, statuses, counts: () => ({ cancellations, loads }) };
+  return { page, window, port, engine, first, statuses, counts: () => ({ cancellations, loads }) };
 }
 async function nextConnection() {
   await Bun.sleep(550);
@@ -158,7 +158,7 @@ async function nextConnection() {
   expect(next.sent[0]).toEqual({ type: "resume", token, compatibility });
   return next;
 }
-async function downloadSnapshot(next: Connection) {
+function beginSnapshot(next: Connection) {
   next.onmessage({ type: "welcome", slot: 0 });
   next.onmessage({ type: "resume_prepare", ...start });
   const bytes = new Uint8Array([1, 2, 3]);
@@ -171,10 +171,13 @@ async function downloadSnapshot(next: Connection) {
     checksum: checksum(bytes),
     state,
   });
-  next.onmessage({ type: "snapshot_chunk", attempt: 1, offset: 0, data: [...bytes] });
+  return () => next.onmessage({ type: "snapshot_chunk", attempt: 1, offset: 0, data: [...bytes] });
+}
+async function downloadSnapshot(next: Connection, target = 20) {
+  beginSnapshot(next)();
   await Promise.resolve();
-  expect(next.sent).toContainEqual({ type: "resume_clock", attempt: 1, target: 20 });
-  next.onmessage({ type: "resume_catchup", attempt: 1, start: 20, head: 20, digest: 42 });
+  expect(next.sent).toContainEqual({ type: "resume_clock", attempt: 1, target });
+  next.onmessage({ type: "resume_catchup", attempt: 1, start: 20, head: target, digest: 42 });
 }
 async function restore(next: Connection) {
   await downloadSnapshot(next);
@@ -469,4 +472,113 @@ test("recovery owns its retarget limit independently of diagnostic counters", as
     "error",
     "Reconnect handoff could not keep up with the native clock",
   ]);
+});
+
+test("leaving while waiting for the recovery clock cannot send a late target", async () => {
+  const { first, statuses, counts } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  next.predictionIsReady = () => false;
+  beginSnapshot(next)();
+  stop!();
+  next.predictionIsReady = () => true;
+  await Bun.sleep(30);
+  expect(next.sent.some((message) => message.type === "resume_clock")).toBe(false);
+  expect(globalThis.tm4LivePrediction).toBeUndefined();
+  expect(counts()).toEqual({ cancellations: 2, loads: 2 });
+  expect(statuses.at(-1)).toEqual(["lobby", "Returned to room"]);
+});
+
+test("leaving during handoff cannot restart prediction or acknowledge the old attempt", async () => {
+  const { first, engine, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  await downloadSnapshot(next);
+  const ends = mock(() => {});
+  engine._WebNetEndReplay = ends;
+  const begin = mock(() => {});
+  next.beginResumedPrediction = begin;
+  next.predictionClock = () => 119;
+  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 });
+  await Promise.resolve();
+  stop!();
+  next.predictionClock = () => 120;
+  await Bun.sleep(10);
+  expect(ends).toHaveBeenCalledTimes(1);
+  expect(begin).not.toHaveBeenCalled();
+  expect(next.sent.some((message) => message.type === "resume_live_ack")).toBe(false);
+  expect(statuses.at(-1)).toEqual(["lobby", "Returned to room"]);
+});
+
+test("leaving between catch-up batches stops C replay and suppresses its acknowledgement", async () => {
+  const { first, port, engine, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  next.resumeTarget = () => 84;
+  await downloadSnapshot(next, 84);
+  const ends = mock(() => {});
+  engine._WebNetEndReplay = ends;
+  const step = mock((tick: number) => {
+    port.netMatch = { tick: tick + 1, ...state };
+    return 1;
+  });
+  engine._WebNetQueueTick = step;
+  engine.ccall = () => 3;
+  const width = 118 + start.capacity * 7;
+  const bytes = new Uint8Array(64 * width);
+  const view = new DataView(bytes.buffer);
+  for (let row = 0; row < bytes.length; row += width) {
+    view.setUint32(row, state.digest, true);
+    state.sections.forEach((value, index) => view.setUint32(row + 4 * (index + 1), value, true));
+  }
+  next.onmessage({
+    type: "catchup_frames",
+    attempt: 1,
+    start: 20,
+    head: 84,
+    data: [...bytes],
+    checksum: checksum(bytes),
+  });
+  const steps = step.mock.calls.length;
+  expect(steps).toBeGreaterThan(0);
+  expect(steps).toBeLessThanOrEqual(24);
+  stop!();
+  await Bun.sleep(10);
+  expect(step).toHaveBeenCalledTimes(steps);
+  expect(ends).toHaveBeenCalledTimes(1);
+  expect(next.sent.some((message) => message.type === "catchup_applied")).toBe(false);
+  expect(statuses.at(-1)).toEqual(["lobby", "Returned to room"]);
+});
+
+test("failed preparation releases prediction and the C match through the same teardown", async () => {
+  const { first, statuses, counts } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  next.onmessage({ type: "welcome", slot: 0 });
+  next.preparePrediction = () => {
+    throw new Error("preparation failed");
+  };
+  next.onmessage({ type: "resume_prepare", ...start });
+  await Promise.resolve();
+  expect(globalThis.tm4LivePrediction).toBeUndefined();
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  expect(counts()).toEqual({ cancellations: 2, loads: 1 });
+  expect(statuses.at(-1)).toEqual(["error", "preparation failed"]);
+});
+
+test("a late connection after leaving is closed without restarting the session", async () => {
+  const { first, statuses } = await setup();
+  let release!: () => void;
+  connectionPending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  first.onerror(new NetworkConnectionError("connection lost"));
+  await Bun.sleep(550);
+  const next = connections[1]!;
+  stop!();
+  release();
+  await Bun.sleep(0);
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  expect(next.sent).toEqual([]);
+  expect(statuses.at(-1)).toEqual(["lobby", "Returned to room"]);
 });
