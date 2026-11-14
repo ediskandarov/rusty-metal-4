@@ -47,6 +47,27 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(car->freeze_ticks);
     VALUE(car->shield_ticks);
     VALUE(car->invisibility_ticks);
+    VALUE(car->invisibility_hidden);
+    VALUE(car->original_faces != NULL);
+    VALUE(car->original_colors != NULL);
+    /* Fade progress controls when its simulation object is destroyed. */
+    if (car->original_faces) {
+        s32 count = 0;
+        for (s32 i = 0; i < car->display_list_count; ++i)
+            count += car->display_lists[i].face_count;
+        VALUE(count);
+        for (s32 i = 0; i < count; ++i)
+            VALUE(car->faces[i].reflection);
+    }
+    if (car->original_colors) {
+        VALUE(car->normal_count);
+        for (s32 i = 0; i < car->normal_count; ++i) {
+            VALUE(car->colors[i].r);
+            VALUE(car->colors[i].g);
+            VALUE(car->colors[i].b);
+            VALUE(car->colors[i].cd);
+        }
+    }
     VALUE(car->special_regeneration_ticks);
     VALUE(car->special_regeneration_interval);
     VALUE(car->muzzle_index);
@@ -148,9 +169,9 @@ const char* WebNetWriteCars(NetStateOutput* hash)
             continue;
         const SnapshotType* type = WebSnapshotCarCallbackType(car);
         u8 state[256];
-        const u32 length = type ? WebSnapshotFieldsCapture(type, car->callback_context,
-                                      state, sizeof(state))
-                                : 0;
+        const u32 length = type
+            ? WebSnapshotFieldsCapture(type, car->callback_context, state, sizeof(state))
+            : 0;
         if (!length) {
             unsupported = "car callback state";
             continue;

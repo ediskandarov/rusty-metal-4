@@ -601,3 +601,62 @@ test("solo FFA supports late admission across rollback and portable recovery", a
   joined.restore(after);
   assert.deepEqual(joined.canonical(), world.canonical());
 });
+
+const invisibilityInput = [1 << 14, 0, 1 << 14, 0, 1 << 12, 0, 1 << 12, 0];
+const shieldInput = [1 << 12, 0, 1 << 12, 0, 1 << 13, 0];
+
+for (const [shieldTick, deathTick] of [
+  [null, null],
+  [20, null],
+  [60, null],
+  [null, 20],
+  [null, 60],
+]) {
+  test(`invisibility recovery (shield at ${shieldTick}, death at ${deathTick})`, async () => {
+    const world = await simulation();
+    for (let i = 0; i < 10; ++i) world.step();
+    assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+    const before = world.snapshot();
+    const input = (tick) => {
+      if (tick >= 10 && tick < 10 + invisibilityInput.length) return invisibilityInput[tick - 10];
+      if (shieldTick !== null && tick >= shieldTick && tick < shieldTick + shieldInput.length)
+        return shieldInput[tick - shieldTick];
+      return 0;
+    };
+    const advance = (current, tick) => {
+      if (tick === deathTick) assert.equal(current.x.WebTestKillParticipant(0), 1);
+      current.step(input(tick));
+    };
+    const expected = [],
+      snapshots = [[10, before]];
+    for (let tick = 10; tick < 240; ++tick) {
+      advance(world, tick);
+      expected.push(world.canonical());
+      // Mid-fade, hidden, shield overlap and after expiry.
+      if ([17, 28, 55, 75, 150, 210].includes(tick)) snapshots.push([tick + 1, world.snapshot()]);
+    }
+    assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+    for (let tick = 10; tick < 240; ++tick) {
+      advance(world, tick);
+      assert.deepEqual(world.canonical(), expected[tick - 10], `rollback tick ${tick}`);
+    }
+    assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+    for (const [nextTick, snapshot] of snapshots) {
+      const restored = await simulation();
+      restored.restore(snapshot);
+      restored.x.WebNetEndReplay();
+      assert.deepEqual(restored.snapshot(), snapshot, `round trip at ${nextTick}`);
+      assert.ok(restored.x.WebNetCaptureLocalCheckpoint());
+      for (let tick = nextTick; tick < 240; ++tick) {
+        advance(restored, tick);
+        assert.deepEqual(restored.canonical(), expected[tick - 10], `portable tick ${tick}`);
+      }
+      assert.equal(restored.x.WebNetRestoreLocalCheckpoint(), 1);
+      for (let tick = nextTick; tick < 240; ++tick) {
+        advance(restored, tick);
+        assert.deepEqual(restored.canonical(), expected[tick - 10], `active rollback tick ${tick}`);
+      }
+      assert.equal(restored.x.WebNetFinishLocalReplay(), 1);
+    }
+  });
+}

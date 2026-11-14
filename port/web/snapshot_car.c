@@ -113,7 +113,8 @@ static const CarCallbackBinding* find_callbacks(const Car* car)
 {
     for (u32 i = 0; i < ArrayCount(callback_types); ++i) {
         const CarCallbackBinding* binding = &callback_types[i];
-        if (car->process_callback == binding->process && car->collision_callback == binding->collision
+        if (car->process_callback == binding->process
+            && car->collision_callback == binding->collision
             && car->destructor_callback == binding->destroy
             && (car->callback_context != NULL) == (binding->type->size != 0))
             return binding;
@@ -332,9 +333,9 @@ static const SnapshotField car_fields[] = {
     SNAP_POD(Car, frame),
     SNAP_POD(Car, light_level),
     SNAP_POD(Car, light_boost),
-    SNAP_TRANSIENT(Car, original_faces),
-    SNAP_TRANSIENT(Car, original_colors),
-    SNAP_TRANSIENT(Car, invisibility_hidden),
+    SNAP_DERIVED(Car, original_faces),
+    SNAP_DERIVED(Car, original_colors),
+    SNAP_POD(Car, invisibility_hidden),
     SNAP_POD(Car, turbo_emitter_count),
     SNAP_LOCAL(Car, turbo_emitters),
     SNAP_POD(Car, turbo_amount),
@@ -451,9 +452,28 @@ static const SnapshotField car_fields[] = {
     { 0 },
 };
 
-static int has_freeze_display(const Car* car)
+void CarInvisibilityConstructorProcess(Car** effect);
+s32 CarCopyDisplayFaces(Car* car, u8 reflection);
+s32 CarCopyDisplayColors(Car* car);
+void CarRestoreOriginalFaces(Car* car);
+void CarRestoreOriginalColors(Car* car);
+
+static u32 display_face_count(const Car* car)
 {
-    return car->freeze_ticks > 0 && !car->shield_ticks && !car->invisibility_ticks;
+    u32 count = 0;
+    for (s32 i = 0; i < car->display_list_count; ++i)
+        count += car->display_lists[i].face_count;
+    return count;
+}
+
+static int display_state_valid(const Car* car)
+{
+    return car->faces && car->colors && car->normal_count > 0 && car->normal_count <= UINT16_MAX
+        && display_face_count(car) <= UINT16_MAX
+        && (!car->original_faces || car->freeze_ticks || car->shield_ticks
+            || car->invisibility_ticks)
+        && (!car->original_colors || (car->original_faces && car->invisibility_ticks))
+        && (car->invisibility_hidden == 0 || car->invisibility_hidden == 1);
 }
 
 static int turbo_resources_valid(const Car* car)
@@ -476,8 +496,7 @@ static int car_valid(const void* payload)
             || (!car->ai_input_callback && car->ai_saved_input_callback == CarPlayerInput))
         || car->ai_state_callback != CarAiApproachTarget || car->ai_saved_state_callback
         || !WebSnapshotCarCallbackType(car) || car->active_collision_particle
-        || car->active_collision_hit || (car->original_faces && !has_freeze_display(car))
-        || car->original_colors || car->invisibility_hidden || car->ai.target_entry
+        || car->active_collision_hit || !display_state_valid(car) || car->ai.target_entry
         || car->ai.nearby_list || car->ai.targeting_count || car->health <= 0
         || car->health > car->maximum_health || car->controls.gear < CAR_GEAR_REVERSE
         || car->controls.gear > CAR_GEAR_FOURTH || car->controls.action < CarActionNone
@@ -512,7 +531,7 @@ static int car_valid(const void* payload)
 
 typedef struct {
     u16 area, node;
-    u8 suspended, freeze_faces;
+    u8 suspended, copied_faces, copied_colors;
 } DriverBinding;
 
 static u32 capture_driver(const void* payload, u8* output, u32 capacity)
@@ -523,7 +542,8 @@ static u32 capture_driver(const void* payload, u8* output, u32 capacity)
     DriverBinding binding;
     memset(&binding, 0, sizeof(binding));
     binding.suspended = !car->ai_input_callback;
-    binding.freeze_faces = car->original_faces != NULL;
+    binding.copied_faces = car->original_faces != NULL;
+    binding.copied_colors = car->original_colors != NULL;
     for (u32 i = 0; i < ArrayCount(aiWorldInfo.areas); ++i)
         if (car->ai.area == &aiWorldInfo.areas[i])
             binding.area = i + 1;
@@ -536,14 +556,23 @@ static u32 capture_driver(const void* payload, u8* output, u32 capacity)
             return 0;
         binding.node = offset / sizeof(CarAiSpatialNode) + 1;
     }
+    const u32 faces = binding.copied_faces ? display_face_count(car) : 0;
+    const u32 colors_bytes = binding.copied_colors ? car->normal_count * sizeof(CVECTOR) : 0;
+    const u32 prefix = sizeof(binding) + faces + colors_bytes;
+    if (prefix >= capacity)
+        return 0;
+    for (u32 i = 0; i < faces; ++i)
+        output[sizeof(binding) + i] = car->faces[i].reflection;
+    if (colors_bytes)
+        memcpy(output + sizeof(binding) + faces, car->colors, colors_bytes);
     const SnapshotType* type = WebSnapshotCarCallbackType(car);
-    const u32 length = type ? WebSnapshotFieldsCapture(type, car->callback_context,
-                                  output + sizeof(binding), capacity - sizeof(binding))
-                            : 0;
+    const u32 length = type
+        ? WebSnapshotFieldsCapture(type, car->callback_context, output + prefix, capacity - prefix)
+        : 0;
     if (!length)
         return 0;
     memcpy(output, &binding, sizeof(binding));
-    return sizeof(binding) + length;
+    return prefix + length;
 }
 
 static int restore_driver(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
@@ -554,7 +583,7 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
         return 0;
     memcpy(&binding, input, sizeof(binding));
     if (!binding.area || binding.area > ArrayCount(aiWorldInfo.areas) || binding.suspended > 1
-        || binding.freeze_faces > 1 || (binding.freeze_faces && !has_freeze_display(car)))
+        || binding.copied_faces > 1 || binding.copied_colors > 1)
         return 0;
     CarAiArea* area = &aiWorldInfo.areas[binding.area - 1];
     if (binding.node > area->node_count || (binding.node && !area->nodes)
@@ -569,15 +598,46 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
         MemFree(car->turbo_emitters);
         car->turbo_emitters = NULL;
     }
+    const u32 faces = binding.copied_faces ? display_face_count(car) : 0;
+    const u32 colors_bytes = binding.copied_colors ? car->normal_count * sizeof(CVECTOR) : 0;
+    const u32 prefix = sizeof(binding) + faces + colors_bytes;
+    if (prefix >= length)
+        return 0;
     const CarCallbackBinding* callbacks = find_callbacks(car);
-    return callbacks
-        && WebSnapshotFieldsRestore(callbacks->type, car->callback_context, input + sizeof(binding),
-            length - sizeof(binding), find)
-        && (!callbacks->refresh || callbacks->refresh(car, car->callback_context))
-        && (!binding.freeze_faces || CarDisplayFreezeConstructor(car));
+    if (!callbacks
+        || !WebSnapshotFieldsRestore(
+            callbacks->type, car->callback_context, input + prefix, length - prefix, find)
+        || (callbacks->refresh && !callbacks->refresh(car, car->callback_context)))
+        return 0;
+
+    /* Rebuild private display buffers without spawning a second fade object. */
+    CarRestoreOriginalColors(car);
+    CarRestoreOriginalFaces(car);
+    if ((binding.copied_faces && !CarCopyDisplayFaces(car, 0))
+        || (binding.copied_colors && !CarCopyDisplayColors(car)))
+        return 0;
+    for (u32 i = 0; i < faces; ++i)
+        car->faces[i].reflection = input[sizeof(binding) + i];
+    if (colors_bytes)
+        memcpy(car->colors, input + sizeof(binding) + faces, colors_bytes);
+    return 1;
 }
 
+typedef struct {
+    Car* car;
+} InvisibilityFade;
+
+static const SnapshotCustomClass invisibility_class = {
+    .process = (Tm4ObjectCallback)CarInvisibilityConstructorProcess,
+};
+static const SnapshotField invisibility_fields[] = {
+    SNAP_REQUIRED(InvisibilityFade, car, "car"),
+    { 0 },
+};
+
 const SnapshotType WebSnapshotCarTypes[] = {
+    { "carInvisibilityConstructor", sizeof(InvisibilityFade), invisibility_fields,
+        .baseline_removable = 1, .hash_fields = 1, .custom = &invisibility_class },
     { "car", sizeof(Car), car_fields, car_valid, capture_driver, restore_driver,
         .baseline_removable = 1, .release = release_car },
     { 0 },
