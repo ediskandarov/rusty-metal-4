@@ -22,7 +22,7 @@ typedef struct WebParticipantRespawn {
 typedef struct WebParticipantState {
     WebParticipantResult slots[8];
     WebParticipantRespawn respawns[8];
-    /* One-based index into the immutable, prepared startup car list. */
+    /* One-based index into the immutable, prepared model pool. */
     u32 models[8];
 } WebParticipantState;
 
@@ -33,6 +33,7 @@ void WebParticipantCarRemoved(const struct Car* car);
 /* Mode policies call this at deterministic tick boundaries, only after removal. */
 int WebParticipantScheduleRespawn(s32 slot, u32 due_tick, u32 retry_ticks, u32 attempts);
 void WebParticipantProcessRespawns(void);
+void WebParticipantSelectRespawnModel(s32 slot, u32 model);
 void WebParticipantRecordDeath(const struct Car* victim, WebParticipantId source);
 struct Anim;
 struct Tm4CollisionPolygon;

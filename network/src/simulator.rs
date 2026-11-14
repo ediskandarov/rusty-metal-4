@@ -402,6 +402,14 @@ impl Simulator {
         let world = self.with_string(&session.world, |world, address| {
             world.call::<u32, i32>("WebNetWorldIndex", address)
         })?;
+        ensure!(
+            session
+                .model_pool
+                .iter()
+                .all(|car| self.catalog.cars.contains(car)),
+            "Prepared model is unavailable locally"
+        );
+        let pool = session.model_pool.join("\n");
         let names = session.cars.join("\n");
         let identities = session
             .participants
@@ -409,22 +417,25 @@ impl Simulator {
             .map(ToString::to_string)
             .collect::<Vec<_>>()
             .join("\n");
-        let accepted = self.with_string(&identities, |simulator, identities_address| {
-            simulator.with_string(&names, |simulator, address| {
-                simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32), i32>(
-                    "WebNetStartFfa",
-                    (
-                        session.capacity as i32,
-                        u32::from(session.slot_mask()),
-                        world,
-                        session.seed,
-                        -1,
-                        u32::from(session.portable),
-                        address,
-                        identities_address,
-                        session.respawn_delay_ticks,
-                    ),
-                )
+        let accepted = self.with_string(&pool, |simulator, pool_address| {
+            simulator.with_string(&identities, |simulator, identities_address| {
+                simulator.with_string(&names, |simulator, address| {
+                    simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32, u32), i32>(
+                        "WebNetStartFfa",
+                        (
+                            session.capacity as i32,
+                            u32::from(session.slot_mask()),
+                            world,
+                            session.seed,
+                            -1,
+                            u32::from(session.portable),
+                            address,
+                            identities_address,
+                            session.respawn_delay_ticks,
+                            pool_address,
+                        ),
+                    )
+                })
             })
         })?;
         ensure!(accepted == 1, "Match setup rejected");
@@ -736,10 +747,28 @@ mod tests {
         #[serde(default = "default_seed")]
         seed: u32,
         cars: Vec<String>,
+        #[serde(rename = "modelPool")]
+        model_pool: Vec<String>,
         rows: Vec<Row>,
         tape: Vec<Tape>,
         events: Vec<serde_json::Value>,
     }
+    #[test]
+    fn browser_record_preserves_non_alphabetical_model_pool_and_requires_it() {
+        // TM4_TEST_CAR='Pizza Boy' records this pool order. Reconstructing it
+        // through a set changes canonical model indices before the first tick.
+        let mut recording = serde_json::json!({
+            "world": "Construction Yard", "seed": 12345,
+            "cars": ["Pizza Boy", "Orbital"],
+            "modelPool": ["Pizza Boy", "Orbital"],
+            "rows": [], "tape": [], "events": []
+        });
+        let record: Record = serde_json::from_value(recording.clone()).unwrap();
+        assert_eq!(record.model_pool, ["Pizza Boy", "Orbital"]);
+        recording.as_object_mut().unwrap().remove("modelPool");
+        assert!(serde_json::from_value::<Record>(recording).is_err());
+    }
+
     #[derive(Deserialize)]
     struct Row {
         tick: u32,
@@ -783,6 +812,7 @@ mod tests {
         SessionStart {
             mode: tm4_network::protocol::MatchMode::Ffa,
             respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+            model_pool: vec!["Orbital".into(), "Pizza Boy".into()],
             capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
             participants: vec![
@@ -887,6 +917,7 @@ mod tests {
                     .map(|id| tm4_network::protocol::ParticipantId(id as u64))
                     .collect(),
                 slots,
+                model_pool: vec!["Orbital".into(), "Pizza Boy".into(), "Crusher".into()],
                 cars: ["Orbital", "Pizza Boy", "Crusher"][..count]
                     .iter()
                     .map(|car| (*car).into())
@@ -1142,6 +1173,7 @@ mod tests {
                 ParticipantId(77),
             ],
             cars: vec!["Orbital".into(), "Pizza Boy".into(), "Crusher".into()],
+            model_pool: vec!["Orbital".into(), "Pizza Boy".into(), "Crusher".into()],
             ..session()
         };
         for attributed in [true, false] {
@@ -1235,6 +1267,12 @@ mod tests {
                     ParticipantId(u64::MAX),
                 ],
                 cars: vec![model.into(), "Pizza Boy".into(), "Crusher".into()],
+                model_pool: [model, "Pizza Boy", "Crusher"]
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
                 ..session()
             };
             let mut world = Simulator::new(&wasm, &resources, compatibility())?;
@@ -1624,6 +1662,7 @@ mod tests {
         let setup = SessionStart {
             world: record.world.clone(),
             cars: record.cars.clone(),
+            model_pool: record.model_pool.clone(),
             seed: record.seed,
             ..session()
         };
@@ -1725,6 +1764,7 @@ mod tests {
             let mut setup = session();
             setup.world = map.into();
             setup.cars = vec![first.into(), second.into()];
+            setup.model_pool = setup.cars.clone();
             let (_, portable) = world
                 .start(&setup)
                 .with_context(|| format!("Stock startup {map}/{first}/{second}"))?;

@@ -65,7 +65,7 @@ export function createSnapshotRecovery({
   engine: NetworkEngine;
   port: NetworkPort;
   connection: Awaited<ReturnType<typeof connectNetwork>>;
-  configuration: Pick<Start, "capacity" | "slots" | "cars" | "epoch"> & {
+  configuration: Pick<Start, "capacity" | "slots" | "modelPool" | "epoch"> & {
     slot: number;
     depth: number;
   };

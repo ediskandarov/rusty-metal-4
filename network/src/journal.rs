@@ -155,7 +155,7 @@ impl Journal {
             path,
             writer,
             width,
-            pool: header.start.cars.clone(),
+            pool: header.start.model_pool.clone(),
             rows: Vec::new(),
             cache_limit: cache_limit / width * width,
             record_offset: (MAGIC.len() + 8 + bytes.len()) as u64,
@@ -348,7 +348,7 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
         if decode_membership(
             &data[29..JOURNAL_FRAME_PREFIX],
             summary.header.start.capacity,
-            &summary.header.start.cars,
+            &summary.header.start.model_pool,
         )
         .is_none()
             || data[28] > 1
@@ -399,6 +399,7 @@ mod tests {
             start: SessionStart {
                 mode: tm4_network::protocol::MatchMode::Ffa,
                 respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+                model_pool: vec!["Orbital".into()],
                 capacity: players,
                 slots: (0..players).map(|slot| slot as u8).collect(),
                 participants: (1..=players)

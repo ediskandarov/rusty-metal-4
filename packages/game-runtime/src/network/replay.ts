@@ -39,7 +39,7 @@ export class SnapshotReplay {
     start: number,
     head: number,
     digest: number,
-    configuration: SlotConfiguration & { cars: string[] },
+    configuration: SlotConfiguration & { modelPool: string[] },
     engine: NetworkEngine,
     port: NetworkPort,
     signal: AbortSignal,
@@ -58,9 +58,9 @@ export class SnapshotReplay {
     this.#port = port;
     this.#signal = signal;
     this.#capacity = capacity;
-    this.#cars = [...configuration.cars];
+    this.#cars = [...configuration.modelPool];
     if (
-      this.#cars.length < 2 ||
+      this.#cars.length < 1 ||
       this.#cars.length > 8 ||
       this.#cars.some((car) => !car || car.includes("\0") || car.includes("\n"))
     )

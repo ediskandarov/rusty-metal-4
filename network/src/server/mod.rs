@@ -242,7 +242,10 @@ impl Match {
         self.broadcast(
             links,
             &Message::Lobby {
-                cars: self.catalog.as_ref().unwrap().cars.clone(),
+                cars: self.session.as_ref().map_or_else(
+                    || self.catalog.as_ref().unwrap().cars.clone(),
+                    |session| session.model_pool.clone(),
+                ),
                 players: self
                     .controls
                     .iter()

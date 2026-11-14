@@ -49,6 +49,7 @@ async function observeAcceptedFrames(reference, clients) {
                     "string",
                     "string",
                     "number",
+                    "string",
                   ],
                   [
                     start.capacity,
@@ -60,6 +61,7 @@ async function observeAcceptedFrames(reference, clients) {
                     start.cars.join("\n"),
                     start.participants.join("\n"),
                     start.respawnDelayTicks,
+                    start.modelPool.join("\n"),
                   ],
                 )
               )

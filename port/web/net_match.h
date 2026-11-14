@@ -11,6 +11,10 @@ int WebNetDepartParticipant(unsigned int tick, int slot, unsigned int low, unsig
 int WebNetParticipantModelsValid(const struct WebParticipantState* state, unsigned int slots);
 void WebNetRestoreParticipantConfiguration(void);
 unsigned int WebNetFfaRespawnDelay(void);
+int WebNetDeparting(void);
+unsigned int WebNetModelCount(void);
+char* WebNetModelName(unsigned int index);
+void WebNetModelPool(char output[8][64]);
 int WebNetSlotCapacity(void);
 int WebNetSlotMask(void);
 int WebNetParticipantSlot(int index);

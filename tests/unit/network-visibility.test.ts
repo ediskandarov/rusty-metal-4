@@ -58,7 +58,7 @@ afterEach(async () => {
   connectionPending = undefined;
 });
 
-const compatibility = { protocol: 15, build: "a".repeat(64), content: "b".repeat(64) };
+const compatibility = { protocol: 16, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
   mode: "ffa" as const,
   respawnDelayTicks: 90,
@@ -67,6 +67,7 @@ const start = {
   world: "Road Rage",
   participants: ["0000000000000001", "0000000000000002"],
   cars: ["Crusher", "Trash Man"],
+  modelPool: ["Crusher", "Trash Man"],
   seed: 12345,
   epoch: 1,
   portable: true,

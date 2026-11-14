@@ -302,6 +302,7 @@ export async function joinMatch(
           journal.identify({
             world: message.world,
             cars: message.cars,
+            modelPool: message.modelPool,
             seed: message.seed,
             capacity: message.capacity,
             slots: message.slots,
@@ -318,7 +319,7 @@ export async function joinMatch(
           socket.preparePrediction(
             message.slots.reduce((mask, slot) => mask | (1 << slot), 0),
             message.participants,
-            message.cars,
+            message.modelPool,
             message.type === "resume_prepare",
           );
           if (!configureMatch(engine, message, slot))

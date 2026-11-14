@@ -1,9 +1,9 @@
 # Network requirements — v0.1
 
-Status: design requirements, not implemented guarantees. Updated 2026-11-09.
+Status: design requirements, not implemented guarantees. Updated 2026-11-14.
 Basis: the [network prototype audit](network-audit.md) and the agreed single-player
-browser model. The current supported scenario is 2–8-player Deathmatch. The next agreed mode is
-eight-slot FFA, scoped in [participant lifecycle](design/participant-lifecycle.md).
+browser model. The current network mode is eight-slot FFA, with its implemented
+boundaries scoped in [participant lifecycle](design/participant-lifecycle.md).
 
 ## Scope and invariants
 
@@ -50,7 +50,8 @@ Before loading, the server supplies a versioned session description containing:
 
 - Session identity and world/round epoch.
 - Simulation build/protocol compatibility and gameplay-content fingerprints.
-- Mode and its settings, stable map identity, roster, slot ownership, and AI settings.
+- Mode and its settings, stable map identity, prepared model pool, initial roster, slot ownership,
+  and AI settings.
 - Seeds for all gameplay RNGs and allowed gameplay modifiers.
 
 Choose resources by stable identity rather than local enumeration order. Reject

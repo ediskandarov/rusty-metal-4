@@ -41,6 +41,7 @@ test("the browser oracle uses exact authority identities, including reused and h
           type: "prediction_prepare",
           mode: "ffa",
           respawnDelayTicks: 90,
+          modelPool: ["Orbital", "Pizza Boy", "Crusher"],
           capacity: 8,
           slots: [0, 3, 7],
           participants,

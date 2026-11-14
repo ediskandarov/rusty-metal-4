@@ -754,8 +754,20 @@ try {
             "string",
             "string",
             "number",
+            "string",
           ],
-          [8, 3, 0, 12345, 0, 2, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002", 90],
+          [
+            8,
+            3,
+            0,
+            12345,
+            0,
+            2,
+            "Orbital\nPizza Boy",
+            "0000000000000001\n0000000000000002",
+            90,
+            "Orbital\nPizza Boy",
+          ],
         );
         if (!ready) throw new Error("Could not restart rendered C fixture");
         globalThis.tm4LiveTrace.fixtures = {};

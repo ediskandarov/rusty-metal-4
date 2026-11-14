@@ -86,7 +86,18 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
   return engine.ccall(
     "WebNetStartFfa",
     "number",
-    ["number", "number", "number", "number", "number", "number", "string", "string", "number"],
+    [
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "number",
+      "string",
+      "string",
+      "number",
+      "string",
+    ],
     [
       start.capacity,
       start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
@@ -97,6 +108,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       start.cars.join("\n"),
       start.participants.join("\n"),
       start.respawnDelayTicks,
+      start.modelPool.join("\n"),
     ],
   );
 }

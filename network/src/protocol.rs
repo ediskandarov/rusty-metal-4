@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 15;
+pub const PROTOCOL_VERSION: u16 = 16;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 118;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -318,10 +318,29 @@ pub struct SessionStart {
     pub participants: Vec<ParticipantId>,
     pub world: String,
     pub cars: Vec<String>,
+    /// Ordered immutable resource pool, independent of occupied slots.
+    #[serde(rename = "modelPool")]
+    pub model_pool: Vec<String>,
     pub compatibility: Compatibility,
     pub seed: u32,
     pub epoch: u32,
     pub portable: bool,
+}
+
+/// The original renderer has eight permanent car atlases. Preserve every initial
+/// selection, then fill spare atlases in catalog order. The declared result, not
+/// this policy or local enumeration, is consumed by peers and journal replay.
+pub fn prepared_model_pool(catalog: &[String], cars: &[String]) -> Vec<String> {
+    let mut pool = Vec::new();
+    for car in cars.iter().chain(catalog) {
+        if pool.len() == MAX_PLAYERS {
+            break;
+        }
+        if !pool.contains(car) {
+            pool.push(car.clone());
+        }
+    }
+    pool
 }
 
 impl SessionStart {
@@ -340,6 +359,15 @@ impl SessionStart {
                 .cars
                 .iter()
                 .all(|car| !car.is_empty() && !car.contains(['\0', '\n']))
+            && !self.model_pool.is_empty()
+            && self.model_pool.len() <= MAX_PLAYERS
+            && self.model_pool.iter().enumerate().all(|(i, model)| {
+                !model.is_empty()
+                    && model.len() < 64
+                    && !model.contains(['\0', '\n'])
+                    && !self.model_pool[..i].contains(model)
+            })
+            && self.cars.iter().all(|car| self.model_pool.contains(car))
             && !self.world.is_empty()
             && !self.world.contains('\0')
             && self.slots.windows(2).all(|pair| pair[0] < pair[1])
@@ -560,5 +588,21 @@ mod participant_tests {
             8,
             &pool
         ));
+    }
+}
+
+#[cfg(test)]
+mod model_pool_tests {
+    use super::*;
+    #[test]
+    fn pool_preserves_all_startup_choices_and_fills_without_duplicate_atlases() {
+        let catalog: Vec<String> = (0..22).map(|i| format!("stock{i}")).collect();
+        let repeated = vec![catalog[21].clone(); 8];
+        let pool = prepared_model_pool(&catalog, &repeated);
+        assert_eq!(pool.len(), 8);
+        assert_eq!(pool[0], catalog[21]);
+        assert_eq!(&pool[1..], &catalog[..7]);
+        let distinct = catalog[14..].to_vec();
+        assert_eq!(prepared_model_pool(&catalog, &distinct), distinct);
     }
 }

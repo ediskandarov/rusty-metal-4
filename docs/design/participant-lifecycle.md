@@ -11,13 +11,13 @@ Updated 2026-11-14.
 | --- | --- |
 | Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
 | Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
-| Implemented FFA policy | Eight gameplay slots; automatic same-model respawn, independent of surviving-car count. |
-| Deferred mode policy | Random model selection, time/frag limits, completed-round results and return to room, spectator seats and live replacement of a living car. |
+| Implemented FFA policy | Eight gameplay slots; automatic random-model respawn, independent of surviving-car count. |
+| Deferred mode policy | Time/frag limits, completed-round results and return to room, spectator seats and live replacement of a living car. |
 
 The first agreed new mode is FFA: eight gameplay slots and joining and leaving
-during play. Car selection belongs to the mode: this increment keeps the assigned
-model; the planned random selection may choose the same model again. Time and frag
-limits and their settings remain deferred; their defaults are undecided. Other modes
+during play. Car selection belongs to the mode: FFA randomly selects from its prepared
+pool on removal and may choose the same model again. Time and frag limits and their
+settings remain deferred; their defaults are undecided. Other modes
 below are design cases, not commitments to implement them now.
 
 ## First FFA delivery boundary
@@ -29,7 +29,7 @@ original Deathmatch round organization. Standalone offline modes remain unchange
 FFA rooms always offer eight player places, matching the eight gameplay slots; capacity
 is not configurable. Two prepared participants can start, and later arrivals can join
 the remaining places. The first increment uses C-owned participant frags/deaths and
-a fresh car of the currently assigned prepared model after death. Its explicit
+a fresh randomly selected prepared car after death. Its explicit
 startup parameter defaults to 90 simulation ticks (three seconds at 30 Hz), measured
 from removal. It retries a failed spawn after 30 ticks, at most three attempts total.
 Exhaustion leaves that participant in a terminal waiting state with identity, results
@@ -41,9 +41,9 @@ FFA bypasses the original Deathmatch victory/transition driver: one or zero livi
 cars, or explicit departures, never end the round. The mode and delay are immutable
 startup/journal data; portable roots validate the delay, and the existing C checkpoint
 state contains all pending attempts. Lightyear restores and replays that same state.
-Live admission, departure, slot reuse and recovery use the shared mechanisms. Random
-selection is the next increment; time/frag limits, final results and automatic return
-to the room are a later increment. Until then FFA continues until explicit teardown.
+Live admission, departure, slot reuse and recovery use the shared mechanisms. Time/frag
+limits, final results and automatic return to the room are a later increment. Until
+then FFA continues until explicit teardown.
 
 Live replacement of an active car, transactional preservation of that car on failed
 replacement, and general transformation policies are deferred. The broader FSMs
@@ -80,11 +80,15 @@ consumes a real free slot without publishing a C participant or car. Occupied an
 reserved slots share the eight-seat capacity; cancelling preparation never renumbers
 another slot. Participant IDs are never reused, including cancelled reservations.
 
-Initial startup loads its selected models. The declared live pool is the distinct
-model names in that immutable startup roster. Admission can select any of those
-models; it cannot extend the pool, substitute an unavailable model or load assets
-from another player. The newcomer prepares the complete pool from their own local
-resources before restoring the current authority checkpoint and catching up.
+Startup declares an ordered `modelPool`, separately from the occupied slots and their
+initial cars. The authority preserves distinct initial choices in slot order, then fills
+spare places in stock catalog order, up to eight models. Eight is the existing renderer's
+permanent car-atlas capacity; choosing another initial stock model remains supported.
+Every peer loads the complete declared pool before stepping. Atlas assignments remain
+fixed so detached effects and debris retain their resources across model changes.
+Admission can select any pool model; it cannot extend the pool, substitute an unavailable
+model or load assets from another player. The newcomer prepares the complete pool from
+their own local resources before restoring the current authority checkpoint and catching up.
 
 After synchronization, admission commits at an authoritative simulation tick. C
 prepares the mandatory camera and car resources before publishing the new ownership.
@@ -149,7 +153,15 @@ Old detached damage effects retain their copied participant provenance.
 Waiting, scheduled and exhausted requests are C-owned canonical state, included in local
 checkpoints and portable session roots. Portable recovery supports dead/waiting participants,
 new car lifetimes and their debris; resource preparation creates no duplicate runtime children.
-Constructor RNG consumption is deterministic and restored through the existing state paths.
+FFA selects exactly once after successful respawn scheduling at removal, in deterministic
+car-removal order. Selection uses the saved gameplay RNG and rejection sampling of its
+15-bit draws, uniformly across the ordered pool; even a one-model pool consumes a draw.
+Explicit departure does not select a respawn.
+The chosen pool index is canonical immediately, including while waiting. Retries never
+reroll. Failed constructors restore gameplay/effect RNG and object serials to their
+pre-attempt values; they retain the selected model, identity, results and lease.
+Portable roots validate the exact pool membership and order before reconstructing cars.
+Constructor RNG consumption otherwise follows the existing state paths.
 
 FFA schedules the shared respawn operation when removal commits. The original-rule
 and manual-respawn startup entry point exists only in diagnostic builds for focused
@@ -283,7 +295,7 @@ after the match has ended.
 
 | Mode | Join during play | After death | Departure consequences |
 | --- | --- | --- | --- |
-| FFA, first increment | Reserve any free seat, catch up, spawn | Keep results and slot; fresh same-model car after the configured delay | Free seat; old effects never become the next occupant's |
+| FFA, first increment | Reserve any free seat, catch up, spawn | Keep results and slot; fresh random pool model after the configured delay | Free seat; old effects never become the next occupant's |
 | Diagnostic original-rule fixture | Prepared-pool admission while the round is active | Existing game rules | Retire at the event tick; original victory rules can finish the round |
 | Team deathmatch, candidate | Also assign a team | Preserve team and results | Preserve team results independently of occupancy |
 | Capture the flag, candidate | Also assign a team | Respawn under mode rules | Resolve a carried objective before removing the car |
@@ -411,7 +423,7 @@ a rollback boundary, and after portable snapshot recovery in another instance.
 | Deferred: live replacement fails | Original car, binding and gameplay RNG state are unchanged |
 | Match ends during reservation, creation or recovery | Pending operations are cancelled, teardown frees slots, the next match starts cleanly |
 | Respawn chooses a random car, including the same model | Replay selects the same model, starts a new car lifetime and preserves participant results |
-| Implemented foundation: fixed-model respawn | Same identity/results/lease, fresh serial; rollback and portable continuation across death, waiting and respawn |
+| Shared fixed-model respawn foundation | Same identity/results/lease, fresh serial; rollback and portable continuation across death, waiting and respawn |
 | Deferred: a mod replaces a living car | Participant stays Playing with the same lease and results, car-local state follows replacement policy |
 | Deferred: live replacement occurs while the client is disconnected | Recovery restores the actual replacement rather than the client's previous model |
 | Requested model is unavailable or incompatible on a peer | Admission or pool extension is rejected before activation without stopping existing players |

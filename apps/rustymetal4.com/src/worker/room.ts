@@ -326,6 +326,7 @@ export class Room extends DurableObject<Env> {
         }
       }
       if (status.phase === "match" && match.stage !== "playing") {
+        match.cars = status.cars;
         match.stage = "playing";
         match.message =
           "Match in progress. New players can join with a prepared car; existing players can reconnect.";

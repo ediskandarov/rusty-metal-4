@@ -10,14 +10,34 @@ const compiled = await WebAssembly.compile(fs.readFileSync(process.env.TM4_SIMUL
 const slots = [0, 3, 5, 7];
 const identities = ["fffffffffffffffd", "0020000000000001", "ffffffffffffffff", "123456789abcdef0"];
 
-async function simulation(model = "Orbital", delay = 90) {
+async function simulation(
+  model = "Orbital",
+  delay = 90,
+  pool = ["Orbital", "Pizza Boy", "Crusher", "Microblast", "Super Auger"],
+  roster = [model, "Pizza Boy", "Crusher", "Crusher"],
+  occupied = slots,
+  unavailable = null,
+) {
   const wasi = new WASI({
     version: "preview1",
     preopens: { "/DATA": join(process.env.TM4_RESOURCE_DIR, "DATA") },
     returnOnExit: true,
   });
+  const imports = { ...wasi.wasiImport };
+  if (unavailable) {
+    for (const operation of ["path_open", "path_filestat_get"]) {
+      const original = imports[operation];
+      imports[operation] = (...args) => {
+        const path = new TextDecoder().decode(
+          new Uint8Array(instance.exports.memory.buffer, args[2], args[3]),
+        );
+        if (path.toUpperCase().endsWith(unavailable)) return 44; // WASI ENOENT
+        return original(...args);
+      };
+    }
+  }
   const instance = await WebAssembly.instantiate(compiled, {
-    wasi_snapshot_preview1: wasi.wasiImport,
+    wasi_snapshot_preview1: imports,
   });
   wasi.initialize(instance);
   const x = instance.exports;
@@ -34,9 +54,27 @@ async function simulation(model = "Orbital", delay = 90) {
     return address;
   };
   assert.equal(x.HeadlessInitialize(), 1);
-  const cars = argument([model, "Pizza Boy", "Crusher", "Crusher"].join("\n"));
-  const ids = argument(identities.join("\n"));
-  assert.equal(x.WebNetStartFfa(8, 0xa9, 0, 12345, -1, 1, cars, ids, delay), 1);
+  const cars = argument(roster.join("\n"));
+  const ids = argument(
+    occupied.map((_, i) => identities[i] ?? (i + 1).toString(16).padStart(16, "0")).join("\n"),
+  );
+  const models = argument(pool.join("\n"));
+  assert.equal(
+    x.WebNetStartFfa(
+      8,
+      occupied.reduce((mask, slot) => mask | (1 << slot), 0),
+      0,
+      12345,
+      -1,
+      1,
+      cars,
+      ids,
+      delay,
+      models,
+    ),
+    1,
+  );
+  x.free(models);
   x.free(cars);
   x.free(ids);
   return {
@@ -104,6 +142,7 @@ test("FFA repeated simultaneous deaths preserve results, serials, attribution an
     if (tick === 12) assert.equal(current.x.WebTestHitParticipant(projectile, 7), 1);
   };
   let previous = original;
+  const chosen = new Set();
   for (let tick = 3; tick < 37; ++tick) {
     actions(world, tick);
     world.step();
@@ -113,6 +152,7 @@ test("FFA repeated simultaneous deaths preserve results, serials, attribution an
     if ([3, 14, 25].includes(tick)) {
       assert.equal(car(world, 0), 0);
       assert.equal(pending(world, 0), 2);
+      chosen.add(pending(world, 0, 4));
       assert.equal(pending(world, 0, 1), tick + 6);
       assert.equal(status(world, 2), tick === 14 ? 0 : 1, "one or zero survivors continue");
     }
@@ -125,6 +165,11 @@ test("FFA repeated simultaneous deaths preserve results, serials, attribution an
     }
     if ([3, 8, 9].includes(tick)) snapshots.push([world.snapshot(), tick + 1]);
   }
+  assert.ok(chosen.size > 1, "multiple deaths select different models");
+  assert.ok(
+    [...chosen].some((model) => model >= 4),
+    "selection includes models outside initial roster",
+  );
   assert.deepEqual(world.results(0), [0xfffffffffffffffdn, 3, 6]);
   assert.deepEqual(world.results(7), [0x123456789abcdef0n, 0, 1]);
   assert.equal(x.WebNetRestoreLocalCheckpoint(), 1);
@@ -181,12 +226,14 @@ test("FFA failed spawn retains identity/results/lease, retries three times then 
   assert.equal(x.WebTestSetParticipantResults(0, 4, 5), 1);
   assert.equal(x.WebTestKillParticipant(0), 1);
   world.step();
+  const selected = pending(world, 0, 4);
   for (let tick = 1; tick < 70; ++tick) {
     if ([2, 32, 62].includes(tick)) x.WebTestFailSimulationAllocation(0);
     world.step();
     if ([2, 32].includes(tick)) assert.equal(pending(world, 0), 2);
     if (tick >= 62) assert.equal(pending(world, 0), 3);
     assert.equal(car(world, 0), 0);
+    assert.equal(pending(world, 0, 4), selected, "retry keeps selected model");
     assert.deepEqual(world.results(0), [0xfffffffffffffffdn, 4, 6]);
     assert.equal(x.WebNetSlotMask(), 0xa9);
     assert.equal(status(world, 4), 0);
@@ -199,4 +246,163 @@ test("FFA failed spawn retains identity/results/lease, retries three times then 
     fresh.step();
     assert.deepEqual(fresh.canonical(), world.canonical());
   }
+});
+
+test("FFA can select the same model, preserving a new lifetime and portable continuation", async () => {
+  const pool = ["Crusher"],
+    roster = Array(4).fill("Crusher");
+  const world = await simulation("Crusher", 2, pool, roster);
+  const serial = car(world, 0);
+  assert.equal(world.x.WebTestKillParticipant(0), 1);
+  world.step();
+  assert.equal(pending(world, 0, 4), 1);
+  const fresh = await simulation("Crusher", 2, pool, roster);
+  fresh.restore(world.snapshot());
+  for (let tick = 1; tick < 12; ++tick) {
+    world.step();
+    fresh.step();
+    assert.deepEqual(fresh.canonical(), world.canonical());
+  }
+  assert.ok(car(world, 0) > serial);
+  assert.equal(pending(world, 0, 4), 1);
+  assert.deepEqual(world.results(0), [0xfffffffffffffffdn, 0, 1]);
+});
+
+test("pool is independent of occupancy and validates before activation or portable restore", async () => {
+  for (const pool of [
+    [],
+    ["Orbital", "Orbital"],
+    ["Missing"],
+    ["Orbital", "Pizza Boy"],
+    ["Orbital", "Pizza Boy", "Crusher", "Missing"],
+    ["Orbital", "Pizza Boy", "Crusher", ""],
+    [
+      "Orbital",
+      "Pizza Boy",
+      "Crusher",
+      "Capt. Grimm",
+      "Calypso",
+      "Quatro",
+      "Goggle Eyes",
+      "Meter Maid",
+      "Gen. Warthog",
+    ],
+  ])
+    await assert.rejects(simulation("Orbital", 2, pool));
+  const world = await simulation("Orbital", 2);
+  const reordered = await simulation("Orbital", 2, [
+    "Pizza Boy",
+    "Orbital",
+    "Crusher",
+    "Microblast",
+    "Super Auger",
+  ]);
+  const before = reordered.canonical();
+  assert.throws(() => reordered.restore(world.snapshot()), /restore/);
+  assert.deepEqual(reordered.canonical(), before, "rejected pool does not mutate live state");
+  // Recover a new instance after model changes, then admit a car absent from the
+  // initial roster. All resources and callback descriptors were prepared already.
+  assert.equal(world.x.WebTestKillParticipant(0), 1);
+  for (let tick = 0; tick < 4; ++tick) world.step();
+  let head = 4;
+  while (pending(world, 0, 4) === 1) {
+    assert.equal(world.x.WebTestKillParticipant(0), 1);
+    for (let i = 0; i < 4; ++i) {
+      world.step();
+      ++head;
+    }
+  }
+  assert.notEqual(pending(world, 0, 4), 1, "portable admission checkpoint has a changed model");
+  const fresh = await simulation("Orbital", 2);
+  fresh.restore(world.snapshot());
+  const admit = (sim) => {
+    const name = new TextEncoder().encode("Super Auger\0"),
+      ptr = sim.x.malloc(name.length);
+    new Uint8Array(sim.x.memory.buffer).set(name, ptr);
+    assert.equal(sim.x.WebNetAdmitParticipant(head, 6, 99, 0, ptr), 1);
+    sim.x.free(ptr);
+  };
+  admit(world);
+  admit(fresh);
+  assert.equal(pending(world, 6, 4), 5);
+  for (let tick = head; tick < head + 16; ++tick) {
+    world.step();
+    fresh.step();
+    assert.deepEqual(fresh.canonical(), world.canonical());
+  }
+});
+
+test("eight distinct initial stock models retain separate pool identities", async () => {
+  const pool = [
+    "Orbital",
+    "Pizza Boy",
+    "Capt. Grimm",
+    "Calypso",
+    "Quatro",
+    "Goggle Eyes",
+    "Meter Maid",
+    "Gen. Warthog",
+  ];
+  const occupied = Array.from({ length: 8 }, (_, i) => i);
+  const world = await simulation("Orbital", 2, pool, pool, occupied);
+  for (const slot of occupied) assert.equal(pending(world, slot, 4), slot + 1);
+  const fresh = await simulation("Orbital", 2, pool, pool, occupied);
+  fresh.restore(world.snapshot());
+  for (const slot of occupied) {
+    assert.equal(world.x.WebTestKillParticipant(slot), 1);
+    assert.equal(fresh.x.WebTestKillParticipant(slot), 1);
+  }
+  for (let tick = 0; tick < 16; ++tick) {
+    world.step();
+    fresh.step();
+    assert.deepEqual(fresh.canonical(), world.canonical(), "eight-slot respawn continuation");
+  }
+  for (const slot of occupied) assert.equal(world.x.WebTestNetworkSlotBindings(slot), 15);
+});
+
+test("partial respawn failures replay across retry boundaries without changing the selection", async () => {
+  const pool = ["Crusher"],
+    roster = Array(4).fill("Crusher");
+  for (const allocation of [0, 4, 12, 13, 14, 15, 18]) {
+    const world = await simulation("Crusher", 2, pool, roster);
+    assert.equal(world.x.WebTestKillParticipant(0), 1);
+    world.step();
+    assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+    const snapshot = world.snapshot(),
+      rows = [];
+    for (let tick = 1; tick < 38; ++tick) {
+      if (tick === 2) world.x.WebTestFailSimulationAllocation(allocation);
+      world.step();
+      rows.push(world.canonical());
+      assert.equal(pending(world, 0, 4), 1);
+    }
+    assert.ok(car(world, 0), `retry after allocation ${allocation}`);
+    const fresh = await simulation("Crusher", 2, pool, roster);
+    fresh.restore(snapshot);
+    assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+    for (let tick = 1; tick < 38; ++tick) {
+      if (tick === 2) {
+        world.x.WebTestFailSimulationAllocation(allocation);
+        fresh.x.WebTestFailSimulationAllocation(allocation);
+      }
+      world.step();
+      fresh.step();
+      assert.deepEqual(
+        world.canonical(),
+        rows[tick - 1],
+        `local failure ${allocation}, tick ${tick}`,
+      );
+      assert.deepEqual(
+        fresh.canonical(),
+        rows[tick - 1],
+        `portable failure ${allocation}, tick ${tick}`,
+      );
+    }
+    assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+  }
+});
+
+test("a known pool model with missing local disc resources is rejected before activation", async () => {
+  await assert.rejects(simulation("Orbital", 2, undefined, undefined, slots, "AUGER.MR"));
+  await assert.rejects(simulation("Orbital", 2, undefined, undefined, slots, "YARD.MR"));
 });

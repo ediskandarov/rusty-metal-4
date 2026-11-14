@@ -1,9 +1,12 @@
 #include "participant.h"
 
+#include "interpolation.h"
 #include "net_match.h"
+#include "src/main/object/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
 #include "tm4/main/object.h"
+#include "tm4/main/system.h"
 #include "tm4/modules/car.h"
 
 #include <limits.h>
@@ -18,7 +21,10 @@ static int equal(WebParticipantId first, WebParticipantId second)
     return first.low == second.low && first.high == second.high;
 }
 
-static int present(WebParticipantId id) { return id.low || id.high; }
+static int present(WebParticipantId id)
+{
+    return id.low || id.high;
+}
 
 WebParticipantId WebParticipantIdentity(s32 slot)
 {
@@ -74,6 +80,17 @@ int WebParticipantScheduleRespawn(s32 slot, u32 due_tick, u32 retry_ticks, u32 a
     return 1;
 }
 
+void WebParticipantSelectRespawnModel(s32 slot, u32 model)
+{
+    if (WebNetSlotOccupied(slot) && !GameInfo.players[slot].car
+        && participants.respawns[slot].state == WebCarScheduled && model
+        && model <= WebNetModelCount()) {
+        participants.models[slot] = model;
+        WebNetRestoreParticipantConfiguration();
+    }
+}
+
+void WebCheckpointSetRandomState(u32 random, u32 effects);
 void WebParticipantProcessRespawns(void)
 {
     if (!WebNetMatchActive())
@@ -88,6 +105,9 @@ void WebParticipantProcessRespawns(void)
         }
         if (pending->due_tick > (u32)MainFrameCount)
             continue;
+        const u32 random = randseed(), effects = WebRenderEffectRandomState();
+        const u32 serial = ObjectNextSerial;
+        RegistryDirectory* directory = RegGetCurrentDirectoryPtr();
         ++pending->attempts;
         --pending->remaining;
         for (s32 entrant = 0; entrant < GameInfo.player_car_count; ++entrant) {
@@ -98,12 +118,19 @@ void WebParticipantProcessRespawns(void)
         }
         if (GameInfo.players[slot].car)
             *pending = (WebParticipantRespawn) { .state = WebCarActive };
-        else if (pending->remaining)
-            pending->due_tick = (u32)MainFrameCount + pending->retry_ticks;
         else {
-            pending->state = WebCarSpawnFailed;
-            pending->due_tick = 0;
+            /* Keep the already selected model; rejected constructors must not
+             * perturb later participants' RNG or object identities. */
+            ObjectNextSerial = serial;
+            WebCheckpointSetRandomState(random, effects);
+            if (pending->remaining)
+                pending->due_tick = (u32)MainFrameCount + pending->retry_ticks;
+            else {
+                pending->state = WebCarSpawnFailed;
+                pending->due_tick = 0;
+            }
         }
+        RegChangeCurrentDirectoryP(directory);
     }
 }
 
@@ -169,5 +196,11 @@ int WebParticipantParse(WebParticipantState* state, u32 mask, const char* identi
     return WebParticipantStateValid(state, mask);
 }
 
-void WebParticipantCapture(WebParticipantState* state) { *state = participants; }
-void WebParticipantRestore(const WebParticipantState* state) { participants = *state; }
+void WebParticipantCapture(WebParticipantState* state)
+{
+    *state = participants;
+}
+void WebParticipantRestore(const WebParticipantState* state)
+{
+    participants = *state;
+}

@@ -37,6 +37,8 @@ typedef struct NetMatchSetup {
     s32 capacity;
     u32 slots;
     char* cars[8];
+    char* model_pool[8];
+    u32 model_count;
     char* world;
     u32 seed;
     s32 view_slot;
@@ -55,6 +57,7 @@ static struct {
     int stepping;
     int replaying;
     int local_replaying;
+    int departing;
     u32 checkpoint_tick;
 } match;
 
@@ -96,9 +99,9 @@ static int session_resources_present(const NetMatchSetup* setup)
     for (unsigned i = 0; i < ArrayCount(common); ++i)
         if (access(common[i], R_OK))
             return reject_start(common[i]);
-    for (s32 i = -1; i < __builtin_popcount(setup->slots); ++i) {
+    for (s32 i = -1; i < (s32)setup->model_count; ++i) {
         RegistryDirectory* directory = i < 0 ? GameGetWorldNameDirectoryPtr(setup->world)
-                                             : GetMatchingCarDirectory(setup->cars[i], NULL);
+                                             : GetMatchingCarDirectory(setup->model_pool[i], NULL);
         const char* name = directory ? RegGetFileDataPS(directory, "filename") : NULL;
         char path[128];
         if (!name || snprintf(path, sizeof(path), "/DATA/%s.MR", name) >= sizeof(path))
@@ -118,6 +121,21 @@ static int session_resources_present(const NetMatchSetup* setup)
         }
     }
     return 1;
+}
+
+u32 WebNetModelCount(void)
+{
+    return match.setup.model_count;
+}
+char* WebNetModelName(u32 index)
+{
+    return index < match.setup.model_count ? match.setup.model_pool[index] : NULL;
+}
+void WebNetModelPool(char output[8][64])
+{
+    memset(output, 0, 8 * 64);
+    for (u32 i = 0; i < match.setup.model_count; ++i)
+        strcpy(output[i], match.setup.model_pool[i]);
 }
 
 int WebNetSlotCapacity(void)
@@ -167,7 +185,7 @@ int WebNetParticipantModelsValid(const WebParticipantState* state, u32 slots)
 {
     if (!WebParticipantStateValid(state, slots) || (slots & ~((1u << match.setup.capacity) - 1)))
         return 0;
-    const u32 prepared = __builtin_popcount(match.setup.slots);
+    const u32 prepared = match.setup.model_count;
     for (s32 slot = 0; slot < 8; ++slot)
         if (state->models[slot] > prepared)
             return 0;
@@ -183,7 +201,7 @@ void WebNetRestoreParticipantConfiguration(void)
     for (s32 slot = 0; slot < match.setup.capacity; ++slot) {
         if (!WebNetSlotOccupied(slot))
             continue;
-        GameInfo.character_names[entrant] = match.setup.cars[participants.models[slot] - 1];
+        GameInfo.character_names[entrant] = match.setup.model_pool[participants.models[slot] - 1];
         if (GameInfo.players[slot].car)
             GameInfo.players[slot].car->index = entrant;
         ++entrant;
@@ -212,8 +230,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetAdmitParticipant(
         if (previous.slots[i].id.low == low && previous.slots[i].id.high == high)
             return 0;
     u32 prepared_model = 0;
-    for (s32 i = 0; i < __builtin_popcount(match.setup.slots); ++i)
-        if (!strcmp(match.setup.cars[i], model)) {
+    for (s32 i = 0; i < match.setup.model_count; ++i)
+        if (!strcmp(match.setup.model_pool[i], model)) {
             prepared_model = i + 1;
             break;
         }
@@ -276,8 +294,10 @@ EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u3
     WebCheckpointArenaSelect(WebLevelCheckpointActive());
     /* Ordinary object destruction resolves described weak references, capture
      * links and owned children while copied projectile provenance survives. */
+    match.departing = 1;
     if (GameInfo.players[slot].car)
         ObjectDestroy(GameInfo.players[slot].car);
+    match.departing = 0;
     if (GameInfo.active_view == GameInfo.players[slot].camera)
         GameInfo.active_view = NULL;
     if (GameInfo.players[slot].camera)
@@ -298,7 +318,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u3
 /* All startup data is mandatory and validated in a local candidate. No prior
  * selection, failed request or cancelled match can contribute configuration. */
 static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot, u32 flags,
-    const char* car_names, const char* participant_ids, u32 respawn_delay_ticks)
+    const char* car_names, const char* participant_ids, u32 respawn_delay_ticks,
+    const char* pool_names)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8 || !slots
         || (slots & ~((1u << capacity) - 1)) || __builtin_popcount(slots) < 2 || view_slot < -1
@@ -343,6 +364,62 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     WebParticipantState participants;
     if (!WebParticipantParse(&participants, slots, participant_ids))
         return reject_start("Invalid participant identities");
+    if (pool_names) {
+        const size_t pool_length = strnlen(pool_names, 512);
+        if (!pool_length || pool_length >= 512)
+            return reject_start("Invalid prepared model pool");
+        const char* entry = pool_names;
+        while (*entry) {
+            const char* end = strchr(entry, '\n');
+            if (!end)
+                end = pool_names + pool_length;
+            if (end == entry || end - entry >= 64 || candidate.model_count == 8)
+                return reject_start("Invalid prepared model pool");
+            char* model = NULL;
+            const s32 available = RegGetNumberOfDirectoriesS("/objects/car/characters");
+            for (s32 i = 0; i < available; ++i) {
+                char* name = RegGetDirectoryNameSN("/objects/car/characters", i);
+                if (name && strlen(name) == (size_t)(end - entry)
+                    && !strncmp(name, entry, end - entry)) {
+                    model = name;
+                    break;
+                }
+            }
+            if (!model)
+                return reject_start("Prepared model is unavailable");
+            for (u32 i = 0; i < candidate.model_count; ++i)
+                if (!strcmp(candidate.model_pool[i], model))
+                    return reject_start("Duplicate prepared model");
+            candidate.model_pool[candidate.model_count++] = model;
+            if (!*end)
+                break;
+            entry = end + 1;
+            if (!*entry)
+                return reject_start("Invalid prepared model pool");
+        }
+    } else {
+        /* Diagnostic original-rule fixtures use only their declared roster. */
+        for (s32 i = 0; i < count; ++i) {
+            u32 j = 0;
+            while (j < candidate.model_count && strcmp(candidate.model_pool[j], candidate.cars[i]))
+                ++j;
+            if (j == candidate.model_count)
+                candidate.model_pool[candidate.model_count++] = candidate.cars[i];
+        }
+    }
+    s32 entrant = 0;
+    for (s32 slot = 0; slot < capacity; ++slot) {
+        if (!(slots & (1u << slot)))
+            continue;
+        u32 i = 0;
+        while (
+            i < candidate.model_count && strcmp(candidate.model_pool[i], candidate.cars[entrant]))
+            ++i;
+        if (i == candidate.model_count)
+            return reject_start("Initial car is outside prepared pool");
+        participants.models[slot] = i + 1;
+        ++entrant;
+    }
     if (!session_resources_present(&candidate))
         return 0;
     match.setup = candidate;
@@ -363,12 +440,18 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
 /* Production network matches use FFA. The original driver remains available only
  * to diagnostic fixtures that verify the shared lifecycle independently of policy. */
 EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot,
-    u32 flags, const char* car_names, const char* participant_ids, u32 delay)
+    u32 flags, const char* car_names, const char* participant_ids, u32 delay,
+    const char* model_pool)
 {
-    if (capacity != 8 || !delay || delay > 3600)
+    if (capacity != 8 || !delay || delay > 3600 || !model_pool)
         return reject_start("Invalid FFA respawn delay or gameplay capacity");
-    return start_match(
-        capacity, slots, world, seed, view_slot, flags, car_names, participant_ids, delay);
+    return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
+        delay, model_pool);
+}
+
+int WebNetDeparting(void)
+{
+    return match.departing;
 }
 
 u32 WebNetFfaRespawnDelay(void)
@@ -381,7 +464,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
     s32 view_slot, u32 flags, const char* car_names, const char* participant_ids)
 {
     return start_match(
-        capacity, slots, world, seed, view_slot, flags, car_names, participant_ids, 0);
+        capacity, slots, world, seed, view_slot, flags, car_names, participant_ids, 0, NULL);
 }
 #endif
 

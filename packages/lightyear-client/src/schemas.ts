@@ -1,5 +1,5 @@
 import { z } from "zod";
-export const networkProtocolVersion = 15;
+export const networkProtocolVersion = 16;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -66,6 +66,16 @@ export const startSchema = slotConfigurationSchema
       )
       .min(2)
       .max(8),
+    modelPool: z
+      .array(
+        z
+          .string()
+          .min(1)
+          .max(63)
+          .regex(/^[^\0\n]+$/),
+      )
+      .min(1)
+      .max(8),
     participants: z.array(participantIdSchema).min(2).max(8),
     seed: u32,
     epoch: u32,
@@ -76,6 +86,8 @@ export const startSchema = slotConfigurationSchema
     (start) =>
       start.capacity === 8 &&
       start.cars.length === start.slots.length &&
+      new Set(start.modelPool).size === start.modelPool.length &&
+      start.cars.every((car) => start.modelPool.includes(car)) &&
       start.participants.length === start.slots.length &&
       new Set(start.participants).size === start.participants.length,
     "One mode car is required per occupied slot",

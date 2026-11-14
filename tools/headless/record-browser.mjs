@@ -50,6 +50,7 @@ try {
           const cars = firstCar
             ? [firstCar, firstCar === "Pizza Boy" ? "Orbital" : "Pizza Boy"]
             : ["Orbital", "Pizza Boy"];
+          const modelPool = [...cars];
           const world = Module.ccall("WebNetWorldIndex", "number", ["string"], [worldName]);
           assert(world >= 0, "world " + worldName);
           const started = performance.now();
@@ -67,6 +68,7 @@ try {
                 "string",
                 "string",
                 "number",
+                "string",
               ],
               [
                 8,
@@ -78,6 +80,7 @@ try {
                 cars.join("\n"),
                 "0000000000000001\n0000000000000002",
                 90,
+                modelPool.join("\n"),
               ],
             ),
             "start",
@@ -122,6 +125,7 @@ try {
             startupMs,
             stepMs,
             cars,
+            modelPool,
             health: tm4Port.cars.map((car) => car.health),
             frames: tm4Port.levelFrames,
             memoryBytes: null,

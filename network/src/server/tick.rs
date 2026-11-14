@@ -120,6 +120,13 @@ fn prepare_session(
         game.participants.freeze();
         game.started = true;
         game.loading_since = Instant::now();
+        let cars: Vec<String> = game
+            .participants
+            .slots()
+            .map(|slot| game.participants.at_slot(slot).car.clone().unwrap())
+            .collect();
+        let model_pool =
+            tm4_network::protocol::prepared_model_pool(&game.catalog.as_ref().unwrap().cars, &cars);
         let start = SessionStart {
             mode: tm4_network::protocol::MatchMode::Ffa,
             respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
@@ -134,11 +141,8 @@ fn prepare_session(
                 .selected_world
                 .clone()
                 .unwrap_or_else(|| game.catalog.as_ref().unwrap().worlds[0].clone()),
-            cars: game
-                .participants
-                .slots()
-                .map(|slot| game.participants.at_slot(slot).car.clone().unwrap())
-                .collect(),
+            cars,
+            model_pool,
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,

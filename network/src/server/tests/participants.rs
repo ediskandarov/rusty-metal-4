@@ -43,6 +43,7 @@ fn game() -> Match {
         session: Some(SessionStart {
             mode: tm4_network::protocol::MatchMode::Ffa,
             respawn_delay_ticks: tm4_network::protocol::FFA_RESPAWN_DELAY_TICKS,
+            model_pool: vec!["Orbital".into(), "Pizza Boy".into()],
             capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
             participants: vec![ParticipantId(1), ParticipantId(2)],

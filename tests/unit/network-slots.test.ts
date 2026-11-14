@@ -10,16 +10,23 @@ const start = {
   slots: [0, 3, 7],
   participants: ["0000000000000001", "0000000000000002", "0000000000000003"],
   cars: ["Orbital", "Pizza Boy", "Crusher"],
+  modelPool: ["Orbital", "Pizza Boy", "Crusher"],
   world: "Construction Yard",
   seed: 12345,
   epoch: 1,
   portable: false,
-  compatibility: { protocol: 15, build: "a".repeat(64), content: "b".repeat(64) },
+  compatibility: { protocol: 16, build: "a".repeat(64), content: "b".repeat(64) },
 };
 test("startup validates capacity, unique actual slots and one mode car per occupied slot", () => {
   expect(startSchema.parse(start)).toEqual(start);
   for (const invalid of [
     { mode: "deathmatch" },
+    { modelPool: undefined },
+    { modelPool: [] },
+    { modelPool: ["Orbital", "Orbital", "Pizza Boy", "Crusher"] },
+    { modelPool: ["Orbital", "Pizza Boy"] },
+    { modelPool: ["Orbital", "Pizza Boy", "Crusher", "bad\nmodel"] },
+    { modelPool: Array.from({ length: 9 }, (_, i) => `car${i}`) },
     { respawnDelayTicks: undefined },
     { respawnDelayTicks: 0 },
     { respawnDelayTicks: 3601 },
@@ -62,6 +69,7 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     "Orbital\nPizza Boy\nCrusher",
     "0000000000000001\n0000000000000002\n0000000000000003",
     90,
+    start.modelPool.join("\n"),
   ]);
   expect(configureMatch(engine, start, 1)).toBe(1);
   expect(() => configureMatch(engine, start, 8)).toThrow();
@@ -88,7 +96,7 @@ test("portable catch-up decodes capacity-width rows but stages only the real occ
     10,
     11,
     42,
-    { capacity: 8, slots: [0, 3, 7], cars: start.cars },
+    { capacity: 8, slots: [0, 3, 7], modelPool: start.modelPool },
     engine,
     port,
     new AbortController().signal,

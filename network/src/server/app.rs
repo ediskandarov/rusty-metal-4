@@ -177,6 +177,9 @@ pub(crate) fn run_match(
                     .filter(|player| player.connection.is_some())
                     .count();
                 status.tick = game.tick;
+                if let Some(session) = &game.session {
+                    status.cars = session.model_pool.clone();
+                }
                 let mut health = game.health.lock().unwrap();
                 for (slot, player) in game.controls.iter().enumerate() {
                     health.unacknowledged(

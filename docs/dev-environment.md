@@ -161,7 +161,7 @@ server, then every participant readies and the host starts the actual roster.
 FFA keeps running after deaths; automatic limits, results and return to the room
 remain deferred. Explicit departure releases seats, and an empty room releases its
 private server. FFA always provides eight places, independently of the initial roster
-size. During play, a newcomer can load their own disc, select from the startup-prepared model pool and join a free seat;
+size. During play, a newcomer can load their own disc, select from the explicit startup-prepared model pool and join a free seat;
 explicit room leave schedules native departure. Closing a tab preserves recovery
 identity rather than releasing its gameplay seat.
 

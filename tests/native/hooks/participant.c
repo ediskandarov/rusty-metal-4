@@ -378,6 +378,8 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestRespawnState(s32 slot, s32 field)
         return pending->attempts;
     case 3:
         return pending->remaining;
+    case 4:
+        return state.models[slot];
     default:
         return UINT32_MAX;
     }

@@ -371,7 +371,6 @@ export function freezeRoster(state: RoomState, key: string, now: number): RoomMa
     car: member.car!,
     credential: (crypto.randomUUID() + crypto.randomUUID()).replaceAll("-", ""),
   }));
-  match.cars = [...new Set(match.roster.map((entry) => entry.car))];
   match.stage = "starting";
   match.deadline = now + preparationLimit;
   match.message = "Connecting the prepared participants…";

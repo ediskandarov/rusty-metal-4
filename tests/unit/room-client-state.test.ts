@@ -20,7 +20,7 @@ function deferred<T>() {
 }
 const id = "a".repeat(32);
 const host = "9bad46c2-542d-4d6e-a78a-2ec81a700a23";
-const compatibility = { protocol: 15, build: "b".repeat(64), content: "c".repeat(64) };
+const compatibility = { protocol: 16, build: "b".repeat(64), content: "c".repeat(64) };
 const disc = { compatibility, cars: ["Calypso", "Quatro"] };
 const match: MatchSnapshot = {
   id: "74433021-24b5-43fe-b1b9-eb16565b6092",

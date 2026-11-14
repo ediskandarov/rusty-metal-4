@@ -11,7 +11,7 @@ const roomId = "a".repeat(32);
 const sessionId = "c24baad1-69d9-4cc8-b74c-e56de97502e4";
 const room = { type: "rm4-room", roomId } as const;
 const player = { type: "rm4-player", roomId } as const;
-const compatibility = { protocol: 15, build: "b".repeat(64), content: "c".repeat(64) };
+const compatibility = { protocol: 16, build: "b".repeat(64), content: "c".repeat(64) };
 const join = {
   ...room,
   action: "join",

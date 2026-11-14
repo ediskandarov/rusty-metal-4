@@ -1,0 +1,38 @@
+--- a/src/main/loadfiles.c
++++ b/src/main/loadfiles.c
+@@ -2,6 +2,7 @@
+ #include "tm4/fixed.h"
+ 
+ #include "tm4_scalar.h"
++#include "port/web/net_match.h"
+ 
+ #include "tm4/main/cd.h"
+ #include "tm4/main/game.h"
+@@ -387,20 +388,23 @@
+             filename, LoadingRegistryExtension, NULL, LoadFilesProcessWorldRegistry);
+     LoadFilesAdd(LoadingGameRegistryFilename, NULL, LoadFilesProcessGameRegistry);
+     LoadFilesCarVramSlotCount = 0;
+-    for (player = 0; player < GameInfo.entrant_count; player++) {
++    const s32 model_count = WebNetMatchActive() ? WebNetModelCount() : GameInfo.entrant_count;
++    for (player = 0; player < model_count; player++) {
++        char* model
++            = WebNetMatchActive() ? WebNetModelName(player) : GameInfo.character_names[player];
+         for (index = 0; index < LoadFilesCarVramSlotCount; index++) {
+-            if (!strcmp(uniqueCars[index], GameInfo.character_names[player]))
++            if (!strcmp(uniqueCars[index], model))
+                 break;
+         }
+         if (index < LoadFilesCarVramSlotCount)
+             continue;
+-        directory = GetMatchingCarDirectory(GameInfo.character_names[player], NULL);
++        directory = GetMatchingCarDirectory(model, NULL);
+         if (!directory)
+             continue;
+         filename = RegGetFileDataPS(directory, MatchingDirectoryFilename);
+         if (!filename)
+             continue;
+-        uniqueCars[index] = GameInfo.character_names[player];
++        uniqueCars[index] = model;
+         LoadFilesCarVramSlotCount++;
+         LoadFilesAddWithExtension(
+             filename, LoadingRegistryExtension, uniqueCars[index], LoadFilesProcessCar);

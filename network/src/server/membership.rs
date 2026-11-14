@@ -96,7 +96,7 @@ impl Match {
                     if !self
                         .session
                         .as_ref()
-                        .is_some_and(|session| session.cars.contains(&car))
+                        .is_some_and(|session| session.model_pool.contains(&car))
                     {
                         return Err("Choose a model from the match's prepared pool.");
                     }
@@ -404,15 +404,7 @@ impl Match {
                 cars: self
                     .session
                     .as_ref()
-                    .map(|session| {
-                        session
-                            .cars
-                            .iter()
-                            .cloned()
-                            .collect::<std::collections::BTreeSet<_>>()
-                            .into_iter()
-                            .collect()
-                    })
+                    .map(|session| session.model_pool.clone())
                     .unwrap_or_default(),
                 players: vec![tm4_network::protocol::LobbyPlayer {
                     slot,

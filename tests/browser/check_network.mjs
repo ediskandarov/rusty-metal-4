@@ -166,8 +166,20 @@ try {
               "string",
               "string",
               "number",
+              "string",
             ],
-            [8, 3, 0, seed, -1, 0, "Orbital\nPizza Boy", "0000000000000011\n0000000000000012", 90],
+            [
+              8,
+              3,
+              0,
+              seed,
+              -1,
+              0,
+              "Orbital\nPizza Boy",
+              "0000000000000011\n0000000000000012",
+              90,
+              "Orbital\nPizza Boy",
+            ],
           );
           if (
             !started ||

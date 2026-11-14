@@ -7,6 +7,7 @@ use tm4_network::protocol::{Catalog, ControllerIdentity, MAX_PLAYERS, Participan
 #[derive(Default)]
 pub(crate) struct Participant {
     pub joining: bool,
+    /// Admission selection only; C owns the current car model after respawn.
     pub car: Option<String>,
     pub lobby_ready: bool,
     pub credential: Option<String>,

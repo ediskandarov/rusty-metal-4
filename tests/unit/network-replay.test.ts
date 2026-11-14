@@ -38,7 +38,7 @@ function setup() {
       start,
       target,
       digest,
-      { capacity: 2, slots: [0, 1], cars: ["Orbital", "Crusher"] },
+      { capacity: 2, slots: [0, 1], modelPool: ["Orbital", "Crusher"] },
       engine,
       port,
       abort.signal,

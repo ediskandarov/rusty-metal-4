@@ -33,21 +33,24 @@ try {
   };
   assert.equal(x.HeadlessInitialize(), 1);
   const world = arg(start.world, (address) => x.WebNetWorldIndex(address));
-  arg(start.cars.join("\n"), (cars) =>
-    arg(start.participants.join("\n"), (ids) =>
-      assert.equal(
-        x.WebNetStartFfa(
-          start.capacity,
-          start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
-          world,
-          start.seed,
-          -1,
+  arg(start.modelPool.join("\n"), (pool) =>
+    arg(start.cars.join("\n"), (cars) =>
+      arg(start.participants.join("\n"), (ids) =>
+        assert.equal(
+          x.WebNetStartFfa(
+            start.capacity,
+            start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
+            world,
+            start.seed,
+            -1,
+            1,
+            cars,
+            ids,
+            start.respawnDelayTicks,
+            pool,
+          ),
           1,
-          cars,
-          ids,
-          start.respawnDelayTicks,
         ),
-        1,
       ),
     ),
   );
@@ -72,7 +75,7 @@ try {
         high = Number(id >> 32n);
       if (kind === 1)
         assert.equal(
-          arg(start.cars[bytes[entry + 10]], (model) =>
+          arg(start.modelPool[bytes[entry + 10]], (model) =>
             x.WebNetAdmitParticipant(tick, slot, low, high, model),
           ),
           1,

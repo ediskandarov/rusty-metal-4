@@ -95,6 +95,7 @@ try {
           const result = step(tick);
           trace.rows[tick + 1] = {
             car: Module._WebTestCarHandle(0),
+            model: Module._WebTestRespawnState(0, 4),
             pending: Module._WebTestRespawnState(0, 0),
             due: Module._WebTestRespawnState(0, 1),
             scores: structuredClone(tm4Port.netMatch?.scores),
@@ -244,6 +245,7 @@ try {
   );
   await join(late, "Late");
   let lateFrame = await load(late);
+  if (ffa) await late.locator("#room-car").selectOption("Pizza Boy");
   assert.equal(await late.locator("#room-ready").innerText(), "Join match");
   await late.locator("#room-ready").click();
   // Observe C prediction crossing the announced admission while the authority
@@ -455,6 +457,13 @@ try {
     assert((await frames[0].evaluate(() => Module._WebTestCarHandle(0))) > oldCar);
     const results = await frames[0].evaluate(() => tm4Port.netMatch.scores[0]);
     assert.equal(results.deaths, Math.floor((death - 120) / 180) + 1);
+    const models = await frames[1].evaluate(() => [
+      ...new Set(Object.values(globalThis.ffaTrace.rows).map((row) => row.model)),
+    ]);
+    assert(
+      models.some((model) => model > 1),
+      "random respawn uses models outside the all-Orbital initial roster",
+    );
     console.log(
       "PASS same-identity portable recovery after disconnected death and respawn",
       death,

@@ -63,7 +63,7 @@ impl Match {
                     || !self
                         .session
                         .as_ref()
-                        .is_some_and(|session| session.cars.contains(&car))
+                        .is_some_and(|session| session.model_pool.contains(&car))
                 {
                     send(
                         links,
