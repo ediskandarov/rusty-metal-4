@@ -7,6 +7,7 @@
 #include "src/modules/car/private.h"
 #include "src/modules/cars/c_crush/private.h"
 #include "src/modules/cars/shovel.h"
+#include "src/modules/fire/private.h"
 #include "src/modules/firing/private.h"
 #include "src/modules/lightn/private.h"
 #include "tm4/main/game.h"
@@ -234,6 +235,64 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestSetDebrisMatrixPadding(u8 value)
         memset((u8*)&part->rotation_step + begin, value, length);
         memset((u8*)&part->local_to_world + begin, value, length);
         ++count;
+    }
+    return count;
+}
+
+EMSCRIPTEN_KEEPALIVE int WebTestCreatePaddingEffects(void)
+{
+    Car* car = GameInfo.players[0].car;
+    if (!car || !FlameClassCount)
+        return 0;
+    FlamePlacement placement
+        = { .world_position = car->position, .world_direction = { 0, -ONE, 0, 0 } };
+    SVECTOR axis = { 0, ONE, 0, 0 };
+    WebCheckpointArenaSelect(1);
+    void* ring = ObjectCreate("fireRing", 0, "fire", &car->position, 1536, 192, NULL, &axis, 4096);
+    void* flame = ObjectCreate("flameEmitter", 0, FlameClasses[0].name, NULL, &placement);
+    WebCheckpointArenaSelect(0);
+    return ring && flame;
+}
+
+EMSCRIPTEN_KEEPALIVE u32 WebTestSetEffectPadding(u32 field, u8 value)
+{
+    u32 count = 0;
+    for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
+        for (Tm4ObjectHeader* object = ObjectLists[list].first; object; object = object->next) {
+            if (!strcmp(object->name, "fireRing")) {
+                FireRing* ring = ObjectGetPayload(object);
+                if (field == 0) {
+                    memset(&ring->axis.pad, value, sizeof(ring->axis.pad));
+                    ++count;
+                } else if (field == 1) {
+                    for (s32 i = 0; i < ring->particle_count; ++i) {
+                        memset(&ring->particles[i].position.pad, value,
+                            sizeof(ring->particles[i].position.pad));
+                        ++count;
+                    }
+                }
+            } else if (!strcmp(object->name, "flameEmitter") && (field == 2 || field == 3)) {
+                FlameEmitter* flame = ObjectGetPayload(object);
+                s16* pad = field == 2 ? &flame->world_direction.pad : &flame->world_velocity.pad;
+                memset(pad, value, sizeof(*pad));
+                ++count;
+            } else if (!strcmp(object->name, "carpart")) {
+                WebCarpart* debris = ObjectGetPayload(object);
+                if (field == 4) {
+                    memset(&debris->part.collision_origin.pad, value,
+                        sizeof(debris->part.collision_origin.pad));
+                    ++count;
+                } else if (field == 5) {
+                    const size_t begin = offsetof(CarRenderFace, reflection) + sizeof(u8);
+                    const size_t length = offsetof(CarRenderFace, texture) - begin;
+                    for (s32 i = 0; i < debris->group.frames[CAR_RENDER_FRAME_DAMAGED].face_count;
+                         ++i) {
+                        memset((u8*)&debris->faces[i] + begin, value, length);
+                        ++count;
+                    }
+                }
+            }
+        }
     }
     return count;
 }

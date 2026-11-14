@@ -105,7 +105,10 @@ static u32 fire_ring_particles(const void* payload)
 
 static const SnapshotField fire_ring_particle_fields[] = {
     SNAP_REF(FireRingParticle, animation, "anim"),
-    SNAP_POD(FireRingParticle, position),
+    SNAP_POD(FireRingParticle, position.vx),
+    SNAP_POD(FireRingParticle, position.vy),
+    SNAP_POD(FireRingParticle, position.vz),
+    SNAP_TRANSIENT(FireRingParticle, position.pad),
     SNAP_POD(FireRingParticle, position_q12),
     SNAP_POD(FireRingParticle, step_q12),
     { 0 },
@@ -122,7 +125,10 @@ static const SnapshotField fire_ring_fields[] = {
     SNAP_STRING(FireRing, animation_name),
     SNAP_POD(FireRing, origin_q12),
     SNAP_INDEX(FireRing, polygon, &WebSnapshotCollisionPolygons),
-    SNAP_POD(FireRing, axis),
+    SNAP_POD(FireRing, axis.vx),
+    SNAP_POD(FireRing, axis.vy),
+    SNAP_POD(FireRing, axis.vz),
+    SNAP_TRANSIENT(FireRing, axis.pad),
     SNAP_POD(FireRing, radius),
     SNAP_POD(FireRing, angular_divisions),
     SNAP_POD(FireRing, radius_step_per_frame),
@@ -336,8 +342,14 @@ static const SnapshotIndexBinding flame_weapons = {
 };
 
 static const SnapshotField flame_fields[] = {
-    SNAP_POD(FlameEmitter, world_direction),
-    SNAP_POD(FlameEmitter, world_velocity),
+    SNAP_POD(FlameEmitter, world_direction.vx),
+    SNAP_POD(FlameEmitter, world_direction.vy),
+    SNAP_POD(FlameEmitter, world_direction.vz),
+    SNAP_TRANSIENT(FlameEmitter, world_direction.pad),
+    SNAP_POD(FlameEmitter, world_velocity.vx),
+    SNAP_POD(FlameEmitter, world_velocity.vy),
+    SNAP_POD(FlameEmitter, world_velocity.vz),
+    SNAP_TRANSIENT(FlameEmitter, world_velocity.pad),
     SNAP_POD(FlameEmitter, period_frames),
     SNAP_POD(FlameEmitter, emit_period_frames),
     SNAP_POD(FlameEmitter, emit_elapsed_frames),
@@ -554,15 +566,25 @@ static u32 carpart_face_count(const void* payload)
 {
     return ((const WebCarpart*)payload)->group.frames[CAR_RENDER_FRAME_DAMAGED].face_count;
 }
-static const SnapshotField carpart_face_fields[]
-    = { { SnapshotPod, 0, sizeof(CarRenderFace) }, { 0 } };
+static const SnapshotField carpart_face_fields[] = {
+    SNAP_POD(CarRenderFace, code),
+    SNAP_POD(CarRenderFace, double_sided),
+    SNAP_POD(CarRenderFace, reflection),
+    SNAP_POD(CarRenderFace, texture),
+    SNAP_POD(CarRenderFace, vertices),
+    SNAP_POD(CarRenderFace, normals),
+    { 0 },
+};
 static const SnapshotArray carpart_faces
     = { carpart_face_fields, sizeof(CarRenderFace), carpart_face_count, 8192 };
 static const SnapshotField carpart_fields[] = {
     SNAP_RESOURCE_STRING(WebCarpart, model, &carpart_models),
     SNAP_POD(WebCarpart, group),
     SNAP_OWNED_ARRAY(WebCarpart, faces, &carpart_faces),
-    SNAP_POD(WebCarpart, part.collision_origin),
+    SNAP_POD(WebCarpart, part.collision_origin.vx),
+    SNAP_POD(WebCarpart, part.collision_origin.vy),
+    SNAP_POD(WebCarpart, part.collision_origin.vz),
+    SNAP_TRANSIENT(WebCarpart, part.collision_origin.pad),
     SNAP_POD(WebCarpart, part.world_position_q12),
     SNAP_POD(WebCarpart, part.frame_displacement_q12),
     SNAP_POD(WebCarpart, part.gravity_step_q12),

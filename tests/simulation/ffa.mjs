@@ -699,3 +699,41 @@ test("debris matrix padding cannot change hashes, snapshots or replay after a de
     assert.deepEqual(restored.canonical(), expected[i], "portable recovery tick " + i);
   }
 });
+
+test("unused effect bytes cannot change hashes, snapshots or subsequent ticks", async () => {
+  const world = await simulation("Super Auger");
+  for (let i = 0; i < 10; ++i) world.step();
+  assert.equal(world.x.WebTestCreatePaddingEffects(), 1);
+  assert.equal(world.x.WebTestKillParticipant(0), 1);
+  world.step();
+  const canonical = world.canonical();
+  const snapshot = world.snapshot();
+  assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+  for (let field = 0; field < 6; ++field) {
+    for (const value of [0x66, 0xff, 0]) {
+      assert.ok(world.x.WebTestSetEffectPadding(field, value), `field ${field} exists`);
+      assert.deepEqual(world.canonical(), canonical, `field ${field} checksum`);
+      assert.deepEqual(world.snapshot(), snapshot, `field ${field} snapshot`);
+    }
+    world.x.WebTestSetEffectPadding(field, 0xff);
+  }
+  const expected = [];
+  for (let tick = 0; tick < 120; ++tick) {
+    world.step();
+    expected.push(world.canonical());
+  }
+  assert.equal(world.x.WebNetRestoreLocalCheckpoint(), 1);
+  for (let tick = 0; tick < expected.length; ++tick) {
+    world.step();
+    assert.deepEqual(world.canonical(), expected[tick], `rollback tick ${tick}`);
+  }
+  assert.equal(world.x.WebNetFinishLocalReplay(), 1);
+  const restored = await simulation("Super Auger");
+  restored.restore(snapshot);
+  restored.x.WebNetEndReplay();
+  assert.deepEqual(restored.snapshot(), snapshot);
+  for (let tick = 0; tick < expected.length; ++tick) {
+    restored.step();
+    assert.deepEqual(restored.canonical(), expected[tick], `portable recovery tick ${tick}`);
+  }
+});
