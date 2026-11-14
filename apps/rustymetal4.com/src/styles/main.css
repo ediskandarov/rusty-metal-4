@@ -145,19 +145,57 @@ select {
 .button {
   display: inline-block;
 }
-.room-card {
-  border-top: 1px solid #354151;
-  padding: 20px 0;
+.room-table-scroll {
+  overflow-x: auto;
 }
-.room-card:last-child {
-  padding-bottom: 0;
+.room-table {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: collapse;
+  font-size: 0.9rem;
 }
-.room-card h3 {
-  margin: 0;
+.room-table th,
+.room-table td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid #354151;
+}
+.room-table thead {
+  background: #151a21;
+  color: #c0cad7;
+}
+.room-table th[scope="row"] {
+  width: 40%;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
-.room-card p {
-  margin: 6px 0 16px;
+.room-table .room-players {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.room-table tbody tr:hover,
+.room-table tbody tr:focus-within {
+  background: #252e3a;
+}
+.room-table .room-action {
+  text-align: right;
+  width: 1%;
+  white-space: nowrap;
+}
+.room-join {
+  padding: 6px 14px;
+}
+.room-name {
+  display: block;
+  text-decoration: none;
+}
+.room-name:hover {
+  text-decoration: underline;
+}
+.room-table .room-empty {
+  color: #c0cad7;
+  white-space: normal;
 }
 .room-parameters {
   display: grid;

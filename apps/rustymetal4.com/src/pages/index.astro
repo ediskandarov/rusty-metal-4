@@ -28,8 +28,25 @@ import { Content as RoomHelp } from "../content/rooms.md";
       Connecting…
     </p>
     <p id="directory-error" class="error" role="alert" hidden></p>
-    <div id="rooms" class="room-list" aria-live="polite">
-      <p>Loading rooms…</p>
+    <div class="room-table-scroll" role="region" aria-labelledby="directory-heading" tabindex="0">
+      <table class="room-table" aria-labelledby="directory-heading">
+        <thead>
+          <tr>
+            <th scope="col">Server</th>
+            <th scope="col" class="room-players">
+              Players
+            </th>
+            <th scope="col">Mode</th>
+            <th scope="col">Map</th>
+            <th scope="col" aria-label="Actions"></th>
+          </tr>
+        </thead>
+        <tbody id="rooms" aria-live="polite">
+          <tr>
+            <td colspan="5">Loading rooms…</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </section>
   <section aria-labelledby="create-heading">
@@ -55,39 +72,29 @@ import { Content as RoomHelp } from "../content/rooms.md";
     <p>Your browser remembers your membership. No account is needed.</p>
   </section>
   <template id="empty-template">
-    <p>
-      No public rooms yet.{" "}
-      <a href="#create-player" id="first-room">
-        Create room
-      </a>{" "}
-      to invite other players.
-    </p>
+    <tr>
+      <td colspan="5" class="room-empty">
+        No public rooms yet.{" "}
+        <a href="#create-player" id="first-room">
+          Create room
+        </a>{" "}
+        to invite other players.
+      </td>
+    </tr>
   </template>
-  <template id="room-card-template">
-    <article class="room-card">
-      <h3 class="card-name"></h3>
-      <p class="card-host"></p>
-      <dl class="room-parameters">
-        <div>
-          <dt>Game mode</dt>
-          <dd class="card-mode"></dd>
-        </div>
-        <div>
-          <dt>Map</dt>
-          <dd class="card-map"></dd>
-        </div>
-        <div>
-          <dt>Players / limit</dt>
-          <dd class="card-count"></dd>
-        </div>
-        <div>
-          <dt>Available slots</dt>
-          <dd class="availability"></dd>
-        </div>
-      </dl>
-      <a class="button" href="/">
-        Join room
-      </a>
-    </article>
+  <template id="room-row-template">
+    <tr>
+      <th scope="row">
+        <a class="room-name" href="/"></a>
+      </th>
+      <td class="room-players"></td>
+      <td class="room-mode"></td>
+      <td class="room-map"></td>
+      <td class="room-action">
+        <a class="button room-join" href="/">
+          Join
+        </a>
+      </td>
+    </tr>
   </template>
 </Page>

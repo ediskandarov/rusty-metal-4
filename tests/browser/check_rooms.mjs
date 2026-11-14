@@ -45,13 +45,21 @@ try {
   const invite = await a.locator("#invite-link").inputValue();
   assert.match(invite, /^http:\/\/[^/]+\/rooms\/[a-f0-9]{32}$/);
   await b.goto(url);
-  await b.getByRole("heading", { name: "Night shift", exact: true }).waitFor();
-  assert.equal(await b.locator(".card-mode").textContent(), "Deathmatch");
-  assert.equal(await b.locator(".card-map").textContent(), "Construction Yard");
-  assert.equal(await b.locator(".card-count").textContent(), "1 / 8 players");
-  assert.equal(await b.locator(".availability").textContent(), "7 places free");
+  await b.getByRole("link", { name: "Night shift", exact: true }).waitFor();
+  assert.equal(await b.locator(".room-mode").textContent(), "Deathmatch");
+  assert.equal(await b.locator(".room-map").textContent(), "Construction Yard");
+  assert.equal(await b.locator("#rooms .room-players").textContent(), "1 / 8");
   await b.screenshot({ path: "build/room-tests/directory.png", fullPage: true });
-  await b.getByRole("link", { name: "Join room" }).click();
+  await b.setViewportSize({ width: 390, height: 844 });
+  assert(await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+  assert(
+    await b
+      .locator(".room-table-scroll")
+      .evaluate((table) => table.scrollWidth > table.clientWidth),
+  );
+  await b.screenshot({ path: "build/room-tests/directory-mobile.png", fullPage: true });
+  await b.setViewportSize({ width: 1280, height: 1000 });
+  await b.getByRole("link", { name: "Join Night shift", exact: true }).click();
   await b.locator("#join-player").fill("Boris");
   await b.locator("#join-form button").click();
   await b.getByText("Boris (you)", { exact: true }).waitFor();
@@ -86,7 +94,12 @@ try {
   await a.locator("#join-panel").waitFor();
   assert.equal(await b.locator("#participants li").count(), 1);
   assert.equal(await b.locator("#room-free").textContent(), "1 place free");
-  await secondTab.getByText("Hosted by Boris", { exact: true }).waitFor();
+  await eventually(
+    () => secondTab.locator("#rooms .room-players").textContent(),
+    (count) => count === "1 / 2",
+  );
+  assert.equal(await secondTab.locator("#rooms .room-name").textContent(), "Oil crew");
+  assert.equal(await secondTab.locator("#rooms .room-map").textContent(), "The Oil Rig");
   await b.locator("#leave-button").click();
   await b.waitForURL(url + "/");
   const id = new URL(invite).pathname.split("/").pop();

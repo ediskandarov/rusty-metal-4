@@ -94,27 +94,20 @@ async function directory(): Promise<void> {
     }
     list.replaceChildren(
       ...rooms.map((room) => {
-        const fragment = element<HTMLTemplateElement>("room-card-template").content.cloneNode(
+        const fragment = element<HTMLTemplateElement>("room-row-template").content.cloneNode(
           true,
         ) as DocumentFragment;
         const set = (selector: string, value: string) => {
           fragment.querySelector(selector)!.textContent = value;
         };
-        set(".card-mode", modeLabel(room.modeId));
-        set(".card-name", room.name);
-        set(".card-host", `Hosted by ${room.host}`);
-        set(".card-map", mapLabel(room.mapId));
-        set(".card-count", `${room.participantCount} / ${room.capacity} players`);
-        set(
-          ".availability",
-          room.freePlaces
-            ? `${room.freePlaces} ${room.freePlaces === 1 ? "place" : "places"} free`
-            : "Full",
-        );
-        fragment.querySelector(".availability")!.classList.toggle("full", !room.freePlaces);
-        const link = fragment.querySelector<HTMLAnchorElement>("a")!;
-        link.href = `/rooms/${room.id}`;
-        if (!room.freePlaces) link.textContent = "View room";
+        set(".room-name", room.name);
+        set(".room-players", `${room.participantCount} / ${room.capacity}`);
+        set(".room-mode", modeLabel(room.modeId));
+        set(".room-map", room.mapId ? mapLabel(room.mapId) : "Not selected");
+        for (const link of fragment.querySelectorAll<HTMLAnchorElement>("a")) {
+          link.href = `/rooms/${room.id}`;
+        }
+        fragment.querySelector(".room-join")!.setAttribute("aria-label", `Join ${room.name}`);
         return fragment;
       }),
     );
