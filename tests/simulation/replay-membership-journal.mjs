@@ -1,9 +1,9 @@
 /* Replay a captured authority journal through the actual simulation Wasm. */
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const { WASI } = require("node:wasi");
-const { join } = require("node:path");
-(async () => {
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { join } from "node:path";
+import { WASI } from "node:wasi";
+try {
   const bytes = fs.readFileSync(process.argv[2]);
   assert.equal(bytes.subarray(0, 8).toString("hex"), "544d344a524e4c03");
   const headerLength = bytes.readUInt32LE(8),
@@ -115,7 +115,7 @@ const { join } = require("node:path");
   console.log(
     `PASS captured live membership journal: ${tick} actual-Wasm ticks, ${events} membership decisions, all complete subsystem digests matched`,
   );
-})().catch((error) => {
+} catch (error) {
   console.error(error);
   process.exitCode = 1;
-});
+}

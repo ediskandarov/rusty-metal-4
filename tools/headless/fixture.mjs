@@ -18,4 +18,4 @@ function fixtureCommands(tick) {
   const second = tick < 56 ? 0x40 | (steering ^ 0xa000) : tick >= 150 ? 0x40 | steering | 0x2 : 0;
   return [{ buttons: first }, { buttons: second }];
 }
-module.exports = { fixtureAction, fixtureCommands };
+export { fixtureAction, fixtureCommands };

@@ -1,10 +1,10 @@
 /* Actual simulation membership transactions; no browser or injected engine mocks. */
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const { test } = require("node:test");
-const { WASI } = require("node:wasi");
-const { join } = require("node:path");
-const modulePromise = WebAssembly.compile(fs.readFileSync(process.env.TM4_SIMULATION_WASM));
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { WASI } from "node:wasi";
+const compiledModule = await WebAssembly.compile(fs.readFileSync(process.env.TM4_SIMULATION_WASM));
 const initialSlots = [0, 3, 5, 7];
 const initialIds = [1n, 2n, 3n, 4n];
 async function simulation() {
@@ -13,7 +13,7 @@ async function simulation() {
     preopens: { "/DATA": join(process.env.TM4_RESOURCE_DIR, "DATA") },
     returnOnExit: true,
   });
-  const { exports: x } = await WebAssembly.instantiate(await modulePromise, {
+  const { exports: x } = await WebAssembly.instantiate(compiledModule, {
     wasi_snapshot_preview1: wasi.wasiImport,
   });
   wasi.initialize({ exports: x });

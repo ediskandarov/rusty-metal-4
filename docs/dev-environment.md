@@ -186,7 +186,7 @@ only when working on the retained container infrastructure.
   native diagnostic bundle and matching website runtime as the match browser test.
   The downloaded journal is `build/room-tests/live-membership.tm4j`;
   `TM4_SIMULATION_WASM=<authority Wasm> TM4_RESOURCE_DIR=<resource root> node
-tests/simulation/replay-membership-journal.cjs <journal>` checks every recorded
+tests/simulation/replay-membership-journal.mjs <journal>` checks every recorded
   subsystem digest in a fresh simulation instance.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
   admission, creation retries, permissions, reconnect/hibernation, host succession,

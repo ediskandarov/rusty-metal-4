@@ -10,7 +10,7 @@ const commands = [
   "tools/serve.js",
   "tools/headless/build.ts",
   "tools/headless/prepare-resources.ts",
-  "tools/headless/record-browser.cjs",
+  "tools/headless/record-browser.mjs",
   "tools/mods/build.ts",
   "tools/network/build.ts",
   "tools/network/build-server.ts",

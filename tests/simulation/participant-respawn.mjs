@@ -1,12 +1,12 @@
 /* Focused actual-Wasm lifecycle fixtures. Run with node --test and the same
  * TM4_SIMULATION_WASM / TM4_RESOURCE_DIR inputs as the Rust simulator tests. */
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const { test } = require("node:test");
-const { WASI } = require("node:wasi");
-const { join } = require("node:path");
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { WASI } from "node:wasi";
 
-const modulePromise = WebAssembly.compile(fs.readFileSync(process.env.TM4_SIMULATION_WASM));
+const compiledModule = await WebAssembly.compile(fs.readFileSync(process.env.TM4_SIMULATION_WASM));
 const slots = [0, 3, 5, 7];
 const identities = ["fffffffffffffffd", "0020000000000001", "ffffffffffffffff", "123456789abcdef0"];
 
@@ -16,7 +16,7 @@ async function simulation(model = "Orbital") {
     preopens: { "/DATA": join(process.env.TM4_RESOURCE_DIR, "DATA") },
     returnOnExit: true,
   });
-  const instance = await WebAssembly.instantiate(await modulePromise, {
+  const instance = await WebAssembly.instantiate(compiledModule, {
     wasi_snapshot_preview1: wasi.wasiImport,
   });
   wasi.initialize(instance);

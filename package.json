@@ -21,7 +21,7 @@
     "test:server": "bun tests/browser/check_server.mjs",
     "build:mod": "bun tools/mods/build.ts",
     "build:simulation": "bun tools/headless/build.ts",
-    "test:simulation:record": "bun tools/headless/record-browser.cjs",
+    "test:simulation:record": "bun tools/headless/record-browser.mjs",
     "test:simulation": "bun tools/headless/test.ts",
     "build:player": "bun apps/player/build.ts",
     "build:server": "bun apps/server/build.ts",
