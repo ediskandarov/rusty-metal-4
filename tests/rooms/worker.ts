@@ -113,6 +113,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
   private failStop = false;
   private statusFailure: "http" | "timeout" | null = null;
   private roster: unknown[] = [];
+  private bots: string[] = [];
   private players: number = ffaCapacity;
   private leases = new Map<
     string,
@@ -144,6 +145,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       starts: this.starts,
       stops: this.stops,
       roster: this.roster,
+      bots: this.bots,
       players: this.players,
     };
   }
@@ -202,10 +204,12 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
       const input = (await request.json()) as {
         sessionId: string;
         roster: unknown[];
+        bots?: string[];
         players: number;
       };
       this.sessionId = input.sessionId;
       this.roster = input.roster;
+      this.bots = input.bots ?? [];
       this.players = input.players;
       this.phase = "match";
       await new ServerJournal(this.ctx.storage).save(

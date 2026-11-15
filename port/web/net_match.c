@@ -280,9 +280,9 @@ static int membership_boundary(u32 tick)
 
 static u32 admission_model(u32 tick, s32 slot, u32 low, u32 high, const char* model)
 {
-    if (match.setup.bot_slots || !membership_boundary(tick) || GameInfo.deathmatch_finished
-        || slot < 0 || slot >= match.setup.capacity || WebNetSlotOccupied(slot) || (!low && !high)
-        || !model)
+    if (!membership_boundary(tick) || GameInfo.deathmatch_finished || slot < 0
+        || slot >= match.setup.capacity || (match.setup.bot_slots & (1u << slot))
+        || WebNetSlotOccupied(slot) || (!low && !high) || !model)
         return 0;
     WebParticipantState previous;
     WebParticipantCapture(&previous);

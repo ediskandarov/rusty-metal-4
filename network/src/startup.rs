@@ -123,6 +123,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         }
         participants.add_bot(model)?;
     }
+    participants.set_human_limit(count)?;
     if !room_roster.is_empty() && !(1..=count).contains(&room_roster.len()) {
         return Err("Room members do not match the prepared participant roster".into());
     }

@@ -213,10 +213,12 @@ remains deferred; offline round rules are unchanged.
 
 ## Original AI participants
 
-Standalone FFA accepts an explicit startup roster of humans and original-AI opponents
-within eight gameplay slots, with at least one human. Vacancies stay empty. Room setup
-and live admission into an AI match are rejected; human-only live membership retains its
-existing behavior. Temporary human disconnection keeps the lease for ordinary recovery.
+FFA accepts an explicit startup roster of humans and original-AI opponents
+within eight gameplay slots, with at least one human. Vacancies stay empty. Rooms and
+standalone setup accept explicit bots before preparation. Bot places and the human limit
+share eight slots. Live human admission counts both active and loading reservations against
+the human limit; bots neither prevent admission nor surrender their places. Temporary human
+disconnection keeps the lease for ordinary recovery.
 Explicit departure of the last human retires all bots in the same authoritative membership
 batch and lets the native server exit normally.
 

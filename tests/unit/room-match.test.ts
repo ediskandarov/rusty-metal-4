@@ -218,3 +218,93 @@ test("a ready host can start alone and keep seven places for late entrants", () 
   join(state, "late", "Late", 300);
   expect(snapshot(state, "late").freePlaces).toBe(6);
 });
+
+test("FFA quotas allow late humans alongside bots and retain named results", () => {
+  const state = fixture();
+  state.match = null;
+  edit(state, "host", {
+    ...state.settings,
+    modeOptions: { ffa: { bots: ["Pizza Boy", "Orbital"], humanLimit: 4 } },
+  });
+  expect(snapshot(state, "host").participantCount).toBe(4);
+  expect(snapshot(state, "host").freePlaces).toBe(2);
+  const match = beginPreparation(state, "host", 200);
+  match.cars = ["Orbital", "Pizza Boy"];
+  match.compatibility = compatibility;
+  match.stage = "ready";
+  for (const key of ["host", "guest"]) updatePlayer(state, key, { ...selected, ready: true });
+  freezeRoster(state, "host", 300);
+  expect(match.roster).toHaveLength(2);
+  expect(Object.keys(match.botMembers!)).toEqual(["2", "3"]);
+  match.stage = "playing";
+  expect(snapshot(state, "host").freePlaces).toBe(2);
+  const late = join(state, "new", "New", 400);
+  join(state, "last", "Last", 400);
+  expect(snapshot(state, "host").freePlaces).toBe(0);
+  expect(() => join(state, "overflow", "Overflow", 400)).toThrow("full");
+  expect(join(state, "new", "New", 400).id).toBe(late.id);
+  removeMember(state, late.id, 410);
+  expect(snapshot(state, "host").freePlaces).toBe(1);
+  const replacement = join(state, "replacement", "Replacement", 420);
+  expect(replacement.id).not.toBe(late.id);
+  removeMember(state, replacement.id, 430);
+  removeMember(state, state.members.find((m) => m.key === "last")!.id, 430);
+  expect(join(state, "host", "Host", 400).id).toBe(state.hostId!);
+  const result = {
+    sessionId: match.id,
+    completion: { tick: 600, reasons: 2, winners: 4 },
+    participants: [
+      {
+        identity: { slot: 0, participant: "0000000000000001" },
+        credential: match.roster[0]!.credential,
+        score: { frags: 1, deaths: 2 },
+      },
+      {
+        identity: { slot: 2, participant: "0000000000000003" },
+        credential: null,
+        score: { frags: 20, deaths: 1 },
+      },
+    ],
+  };
+  expect(retainResult(state, match.id, result)).toBe(true);
+  expect(state.result!.participants[1]!.name).toBe("Bot 1");
+  expect(state.result!.participants[1]!.winner).toBe(true);
+  resetMatch(state, "Finished", 500);
+  expect(snapshot(state, "host").freePlaces).toBe(2);
+  expect(state.result!.participants[1]!.score.frags).toBe(20);
+});
+
+test("bot configuration validates capacity, mode and prepared models without partial changes", () => {
+  const state = fixture();
+  state.match = null;
+  const before = state.settings;
+  expect(() =>
+    edit(state, "host", {
+      ...before,
+      modeOptions: { ffa: { bots: Array(7).fill("Orbital"), humanLimit: 2 } },
+    }),
+  ).toThrow("Invalid mode settings");
+  expect(state.settings).toBe(before);
+  expect(() =>
+    edit(state, "host", { ...before, modeOptions: { ffa: { bots: [], humanLimit: 1 } } }),
+  ).toThrow("current room membership");
+  expect(state.settings).toBe(before);
+  expect(() =>
+    edit(state, "guest", { ...before, modeOptions: { ffa: { bots: [], humanLimit: 8 } } }),
+  ).toThrow("Only the host");
+  expect(() =>
+    edit(state, "host", { ...before, modeOptions: { tournament: { bots: [] } } }),
+  ).toThrow("Invalid mode settings");
+  edit(state, "host", {
+    ...before,
+    modeOptions: { ffa: { bots: ["Unavailable"], humanLimit: 7 } },
+  });
+  const match = beginPreparation(state, "host", 200);
+  match.cars = ["Orbital"];
+  match.compatibility = compatibility;
+  match.stage = "ready";
+  for (const key of ["host", "guest"]) updatePlayer(state, key, { ...selected, ready: true });
+  expect(() => freezeRoster(state, "host", 300)).toThrow("available");
+  expect(match.roster).toEqual([]);
+  expect(match.stage).toBe("ready");
+});

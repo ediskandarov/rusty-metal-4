@@ -36,6 +36,7 @@ pub(crate) struct ParticipantRoster {
     // Slots are simulation capacity; these IDs are never array indices.
     slots: Vec<Option<ParticipantId>>,
     frozen: bool,
+    human_limit: usize,
     next_id: u64,
 }
 
@@ -48,6 +49,7 @@ impl ParticipantRoster {
             participants: HashMap::new(),
             slots: vec![None; capacity],
             frozen: false,
+            human_limit: capacity,
             next_id: 1,
         };
         for &slot in reservations {
@@ -72,6 +74,24 @@ impl ParticipantRoster {
 
     pub fn capacity(&self) -> usize {
         self.slots.len()
+    }
+    pub fn set_human_limit(&mut self, limit: usize) -> Result<(), &'static str> {
+        let bots = self.participants.values().filter(|p| p.original_ai).count();
+        if self.frozen
+            || limit == 0
+            || limit + bots > self.capacity()
+            || self.reserved_humans() > limit
+        {
+            return Err("Invalid human and bot quotas.");
+        }
+        self.human_limit = limit;
+        Ok(())
+    }
+    fn reserved_humans(&self) -> usize {
+        self.participants
+            .values()
+            .filter(|p| !p.original_ai)
+            .count()
     }
     pub fn human(&self, slot: usize) -> bool {
         self.contains(slot) && !self.at_slot(slot).original_ai
@@ -128,6 +148,9 @@ impl ParticipantRoster {
         if !self.frozen {
             return Err("match has not started");
         }
+        if self.reserved_humans() >= self.human_limit {
+            return Err("The human quota is full.");
+        }
         let slot = self
             .slots
             .iter()
@@ -163,7 +186,11 @@ impl ParticipantRoster {
     }
     // Preparation and live mutation use separate, explicit phase checks.
     pub(super) fn reserve(&mut self, slot: usize) -> Result<ControllerIdentity, &'static str> {
-        if self.frozen || slot >= self.capacity() || self.slots[slot].is_some() {
+        if self.frozen
+            || slot >= self.capacity()
+            || self.slots[slot].is_some()
+            || self.reserved_humans() >= self.human_limit
+        {
             return Err("slot unavailable");
         }
         let id = self.allocate();
@@ -258,6 +285,23 @@ mod tests {
                 .add_bot("Orbital".into())
                 .is_err()
         );
+    }
+
+    #[test]
+    fn quotas_validate_initial_humans_bots_and_preparation_reservations() {
+        let mut roster = ParticipantRoster::new(8, &[0, 3]).unwrap();
+        roster.add_bot("Orbital".into()).unwrap();
+        assert!(roster.set_human_limit(0).is_err());
+        assert!(roster.set_human_limit(1).is_err());
+        assert!(roster.set_human_limit(8).is_err());
+        roster.set_human_limit(2).unwrap();
+        assert!(roster.reserve(4).is_err());
+        let old = roster.binding(3);
+        roster.release(old).unwrap();
+        roster.reserve(4).unwrap();
+        assert!(roster.reserve(5).is_err());
+        roster.freeze();
+        assert!(roster.set_human_limit(3).is_err());
     }
 
     #[test]

@@ -48,8 +48,32 @@ const text = (length: number) =>
         ),
       "Control characters are not allowed",
     );
+export const modeOptionsSchema = z
+  .object({
+    ffa: z
+      .object({
+        bots: z.array(text(48)).max(7),
+        humanLimit: z.number().int().min(1).max(ffaCapacity),
+      })
+      .strict()
+      .refine(
+        (options) => options.humanLimit + options.bots.length <= ffaCapacity,
+        "Human and bot quotas must fit within eight places",
+      ),
+  })
+  .strict();
+export const roomBots = (settings: {
+  modeId: string;
+  modeOptions?: z.infer<typeof modeOptionsSchema>;
+}) => (settings.modeId === "ffa" ? (settings.modeOptions?.ffa.bots ?? []) : []);
+export const roomHumanLimit = (settings: {
+  modeId: string;
+  modeOptions?: z.infer<typeof modeOptionsSchema>;
+}) =>
+  settings.modeId === "ffa" ? (settings.modeOptions?.ffa.humanLimit ?? ffaCapacity) : ffaCapacity;
 export const roomSettingsSchema = z.object({
   name: text(48),
+  modeOptions: modeOptionsSchema.optional(),
   modeId: z.enum(["ffa"]),
   mapId: z.enum(maps.map((map) => map.id)),
   capacity: z.literal(ffaCapacity),

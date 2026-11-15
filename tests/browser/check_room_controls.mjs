@@ -16,7 +16,11 @@ const compatibility = {
 try {
   const origin = (await mf.ready).origin;
   browser = await launchBrowser();
-  const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  const contexts = await Promise.all([
+    browser.newContext(),
+    browser.newContext(),
+    browser.newContext(),
+  ]);
   const errors = [];
   for (const context of contexts) {
     context.on("page", (page) => page.on("pageerror", (error) => errors.push(error.message)));
@@ -85,6 +89,22 @@ try {
   await loaded(hostPlayer);
   await eventually(view, (room) => room.participants[0]?.car === "Orbital");
   await host.waitForFunction(() => !document.getElementById("room-car").disabled);
+
+  await host.locator("#edit-bots").selectOption(["Orbital", "Pizza Boy"]);
+  await host.locator("#edit-human-limit").fill("4");
+  await host.locator("#settings-form button[type=submit]").click();
+  await eventually(view, (room) => room.modeOptions?.ffa.bots.length === 2);
+  await host.locator("#participants .participant-role").filter({ hasText: "AI" }).first().waitFor();
+  assert.equal(
+    await host.locator("#participants .participant-role").filter({ hasText: "AI" }).count(),
+    2,
+  );
+  assert.equal((await view()).freePlaces, 3);
+  assert.equal((await view()).modeOptions.ffa.humanLimit, 4);
+  await host.locator("#edit-bots").selectOption([]);
+  await host.locator("#settings-form button[type=submit]").click();
+  await eventually(view, (room) => room.modeOptions?.ffa.bots.length === 0);
+  console.log("PASS FFA mode settings persist explicit bots and reserve shared room places");
 
   // Only this frame, this room and a complete resource event may change disc state.
   await host.evaluate(
@@ -201,6 +221,9 @@ try {
     "PASS pending car and settings drafts survive live updates; rejected selection restores authority without losing the error",
   );
 
+  await host.locator("#edit-bots").selectOption(["Pizza Boy"]);
+  await host.locator("#settings-form button[type=submit]").click();
+  await eventually(view, (room) => room.modeOptions?.ffa.bots.length === 1);
   await host.locator("#prepare-match").click();
   await hostPlayer.waitForFunction(() =>
     window.commands.some((command) => command.action === "upload"),
@@ -234,6 +257,32 @@ try {
     await frame.waitForFunction(
       () => window.commands.filter((command) => command.action === "join").length === 1,
     );
+  const servers = await mf.getDurableObjectNamespace("SERVER");
+  const authority = servers.get(servers.idFromName(id + ":" + match.id));
+  const prepared = await authority.inspectForTest();
+  assert.deepEqual(prepared.bots, ["Pizza Boy"]);
+  assert.equal(prepared.players, 4);
+  assert.equal(prepared.roster.length, 2);
+  await eventually(view, (room) => room.match?.stage === "playing");
+  assert.equal((await view()).freePlaces, 2);
+  console.log("PASS room startup forwards bots separately from the human credential roster");
+  const late = await contexts[2].newPage();
+  await late.goto(invite);
+  await late.locator("#join-player").fill("Late human");
+  await late.locator("#join-form button").click();
+  await late.locator("#leave-button").waitFor();
+  const latePlayer = await player(late);
+  await loaded(latePlayer);
+  await late.waitForFunction(() => !document.getElementById("room-ready").disabled);
+  await late.locator("#room-ready").click();
+  await latePlayer.waitForFunction(() =>
+    window.commands.some((command) => command.action === "join"),
+  );
+  assert.equal((await view()).freePlaces, 1);
+  await late.locator("#leave-button").click();
+  await late.waitForURL(origin + "/");
+  await eventually(view, (room) => room.freePlaces === 2);
+  console.log("PASS late human joins a bot match and departure releases only the human place");
   await host.locator("#reconnect-match").click();
   await hostPlayer.waitForFunction(
     () => window.commands.filter((command) => command.action === "join").length === 2,

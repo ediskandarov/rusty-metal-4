@@ -257,5 +257,5 @@ test("administrator setup shares eight slots between explicit humans and bots", 
       sessionId: "00000000-0000-4000-8000-000000000000",
       roster: [{ credential: "a".repeat(64), car: "Orbital" }],
     }).success,
-  ).toBe(false);
+  ).toBe(true);
 });

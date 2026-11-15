@@ -1,5 +1,11 @@
 import { createRoomsClient, RoomsApiError as ApiError } from "@tm4/rooms-client";
-import { mapLabel, modeLabel, type RoomSummary } from "@tm4/rooms-client/schemas";
+import {
+  mapLabel,
+  modeLabel,
+  roomBots,
+  roomHumanLimit,
+  type RoomSummary,
+} from "@tm4/rooms-client/schemas";
 
 import { matchControls } from "./match-controls.ts";
 import { serverLocationLabel } from "./server-location.ts";
@@ -83,7 +89,10 @@ async function directory(): Promise<void> {
           fragment.querySelector(selector)!.textContent = value;
         };
         set(".room-name", room.name);
-        set(".room-players", `${room.participantCount} / ${room.capacity}`);
+        set(
+          ".room-players",
+          `${room.participantCount} / ${roomHumanLimit(room) + roomBots(room).length}`,
+        );
         set(".room-mode", modeLabel(room.modeId));
         set(".room-map", room.mapId ? mapLabel(room.mapId) : "Not selected");
         for (const link of fragment.querySelectorAll<HTMLAnchorElement>("a")) {
@@ -195,7 +204,8 @@ async function room(): Promise<void> {
     element("server-region").textContent = room.match
       ? serverLocationLabel(room.match.location)
       : "Not allocated";
-    element("room-capacity").textContent = `${room.participantCount} / ${room.capacity} players`;
+    element("room-capacity").textContent =
+      `${room.participants.length} / ${roomHumanLimit(room)} humans · ${roomBots(room).length} bots`;
     element("member-count").textContent = String(room.participantCount);
     element("room-free").textContent =
       `${room.freePlaces} ${room.freePlaces === 1 ? "place" : "places"} free`;
@@ -217,6 +227,15 @@ async function room(): Promise<void> {
         return fragment;
       }),
     );
+    for (const [index, model] of (room.modeOptions?.ffa.bots ?? []).entries()) {
+      const fragment = element<HTMLTemplateElement>("participant-template").content.cloneNode(
+        true,
+      ) as DocumentFragment;
+      fragment.querySelector(".participant-name")!.textContent = "Bot " + (index + 1);
+      fragment.querySelector(".participant-role")!.textContent = "AI";
+      fragment.querySelector(".participant-presence")!.textContent = model;
+      element("participants").append(fragment);
+    }
     const host = room.you !== null && room.you === room.hostId;
     element("settings-panel").hidden = !host || !!room.match;
     element("join-panel").hidden = room.you !== null;
@@ -229,6 +248,23 @@ async function room(): Promise<void> {
     settingsForm.querySelector<HTMLButtonElement>("button[type=submit]")!.disabled =
       operation !== null;
     const settings = state.settingsDraft ?? room;
+    const bots = settingsForm.elements.namedItem("bots") as HTMLSelectElement;
+    const selected = settings.modeOptions?.ffa.bots ?? [];
+    const humanLimit = settingsForm.elements.namedItem("humanLimit") as HTMLInputElement;
+    humanLimit.max = String(8 - selected.length);
+    humanLimit.value = String(settings.modeOptions?.ffa.humanLimit ?? 8);
+    humanLimit.disabled = operation !== null;
+    const choices = [...new Set([...(state.disc?.cars ?? []), ...selected])];
+    if (JSON.stringify(Array.from(bots.options, (o) => o.value)) !== JSON.stringify(choices))
+      bots.replaceChildren(...choices.map((name) => new Option(name, name)));
+    for (const option of bots.options) option.selected = selected.includes(option.value);
+    bots.disabled = operation !== null || !state.disc;
+    for (const panel of settingsForm.querySelectorAll<HTMLElement>("[data-mode-settings]"))
+      panel.hidden = panel.dataset.modeSettings !== settings.modeId;
+    const botHelp = settingsForm.querySelector<HTMLElement>("[id$='-bots-help']")!;
+    botHelp.textContent = state.disc
+      ? selected.length + " bots · " + humanLimit.value + " human places"
+      : "Load your disc to choose bots.";
     for (const key of ["name", "modeId", "mapId"] as const) {
       const field = settingsForm.elements.namedItem(key) as HTMLInputElement;
       if (field.value !== settings[key]) field.value = settings[key];
@@ -310,13 +346,27 @@ async function room(): Promise<void> {
         if (joined) watch();
       });
   });
-  settingsForm.addEventListener("input", () => {
+  settingsForm.addEventListener("input", (event) => {
     const field = (name: string) =>
       (settingsForm.elements.namedItem(name) as HTMLInputElement).value;
+    const bots = Array.from(
+      (settingsForm.elements.namedItem("bots") as HTMLSelectElement).selectedOptions,
+      (option) => option.value,
+    );
+    const humanLimit = Number(field("humanLimit"));
     store.getState().editSettings({
       name: field("name"),
       modeId: field("modeId"),
       mapId: field("mapId"),
+      modeOptions: {
+        ffa: {
+          bots,
+          humanLimit:
+            event.target === settingsForm.elements.namedItem("bots")
+              ? Math.min(humanLimit, 8 - bots.length)
+              : humanLimit,
+        },
+      },
     });
   });
   settingsForm.addEventListener("submit", (event) => {

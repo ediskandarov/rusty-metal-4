@@ -15,6 +15,7 @@ interface SettingsDraft {
   name: string;
   modeId: string;
   mapId: string;
+  modeOptions?: { ffa: { bots: string[]; humanLimit: number } };
 }
 interface Disc {
   compatibility: Compatibility;

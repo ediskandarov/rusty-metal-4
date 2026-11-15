@@ -118,8 +118,10 @@ the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
 For original-AI FFA, choose the human count and explicit **Original AI opponents**
 in native administrator setup. Humans and selected opponents share eight places; selecting
-none starts a human-only match. Vacancies are never filled automatically. Room setup
-remains human-only. With prepared local resources, for example:
+none starts a human-only match. Vacancies are never filled automatically. Room hosts can
+choose opponents under Free for all settings after loading their disc,
+then set the maximum human count and save settings before preparing the server. Bot places
+and the human limit share eight slots. Humans can join during play within their limit and reconnect after disconnection. With prepared local resources, for example:
 
 `bun run match 2 --diagnostic --bot "Orbital" --bot "Pizza Boy" --bot "Capt. Grimm"`
 

@@ -496,3 +496,60 @@ test("eight occupied slots with two humans and six original bots retain portable
     assert.deepEqual(restored.canonical(), expected[tick], `eight-seat tick ${tick}`);
   }
 });
+
+test("late human admission alongside AI replays across rollback and portable recovery", async () => {
+  const config = { slots: [0, 1, 2], bots: [1, 2], cars: ["Orbital", "Pizza Boy", "Orbital"] };
+  const world = await simulation(true, config);
+  assert.equal(world.ai(0, 1), 2);
+  assert.equal(world.ai(0, 2), 2);
+  for (let i = 0; i < 30; ++i) world.step();
+  const actions = (world) => {
+    const x = world.x;
+    const tick = x.HeadlessTick();
+    if (tick === 32 || tick === 40 || tick === 48) {
+      const model = new TextEncoder().encode("Pizza Boy\0");
+      const address = x.malloc(model.length);
+      new Uint8Array(x.memory.buffer).set(model, address);
+      try {
+        assert.equal(
+          x.WebNetAdmitParticipant(
+            tick,
+            tick === 48 ? 0 : 3,
+            tick === 32 ? 9 : tick === 40 ? 10 : 11,
+            0,
+            address,
+          ),
+          1,
+        );
+      } finally {
+        x.free(address);
+      }
+    }
+    if (tick === 37) assert.equal(x.WebNetDepartParticipant(tick, 3, 9, 0), 1);
+    if (tick === 45) assert.equal(x.WebNetDepartParticipant(tick, 0, 1, 0), 1);
+  };
+  assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+  const expected = [];
+  const snapshots = [];
+  for (let tick = 30; tick < 60; ++tick) {
+    actions(world);
+    world.step();
+    expected.push(world.canonical());
+    if ([31, 34, 38, 43, 46, 50].includes(tick)) snapshots.push([tick + 1, world.snapshot()]);
+  }
+  assert.equal(world.x.WebNetRestoreLocalCheckpoint(30), 1);
+  for (let tick = 30; tick < 60; ++tick) {
+    actions(world);
+    world.step();
+    assert.deepEqual(world.canonical(), expected[tick - 30], "local replay " + tick);
+  }
+  for (const [start, snapshot] of snapshots) {
+    const restored = await simulation(true, config);
+    restored.restore(snapshot);
+    for (let tick = start; tick < 60; ++tick) {
+      actions(restored);
+      restored.step();
+      assert.deepEqual(restored.canonical(), expected[tick - 30], "portable replay " + tick);
+    }
+  }
+});

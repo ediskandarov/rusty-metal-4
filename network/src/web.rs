@@ -686,11 +686,9 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         let mut status = service.status.lock().unwrap();
         if options.players + options.bots.len() > MAX_PLAYERS
             || options.bots.iter().any(|bot| !status.cars.contains(bot))
-            || (!options.bots.is_empty()
-                && (options.session_id.is_some() || !options.roster.is_empty()))
         {
             return Err(invalid(
-                "Choose stock AI models for a standalone roster of at most eight human and AI participants.",
+                "Choose available AI models within eight human and AI places.",
             ));
         }
         if !status.worlds.contains(&options.world) {
@@ -1011,7 +1009,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn explicit_ai_roster_requires_capacity_and_standalone_setup() {
+    async fn explicit_ai_roster_requires_capacity_and_supports_room_setup() {
         let fixture = Fixture::new();
         {
             let mut status = fixture.service.status.lock().unwrap();
@@ -1021,13 +1019,14 @@ mod tests {
         }
         let valid = serde_json::json!({
             "players": 2, "bots": ["Orbital", "Pizza Boy", "Orbital"],
+            "sessionId": "00000000-0000-4000-8000-000000000000",
+            "roster": [{ "credential": "a".repeat(64), "car": "Orbital" }],
             "world": "Construction Yard", "limits": { "timeLimitTicks": 27000, "fragLimit": 20 }
         });
         for changes in [
             serde_json::json!({ "players": 6 }),
             serde_json::json!({ "bots": ["Unknown"] }),
             serde_json::json!({ "bot": "Orbital" }),
-            serde_json::json!({ "sessionId": "00000000-0000-4000-8000-000000000000", "roster": [{ "credential": "a".repeat(64), "car": "Orbital" }] }),
         ] {
             let mut invalid = valid.clone();
             invalid

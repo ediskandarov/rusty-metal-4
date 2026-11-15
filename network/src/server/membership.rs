@@ -168,11 +168,7 @@ impl Match {
     }
 
     pub(super) fn reserve_live(&mut self) -> Result<ControllerIdentity, &'static str> {
-        if self
-            .participants
-            .slots()
-            .any(|slot| !self.participants.human(slot))
-            || !self.started
+        if !self.started
             || self.tick == 0
             || self.ended
             || self

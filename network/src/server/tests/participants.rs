@@ -1298,6 +1298,7 @@ fn last_human_departure_retires_all_explicit_bots_in_the_same_batch() {
     for model in ["Pizza Boy", "Orbital", "Pizza Boy"] {
         game.participants.add_bot(model.into()).unwrap();
     }
+    game.participants.set_human_limit(2).unwrap();
     game.participants.freeze();
     game.controls = (0..8).map(|_| ControllerState::default()).collect();
     game.session.as_mut().unwrap().bots = vec![2, 3, 4];
@@ -1314,4 +1315,31 @@ fn last_human_departure_retires_all_explicit_bots_in_the_same_batch() {
         let expected: Vec<_> = [first, last].into_iter().chain(bots.iter().copied()).map(|identity| MembershipChange::Depart { identity }).collect();
         assert_eq!(game.membership.scheduled[&tick], expected);
     }).unwrap();
+}
+
+#[test]
+fn bots_allow_live_humans_within_the_reserved_human_quota() {
+    let mut game = game();
+    game.participants = ParticipantRoster::new(8, &[0]).unwrap();
+    game.participants.add_bot("Pizza Boy".into()).unwrap();
+    game.participants.add_bot("Orbital".into()).unwrap();
+    game.participants.set_human_limit(3).unwrap();
+    let bot = game.participants.binding(1);
+    game.participants.freeze();
+    game.controls = (0..8).map(|_| ControllerState::default()).collect();
+    game.session.as_mut().unwrap().bots = vec![1, 2];
+    let first = game.reserve_live().unwrap();
+    let second = game.reserve_live().unwrap();
+    assert_eq!(first.slot, 3);
+    assert_eq!(second.slot, 4);
+    assert!(game.reserve_live().is_err());
+    game.participants.commit_live(first).unwrap();
+    assert!(game.reserve_live().is_err());
+    game.participants.release_live(second).unwrap();
+    let replacement = game.reserve_live().unwrap();
+    assert_eq!(replacement.slot, second.slot);
+    assert_ne!(replacement.participant, second.participant);
+    assert!(game.participants.release_live(second).is_err());
+    assert_eq!(game.participants.binding(1), bot);
+    assert!(game.participants.at_slot(1).original_ai);
 }

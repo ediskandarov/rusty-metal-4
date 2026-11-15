@@ -69,7 +69,6 @@ export const startOptionsSchema = z
   .refine(
     (value) =>
       value.players + (value.bots?.length ?? 0) <= 8 &&
-      (!value.bots?.length || (value.sessionId === undefined && value.roster === undefined)) &&
       ((value.sessionId === undefined && value.roster === undefined) ||
         (value.sessionId !== undefined &&
           value.roster !== undefined &&

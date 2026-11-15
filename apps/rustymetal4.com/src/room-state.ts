@@ -5,9 +5,12 @@ import {
   maps,
   type MatchSnapshot,
   modes,
+  roomBots,
+  roomHumanLimit,
   type RoomResult,
   roomResultSchema,
   type RoomSettings,
+  roomSettingsSchema,
   type RoomSnapshot,
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
@@ -53,7 +56,9 @@ export function settings(value: unknown): RoomSettings {
   if (!map) throw new RoomError(400, "Choose a supported map.");
   if (input.capacity !== ffaCapacity)
     throw new RoomError(400, "Free for all always has eight player places.");
-  return { name, modeId: mode.id, mapId: map.id, capacity: ffaCapacity };
+  const parsed = roomSettingsSchema.safeParse({ ...input, name, modeId: mode.id, mapId: map.id });
+  if (!parsed.success) throw new RoomError(400, "Invalid mode settings.");
+  return parsed.data;
 }
 export const preparationLimit = 5 * 60_000;
 export const emptyMatchGrace = 120_000;
@@ -74,6 +79,7 @@ export interface RoomMatch {
   roster: { id: string; credential: string; car: string; pending: boolean }[];
   message: string;
   // Name receipts survive an in-flight departure; scores still come only from the authority.
+  botMembers?: Record<number, { id: string; name: string }>;
   resultMembers: Record<string, { id: string; name: string }>;
 }
 export interface Member {
@@ -143,7 +149,8 @@ export function join(state: RoomState, key: string, name: unknown, now: number):
   if (existing) return existing;
   if (state.match?.roster.length && state.match.stage !== "playing")
     throw new RoomError(409, "The match is still preparing. Wait for play to begin.");
-  if (state.members.length >= ffaCapacity) throw new RoomError(409, "This room is full.");
+  if (state.members.length >= roomHumanLimit(state.settings))
+    throw new RoomError(409, "This room is full.");
   const member: Member = {
     id: crypto.randomUUID(),
     key,
@@ -216,7 +223,10 @@ export function edit(state: RoomState, key: string, value: unknown): void {
     throw new RoomError(403, "Only the host can change room settings.");
   if (state.match)
     throw new RoomError(409, "Cancel preparation or finish the match before changing settings.");
-  state.settings = settings(value);
+  const next = settings(value);
+  if (state.members.length > roomHumanLimit(next))
+    throw new RoomError(409, "The human limit cannot be smaller than the current room membership.");
+  state.settings = next;
   invalidateReady(state);
 }
 export function summary(state: RoomState): RoomSummary {
@@ -225,11 +235,11 @@ export function summary(state: RoomState): RoomSummary {
     capacity: ffaCapacity,
     id: state.id,
     host: state.members.find((member) => member.id === state.hostId)?.name ?? "Waiting for a host",
-    participantCount: state.members.length,
+    participantCount: state.members.length + roomBots(state.settings).length,
     freePlaces:
-      state.match?.roster.length && state.match.stage !== "playing"
+      state.match && state.match.roster.length > 0 && state.match.stage !== "playing"
         ? 0
-        : ffaCapacity - state.members.length,
+        : roomHumanLimit(state.settings) - state.members.length,
   };
 }
 export function snapshot(state: RoomState, key: string): RoomSnapshot {
@@ -376,6 +386,21 @@ export function freezeRoster(state: RoomState, key: string, now: number): RoomMa
     )
   )
     throw new RoomError(409, "At least one player must be present, with every participant ready.");
+  const bots = roomBots(state.settings);
+  if (
+    state.members.length > roomHumanLimit(state.settings) ||
+    bots.some((car) => !match.cars.includes(car))
+  )
+    throw new RoomError(
+      409,
+      "Choose bot models available on the prepared server within eight places.",
+    );
+  match.botMembers = Object.fromEntries(
+    bots.map((_, index) => [
+      state.members.length + index,
+      { id: crypto.randomUUID(), name: "Bot " + (index + 1) },
+    ]),
+  );
   match.roster = state.members.map((member) => ({
     id: member.id,
     pending: false,
@@ -410,7 +435,9 @@ export function retainResult(
   if (!match || match.id !== matchId || result.sessionId !== matchId) return false;
   if (state.result?.matchId === matchId) return true;
   const participants = result.participants.map((row) => {
-    const member = row.credential ? match.resultMembers[row.credential] : undefined;
+    const member = row.credential
+      ? match.resultMembers[row.credential]
+      : match.botMembers?.[row.identity.slot];
     if (!member) throw new RoomError(502, "The final participant could not be bound to this room.");
     return {
       memberId: member.id,
