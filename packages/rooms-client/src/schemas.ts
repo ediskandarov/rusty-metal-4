@@ -1,3 +1,20 @@
+import { text } from "./fields.ts";
+import {
+  ffaCapacity,
+  modeDefinitions,
+  modeIdSchema,
+  modeOptionsSchema,
+  modes,
+  roomModeCapacity,
+} from "./modes/index.ts";
+export {
+  ffaCapacity,
+  modes,
+  roomModeCapacity,
+  modeOptionsSchema,
+  roomBots,
+  roomHumanLimit,
+} from "./modes/index.ts";
 import {
   compatibilitySchema,
   controllerIdentitySchema,
@@ -9,13 +26,6 @@ import { serverLocationSchema } from "@tm4/rustymetal-server-client/schemas";
 import { z } from "zod";
 export { compatibilitySchema };
 export type { Compatibility } from "@tm4/lightyear-client/schemas";
-export const ffaCapacity = 8;
-export const modes = [
-  { id: "ffa", label: "Free for all" },
-  { id: "tournament", label: "Tournament" },
-] as const;
-export const roomModeCapacity = (mode: string) => (mode === "tournament" ? 2 : ffaCapacity);
-
 // Names come from the native GameGetWorldName catalog; IDs remain stable if labels change.
 export const maps = [
   { id: "construction-yard", label: "Construction Yard" },
@@ -39,49 +49,11 @@ export const maps = [
 export const roomIdSchema = z.string().regex(/^[a-f0-9]{32}$/);
 export const matchIdSchema = z.string().uuid();
 const count = z.number().int().nonnegative();
-const text = (length: number) =>
-  z
-    .string()
-    .trim()
-    .min(1)
-    .max(length)
-    .refine(
-      (value) =>
-        [...value].every(
-          (character) => character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127,
-        ),
-      "Control characters are not allowed",
-    );
-export const modeOptionsSchema = z
-  .object({
-    ffa: z
-      .object({
-        bots: z.array(text(48)).max(7),
-        humanLimit: z.number().int().min(1).max(ffaCapacity),
-      })
-      .strict()
-      .refine(
-        (options) => options.humanLimit + options.bots.length <= ffaCapacity,
-        "Human and bot quotas must fit within eight places",
-      ),
-  })
-  .strict();
-export const roomBots = (settings: {
-  modeId: string;
-  modeOptions?: z.infer<typeof modeOptionsSchema>;
-}) => (settings.modeId === "ffa" ? (settings.modeOptions?.ffa.bots ?? []) : []);
-export const roomHumanLimit = (settings: {
-  modeId: string;
-  modeOptions?: z.infer<typeof modeOptionsSchema>;
-}) =>
-  settings.modeId === "ffa"
-    ? (settings.modeOptions?.ffa.humanLimit ?? ffaCapacity)
-    : roomModeCapacity(settings.modeId);
 export const roomSettingsSchema = z
   .object({
     name: text(48),
     modeOptions: modeOptionsSchema.optional(),
-    modeId: z.enum(["ffa", "tournament"]),
+    modeId: modeIdSchema,
     mapId: z.enum(maps.map((map) => map.id)),
     capacity: z.union([z.literal(ffaCapacity), z.literal(2)]),
   })
@@ -89,12 +61,9 @@ export const roomSettingsSchema = z
     message: "Capacity must match the game mode",
     path: ["capacity"],
   })
-  .refine(
-    (settings) =>
-      settings.modeId === "ffa" ||
-      (!settings.modeOptions && settings.mapId === "construction-yard"),
-    { message: "Tournament starts at Construction Yard without FFA options" },
-  );
+  .refine((settings) => modeDefinitions[settings.modeId].validSettings(settings), {
+    message: "Settings do not match the selected game mode",
+  });
 export type RoomSettings = z.infer<typeof roomSettingsSchema>;
 export const roomSummarySchema = roomSettingsSchema.safeExtend({
   id: roomIdSchema,

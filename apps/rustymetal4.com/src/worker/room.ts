@@ -1,9 +1,8 @@
-import { ffaDefaultLimits } from "@tm4/lightyear-client/schemas";
-import { mapLabel, roomHumanLimit } from "@tm4/rooms-client/schemas";
 import { createServerClient } from "@tm4/rustymetal-server-client";
 import { DurableObject } from "cloudflare:workers";
 
 import { failure, json, readJson } from "../http.ts";
+import { modeRules } from "../modes/rules.ts";
 import {
   beginPreparation,
   connect,
@@ -13,7 +12,6 @@ import {
   edit,
   emptyMatchGrace,
   freezeRoster,
-  invalidateReady,
   join,
   memberFor,
   monitoringGrace,
@@ -28,7 +26,6 @@ import {
   retainResult,
   RoomError,
   type RoomState,
-  sameCompatibility,
   snapshot,
   summary,
   updatePlayer,
@@ -341,10 +338,7 @@ export class Room extends DurableObject<Env> {
       if (status.phase === "match" && match.stage !== "playing") {
         match.cars = status.cars;
         match.stage = "playing";
-        match.message =
-          state.settings.modeId === "tournament"
-            ? "Tournament battle in progress. The two participants can reconnect."
-            : "Match in progress. New players can join with a prepared car; existing players can reconnect.";
+        match.message = modeRules[state.settings.modeId].playingMessage;
         await this.commit();
         return;
       }
@@ -356,19 +350,9 @@ export class Room extends DurableObject<Env> {
         match.compatibility = status.compatibility;
         match.cars = status.cars;
         match.stage = "ready";
-        match.message =
-          state.settings.modeId === "tournament"
-            ? "Server ready. Both players must confirm their cars before the host starts."
-            : "Server ready. Choose cars and ready every participant; the host can start with 1–8 players.";
-        if (state.settings.modeId !== "tournament") invalidateReady(state);
-        else
-          for (const member of state.members)
-            if (
-              !sameCompatibility(member.compatibility, match.compatibility) ||
-              !member.car ||
-              !match.cars.includes(member.car)
-            )
-              member.ready = false;
+        const rules = modeRules[state.settings.modeId];
+        match.message = rules.readyMessage;
+        rules.serverPrepared(state);
         await this.commit();
         return;
       }
@@ -561,11 +545,7 @@ export class Room extends DurableObject<Env> {
           await this.commit();
           try {
             await this.api().start({
-              mode: state.settings.modeId,
-              players: roomHumanLimit(state.settings),
-              bots: state.settings.modeOptions?.ffa.bots ?? [],
-              world: mapLabel(state.settings.mapId),
-              limits: state.settings.modeId === "ffa" ? ffaDefaultLimits : undefined,
+              ...modeRules[state.settings.modeId].serverOptions(state.settings),
               sessionId: match.id,
               roster: match.roster.map(({ credential, car }) => ({ credential, car })),
             });
@@ -581,8 +561,8 @@ export class Room extends DurableObject<Env> {
           if (member) {
             const match = state.match;
             const lease = match?.roster.find((entry) => entry.id === member.id);
-            if (match?.roster.length && lease && state.settings.modeId === "tournament") {
-              await this.stopMatch("Tournament ended because a participant left the room.");
+            if (match?.roster.length && lease && !modeRules[state.settings.modeId].allowLateJoin) {
+              await this.stopMatch("Match ended because a participant left the fixed roster.");
             } else if (match?.stage === "playing" && lease) {
               await this.api().membership({
                 sessionId: match.id,

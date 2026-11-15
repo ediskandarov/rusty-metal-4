@@ -4,9 +4,11 @@ import {
   modeLabel,
   roomBots,
   roomHumanLimit,
+  roomSettingsSchema,
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
 
+import { roomModes } from "./modes/index.ts";
 import { roomMatch } from "./room-match.ts";
 import { serverLocationLabel } from "./server-location.ts";
 import { createRoomStore, roomConnectionLabel } from "./state/room.ts";
@@ -227,7 +229,7 @@ async function room(): Promise<void> {
         return fragment;
       }),
     );
-    for (const [index, model] of (room.modeOptions?.ffa.bots ?? []).entries()) {
+    for (const [index, model] of roomBots(room).entries()) {
       const fragment = element<HTMLTemplateElement>("participant-template").content.cloneNode(
         true,
       ) as DocumentFragment;
@@ -248,25 +250,13 @@ async function room(): Promise<void> {
     settingsForm.querySelector<HTMLButtonElement>("button[type=submit]")!.disabled =
       operation !== null;
     const settings = state.settingsDraft ?? room;
-    const bots = settingsForm.elements.namedItem("bots") as HTMLSelectElement;
-    const selected = settings.modeOptions?.ffa.bots ?? [];
-    const humanLimit = settingsForm.elements.namedItem("humanLimit") as HTMLInputElement;
-    humanLimit.max = String(8 - selected.length);
-    humanLimit.value = String(settings.modeOptions?.ffa.humanLimit ?? 8);
-    humanLimit.disabled = operation !== null || settings.modeId !== "ffa";
-    (settingsForm.elements.namedItem("mapId") as HTMLSelectElement).disabled =
-      settings.modeId === "tournament";
-    const choices = [...new Set([...(state.disc?.cars ?? []), ...selected])];
-    if (JSON.stringify(Array.from(bots.options, (o) => o.value)) !== JSON.stringify(choices))
-      bots.replaceChildren(...choices.map((name) => new Option(name, name)));
-    for (const option of bots.options) option.selected = selected.includes(option.value);
-    bots.disabled = operation !== null || !state.disc;
-    for (const panel of settingsForm.querySelectorAll<HTMLElement>("[data-mode-settings]"))
+    roomModes[settings.modeId].settings.render(settingsForm, state);
+    for (const panel of settingsForm.querySelectorAll<HTMLFieldSetElement>(
+      "[data-mode-settings]",
+    )) {
       panel.hidden = panel.dataset.modeSettings !== settings.modeId;
-    const botHelp = settingsForm.querySelector<HTMLElement>("[id$='-bots-help']")!;
-    botHelp.textContent = state.disc
-      ? selected.length + " bots · " + humanLimit.value + " human places"
-      : "Load your disc to choose bots.";
+      panel.disabled = panel.hidden;
+    }
     for (const key of ["name", "modeId", "mapId"] as const) {
       const field = settingsForm.elements.namedItem(key) as HTMLInputElement;
       if (field.value !== settings[key]) field.value = settings[key];
@@ -351,27 +341,11 @@ async function room(): Promise<void> {
   settingsForm.addEventListener("input", (event) => {
     const field = (name: string) =>
       (settingsForm.elements.namedItem(name) as HTMLInputElement).value;
-    const bots = Array.from(
-      (settingsForm.elements.namedItem("bots") as HTMLSelectElement).selectedOptions,
-      (option) => option.value,
-    );
-    const humanLimit = Number(field("humanLimit"));
+    const modeId = roomSettingsSchema.shape.modeId.parse(field("modeId"));
     store.getState().editSettings({
       name: field("name"),
-      modeId: field("modeId"),
-      mapId: field("modeId") === "tournament" ? "construction-yard" : field("mapId"),
-      modeOptions:
-        field("modeId") === "tournament"
-          ? undefined
-          : {
-              ffa: {
-                bots,
-                humanLimit:
-                  event.target === settingsForm.elements.namedItem("bots")
-                    ? Math.min(humanLimit, 8 - bots.length)
-                    : humanLimit,
-              },
-            },
+      modeId,
+      ...roomModes[modeId].settings.read(settingsForm, event.target),
     });
   });
   settingsForm.addEventListener("submit", (event) => {

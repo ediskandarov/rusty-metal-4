@@ -83,7 +83,7 @@ export function roomMatch(id: string, store: RoomStore) {
       mode = roomModes[modeId].createControls(store, send);
     }
     mode!.render();
-    prepare(roomModes[room.modeId].minimumPlayers);
+    prepare(roomModes[room.modeId].rules.minimumPlayers);
     journal.hidden = !(match || room.journal);
     journal.disabled = state.journal.downloading;
     const busy = operation !== null;

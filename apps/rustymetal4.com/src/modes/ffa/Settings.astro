@@ -1,0 +1,34 @@
+---
+import { ffaCapacity } from "@tm4/rooms-client/modes";
+import { ffaDefaultLimits } from "@tm4/lightyear-client/schemas";
+interface Props {
+  prefix: string;
+}
+const { prefix } = Astro.props;
+---
+
+<fieldset data-mode-settings="ffa">
+  <legend>Free for all</legend>
+  <label>
+    Bot places — choose their starting cars
+    <select name="bots" id={`${prefix}-bots`} multiple size="5" disabled />
+  </label>
+  <label for={prefix + "-human-limit"}>
+    Maximum human players
+    <input
+      id={prefix + "-human-limit"}
+      name="humanLimit"
+      type="number"
+      min="1"
+      max={ffaCapacity}
+      value={ffaCapacity}
+      required
+    />
+  </label>
+  <p id={prefix + "-bots-help"}>Load your disc to choose bots. Empty places stay empty.</p>
+  <p>
+    {ffaDefaultLimits.timeLimitTicks / 30 / 60} minutes or {ffaDefaultLimits.fragLimit} frags.
+    Limits are fixed for this match.
+  </p>
+  <p>Humans can join during the match within their limit. Bot places stay reserved for bots.</p>
+</fieldset>

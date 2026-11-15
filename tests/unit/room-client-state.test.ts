@@ -75,7 +75,7 @@ async function settled(store: ReturnType<typeof createRoomStore>) {
 
 test("old HTTP snapshots cannot replace newer live room state or a settings draft", () => {
   const { store } = setup();
-  const draft = { name: "Draft", modeId: "ffa", mapId: "road-rage" };
+  const draft = { name: "Draft", modeId: "ffa" as const, mapId: "road-rage" };
   store.getState().editSettings(draft);
   store.getState().receive({ ...snapshot(3), name: "Newest" });
   store.getState().receive({ ...snapshot(2), name: "Old response" });

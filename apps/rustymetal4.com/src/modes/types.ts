@@ -1,7 +1,8 @@
 import type { RoomAction } from "@tm4/room-player-protocol";
-import type { RoomResult } from "@tm4/rooms-client/schemas";
+import type { RoomResult, RoomSettings } from "@tm4/rooms-client/schemas";
 
 import type { RoomStore } from "../state/room.ts";
+import type { ModeRules } from "./rules-types.ts";
 export type RoomState = ReturnType<RoomStore["getState"]>;
 export type SendPlayerAction = (action: RoomAction) => void;
 export interface ModeControls {
@@ -13,8 +14,16 @@ export interface ResultPresentation {
   summary: string;
   rows: { participant: RoomResult["participants"][number]; outcome: string }[];
 }
+export interface ModeSettings {
+  render(form: HTMLFormElement, state: RoomState): void;
+  read(
+    form: HTMLFormElement,
+    target: EventTarget | null,
+  ): { mapId: string; modeOptions?: RoomSettings["modeOptions"] };
+}
 export interface RoomMode {
-  minimumPlayers: number;
+  settings: ModeSettings;
+  rules: ModeRules;
   createControls(store: RoomStore, send: SendPlayerAction): ModeControls;
   results(result: RoomResult): ResultPresentation;
 }

@@ -21,6 +21,8 @@ try {
   await host.locator("#create-name").fill("Tournament");
   await host.locator("#create-form button").click();
   await host.waitForURL(/\/rooms\/[a-f0-9]{32}$/);
+  // An unfinished FFA quota must not block the tournament settings form.
+  await host.locator('[name="humanLimit"]').fill("");
   await host.locator('[name="modeId"]').selectOption("tournament");
   await host.locator('#settings-form button[type="submit"]').click();
   await host.locator("#room-mode").filter({ hasText: "Tournament" }).waitFor();

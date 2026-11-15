@@ -1,7 +1,10 @@
 import type { RoomMode } from "../types.ts";
+import { tournamentRules } from "./rules.ts";
+import { tournamentSettings } from "./settings.ts";
 import { tournamentSelectionStatus } from "./status.ts";
 export const tournament: RoomMode = {
-  minimumPlayers: 2,
+  rules: tournamentRules,
+  settings: tournamentSettings,
   createControls(store, send) {
     let selectionId: string | null = null;
     let sentStatus: string | null = null;

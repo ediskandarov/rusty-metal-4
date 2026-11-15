@@ -1,4 +1,5 @@
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
+import { modeDefinitions } from "@tm4/rooms-client/modes";
 import {
   type Compatibility,
   ffaCapacity,
@@ -16,6 +17,9 @@ import {
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
 import type { AuthoritativeResult, ServerLocation } from "@tm4/rustymetal-server-client/schemas";
+
+import { sameCompatibility } from "./compatibility.ts";
+import { modeRules } from "./modes/rules.ts";
 
 export const reconnectGrace = 45_000;
 export const emptyGrace = 30_000;
@@ -56,12 +60,7 @@ export function settings(value: unknown): RoomSettings {
   if (!mode) throw new RoomError(400, "Choose a supported game mode.");
   if (!map) throw new RoomError(400, "Choose a supported map.");
   if (input.capacity !== roomModeCapacity(mode.id))
-    throw new RoomError(
-      400,
-      mode.id === "ffa"
-        ? "Free for all always has eight player places."
-        : "Tournament has two player places.",
-    );
+    throw new RoomError(400, modeDefinitions[mode.id].capacityError);
   const parsed = roomSettingsSchema.safeParse({ ...input, name, modeId: mode.id, mapId: map.id });
   if (!parsed.success) throw new RoomError(400, "Invalid mode settings.");
   return parsed.data;
@@ -155,12 +154,12 @@ export function join(state: RoomState, key: string, name: unknown, now: number):
   if (existing) return existing;
   if (
     state.match?.roster.length &&
-    (state.match.stage !== "playing" || state.settings.modeId === "tournament")
+    (state.match.stage !== "playing" || !modeRules[state.settings.modeId].allowLateJoin)
   )
     throw new RoomError(
       409,
-      state.settings.modeId === "tournament"
-        ? "Tournament participants are fixed until this battle ends."
+      !modeRules[state.settings.modeId].allowLateJoin
+        ? "Participants are fixed until this battle ends."
         : "The match is still preparing. Wait for play to begin.",
     );
   if (state.members.length >= roomHumanLimit(state.settings))
@@ -319,9 +318,6 @@ export function requireHost(state: RoomState, key: string): Member {
     throw new RoomError(403, "Only the host can prepare or start a match.");
   return member;
 }
-export function sameCompatibility(a: Compatibility | null, b: Compatibility | null): boolean {
-  return !!a && !!b && a.protocol === b.protocol && a.build === b.build && a.content === b.content;
-}
 export function updatePlayer(state: RoomState, key: string, value: unknown): void {
   const member = memberFor(state, key);
   if (!member) throw new RoomError(403, "Join this room first.");
@@ -346,48 +342,20 @@ export function updatePlayer(state: RoomState, key: string, value: unknown): voi
     compatibility = { protocol: raw.protocol, build: raw.build, content: raw.content };
   }
   if (typeof input.ready !== "boolean") throw new RoomError(400, "Choose a readiness state.");
-  const changed = car !== member.car || !sameCompatibility(compatibility, member.compatibility);
-  if (state.settings.modeId === "tournament") {
-    const host = state.members.find((entry) => entry.id === state.hostId);
-    if (
-      input.ready &&
-      (!car ||
-        !compatibility ||
-        (host?.id !== member.id && !sameCompatibility(compatibility, host?.compatibility ?? null)))
-    )
-      throw new RoomError(
-        409,
-        "Choose a car in the game with matching resources before confirming.",
-      );
-    if (host?.id === member.id && !sameCompatibility(compatibility, host.compatibility))
-      invalidateReady(state);
-    member.car = car;
-    member.compatibility = compatibility;
-    member.ready = input.ready;
-    return;
-  }
-  if (
-    input.ready &&
-    (changed ||
-      !car ||
-      !state.match ||
-      !["ready", "playing"].includes(state.match.stage) ||
-      !state.match.cars.includes(car) ||
-      !sameCompatibility(compatibility, state.match.compatibility))
-  )
-    throw new RoomError(
-      409,
-      "Select a car, load matching resources and wait for server preparation before readying.",
-    );
+  const rules = modeRules[state.settings.modeId];
+  const choice = { car, compatibility, ready: input.ready };
+  const error = rules.choiceError(state, member, choice);
+  if (error) throw new RoomError(409, error);
+  if (rules.choiceInvalidatesReady(state, member, choice)) invalidateReady(state);
   member.car = car;
   member.compatibility = compatibility;
-  member.ready = input.ready;
+  member.ready = choice.ready;
 }
 export function beginPreparation(state: RoomState, key: string, now: number): RoomMatch {
   const host = requireHost(state, key);
   if (state.match) throw new RoomError(409, "Preparation is already in progress.");
   if (!host.compatibility) throw new RoomError(409, "Load your disc before preparing the server.");
-  if (state.settings.modeId !== "tournament") invalidateReady(state);
+  modeRules[state.settings.modeId].preparationStarted(state);
   state.notice = "";
   return (state.match = {
     location: null,
@@ -407,8 +375,8 @@ export function beginPreparation(state: RoomState, key: string, now: number): Ro
 }
 export function freezeRoster(state: RoomState, key: string, now: number): RoomMatch {
   requireHost(state, key);
-  if (state.settings.modeId === "tournament" && state.members.length !== 2)
-    throw new RoomError(409, "Tournament requires both players.");
+  if (state.members.length < modeRules[state.settings.modeId].minimumPlayers)
+    throw new RoomError(409, "Not enough participants for this game mode.");
   const match = state.match;
   if (!match || match.stage !== "ready")
     throw new RoomError(409, "Prepare server resources first.");

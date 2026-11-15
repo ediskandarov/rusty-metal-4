@@ -7,13 +7,15 @@ import {
 } from "@tm4/rooms-client/schemas";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
+import { modeRules } from "../modes/rules.ts";
+
 type RoomsClient = ReturnType<typeof createRoomsClient>;
 type Operation = "join" | "settings" | "leave" | "player" | "prepare" | "cancel" | "start";
 type ErrorTarget = "room" | "join" | "settings" | "player";
 type Connection = "loading" | "live" | "reconnecting" | "viewing" | "unavailable" | "expired";
 interface SettingsDraft {
   name: string;
-  modeId: string;
+  modeId: RoomSnapshot["modeId"];
   mapId: string;
   modeOptions?: { ffa: { bots: string[]; humanLimit: number } };
 }
@@ -71,12 +73,16 @@ export function roomCarChoices(state: RoomState): readonly string[] {
 }
 export function roomSelectedCar(state: RoomState): string | null {
   const cars = roomCarChoices(state);
-  if (state.room?.modeId === "tournament" && state.tournamentChoice)
+  if (
+    state.room &&
+    modeRules[state.room.modeId].carSelection === "engine" &&
+    state.tournamentChoice
+  )
     return state.tournamentChoice.car;
   const selected = state.carDraft ?? roomMember(state)?.car;
   return selected && cars.includes(selected)
     ? selected
-    : state.room?.modeId === "tournament"
+    : state.room && modeRules[state.room.modeId].carSelection === "engine"
       ? null
       : (cars[0] ?? null);
 }
@@ -245,7 +251,8 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     async engineCarSelected(car) {
       const state = get();
       if (
-        state.room?.modeId !== "tournament" ||
+        !state.room ||
+        modeRules[state.room.modeId].carSelection !== "engine" ||
         !state.disc ||
         (car !== null && !roomCarChoices(state).includes(car))
       )
@@ -363,7 +370,11 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       rooms.player(id, {
         car: roomSelectedCar(state),
         compatibility: state.disc?.compatibility ?? null,
-        ready: ready ?? (state.room?.modeId === "tournament" && !!state.tournamentChoice?.car),
+        ready:
+          ready ??
+          (!!state.room &&
+            modeRules[state.room.modeId].carSelection === "engine" &&
+            !!state.tournamentChoice?.car),
       }),
     );
   }
