@@ -219,6 +219,7 @@ add_executable(tm4_web
     "${TM4_WEB}/net_state_objects.c"
     "${TM4_WEB}/car.c"
     "${TM4_WEB}/menu_runtime.c"
+    "${TM4_WEB}/tournament_menu.c"
     "${TM4_WEB}/car_exports.c"
     "${TM4_WEB}/native_modules.c"
     "${TM4_WEB}/music.c"

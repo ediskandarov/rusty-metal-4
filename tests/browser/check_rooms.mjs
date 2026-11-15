@@ -38,7 +38,12 @@ try {
   await a.waitForURL(/\/rooms\/[a-f0-9]{32}$/);
   await a.locator("#settings-panel").waitFor();
   await a.getByText("Ada (you)", { exact: true }).waitFor();
-  assert.equal(await a.locator("#edit-mode option").count(), 1);
+  assert.deepEqual(
+    await a
+      .locator("#edit-mode option")
+      .evaluateAll((options) => options.map((option) => option.value)),
+    ["ffa", "tournament"],
+  );
   assert.equal(await a.locator("#edit-mode").inputValue(), "ffa");
   assert.equal(await a.locator("#edit-map").inputValue(), "construction-yard");
   assert.equal(

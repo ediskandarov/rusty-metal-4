@@ -3,6 +3,8 @@ import type { DiscAssets } from "@tm4/resources/loader/types";
 import type { NetworkEngine } from "../network/protocol.ts";
 
 export interface GameExports extends NetworkEngine {
+  ccall(name: string, result: "string", types: string[], values: (string | number)[]): string;
+  ccall(name: string, result: "number", types: string[], values: (string | number)[]): number;
   _WebSetRenderScale(this: void, value: number): void;
   _WebSetCarLodDistance(this: void, value: number): void;
   _WebSetDrawDistance(this: void, value: number): void;

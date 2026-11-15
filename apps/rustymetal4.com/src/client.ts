@@ -253,7 +253,9 @@ async function room(): Promise<void> {
     const humanLimit = settingsForm.elements.namedItem("humanLimit") as HTMLInputElement;
     humanLimit.max = String(8 - selected.length);
     humanLimit.value = String(settings.modeOptions?.ffa.humanLimit ?? 8);
-    humanLimit.disabled = operation !== null;
+    humanLimit.disabled = operation !== null || settings.modeId !== "ffa";
+    (settingsForm.elements.namedItem("mapId") as HTMLSelectElement).disabled =
+      settings.modeId === "tournament";
     const choices = [...new Set([...(state.disc?.cars ?? []), ...selected])];
     if (JSON.stringify(Array.from(bots.options, (o) => o.value)) !== JSON.stringify(choices))
       bots.replaceChildren(...choices.map((name) => new Option(name, name)));
@@ -357,16 +359,19 @@ async function room(): Promise<void> {
     store.getState().editSettings({
       name: field("name"),
       modeId: field("modeId"),
-      mapId: field("mapId"),
-      modeOptions: {
-        ffa: {
-          bots,
-          humanLimit:
-            event.target === settingsForm.elements.namedItem("bots")
-              ? Math.min(humanLimit, 8 - bots.length)
-              : humanLimit,
-        },
-      },
+      mapId: field("modeId") === "tournament" ? "construction-yard" : field("mapId"),
+      modeOptions:
+        field("modeId") === "tournament"
+          ? undefined
+          : {
+              ffa: {
+                bots,
+                humanLimit:
+                  event.target === settingsForm.elements.namedItem("bots")
+                    ? Math.min(humanLimit, 8 - bots.length)
+                    : humanLimit,
+              },
+            },
     });
   });
   settingsForm.addEventListener("submit", (event) => {

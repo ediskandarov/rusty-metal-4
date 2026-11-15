@@ -10,7 +10,11 @@ import { z } from "zod";
 export { compatibilitySchema };
 export type { Compatibility } from "@tm4/lightyear-client/schemas";
 export const ffaCapacity = 8;
-export const modes = [{ id: "ffa", label: "Free for all" }] as const;
+export const modes = [
+  { id: "ffa", label: "Free for all" },
+  { id: "tournament", label: "Tournament (car selection preview)" },
+] as const;
+export const roomModeCapacity = (mode: string) => (mode === "tournament" ? 2 : ffaCapacity);
 
 // Names come from the native GameGetWorldName catalog; IDs remain stable if labels change.
 export const maps = [
@@ -70,16 +74,29 @@ export const roomHumanLimit = (settings: {
   modeId: string;
   modeOptions?: z.infer<typeof modeOptionsSchema>;
 }) =>
-  settings.modeId === "ffa" ? (settings.modeOptions?.ffa.humanLimit ?? ffaCapacity) : ffaCapacity;
-export const roomSettingsSchema = z.object({
-  name: text(48),
-  modeOptions: modeOptionsSchema.optional(),
-  modeId: z.enum(["ffa"]),
-  mapId: z.enum(maps.map((map) => map.id)),
-  capacity: z.literal(ffaCapacity),
-});
+  settings.modeId === "ffa"
+    ? (settings.modeOptions?.ffa.humanLimit ?? ffaCapacity)
+    : roomModeCapacity(settings.modeId);
+export const roomSettingsSchema = z
+  .object({
+    name: text(48),
+    modeOptions: modeOptionsSchema.optional(),
+    modeId: z.enum(["ffa", "tournament"]),
+    mapId: z.enum(maps.map((map) => map.id)),
+    capacity: z.union([z.literal(ffaCapacity), z.literal(2)]),
+  })
+  .refine((settings) => settings.capacity === roomModeCapacity(settings.modeId), {
+    message: "Capacity must match the game mode",
+    path: ["capacity"],
+  })
+  .refine(
+    (settings) =>
+      settings.modeId === "ffa" ||
+      (!settings.modeOptions && settings.mapId === "construction-yard"),
+    { message: "Tournament starts at Construction Yard without FFA options" },
+  );
 export type RoomSettings = z.infer<typeof roomSettingsSchema>;
-export const roomSummarySchema = roomSettingsSchema.extend({
+export const roomSummarySchema = roomSettingsSchema.safeExtend({
   id: roomIdSchema,
   host: z.string(),
   participantCount: count.max(ffaCapacity),

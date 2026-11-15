@@ -1,0 +1,138 @@
+/* global Module, tm4Port */
+import assert from "node:assert/strict";
+
+import { eventually, runtime } from "../rooms/runtime.ts";
+import { launchBrowser } from "./helpers/browser.mjs";
+
+assert(
+  process.env.TM4_DISC_DIR,
+  "Set TM4_DISC_DIR to a local disc folder for the real-engine room check",
+);
+const mf = await runtime(true);
+const browser = await launchBrowser();
+try {
+  const origin = (await mf.ready).origin;
+  const host = await (await browser.newContext()).newPage();
+  const guest = await (await browser.newContext()).newPage();
+  const errors = [];
+  for (const page of [host, guest]) page.on("pageerror", (error) => errors.push(error.message));
+  await host.goto(origin);
+  await host.locator("#create-player").fill("Host");
+  await host.locator("#create-name").fill("Tournament");
+  await host.locator("#create-form button").click();
+  await host.waitForURL(/\/rooms\/[a-f0-9]{32}$/);
+  await host.locator('[name="modeId"]').selectOption("tournament");
+  await host.locator('#settings-form button[type="submit"]').click();
+  await host.locator("#room-mode").filter({ hasText: "Tournament" }).waitFor();
+  const roomId = new URL(host.url()).pathname.split("/").pop();
+  const view = async () =>
+    (await (await host.request.get(`${origin}/api/rooms/${roomId}`)).json()).room;
+  await guest.goto(host.url());
+  await guest.locator("#join-player").fill("Guest");
+  await guest.locator("#join-form button").click();
+  let rejectedConfirmation = false;
+  await guest.route("**/api/rooms/*/player", async (route) => {
+    const request = route.request();
+    if (!rejectedConfirmation && request.method() === "POST" && request.postDataJSON()?.ready) {
+      rejectedConfirmation = true;
+      await route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "Temporary confirmation failure" }),
+      });
+    } else await route.continue();
+  });
+  const frames = [];
+  for (const page of [host, guest]) {
+    await page.bringToFront();
+    await page.locator("#room-player").waitFor();
+    const frame = await (await page.locator("#room-player").elementHandle()).contentFrame();
+    await frame.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
+    await frame.waitForFunction(
+      () => globalThis.tm4Port?.screen === "carsel" && tm4Port.menuReady,
+      null,
+      { timeout: 90000 },
+    );
+    await frame.locator("canvas").focus();
+    await page.keyboard.press("ArrowRight", { delay: 150 });
+    await page.keyboard.press("KeyX", { delay: 150 });
+    await frame.waitForFunction(
+      () => Module.ccall("WebTournamentSelectedCar", "string", [], []),
+      null,
+      { timeout: 10000 },
+    );
+    if (page === guest) {
+      await page
+        .locator("#player-status")
+        .filter({ hasText: "Temporary confirmation failure" })
+        .waitFor();
+      const revision = await frame.evaluate(() => Module._WebTournamentSelectionRevision());
+      // Let the 30 Hz menu sample key-up before pressing Done for a second time.
+      await page.waitForTimeout(100);
+      await page.keyboard.press("KeyX", { delay: 150 });
+      await frame.waitForFunction(
+        (previous) => Module._WebTournamentSelectionRevision() > previous,
+        revision,
+      );
+    }
+    frames.push(frame);
+  }
+  const confirmed = await eventually(
+    view,
+    (room) => room.participants.length === 2 && room.participants.every((p) => p.ready),
+    15000,
+  );
+  assert(rejectedConfirmation, "Retry exercised a failed confirmation");
+  assert(confirmed.participants.every((p) => p.car));
+  assert.equal(confirmed.capacity, 2);
+  assert.equal(confirmed.freePlaces, 0);
+  assert.equal(confirmed.match, null, "Selection does not allocate an FFA server");
+  assert(await host.locator("#room-car").isHidden());
+  assert(await host.locator("#room-ready").isHidden());
+  assert(await host.locator("#start-match").isHidden());
+  for (const frame of frames) assert.equal(await frame.evaluate(() => tm4Port.menuMode), 0);
+  // A delayed stop for the old match must not cancel the separate menu request.
+  await host.bringToFront();
+  await host.evaluate((roomId) => {
+    document
+      .getElementById("room-player")
+      .contentWindow.postMessage(
+        { type: "rm4-room", roomId, action: "stop", sessionId: crypto.randomUUID() },
+        location.origin,
+      );
+  }, roomId);
+  await frames[0].locator("canvas").focus();
+  const revision = await frames[0].evaluate(() => Module._WebTournamentSelectionRevision());
+  await host.keyboard.press("KeyX", { delay: 150 });
+  await frames[0].waitForFunction(
+    (previous) => Module._WebTournamentSelectionRevision() > previous,
+    revision,
+  );
+  await host.screenshot({ path: "build/checks/tournament-room.png", fullPage: true });
+  await guest.bringToFront();
+  await frames[1].locator("canvas").focus();
+  await guest.keyboard.press("KeyS", { delay: 150 });
+  await eventually(
+    view,
+    (room) =>
+      room.participants[0].ready &&
+      !room.participants[1].ready &&
+      room.participants[1].car === null,
+  );
+  await host.bringToFront();
+  await host.locator('[name="modeId"]').selectOption("ffa");
+  await host.locator('#settings-form button[type="submit"]').click();
+  await eventually(
+    view,
+    (room) => room.modeId === "ffa" && room.participants.every((p) => !p.ready && p.car),
+  );
+  for (const frame of frames) await frame.waitForFunction(() => !tm4Port.menuReady);
+  assert(await host.locator("#room-car").isVisible());
+  assert.deepEqual(errors, []);
+  console.log(
+    "PASS two real engine menus confirm room roster, back clears selection, FFA restores HTML controls",
+  );
+} finally {
+  await browser.close();
+  await mf.dispose();
+}

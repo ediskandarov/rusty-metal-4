@@ -16,6 +16,7 @@ export function matchControls(id: string, store: RoomStore) {
   // These track deliveries to this frame, not a second copy of the room state.
   let delivered: { sessionId: string; action: "upload" | "join" } | null = null;
   let sentStatus: string | null = null;
+  let selectionId: string | null = null;
   const send = (value: RoomAction) =>
     frame.contentWindow?.postMessage(
       { type: "rm4-room", roomId: id, ...value } satisfies RoomCommand,
@@ -92,15 +93,38 @@ export function matchControls(id: string, store: RoomStore) {
       frame.removeAttribute("src");
       delivered = null;
       sentStatus = null;
+      selectionId = null;
       return;
     }
     if (state.runtime === "available" && !frame.hasAttribute("src")) {
       frame.src = "/play/?room=" + id;
       frame.hidden = false;
     }
+    const match = room.match;
+    // A refreshed snapshot can skip the old match's final room update.
+    // Stop its player session before asking the same engine to open the menu.
+    if (
+      delivered &&
+      (delivered.sessionId !== match?.id || (delivered.action === "join" && !match.endpoint))
+    ) {
+      send({ action: "stop", sessionId: delivered.sessionId, message: room.notice });
+      delivered = null;
+    }
+    const tournament = room.modeId === "tournament";
+    el("match-help").textContent = tournament
+      ? "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. This preview ends with two confirmed cars."
+      : "Each player loads their own disc below. Only the host uploads required resources to the private match server. Start with at least one ready human player; bots use their reserved places.";
+    if (disc && tournament && !selectionId) {
+      selectionId = crypto.randomUUID();
+      send({ action: "car-selection", requestId: selectionId, enabled: true });
+    } else if ((!disc || !tournament) && selectionId) {
+      send({ action: "car-selection", requestId: selectionId, enabled: false });
+      selectionId = null;
+    }
+    car.closest("label")!.hidden = tournament;
+    ready.hidden = tournament;
     const busy = operation !== null;
     const host = room.you === room.hostId;
-    const match = room.match;
     journal.hidden = !(match || room.journal);
     journal.disabled = state.journal.downloading;
     const joining = match?.stage === "playing" && !match.endpoint;
@@ -110,16 +134,13 @@ export function matchControls(id: string, store: RoomStore) {
       !joining;
     const choices = roomCarChoices(state);
     el("match-status").textContent =
-      match?.message || room.notice || "Load your disc, then the host can prepare the server.";
-    if (
-      delivered &&
-      (delivered.sessionId !== match?.id || (delivered.action === "join" && !match.endpoint))
-    ) {
-      send({ action: "stop", sessionId: delivered.sessionId, message: room.notice });
-      delivered = null;
-    }
+      match?.message ||
+      room.notice ||
+      (tournament
+        ? "Choose and confirm your car in the game below. Tournament battles are not connected yet."
+        : "Load your disc, then the host can prepare the server.");
     const status =
-      disc && !match?.endpoint
+      disc && !match?.endpoint && !tournament
         ? match?.message || room.notice || "Disc loaded. Choose your car in the room."
         : null;
     if (status !== sentStatus) {
@@ -135,12 +156,12 @@ export function matchControls(id: string, store: RoomStore) {
     car.disabled = busy || !disc || locked;
     ready.disabled = busy || !disc || (match?.stage !== "ready" && !joining) || !self.car;
     ready.textContent = joining ? "Join match" : self.ready ? "Not ready" : "Ready";
-    prepare.hidden = !host || (!!match && match.stage !== "uploading");
+    prepare.hidden = tournament || !host || (!!match && match.stage !== "uploading");
     prepare.disabled = busy || !disc;
     prepare.textContent = match ? "Resume resource upload" : "Prepare server from my disc";
     cancel.hidden = !host || !match || locked;
     cancel.disabled = busy;
-    start.hidden = !host || match?.stage !== "ready";
+    start.hidden = tournament || !host || match?.stage !== "ready";
     start.disabled =
       busy ||
       room.participants.length < 1 ||
@@ -197,11 +218,15 @@ export function matchControls(id: string, store: RoomStore) {
     if (!parsed.success || parsed.data.roomId !== id) return;
     const message = parsed.data;
     switch (message.event) {
+      case "car-selection":
+        if (selectionId === message.requestId) void store.getState().engineCarSelected(message.car);
+        break;
       case "status":
         if (message.sessionId === (store.getState().room?.match?.id ?? null))
           store.getState().playerReported(message.message);
         break;
       case "unloaded":
+        selectionId = null;
         delivered = null;
         sentStatus = null;
         store.getState().playerLoaded(null);

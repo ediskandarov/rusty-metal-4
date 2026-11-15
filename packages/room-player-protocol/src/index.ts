@@ -5,6 +5,11 @@ import { z } from "zod";
 const roomEnvelope = z.strictObject({ type: z.literal("rm4-room"), roomId: roomIdSchema });
 export const roomCommandSchema = z.discriminatedUnion("action", [
   roomEnvelope.extend({
+    action: z.literal("car-selection"),
+    requestId: z.string().uuid(),
+    enabled: z.boolean(),
+  }),
+  roomEnvelope.extend({
     action: z.literal("stop"),
     sessionId: matchIdSchema.nullable(),
     message: z.string().optional(),
@@ -31,6 +36,11 @@ export const roomCommandSchema = z.discriminatedUnion("action", [
 
 const playerEnvelope = z.strictObject({ type: z.literal("rm4-player"), roomId: roomIdSchema });
 export const playerMessageSchema = z.discriminatedUnion("event", [
+  playerEnvelope.extend({
+    event: z.literal("car-selection"),
+    requestId: z.string().uuid(),
+    car: z.string().min(1).max(48).nullable(),
+  }),
   playerEnvelope.extend({
     event: z.literal("status"),
     sessionId: matchIdSchema.nullable(),

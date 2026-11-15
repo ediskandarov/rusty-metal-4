@@ -1,7 +1,7 @@
 import { type createRoomsClient, RoomsApiError } from "@tm4/rooms-client";
 import {
   type Compatibility,
-  ffaCapacity,
+  roomModeCapacity,
   roomSettingsSchema,
   type RoomSnapshot,
 } from "@tm4/rooms-client/schemas";
@@ -32,6 +32,7 @@ interface RoomState {
   runtime: "checking" | "available" | "unavailable";
   disc: Disc | null;
   carDraft: string | undefined;
+  tournamentChoice: { car: string | null } | null;
   playerNeedsSync: boolean;
   playerStatus: string;
   returnedResult: string | null;
@@ -49,6 +50,7 @@ interface RoomState {
   playerReported: (message: string) => void;
   selectCar: (car: string) => Promise<void>;
   toggleReady: () => Promise<void>;
+  engineCarSelected: (car: string | null) => Promise<void>;
   prepare: () => Promise<string | null>;
   cancel: () => Promise<void>;
   start: () => Promise<void>;
@@ -69,8 +71,14 @@ export function roomCarChoices(state: RoomState): readonly string[] {
 }
 export function roomSelectedCar(state: RoomState): string | null {
   const cars = roomCarChoices(state);
+  if (state.room?.modeId === "tournament" && state.tournamentChoice)
+    return state.tournamentChoice.car;
   const selected = state.carDraft ?? roomMember(state)?.car;
-  return selected && cars.includes(selected) ? selected : (cars[0] ?? null);
+  return selected && cars.includes(selected)
+    ? selected
+    : state.room?.modeId === "tournament"
+      ? null
+      : (cars[0] ?? null);
 }
 export function roomConnectionLabel(state: RoomState) {
   if (state.room?.closed) return "Room closed";
@@ -97,6 +105,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     runtime: "checking",
     disc: null,
     carDraft: undefined,
+    tournamentChoice: null,
     playerNeedsSync: false,
     playerStatus: "",
     returnedResult: null,
@@ -115,14 +124,14 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       )
         return;
       const memberChanged = state.room?.you !== room.you;
+      const modeChanged = state.room?.modeId !== room.modeId;
       const previousMember = roomMember(state);
       const incomingMember = room.participants.find((member) => member.id === room.you);
       // A fresh room tab has no loaded disc; it must not strand another tab's retained resources.
       const retainedDiscNeedsSync =
         !memberChanged &&
         !!state.disc &&
-        !!previousMember?.loaded &&
-        !incomingMember?.loaded &&
+        (modeChanged || (!!previousMember?.loaded && !incomingMember?.loaded)) &&
         !room.match?.endpoint;
 
       const reset = memberChanged || room.closed;
@@ -141,15 +150,19 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
           ? {
               disc: null,
               carDraft: undefined,
+              tournamentChoice: null,
               playerNeedsSync: false,
               playerStatus: "",
             }
           : {}),
+        ...(modeChanged ? { carDraft: undefined, tournamentChoice: null } : {}),
         ...(room.match?.endpoint ? { playerNeedsSync: false } : {}),
         ...(retainedDiscNeedsSync
           ? {
               playerNeedsSync: true,
-              carDraft: state.carDraft ?? previousMember?.car ?? undefined,
+              carDraft: modeChanged
+                ? undefined
+                : (state.carDraft ?? previousMember?.car ?? undefined),
             }
           : {}),
       });
@@ -191,7 +204,13 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       const room = get().room;
       if (!room) return;
       const result = await perform("settings", "settings", () =>
-        rooms.settings(id, roomSettingsSchema.parse({ ...(draft ?? room), capacity: ffaCapacity })),
+        rooms.settings(
+          id,
+          roomSettingsSchema.parse({
+            ...(draft ?? room),
+            capacity: roomModeCapacity((draft ?? room).modeId),
+          }),
+        ),
       );
       if (result && get().settingsDraft === draft)
         set({ settingsDraft: null, settingsSaved: true });
@@ -207,7 +226,12 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     },
     playerLoaded(disc) {
       if (!get().room?.you || get().room?.closed || get().departed) return;
-      set({ disc, carDraft: undefined, playerNeedsSync: !get().room?.match?.endpoint });
+      set({
+        disc,
+        carDraft: undefined,
+        tournamentChoice: null,
+        playerNeedsSync: !get().room?.match?.endpoint,
+      });
       void syncPlayer();
     },
     playerReported(playerStatus) {
@@ -216,6 +240,17 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     async selectCar(car) {
       if (get().operation || !get().disc || !roomCarChoices(get()).includes(car)) return;
       set({ carDraft: car });
+      await syncPlayer();
+    },
+    async engineCarSelected(car) {
+      const state = get();
+      if (
+        state.room?.modeId !== "tournament" ||
+        !state.disc ||
+        (car !== null && !roomCarChoices(state).includes(car))
+      )
+        return;
+      set({ tournamentChoice: { car }, playerNeedsSync: true });
       await syncPlayer();
     },
     async toggleReady() {
@@ -313,7 +348,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       if (store.getState().playerNeedsSync) void syncPlayer();
     }
   }
-  async function syncPlayer(ready = false) {
+  async function syncPlayer(ready?: boolean) {
     const state = store.getState();
     if (
       state.operation ||
@@ -328,7 +363,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       rooms.player(id, {
         car: roomSelectedCar(state),
         compatibility: state.disc?.compatibility ?? null,
-        ready,
+        ready: ready ?? (state.room?.modeId === "tournament" && !!state.tournamentChoice?.car),
       }),
     );
   }

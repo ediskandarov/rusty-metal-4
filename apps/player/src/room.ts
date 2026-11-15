@@ -1,5 +1,7 @@
 import { joinMatch } from "@tm4/game-runtime/network/match";
-import type { NetworkEngine, NetworkPort } from "@tm4/game-runtime/network/protocol";
+import type { NetworkPort } from "@tm4/game-runtime/network/protocol";
+import type { GameModule } from "@tm4/game-runtime/runtime/module";
+import { selectTournamentCar } from "@tm4/game-runtime/tournament/selection";
 import type { DiscSources } from "@tm4/resources/loader/types";
 import { type PlayerEvent, type PlayerMessage, roomCommandSchema } from "@tm4/room-player-protocol";
 import { createRoomsClient } from "@tm4/rooms-client";
@@ -20,8 +22,10 @@ const notify = (value: PlayerEvent) => {
   );
 };
 let session: ReturnType<typeof createRoomSession> | undefined;
+let selection: { id: string; stop: () => void } | null = null;
+let playerEngine: GameModule | null = null;
 
-export async function roomPlayerReady(engine: NetworkEngine, sources: DiscSources): Promise<void> {
+export async function roomPlayerReady(engine: GameModule, sources: DiscSources): Promise<void> {
   if (!inRoom || !roomId) return;
   const port = (globalThis as typeof globalThis & { tm4Port: NetworkPort }).tm4Port;
   const deadline = Date.now() + 30_000;
@@ -41,6 +45,9 @@ export async function roomPlayerReady(engine: NetworkEngine, sources: DiscSource
   };
   const resources = createRoomsClient({ baseURL: new URL("/api/", location.href) });
   const id = roomId;
+  selection?.stop();
+  selection = null;
+  playerEngine = engine;
   session?.dispose();
   session = createRoomSession({
     show,
@@ -59,11 +66,61 @@ if (inRoom) {
   window.addEventListener("message", (event: MessageEvent<unknown>) => {
     if (event.source !== parent || event.origin !== location.origin) return;
     const parsed = roomCommandSchema.safeParse(event.data);
-    if (parsed.success && parsed.data.roomId === roomId) session?.handle(parsed.data);
+    if (!parsed.success || parsed.data.roomId !== roomId) return;
+    const command = parsed.data;
+    if (command.action === "car-selection") {
+      if (!playerEngine) return;
+      if (!command.enabled) {
+        if (selection?.id === command.requestId) {
+          selection.stop();
+          selection = null;
+          document.getElementById("status")!.hidden = false;
+          matchStatus(document.getElementById("status")!)(
+            "lobby",
+            "Disc loaded. Choose your car in the room.",
+          );
+        }
+        return;
+      }
+      if (selection?.id === command.requestId) return;
+      selection?.stop();
+      try {
+        const stop = selectTournamentCar(playerEngine, (car) => {
+          if (selection?.id === command.requestId) {
+            notify({ event: "car-selection", requestId: command.requestId, car });
+            notify({
+              event: "status",
+              sessionId: null,
+              message: car
+                ? `${car} confirmed. Use Back in the game to change your choice.`
+                : "Choose your car in the game, then press Done.",
+            });
+          }
+        });
+        selection = { id: command.requestId, stop };
+        document.getElementById("status")!.hidden = true;
+      } catch (error) {
+        selection = null;
+        document.getElementById("status")!.hidden = false;
+        matchStatus(document.getElementById("status")!)("error", String(error));
+      }
+      return;
+    }
+    if (selection) {
+      // Match-scoped messages do not own the tournament menu's lifetime.
+      if (command.action === "status" || command.action === "stop") return;
+      selection.stop();
+      selection = null;
+    }
+    document.getElementById("status")!.hidden = false;
+    session?.handle(command);
   });
   window.addEventListener("pagehide", (event) => {
     // A cached page resumes through match.ts; a discarded frame must cancel all operations.
-    if (!event.persisted) session?.dispose();
+    if (!event.persisted) {
+      selection?.stop();
+      session?.dispose();
+    }
   });
   notify({ event: "unloaded" });
 }

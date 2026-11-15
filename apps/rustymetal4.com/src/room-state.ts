@@ -7,6 +7,7 @@ import {
   modes,
   roomBots,
   roomHumanLimit,
+  roomModeCapacity,
   type RoomResult,
   roomResultSchema,
   type RoomSettings,
@@ -54,8 +55,13 @@ export function settings(value: unknown): RoomSettings {
   const map = maps.find((entry) => entry.id === input.mapId);
   if (!mode) throw new RoomError(400, "Choose a supported game mode.");
   if (!map) throw new RoomError(400, "Choose a supported map.");
-  if (input.capacity !== ffaCapacity)
-    throw new RoomError(400, "Free for all always has eight player places.");
+  if (input.capacity !== roomModeCapacity(mode.id))
+    throw new RoomError(
+      400,
+      mode.id === "ffa"
+        ? "Free for all always has eight player places."
+        : "Tournament has two player places.",
+    );
   const parsed = roomSettingsSchema.safeParse({ ...input, name, modeId: mode.id, mapId: map.id });
   if (!parsed.success) throw new RoomError(400, "Invalid mode settings.");
   return parsed.data;
@@ -226,13 +232,15 @@ export function edit(state: RoomState, key: string, value: unknown): void {
   const next = settings(value);
   if (state.members.length > roomHumanLimit(next))
     throw new RoomError(409, "The human limit cannot be smaller than the current room membership.");
+  if (state.settings.modeId !== next.modeId) {
+    for (const member of state.members) member.car = null;
+  }
   state.settings = next;
   invalidateReady(state);
 }
 export function summary(state: RoomState): RoomSummary {
   return {
     ...state.settings,
-    capacity: ffaCapacity,
     id: state.id,
     host: state.members.find((member) => member.id === state.hostId)?.name ?? "Waiting for a host",
     participantCount: state.members.length + roomBots(state.settings).length,
@@ -331,6 +339,25 @@ export function updatePlayer(state: RoomState, key: string, value: unknown): voi
   }
   if (typeof input.ready !== "boolean") throw new RoomError(400, "Choose a readiness state.");
   const changed = car !== member.car || !sameCompatibility(compatibility, member.compatibility);
+  if (state.settings.modeId === "tournament") {
+    const host = state.members.find((entry) => entry.id === state.hostId);
+    if (
+      input.ready &&
+      (!car ||
+        !compatibility ||
+        (host?.id !== member.id && !sameCompatibility(compatibility, host?.compatibility ?? null)))
+    )
+      throw new RoomError(
+        409,
+        "Choose a car in the game with matching resources before confirming.",
+      );
+    if (host?.id === member.id && !sameCompatibility(compatibility, host.compatibility))
+      invalidateReady(state);
+    member.car = car;
+    member.compatibility = compatibility;
+    member.ready = input.ready;
+    return;
+  }
   if (
     input.ready &&
     (changed ||
@@ -350,6 +377,11 @@ export function updatePlayer(state: RoomState, key: string, value: unknown): voi
 }
 export function beginPreparation(state: RoomState, key: string, now: number): RoomMatch {
   const host = requireHost(state, key);
+  if (state.settings.modeId === "tournament")
+    throw new RoomError(
+      409,
+      "Tournament car selection is available; network battles are not connected yet.",
+    );
   if (state.match) throw new RoomError(409, "Preparation is already in progress.");
   if (!host.compatibility) throw new RoomError(409, "Load your disc before preparing the server.");
   invalidateReady(state);
@@ -372,6 +404,8 @@ export function beginPreparation(state: RoomState, key: string, now: number): Ro
 }
 export function freezeRoster(state: RoomState, key: string, now: number): RoomMatch {
   requireHost(state, key);
+  if (state.settings.modeId === "tournament")
+    throw new RoomError(409, "Tournament battles are not connected yet.");
   const match = state.match;
   if (!match || match.stage !== "ready")
     throw new RoomError(409, "Prepare server resources first.");

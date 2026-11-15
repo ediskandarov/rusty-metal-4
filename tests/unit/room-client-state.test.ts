@@ -296,3 +296,127 @@ test("another room tab cannot strand this tab's retained disc and selection betw
   expect(roomSelectedCar(store.getState())).toBe("Quatro");
   expect(store.getState().room?.participants[0]!.loaded).toBe(true);
 });
+
+test("engine confirmation received during a player request is sent after it completes", async () => {
+  const { api, store } = setup();
+  const tournament = {
+    ...snapshot(2),
+    modeId: "tournament" as const,
+    capacity: 2 as const,
+    mapId: "construction-yard" as const,
+  };
+  store.setState({ room: tournament });
+  const first = deferred<RoomSnapshot>();
+  const inputs: unknown[] = [];
+  api.player = async (_id, input) => {
+    inputs.push(input);
+    if (inputs.length === 1) return first.promise;
+    return {
+      ...tournament,
+      version: 4,
+      participants: tournament.participants.map((p) => ({
+        ...p,
+        car: input.car,
+        ready: input.ready,
+      })),
+    };
+  };
+  store.getState().playerLoaded(disc);
+  await store.getState().engineCarSelected("Quatro");
+  expect(inputs).toHaveLength(1);
+  first.resolve({ ...tournament, version: 3 });
+  await settled(store);
+  expect(inputs).toHaveLength(2);
+  expect(inputs[1]).toEqual({ car: "Quatro", compatibility, ready: true });
+  await store.getState().engineCarSelected(null);
+  expect(inputs[2]).toEqual({ car: null, compatibility, ready: false });
+});
+
+test("changing from tournament to FFA publishes a new choice without carrying readiness", async () => {
+  const { api, store } = setup();
+  store.setState({
+    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    tournamentChoice: { car: "Quatro" },
+  });
+  const next = snapshot(3);
+  next.participants[0]!.car = null;
+  const inputs: unknown[] = [];
+  api.player = (_id, input) => {
+    inputs.push(input);
+    return Promise.resolve({
+      ...next,
+      version: 4,
+      participants: next.participants.map((p) => ({ ...p, car: input.car, ready: input.ready })),
+    });
+  };
+  store.getState().receive(next);
+  await settled(store);
+  expect(inputs).toEqual([{ car: "Calypso", compatibility, ready: false }]);
+  expect(store.getState().tournamentChoice).toBeNull();
+});
+
+test("a refreshed tournament snapshot stops the previous match before opening car selection", async () => {
+  const { matchControls } = await import("../../apps/rustymetal4.com/src/match-controls.ts");
+  const { store } = setup();
+  const messages: { action: string; enabled?: boolean; sessionId?: string }[] = [];
+  class Element {
+    hidden = false;
+    options: { value: string }[] = [];
+    contentWindow = { postMessage: (message: (typeof messages)[number]) => messages.push(message) };
+    hasAttribute() {
+      return true;
+    }
+    closest() {
+      return this;
+    }
+    replaceChildren(...options: { value: string }[]) {
+      this.options = options;
+    }
+  }
+  const elements = new Map<string, Element>();
+  const globals = {
+    document: {
+      getElementById(id: string) {
+        if (!elements.has(id)) elements.set(id, new Element());
+        return elements.get(id);
+      },
+    },
+    window: { addEventListener() {}, removeEventListener() {} },
+    location: { origin: "https://example.test", href: "https://example.test/rooms/" + id },
+    Option: class {
+      constructor(
+        public text: string,
+        public value: string,
+      ) {}
+    },
+    fetch: () => new Promise<Response>(() => {}),
+  };
+  const originals = Object.keys(globals).map(
+    (key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)] as const,
+  );
+  let dispose: (() => void) | undefined;
+  try {
+    Object.assign(globalThis, globals);
+    store.getState().receive({
+      ...snapshot(10),
+      match: { ...match, stage: "playing", endpoint: "/match/socket", credential: "credential" },
+    });
+    store.setState({ operation: "settings", runtime: "available" });
+    dispose = matchControls(id, store);
+    expect(messages.at(-1)?.action).toBe("join");
+    messages.length = 0;
+    // Version 11 ended the FFA match while this client was disconnected.
+    store.getState().receive({ ...snapshot(12), modeId: "tournament", capacity: 2 });
+    expect(messages.map(({ action }) => action)).toEqual(["stop", "car-selection"]);
+    expect(messages[0]?.sessionId).toBe(match.id);
+    expect(messages[1]?.enabled).toBe(true);
+    store.setState({ playerStatus: "Refreshed" });
+    expect(messages).toHaveLength(2);
+  } finally {
+    dispose?.();
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else Reflect.deleteProperty(globalThis, key);
+    }
+  }
+});

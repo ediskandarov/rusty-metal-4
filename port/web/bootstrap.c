@@ -8,6 +8,7 @@
 #include "overlays.h"
 #include "render_sync.h"
 #include "subpixel.h"
+#include "tournament_menu.h"
 #ifdef TM4_WEB_TEST_HOOKS
 #include "tests/native/hooks.h"
 #endif
@@ -48,6 +49,15 @@ static int menu_directory_saved;
 static int menu_initialized;
 static int direct_startup;
 static int simulation_only;
+static int tournament_menu_request;
+
+EMSCRIPTEN_KEEPALIVE int WebSetTournamentSelection(int enabled)
+{
+    if (!direct_startup || simulation_only || WebLevelActive() || WebNetMatchActive())
+        return 0;
+    tournament_menu_request = enabled ? 1 : -1;
+    return 1;
+}
 int WebSimulationOnly(void)
 {
     return simulation_only;
@@ -219,7 +229,7 @@ static void* resource(char* path)
 static s32 load_texture(char* path, s32 type, s32 size, void* data, char* registration)
 {
     SystemForwardType12(path, type, size, data, registration);
-    /* Native MENU stays resident; keep its images to restore VRAM after a match. */
+    /* Offline MENU stays resident; keep its images to restore VRAM after a match. */
     return !registration || strcmp(registration, "MENU") != 0;
 }
 
@@ -296,11 +306,15 @@ void WebLeaveMenu(void)
     WEB_BROWSER_REPORT({ tm4Port.menuReady = false; });
     if (!menu_initialized)
         return;
+    WebTournamentMenuClose();
     MenuShutdown();
     menu_initialized = 0;
     if (menu_directory_saved)
         CDPopDirectory();
     menu_directory_saved = 0;
+    /* A network session must start with the same registry as its headless server. */
+    if (direct_startup)
+        RegRemoveReg("MENU");
     set_menu_mask(0);
 }
 
@@ -391,6 +405,22 @@ static void browser_frame(void)
 {
     if (WebLevelCheckpointActive() && !WebNetRenderedPrediction())
         return;
+    if (tournament_menu_request) {
+        int request = tournament_menu_request;
+        tournament_menu_request = 0;
+        if (request > 0) {
+            WebTournamentMenuClose();
+            if (!menu_initialized) {
+                if (RegGetFileDataS("/menu/menu.bit"))
+                    WebReturnToMenu();
+                else
+                    initialize_menu();
+            }
+            WebTournamentMenuOpen();
+        } else if (request < 0 && WebTournamentMenuActive()) {
+            WebLeaveMenu();
+        }
+    }
     apply_render_settings();
     WebApplyCheats();
 #ifdef TM4_WEB_TEST_HOOKS
@@ -400,7 +430,7 @@ static void browser_frame(void)
         WebMovieFrame();
     else if (WebLevelActive())
         WebLevelFrame();
-    else if (!direct_startup) {
+    else if (menu_initialized) {
         static double next_frame;
         double now = emscripten_get_now();
         if (now >= next_frame) {
