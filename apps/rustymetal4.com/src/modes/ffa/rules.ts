@@ -9,7 +9,6 @@ const clearReady: ModeRules["preparationStarted"] = (state) => {
 };
 export const ffaRules: ModeRules = {
   minimumPlayers: modeDefinitions.ffa.minimumPlayers,
-  carSelection: "room",
   allowLateJoin: true,
   playingMessage:
     "Match in progress. New players can join with a prepared car; existing players can reconnect.",

@@ -8,7 +8,6 @@ export const ffa: RoomMode = {
   createControls(store, send) {
     const car = document.getElementById("room-car") as HTMLSelectElement;
     const ready = document.getElementById("room-ready") as HTMLButtonElement;
-    let sentStatus: string | null = null;
     car.onchange = () => {
       void store.getState().selectCar(car.value);
     };
@@ -17,9 +16,24 @@ export const ffa: RoomMode = {
     };
     return {
       reset() {
-        sentStatus = null;
+        store.getState().ffaStatusSent(null);
         car.onchange = null;
         ready.onclick = null;
+      },
+      sync() {
+        const state = store.getState();
+        const { room, disc } = state;
+        if (!room) return;
+        const match = room.match;
+        const status =
+          disc && !match?.endpoint
+            ? match?.message || room.notice || "Disc loaded. Choose your car in the room."
+            : null;
+        const signature = status ? JSON.stringify([match?.id ?? null, status]) : null;
+        if (signature !== state.ffa.sentStatus) {
+          state.ffaStatusSent(signature);
+          if (status) send({ action: "status", sessionId: match?.id ?? null, message: status });
+        }
       },
       render() {
         const state = store.getState();
@@ -38,14 +52,6 @@ export const ffa: RoomMode = {
           "Each player loads their own disc below. Only the host uploads required resources to the private match server. Start with at least one ready human player; bots use their reserved places.";
         document.getElementById("match-status")!.textContent =
           match?.message || room.notice || "Load your disc, then the host can prepare the server.";
-        const status =
-          disc && !match?.endpoint
-            ? match?.message || room.notice || "Disc loaded. Choose your car in the room."
-            : null;
-        if (status !== sentStatus) {
-          sentStatus = status;
-          if (status) send({ action: "status", sessionId: match?.id ?? null, message: status });
-        }
         const choices = roomCarChoices(state);
         if (
           car.options.length !== choices.length ||

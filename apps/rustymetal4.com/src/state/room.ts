@@ -7,7 +7,14 @@ import {
 } from "@tm4/rooms-client/schemas";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import { modeRules } from "../modes/rules.ts";
+import type { FfaSlice } from "../modes/ffa/state.ts";
+import {
+  createFfaSlice,
+  createTournamentSlice,
+  initialModeState,
+  modePlayerChoice,
+} from "../modes/state.ts";
+import type { TournamentSlice } from "../modes/tournament/state.ts";
 
 type RoomsClient = ReturnType<typeof createRoomsClient>;
 type Operation = "join" | "settings" | "leave" | "player" | "prepare" | "cancel" | "start";
@@ -23,7 +30,7 @@ interface Disc {
   compatibility: Compatibility;
   cars: readonly string[];
 }
-interface RoomState {
+export interface RoomState extends FfaSlice, TournamentSlice {
   room: RoomSnapshot | null;
   connection: Connection;
   departed: boolean;
@@ -33,8 +40,6 @@ interface RoomState {
   settingsSaved: boolean;
   runtime: "checking" | "available" | "unavailable";
   disc: Disc | null;
-  carDraft: string | undefined;
-  tournamentChoice: { car: string | null } | null;
   playerNeedsSync: boolean;
   playerStatus: string;
   returnedResult: string | null;
@@ -50,9 +55,6 @@ interface RoomState {
   runtimeChecked: (available: boolean) => void;
   playerLoaded: (disc: Disc | null) => void;
   playerReported: (message: string) => void;
-  selectCar: (car: string) => Promise<void>;
-  toggleReady: () => Promise<void>;
-  engineCarSelected: (car: string | null) => Promise<void>;
   prepare: () => Promise<string | null>;
   cancel: () => Promise<void>;
   start: () => Promise<void>;
@@ -72,19 +74,7 @@ export function roomCarChoices(state: RoomState): readonly string[] {
     : cars;
 }
 export function roomSelectedCar(state: RoomState): string | null {
-  const cars = roomCarChoices(state);
-  if (
-    state.room &&
-    modeRules[state.room.modeId].carSelection === "engine" &&
-    state.tournamentChoice
-  )
-    return state.tournamentChoice.car;
-  const selected = state.carDraft ?? roomMember(state)?.car;
-  return selected && cars.includes(selected)
-    ? selected
-    : state.room && modeRules[state.room.modeId].carSelection === "engine"
-      ? null
-      : (cars[0] ?? null);
+  return state.room ? modePlayerChoice[state.room.modeId](state).car : null;
 }
 export function roomConnectionLabel(state: RoomState) {
   if (state.room?.closed) return "Room closed";
@@ -100,7 +90,9 @@ export function roomConnectionLabel(state: RoomState) {
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 export function createRoomStore(id: string, rooms: RoomsClient, session: () => Promise<unknown>) {
-  const store: StoreApi<RoomState> = createStore<RoomState>()((set, get) => ({
+  const store: StoreApi<RoomState> = createStore<RoomState>()((set, get, api) => ({
+    ...createFfaSlice(syncPlayer)(set, get, api),
+    ...createTournamentSlice(syncPlayer)(set, get, api),
     room: null,
     connection: "loading",
     departed: false,
@@ -110,8 +102,6 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     settingsSaved: false,
     runtime: "checking",
     disc: null,
-    carDraft: undefined,
-    tournamentChoice: null,
     playerNeedsSync: false,
     playerStatus: "",
     returnedResult: null,
@@ -155,20 +145,26 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
         ...(reset
           ? {
               disc: null,
-              carDraft: undefined,
-              tournamentChoice: null,
+              ...initialModeState(),
               playerNeedsSync: false,
               playerStatus: "",
             }
           : {}),
-        ...(modeChanged ? { carDraft: undefined, tournamentChoice: null } : {}),
+        ...(modeChanged ? initialModeState() : {}),
         ...(room.match?.endpoint ? { playerNeedsSync: false } : {}),
         ...(retainedDiscNeedsSync
           ? {
               playerNeedsSync: true,
-              carDraft: modeChanged
-                ? undefined
-                : (state.carDraft ?? previousMember?.car ?? undefined),
+              ...(room.modeId === "ffa"
+                ? {
+                    ffa: {
+                      ...(modeChanged ? initialModeState().ffa : state.ffa),
+                      carDraft: modeChanged
+                        ? undefined
+                        : (state.ffa.carDraft ?? previousMember?.car ?? undefined),
+                    },
+                  }
+                : {}),
             }
           : {}),
       });
@@ -189,7 +185,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
           ? {
               room: null,
               disc: null,
-              carDraft: undefined,
+              ...initialModeState(),
               playerNeedsSync: false,
               settingsDraft: null,
             }
@@ -224,7 +220,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     async leave() {
       const result = await perform("leave", "room", () => rooms.leave(id));
       if (!result) return false;
-      set({ departed: true, disc: null, playerNeedsSync: false });
+      set({ departed: true, disc: null, playerNeedsSync: false, ...initialModeState() });
       return true;
     },
     runtimeChecked(available) {
@@ -234,34 +230,13 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       if (!get().room?.you || get().room?.closed || get().departed) return;
       set({
         disc,
-        carDraft: undefined,
-        tournamentChoice: null,
+        ...initialModeState(),
         playerNeedsSync: !get().room?.match?.endpoint,
       });
       void syncPlayer();
     },
     playerReported(playerStatus) {
       if (playerStatus !== get().playerStatus) set({ playerStatus });
-    },
-    async selectCar(car) {
-      if (get().operation || !get().disc || !roomCarChoices(get()).includes(car)) return;
-      set({ carDraft: car });
-      await syncPlayer();
-    },
-    async engineCarSelected(car) {
-      const state = get();
-      if (
-        !state.room ||
-        modeRules[state.room.modeId].carSelection !== "engine" ||
-        !state.disc ||
-        (car !== null && !roomCarChoices(state).includes(car))
-      )
-        return;
-      set({ tournamentChoice: { car }, playerNeedsSync: true });
-      await syncPlayer();
-    },
-    async toggleReady() {
-      await syncPlayer(!roomMember(get())?.ready);
     },
     async prepare() {
       const room = get().room;
@@ -332,7 +307,9 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
         state.departed ||
         state.connection === "expired" ||
         state.room?.closed ||
-        (operation !== "join" && before.room?.you !== state.room?.you)
+        (operation !== "join" && before.room?.you !== state.room?.you) ||
+        (operation === "player" &&
+          (before.room?.modeId !== state.room?.modeId || before.disc !== state.disc))
       )
         return null;
       state.receive(result);
@@ -343,14 +320,18 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
         !state.departed &&
         state.connection !== "expired" &&
         !state.room?.closed &&
-        before.room?.you === state.room?.you
+        before.room?.you === state.room?.you &&
+        (operation !== "player" ||
+          (before.room?.modeId === state.room?.modeId && before.disc === state.disc))
       )
         store.setState({ errors: { ...state.errors, [target]: errorMessage(error) } });
       return null;
     } finally {
       store.setState({
         operation: null,
-        ...(operation === "player" ? { carDraft: undefined } : {}),
+        ...(operation === "player"
+          ? { ffa: { ...store.getState().ffa, carDraft: undefined } }
+          : {}),
       });
       if (store.getState().playerNeedsSync) void syncPlayer();
     }
@@ -365,16 +346,13 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       state.departed
     )
       return;
+    const choice = modePlayerChoice[state.room.modeId](state);
     store.setState({ playerNeedsSync: false });
     await perform("player", "player", () =>
       rooms.player(id, {
-        car: roomSelectedCar(state),
+        car: choice.car,
         compatibility: state.disc?.compatibility ?? null,
-        ready:
-          ready ??
-          (!!state.room &&
-            modeRules[state.room.modeId].carSelection === "engine" &&
-            !!state.tournamentChoice?.car),
+        ready: ready ?? choice.ready,
       }),
     );
   }

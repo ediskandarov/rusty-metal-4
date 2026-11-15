@@ -5,7 +5,6 @@ import { sameCompatibility } from "../../compatibility.ts";
 import type { ModeRules } from "../rules-types.ts";
 export const tournamentRules: ModeRules = {
   minimumPlayers: modeDefinitions.tournament.minimumPlayers,
-  carSelection: "engine",
   allowLateJoin: false,
   playingMessage: "Tournament battle in progress. The two participants can reconnect.",
   readyMessage: "Server ready. Both players must confirm their cars before the host starts.",

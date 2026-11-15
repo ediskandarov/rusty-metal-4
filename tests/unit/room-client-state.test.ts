@@ -227,7 +227,7 @@ test("losing membership while choosing a car cannot resurrect the old player", a
   await selecting;
   expect(store.getState().room?.you).toBeNull();
   expect(store.getState().disc).toBeNull();
-  expect(store.getState().carDraft).toBeUndefined();
+  expect(store.getState().ffa.carDraft).toBeUndefined();
 });
 
 test("leave completes even if its live event arrives before the HTTP response", async () => {
@@ -323,13 +323,14 @@ test("engine confirmation received during a player request is sent after it comp
     };
   };
   store.getState().playerLoaded(disc);
-  await store.getState().engineCarSelected("Quatro");
+  const selectionId = store.getState().openTournamentSelection()!;
+  await store.getState().engineCarSelected(selectionId, "Quatro");
   expect(inputs).toHaveLength(1);
   first.resolve({ ...tournament, version: 3 });
   await settled(store);
   expect(inputs).toHaveLength(2);
   expect(inputs[1]).toEqual({ car: "Quatro", compatibility, ready: true });
-  await store.getState().engineCarSelected(null);
+  await store.getState().engineCarSelected(selectionId, null);
   expect(inputs[2]).toEqual({ car: null, compatibility, ready: false });
 });
 
@@ -337,7 +338,7 @@ test("changing from tournament to FFA publishes a new choice without carrying re
   const { api, store } = setup();
   store.setState({
     room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
-    tournamentChoice: { car: "Quatro" },
+    tournament: { ...store.getState().tournament, choice: { car: "Quatro" } },
   });
   const next = snapshot(3);
   next.participants[0]!.car = null;
@@ -353,13 +354,18 @@ test("changing from tournament to FFA publishes a new choice without carrying re
   store.getState().receive(next);
   await settled(store);
   expect(inputs).toEqual([{ car: "Calypso", compatibility, ready: false }]);
-  expect(store.getState().tournamentChoice).toBeNull();
+  expect(store.getState().tournament.choice).toBeNull();
 });
 
 test("a refreshed tournament snapshot stops the previous match before opening car selection", async () => {
   const { roomMatch } = await import("../../apps/rustymetal4.com/src/room-match.ts");
   const { store } = setup();
-  const messages: { action: string; enabled?: boolean; sessionId?: string }[] = [];
+  const messages: {
+    action: string;
+    enabled?: boolean;
+    sessionId?: string | null;
+    requestId?: string;
+  }[] = [];
   class Element {
     hidden = false;
     options: { value: string }[] = [];
@@ -417,6 +423,48 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     expect(messages[1]?.enabled).toBe(true);
     store.setState({ playerStatus: "Refreshed" });
     expect(messages).toHaveLength(3);
+    const requestId = store.getState().tournament.selectionId!;
+    const { tournament } = await import("../../apps/rustymetal4.com/src/modes/tournament/index.ts");
+    const controls = tournament.createControls(store, (message) => messages.push(message));
+    const beforeRender = store.getState();
+    controls.render();
+    controls.render();
+    expect(store.getState()).toBe(beforeRender);
+    expect(messages).toHaveLength(3);
+    messages.length = 0;
+    store.getState().receive({
+      ...snapshot(13),
+      modeId: "tournament",
+      capacity: 2,
+      match: { ...match, stage: "playing", endpoint: "/match/socket", credential: "credential" },
+    });
+    expect(messages.map((message) => message.action)).toEqual(["car-selection", "join"]);
+    expect(messages[0]).toMatchObject({ requestId, enabled: false });
+    expect(store.getState().tournament.selectionId).toBeNull();
+    await store.getState().engineCarSelected(requestId, "Quatro");
+    expect(store.getState().tournament.choice).toBeNull();
+    messages.length = 0;
+    store.getState().receive({ ...snapshot(14), modeId: "tournament", capacity: 2 });
+    expect(messages.map((message) => message.action)).toEqual([
+      "stop",
+      "car-selection",
+      "car-selection-status",
+    ]);
+    expect(store.getState().tournament.selectionId).not.toBe(requestId);
+    const secondId = store.getState().tournament.selectionId;
+    messages.length = 0;
+    store.getState().receive(snapshot(15));
+    expect(messages[0]).toMatchObject({
+      action: "car-selection",
+      requestId: secondId,
+      enabled: false,
+    });
+    expect(messages.filter((message) => message.action === "car-selection")).toHaveLength(1);
+    expect(store.getState().tournament).toEqual({
+      choice: null,
+      selectionId: null,
+      sentStatus: null,
+    });
   } finally {
     dispose?.();
     for (const [key, descriptor] of originals) {
@@ -431,7 +479,10 @@ test("tournament waiting status follows confirmed room state rather than local D
   const current: RoomSnapshot = { ...snapshot(10), modeId: "tournament", capacity: 2 };
   store.setState({ room: current, connection: "live", playerNeedsSync: false });
   expect(tournamentSelectionStatus(store.getState()).phase).toBe("choosing");
-  store.setState({ tournamentChoice: { car: "Calypso" }, operation: "player" });
+  store.setState({
+    tournament: { ...store.getState().tournament, choice: { car: "Calypso" } },
+    operation: "player",
+  });
   expect(tournamentSelectionStatus(store.getState()).phase).toBe("confirming");
   store.setState({ operation: null });
   expect(tournamentSelectionStatus(store.getState()).phase).toBe("choosing");
@@ -464,4 +515,117 @@ test("tournament waiting status follows confirmed room state rather than local D
     title: "Your choice was not confirmed",
   });
   expect(tournamentSelectionStatus(store.getState()).message).toContain("Done to retry");
+});
+
+test("mode changes atomically reset both slices and discard a pending old-mode response", async () => {
+  const { api, store } = setup();
+  const response = deferred<RoomSnapshot>();
+  const inputs: unknown[] = [];
+  const next: RoomSnapshot = {
+    ...snapshot(3),
+    modeId: "tournament",
+    capacity: 2,
+    mapId: "construction-yard",
+    participants: snapshot().participants.map((p) => ({ ...p, car: null, ready: false })),
+  };
+  api.player = async (_id, input) => {
+    inputs.push(input);
+    if (inputs.length === 1) return response.promise;
+    return { ...next, version: 5 };
+  };
+  const selecting = store.getState().selectCar("Quatro");
+  store.getState().ffaStatusSent("Old FFA status");
+  const observed: unknown[] = [];
+  const unsubscribe = store.subscribe((state) => {
+    if (state.room?.modeId === "tournament") observed.push(state.ffa);
+  });
+  store.getState().receive(next);
+  expect(
+    observed.every(
+      (value) =>
+        JSON.stringify(value) === JSON.stringify({ carDraft: undefined, sentStatus: null }),
+    ),
+  ).toBe(true);
+  // Even a later-version response belongs to the obsolete mode, not the new selection.
+  response.resolve({
+    ...snapshot(4),
+    participants: [{ ...snapshot().participants[0]!, car: "Quatro", ready: true }],
+  });
+  await selecting;
+  await settled(store);
+  expect(store.getState().room?.modeId).toBe("tournament");
+  expect(store.getState().tournament.choice).toBeNull();
+  expect(inputs[1]).toEqual({ car: null, compatibility, ready: false });
+  unsubscribe();
+});
+
+test("native confirmations are scoped to the current menu and cannot run FFA actions", async () => {
+  const { store } = setup();
+  store.setState({
+    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    operation: "settings",
+  });
+  const firstId = store.getState().openTournamentSelection()!;
+  expect(firstId).not.toBeNull();
+  store.getState().closeTournamentSelection();
+  const secondId = store.getState().openTournamentSelection()!;
+  expect(secondId).not.toBe(firstId);
+  await store.getState().engineCarSelected(firstId, "Quatro");
+  expect(store.getState().tournament.choice).toBeNull();
+  await store.getState().engineCarSelected(secondId, "Quatro");
+  expect(store.getState().tournament.choice).toEqual({ car: "Quatro" });
+  await store.getState().selectCar("Calypso");
+  expect(store.getState().ffa.carDraft).toBeUndefined();
+  store.getState().playerLoaded(null);
+  expect(store.getState().tournament).toEqual({
+    choice: null,
+    selectionId: null,
+    sentStatus: null,
+  });
+  await store.getState().engineCarSelected(secondId, "Calypso");
+  expect(store.getState().tournament.choice).toBeNull();
+});
+
+test("a replaced disc discards the old confirmation error and publishes the new resources", async () => {
+  const { api, store } = setup();
+  store.setState({ room: { ...snapshot(2), modeId: "tournament", capacity: 2 } });
+  const response = deferred<RoomSnapshot>();
+  const inputs: unknown[] = [];
+  api.player = async (_id, input) => {
+    inputs.push(input);
+    if (inputs.length === 1) return response.promise;
+    return { ...store.getState().room!, version: 3 };
+  };
+  const requestId = store.getState().openTournamentSelection()!;
+  const choosing = store.getState().engineCarSelected(requestId, "Quatro");
+  const replacement = { ...disc, compatibility: { ...compatibility, content: "e".repeat(64) } };
+  store.getState().playerLoaded(replacement);
+  response.reject(new Error("Obsolete disc was rejected"));
+  await choosing;
+  await settled(store);
+  expect(store.getState().errors.player).toBeNull();
+  expect(store.getState().tournament.choice).toBeNull();
+  expect(inputs[1]).toEqual({
+    car: "Calypso",
+    compatibility: replacement.compatibility,
+    ready: false,
+  });
+});
+
+test("room expiry clears a native menu and its pending choice without waiting for the view", async () => {
+  const { store } = setup();
+  store.setState({
+    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    operation: "settings",
+  });
+  const requestId = store.getState().openTournamentSelection()!;
+  await store.getState().engineCarSelected(requestId, "Quatro");
+  store.getState().tournamentStatusSent("Confirmed");
+  store.getState().loadFailed(new RoomsApiError(410, "Expired"));
+  expect(store.getState().tournament).toEqual({
+    choice: null,
+    selectionId: null,
+    sentStatus: null,
+  });
+  expect(store.getState().ffa).toEqual({ carDraft: undefined, sentStatus: null });
 });

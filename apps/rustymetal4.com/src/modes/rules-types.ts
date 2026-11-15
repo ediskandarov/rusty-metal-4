@@ -8,7 +8,6 @@ export interface PlayerChoice {
 }
 export interface ModeRules {
   minimumPlayers: number;
-  carSelection: "room" | "engine";
   allowLateJoin: boolean;
   playingMessage: string;
   readyMessage: string;

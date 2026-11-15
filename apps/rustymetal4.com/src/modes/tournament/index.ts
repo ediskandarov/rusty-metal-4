@@ -1,26 +1,51 @@
 import type { RoomMode } from "../types.ts";
 import { tournamentRules } from "./rules.ts";
 import { tournamentSettings } from "./settings.ts";
+import { tournamentChoosing } from "./state.ts";
 import { tournamentSelectionStatus } from "./status.ts";
 export const tournament: RoomMode = {
   rules: tournamentRules,
   settings: tournamentSettings,
   createControls(store, send) {
-    let selectionId: string | null = null;
-    let sentStatus: string | null = null;
-    const reset = () => {
-      if (selectionId) send({ action: "car-selection", requestId: selectionId, enabled: false });
-      selectionId = null;
-      sentStatus = null;
-    };
     return {
-      reset,
+      reset(previous) {
+        const selectionId =
+          store.getState().tournament.selectionId ?? previous.tournament.selectionId;
+        store.getState().closeTournamentSelection();
+        if (selectionId) send({ action: "car-selection", requestId: selectionId, enabled: false });
+      },
       selected(requestId, car) {
-        if (selectionId === requestId) void store.getState().engineCarSelected(car);
+        void store.getState().engineCarSelected(requestId, car);
+      },
+      sync(previous) {
+        const state = store.getState();
+        const previousId = previous.tournament.selectionId;
+        if (previousId && previousId !== state.tournament.selectionId)
+          send({ action: "car-selection", requestId: previousId, enabled: false });
+        if (!tournamentChoosing(state)) {
+          if (state.tournament.selectionId)
+            send({
+              action: "car-selection",
+              requestId: state.tournament.selectionId,
+              enabled: false,
+            });
+          state.closeTournamentSelection();
+          return;
+        }
+        const selectionId = state.openTournamentSelection();
+        if (!selectionId) return;
+        if (!state.tournament.selectionId)
+          send({ action: "car-selection", requestId: selectionId, enabled: true });
+        const status = tournamentSelectionStatus(store.getState());
+        const signature = JSON.stringify(status);
+        if (store.getState().tournament.sentStatus !== signature) {
+          store.getState().tournamentStatusSent(signature);
+          send({ action: "car-selection-status", requestId: selectionId, status });
+        }
       },
       render() {
         const state = store.getState();
-        const { room, disc } = state;
+        const { room } = state;
         if (!room) return;
         const match = room.match;
         document.getElementById("room-car")!.closest("label")!.hidden = true;
@@ -31,20 +56,8 @@ export const tournament: RoomMode = {
           match?.message ||
           room.notice ||
           "Choose and confirm your car in the game below. The host prepares the server before starting the battle.";
-        const choosing = !["starting", "connecting", "playing", "stopping", "finished"].includes(
-          match?.stage ?? "",
-        );
-        if (disc && choosing && !selectionId) {
-          selectionId = crypto.randomUUID();
-          send({ action: "car-selection", requestId: selectionId, enabled: true });
-        } else if (!disc || !choosing) reset();
-        if (selectionId) {
+        if (state.tournament.selectionId) {
           const status = tournamentSelectionStatus(state);
-          const signature = JSON.stringify(status);
-          if (sentStatus !== signature) {
-            sentStatus = signature;
-            send({ action: "car-selection-status", requestId: selectionId, status });
-          }
           document.getElementById("player-status")!.textContent =
             status.title + ". " + status.message;
         }

@@ -16,10 +16,11 @@ export function roomMatch(id: string, store: RoomStore) {
   let delivered: { sessionId: string; action: "upload" | "join" } | null = null;
   let modeId: keyof typeof roomModes | null = null;
   let mode: ModeControls | null = null;
-  const resetMode = () => {
-    mode?.reset();
+  const resetMode = (previous = store.getState()) => {
+    const controls = mode;
     mode = null;
     modeId = null;
+    controls?.reset(previous);
   };
   const send = (value: RoomAction) =>
     frame.contentWindow?.postMessage(
@@ -43,7 +44,7 @@ export function roomMatch(id: string, store: RoomStore) {
       credential: match.credential,
     });
   };
-  const render = () => {
+  const update = (previous: ReturnType<RoomStore["getState"]>) => {
     const state = store.getState();
     const { room, disc, operation } = state;
     const self = roomMember(state);
@@ -56,7 +57,7 @@ export function roomMatch(id: string, store: RoomStore) {
         : state.playerStatus);
     el("server-journal-status").textContent = state.journal.message;
     if (!room || !self || room.closed || state.departed) {
-      resetMode();
+      resetMode(previous);
       frame.hidden = true;
       frame.removeAttribute("src");
       delivered = null;
@@ -78,10 +79,11 @@ export function roomMatch(id: string, store: RoomStore) {
       delivered = null;
     }
     if (modeId !== room.modeId) {
-      resetMode();
+      resetMode(previous);
       modeId = room.modeId;
       mode = roomModes[modeId].createControls(store, send);
     }
+    mode!.sync(previous);
     mode!.render();
     prepare(roomModes[room.modeId].rules.minimumPlayers);
     journal.hidden = !(match || room.journal);
@@ -91,8 +93,26 @@ export function roomMatch(id: string, store: RoomStore) {
     reconnect.disabled = !disc || busy;
     enter();
   };
-  const unsubscribe = store.subscribe(render);
-  render();
+  let updating = false;
+  let pending = false;
+  let previous = store.getState();
+  const synchronize = () => {
+    pending = true;
+    if (updating) return;
+    updating = true;
+    try {
+      while (pending) {
+        pending = false;
+        const before = previous;
+        update(before);
+        previous = store.getState();
+      }
+    } finally {
+      updating = false;
+    }
+  };
+  const unsubscribe = store.subscribe(synchronize);
+  synchronize();
   void getBuildManifest(new URL("/play/simulation-build.json", location.href)).then(
     () => store.getState().runtimeChecked(true),
     () => store.getState().runtimeChecked(false),
@@ -127,7 +147,6 @@ export function roomMatch(id: string, store: RoomStore) {
           store.getState().playerReported(message.message);
         break;
       case "unloaded":
-        resetMode();
         delivered = null;
         store.getState().playerLoaded(null);
         break;
