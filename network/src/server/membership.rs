@@ -82,10 +82,8 @@ impl Match {
             if !self.room_only || !self.started || self.ended {
                 return Err("This room match has ended.");
             }
-            if self.mode == tm4_network::protocol::MatchMode::Tournament
-                && !matches!(request.change, web::RoomMembership::Inspect { .. })
-            {
-                return Err("Tournament participants are fixed until the battle ends.");
+            if !matches!(request.change, web::RoomMembership::Inspect { .. }) {
+                self.mode.check_live_membership()?;
             }
             match request.change {
                 web::RoomMembership::Inspect { credential } => {
@@ -174,7 +172,7 @@ impl Match {
     }
 
     pub(super) fn reserve_live(&mut self) -> Result<ControllerIdentity, &'static str> {
-        if self.mode == tm4_network::protocol::MatchMode::Tournament
+        if self.mode.check_live_membership().is_err()
             || !self.started
             || self.tick == 0
             || self.ended

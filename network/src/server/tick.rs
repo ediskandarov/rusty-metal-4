@@ -125,15 +125,9 @@ fn prepare_session(
             .slots()
             .map(|slot| game.participants.at_slot(slot).car.clone().unwrap())
             .collect();
-        let tournament = game.mode == game_protocol::MatchMode::Tournament;
-        let model_pool = game_protocol::prepared_model_pool(
-            if tournament {
-                &[]
-            } else {
-                &game.catalog.as_ref().unwrap().cars
-            },
-            &cars,
-        );
+        let parameters =
+            game.mode
+                .session_parameters(game.limits, &game.catalog.as_ref().unwrap().cars, &cars);
         let start = SessionStart {
             bots: game
                 .participants
@@ -142,19 +136,8 @@ fn prepare_session(
                 .map(|slot| slot as u8)
                 .collect(),
             mode: game.mode,
-            limits: if tournament {
-                game_protocol::FfaLimits {
-                    time_limit_ticks: 0,
-                    frag_limit: 0,
-                }
-            } else {
-                game.limits
-            },
-            respawn_delay_ticks: if tournament {
-                0
-            } else {
-                game_protocol::ffa_respawn_delay_ticks()
-            },
+            limits: parameters.limits,
+            respawn_delay_ticks: parameters.respawn_delay_ticks,
             capacity: game.controls.len(),
             slots: game.participants.slots().map(|slot| slot as u8).collect(),
             participants: game
@@ -167,7 +150,7 @@ fn prepare_session(
                 .clone()
                 .unwrap_or_else(|| game.catalog.as_ref().unwrap().worlds[0].clone()),
             cars,
-            model_pool,
+            model_pool: parameters.model_pool,
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
             epoch: 1,

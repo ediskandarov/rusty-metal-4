@@ -4,6 +4,7 @@ pub mod input;
 #[cfg(any(target_family = "wasm", all(test, feature = "client")))]
 #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
 mod live_prediction;
+pub mod modes;
 #[cfg(any(target_family = "wasm", test))]
 mod prediction_input;
 pub mod protocol;

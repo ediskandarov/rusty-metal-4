@@ -323,39 +323,6 @@ pub struct FfaLimits {
     pub frag_limit: u32,
 }
 
-impl FfaLimits {
-    pub fn valid(self) -> bool {
-        (1..=i32::MAX as u32).contains(&self.time_limit_ticks)
-            && (1..=i32::MAX as u32).contains(&self.frag_limit)
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FfaDefaults {
-    time_limit_ticks: u32,
-    frag_limit: u32,
-    respawn_delay_ticks: u32,
-}
-
-fn ffa_defaults() -> FfaDefaults {
-    serde_json::from_str(include_str!("../../config/ffa.json")).expect("valid FFA defaults")
-}
-
-impl Default for FfaLimits {
-    fn default() -> Self {
-        let defaults = ffa_defaults();
-        Self {
-            time_limit_ticks: defaults.time_limit_ticks,
-            frag_limit: defaults.frag_limit,
-        }
-    }
-}
-
-pub fn ffa_respawn_delay_ticks() -> u32 {
-    ffa_defaults().respawn_delay_ticks
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionStart {
     /// Explicit original-AI slots; every other occupied slot belongs to a client.
@@ -381,35 +348,10 @@ pub struct SessionStart {
     pub portable: bool,
 }
 
-/// The original renderer has eight permanent car atlases. Preserve every initial
-/// selection, then fill spare atlases in catalog order. The declared result, not
-/// this policy or local enumeration, is consumed by peers and journal replay.
-pub fn prepared_model_pool(catalog: &[String], cars: &[String]) -> Vec<String> {
-    let mut pool = Vec::new();
-    for car in cars.iter().chain(catalog) {
-        if pool.len() == MAX_PLAYERS {
-            break;
-        }
-        if !pool.contains(car) {
-            pool.push(car.clone());
-        }
-    }
-    pool
-}
-
 impl SessionStart {
     pub fn valid_slots(&self) -> bool {
-        (match self.mode {
-            MatchMode::Ffa => self.limits.valid() && (1..=3600).contains(&self.respawn_delay_ticks),
-            MatchMode::Tournament => {
-                self.slots == [0, 1]
-                    && self.bots.is_empty()
-                    && self.respawn_delay_ticks == 0
-                    && self.limits.time_limit_ticks == 0
-                    && self.limits.frag_limit == 0
-                    && self.world == "Construction Yard"
-            }
-        }) && self.bots.len() < self.slots.len()
+        self.mode.valid_session(self)
+            && self.bots.len() < self.slots.len()
             && self.bots.windows(2).all(|pair| pair[0] < pair[1])
             && self.bots.iter().all(|slot| self.slots.contains(slot))
             && self.capacity == MAX_PLAYERS
@@ -660,22 +602,6 @@ mod participant_tests {
             8,
             &pool
         ));
-    }
-}
-
-#[cfg(test)]
-mod model_pool_tests {
-    use super::*;
-    #[test]
-    fn pool_preserves_all_startup_choices_and_fills_without_duplicate_atlases() {
-        let catalog: Vec<String> = (0..22).map(|i| format!("stock{i}")).collect();
-        let repeated = vec![catalog[21].clone(); 8];
-        let pool = prepared_model_pool(&catalog, &repeated);
-        assert_eq!(pool.len(), 8);
-        assert_eq!(pool[0], catalog[21]);
-        assert_eq!(&pool[1..], &catalog[..7]);
-        let distinct = catalog[14..].to_vec();
-        assert_eq!(prepared_model_pool(&catalog, &distinct), distinct);
     }
 }
 

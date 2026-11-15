@@ -676,28 +676,16 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
     }
     let bytes = to_bytes(request.into_body(), 8192).await.map_err(invalid)?;
     let options: StartOptions = serde_json::from_slice(&bytes).map_err(invalid)?;
-    if options.mode == tm4_network::protocol::MatchMode::Tournament
-        && (options.players != 2
-            || options.roster.len() != 2
-            || !options.bots.is_empty()
-            || options.world != "Construction Yard")
-    {
-        return Err(invalid(
-            "Tournament requires two selected humans on Construction Yard",
-        ));
-    }
-    let limits = match (options.mode, options.limits) {
-        (tm4_network::protocol::MatchMode::Ffa, Some(limits)) if limits.valid() => limits,
-        (tm4_network::protocol::MatchMode::Tournament, None) => tm4_network::protocol::FfaLimits {
-            time_limit_ticks: 0,
-            frag_limit: 0,
-        },
-        _ => {
-            return Err(invalid(
-                "FFA requires positive time and frag limits; tournament uses original rules",
-            ));
-        }
-    };
+    let limits = options
+        .mode
+        .validate_start(&tm4_network::modes::StartSettings {
+            human_capacity: options.players,
+            selected_humans: options.roster.len(),
+            bots: options.bots.len(),
+            world: &options.world,
+            limits: options.limits,
+        })
+        .map_err(invalid)?;
     if !(1..=MAX_PLAYERS).contains(&options.players) {
         return Err(invalid("Expected a player count from 1 to 8"));
     }

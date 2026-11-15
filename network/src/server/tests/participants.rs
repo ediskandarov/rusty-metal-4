@@ -46,7 +46,7 @@ fn game() -> Match {
             bots: vec![],
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: tm4_network::protocol::FfaLimits::default(),
-            respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
+            respawn_delay_ticks: tm4_network::modes::ffa::respawn_delay_ticks(),
             model_pool: vec!["Orbital".into(), "Pizza Boy".into()],
             capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
@@ -1471,4 +1471,47 @@ fn room_start_with_one_human_and_bots_reaches_real_simulation() -> anyhow::Resul
         3
     );
     Ok(())
+}
+
+#[test]
+fn tournament_preserves_membership_inspection_but_rejects_live_changes() {
+    let mut game = game();
+    game.mode = game_protocol::MatchMode::Tournament;
+    game.room_only = true;
+    let credential = "ab".repeat(32);
+    game.participants.at_slot_mut(0).room_credential = Some(credential.clone());
+    let identity = game.participants.binding(0);
+    let mut world = World::new();
+    world.insert_resource(game);
+
+    let inspected = room_change(
+        &mut world,
+        web::RoomMembership::Inspect {
+            credential: credential.clone(),
+        },
+    )
+    .unwrap();
+    assert_eq!(inspected.identity, Some(identity));
+    assert!(!inspected.pending);
+    for change in [
+        web::RoomMembership::Admit {
+            credential: "cd".repeat(32),
+            car: "Orbital".into(),
+        },
+        web::RoomMembership::Depart { credential },
+    ] {
+        assert_eq!(
+            room_change(&mut world, change).err(),
+            Some("Tournament participants are fixed until the battle ends.")
+        );
+    }
+    assert_eq!(
+        world.resource_mut::<Match>().reserve_live().unwrap_err(),
+        "Live admission is unavailable for this match."
+    );
+    assert_eq!(world.resource::<Match>().participants.binding(0), identity);
+    assert_eq!(
+        world.resource::<Match>().participants.all_slots().count(),
+        2
+    );
 }

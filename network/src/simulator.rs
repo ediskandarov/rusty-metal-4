@@ -858,7 +858,7 @@ mod tests {
             bots: vec![],
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: tm4_network::protocol::FfaLimits::default(),
-            respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
+            respawn_delay_ticks: tm4_network::modes::ffa::respawn_delay_ticks(),
             model_pool: vec!["Orbital".into(), "Pizza Boy".into()],
             capacity: 8,
             slots: (0..2).map(|slot| slot as u8).collect(),
