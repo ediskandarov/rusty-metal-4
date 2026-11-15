@@ -71,3 +71,10 @@ export function tournamentSelectedCar(state: RoomState): string | null {
 export function tournamentPlayerChoice(state: RoomState) {
   return { car: tournamentSelectedCar(state), ready: !!state.tournament.choice?.car };
 }
+
+export function tournamentRoomReceived(
+  state: RoomState,
+  reset: boolean,
+): TournamentSlice["tournament"] {
+  return reset ? initialTournamentState() : state.tournament;
+}

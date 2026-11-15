@@ -1,5 +1,6 @@
 import type { RoomMode } from "../types.ts";
 import { tournamentRules } from "./rules.ts";
+import { tournamentControls } from "./selectors.ts";
 import { tournamentSettings } from "./settings.ts";
 import { tournamentChoosing } from "./state.ts";
 import { tournamentSelectionStatus } from "./status.ts";
@@ -45,19 +46,15 @@ export const tournament: RoomMode = {
       },
       render() {
         const state = store.getState();
-        const { room } = state;
-        if (!room) return;
-        const match = room.match;
+        const view = tournamentControls(state);
+        if (!view) return;
         document.getElementById("room-car")!.closest("label")!.hidden = true;
         document.getElementById("room-ready")!.hidden = true;
         document.getElementById("match-help")!.textContent =
           "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts once both players have confirmed.";
-        document.getElementById("match-status")!.textContent =
-          match?.message ||
-          room.notice ||
-          "Choose and confirm your car in the game below. The host prepares the server before starting the battle.";
-        if (state.tournament.selectionId) {
-          const status = tournamentSelectionStatus(state);
+        document.getElementById("match-status")!.textContent = view.matchStatus;
+        if (view.selectionStatus) {
+          const status = view.selectionStatus;
           document.getElementById("player-status")!.textContent =
             status.title + ". " + status.message;
         }

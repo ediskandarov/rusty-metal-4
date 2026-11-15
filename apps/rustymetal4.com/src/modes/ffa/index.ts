@@ -1,6 +1,6 @@
-import { roomCarChoices, roomMember, roomSelectedCar } from "../../state/room.ts";
 import type { RoomMode } from "../types.ts";
 import { ffaRules } from "./rules.ts";
+import { ffaControls } from "./selectors.ts";
 import { ffaSettings } from "./settings.ts";
 export const ffa: RoomMode = {
   rules: ffaRules,
@@ -22,13 +22,10 @@ export const ffa: RoomMode = {
       },
       sync() {
         const state = store.getState();
-        const { room, disc } = state;
-        if (!room) return;
-        const match = room.match;
-        const status =
-          disc && !match?.endpoint
-            ? match?.message || room.notice || "Disc loaded. Choose your car in the room."
-            : null;
+        const view = ffaControls(state);
+        if (!view) return;
+        const match = state.room?.match;
+        const status = view.playerStatus;
         const signature = status ? JSON.stringify([match?.id ?? null, status]) : null;
         if (signature !== state.ffa.sentStatus) {
           state.ffaStatusSent(signature);
@@ -37,32 +34,23 @@ export const ffa: RoomMode = {
       },
       render() {
         const state = store.getState();
-        const { room, disc, operation } = state;
-        const self = roomMember(state);
-        if (!room || !self) return;
-        const match = room.match;
-        const joining = match?.stage === "playing" && !match.endpoint;
-        const locked =
-          !!match &&
-          ["starting", "connecting", "playing", "stopping"].includes(match.stage) &&
-          !joining;
+        const view = ffaControls(state);
+        if (!view) return;
         car.closest("label")!.hidden = false;
         ready.hidden = false;
         document.getElementById("match-help")!.textContent =
           "Each player loads their own disc below. Only the host uploads required resources to the private match server. Start with at least one ready human player; bots use their reserved places.";
-        document.getElementById("match-status")!.textContent =
-          match?.message || room.notice || "Load your disc, then the host can prepare the server.";
-        const choices = roomCarChoices(state);
+        document.getElementById("match-status")!.textContent = view.matchStatus;
+        const choices = view.choices;
         if (
           car.options.length !== choices.length ||
           choices.some((name, index) => car.options[index]?.value !== name)
         )
           car.replaceChildren(...choices.map((name) => new Option(name, name)));
-        car.value = roomSelectedCar(state) ?? "";
-        car.disabled = operation !== null || !disc || locked;
-        ready.disabled =
-          operation !== null || !disc || (match?.stage !== "ready" && !joining) || !self.car;
-        ready.textContent = joining ? "Join match" : self.ready ? "Not ready" : "Ready";
+        car.value = view.selectedCar ?? "";
+        car.disabled = view.carDisabled;
+        ready.disabled = view.readyDisabled;
+        ready.textContent = view.readyLabel;
       },
     };
   },

@@ -452,6 +452,11 @@ export function retainResult(
       winner: !!(result.completion.winners & (1 << row.identity.slot)),
     };
   });
-  state.result = roomResultSchema.parse({ matchId, completion: result.completion, participants });
+  state.result = roomResultSchema.parse({
+    modeId: state.settings.modeId,
+    matchId,
+    completion: result.completion,
+    participants,
+  });
   return true;
 }

@@ -92,6 +92,7 @@ export const matchSnapshotSchema = z.object({
 });
 export type MatchSnapshot = z.infer<typeof matchSnapshotSchema>;
 export const roomResultSchema = z.object({
+  modeId: modeIdSchema,
   matchId: matchIdSchema,
   completion: matchCompletionSchema.refine((value) => value.reasons > 0),
   participants: z

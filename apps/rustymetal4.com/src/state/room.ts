@@ -13,6 +13,8 @@ import {
   createTournamentSlice,
   initialModeState,
   modePlayerChoice,
+  modePlayerRequestFinished,
+  modeRoomReceived,
 } from "../modes/state.ts";
 import type { TournamentSlice } from "../modes/tournament/state.ts";
 
@@ -145,28 +147,13 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
         ...(reset
           ? {
               disc: null,
-              ...initialModeState(),
               playerNeedsSync: false,
               playerStatus: "",
             }
           : {}),
-        ...(modeChanged ? initialModeState() : {}),
+        ...modeRoomReceived(state, reset || modeChanged, retainedDiscNeedsSync),
         ...(room.match?.endpoint ? { playerNeedsSync: false } : {}),
-        ...(retainedDiscNeedsSync
-          ? {
-              playerNeedsSync: true,
-              ...(room.modeId === "ffa"
-                ? {
-                    ffa: {
-                      ...(modeChanged ? initialModeState().ffa : state.ffa),
-                      carDraft: modeChanged
-                        ? undefined
-                        : (state.ffa.carDraft ?? previousMember?.car ?? undefined),
-                    },
-                  }
-                : {}),
-            }
-          : {}),
+        ...(retainedDiscNeedsSync ? { playerNeedsSync: true } : {}),
       });
       if (retainedDiscNeedsSync && !get().operation) void syncPlayer();
     },
@@ -329,9 +316,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     } finally {
       store.setState({
         operation: null,
-        ...(operation === "player"
-          ? { ffa: { ...store.getState().ffa, carDraft: undefined } }
-          : {}),
+        ...(operation === "player" ? modePlayerRequestFinished(store.getState()) : {}),
       });
       if (store.getState().playerNeedsSync) void syncPlayer();
     }

@@ -107,3 +107,28 @@ test("changing mode discards choices and never carries tournament readiness into
   expect(state.members.every((member) => member.car === null && !member.ready)).toBe(true);
   expect(summary(state).capacity).toBe(8);
 });
+
+test("finished tournament keeps its mode after switching the next match to FFA", async () => {
+  const { retainResult, resetMatch } = await import("../../apps/rustymetal4.com/src/room-state.ts");
+  const state = room();
+  for (const key of ["host", "guest"])
+    updatePlayer(state, key, { car: "Orbital", compatibility, ready: true });
+  const match = beginPreparation(state, "host", 1000);
+  Object.assign(match, { stage: "ready", compatibility, cars: ["Orbital"] });
+  freezeRoster(state, "host", 1100);
+  retainResult(state, match.id, {
+    sessionId: match.id,
+    completion: { tick: 600, reasons: 4, winners: 3 },
+    participants: match.roster.map((entry, slot) => ({
+      credential: entry.credential,
+      identity: { participant: (slot + 1).toString(16).padStart(16, "0"), slot },
+      score: { frags: 2, deaths: 0 },
+    })),
+  });
+  expect(state.result?.modeId).toBe("tournament");
+  const saved = structuredClone(state.result);
+  resetMatch(state, "Won", 1200);
+  edit(state, "host", { ...options, modeId: "ffa", capacity: 8 });
+  expect(snapshot(state, "host").modeId).toBe("ffa");
+  expect(snapshot(state, "host").result).toEqual(saved);
+});

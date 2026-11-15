@@ -629,3 +629,72 @@ test("room expiry clears a native menu and its pending choice without waiting fo
   });
   expect(store.getState().ffa).toEqual({ carDraft: undefined, sentStatus: null });
 });
+
+test("FFA controls derive readiness, operation locks and late admission from the room", async () => {
+  const { ffaControls } = await import("../../apps/rustymetal4.com/src/modes/ffa/selectors.ts");
+  const { store } = setup();
+  expect(ffaControls(store.getState())).toMatchObject({
+    carDisabled: false,
+    readyDisabled: true,
+    readyLabel: "Ready",
+  });
+  store.setState({ room: { ...snapshot(2), match } });
+  expect(ffaControls(store.getState())).toMatchObject({ carDisabled: false, readyDisabled: false });
+  store.setState({ operation: "player" });
+  expect(ffaControls(store.getState())).toMatchObject({ carDisabled: true, readyDisabled: true });
+  store.setState({ operation: null, disc: null });
+  expect(ffaControls(store.getState())).toMatchObject({ carDisabled: true, readyDisabled: true });
+  store.setState({
+    disc,
+    room: {
+      ...snapshot(3),
+      participants: [{ ...snapshot().participants[0]!, ready: true }],
+      match,
+    },
+  });
+  expect(ffaControls(store.getState())?.readyLabel).toBe("Not ready");
+  store.setState({
+    room: { ...snapshot(4), match: { ...match, stage: "playing", cars: ["Quatro"] } },
+  });
+  expect(ffaControls(store.getState())).toMatchObject({
+    choices: ["Quatro"],
+    selectedCar: "Quatro",
+    carDisabled: false,
+    readyDisabled: false,
+    readyLabel: "Join match",
+  });
+  store.setState({
+    room: {
+      ...snapshot(5),
+      match: { ...match, stage: "playing", endpoint: "/socket", credential: "a".repeat(64) },
+    },
+  });
+  expect(ffaControls(store.getState())).toMatchObject({
+    carDisabled: true,
+    readyDisabled: true,
+    playerStatus: null,
+  });
+  store.setState({ room: { ...snapshot(6), modeId: "tournament", capacity: 2 } });
+  expect(ffaControls(store.getState())).toBeNull();
+});
+
+test("tournament controls derive waiting status without modifying the selection", async () => {
+  const { tournamentControls } =
+    await import("../../apps/rustymetal4.com/src/modes/tournament/selectors.ts");
+  const { store } = setup();
+  expect(tournamentControls(store.getState())).toBeNull();
+  store.setState({
+    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    connection: "live",
+  });
+  expect(tournamentControls(store.getState())?.selectionStatus).toBeNull();
+  store.getState().openTournamentSelection();
+  expect(tournamentControls(store.getState())?.selectionStatus?.phase).toBe("choosing");
+  const confirmed = { ...snapshot(3), modeId: "tournament" as const, capacity: 2 as const };
+  confirmed.participants[0]!.ready = true;
+  store.getState().receive(confirmed);
+  const before = store.getState();
+  expect(tournamentControls(before)?.selectionStatus?.phase).toBe("waiting");
+  expect(tournamentControls(before)?.selectionStatus?.message).toContain("second player");
+  expect(store.getState()).toBe(before);
+});

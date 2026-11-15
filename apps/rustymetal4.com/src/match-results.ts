@@ -1,6 +1,11 @@
+import type { RoomResult } from "@tm4/rooms-client/schemas";
+
 import { roomModes } from "./modes/index.ts";
 import type { RoomState } from "./modes/types.ts";
 import { roomMember } from "./state/room.ts";
+export function matchResultPresentation(result: RoomResult) {
+  return roomModes[result.modeId].results(result);
+}
 export function renderMatchResults(state: RoomState) {
   const result = state.room?.result;
   const viewing = !!result && state.returnedResult !== result.matchId;
@@ -8,12 +13,7 @@ export function renderMatchResults(state: RoomState) {
     !result || !roomMember(state) || state.departed || !!state.room?.closed;
   document.getElementById("return-to-room")!.hidden = !viewing;
   if (result) {
-    // Results can remain visible after the host changes the next match's mode.
-    const mode =
-      result.completion.reasons === 4 || result.completion.reasons === 8
-        ? roomModes.tournament
-        : roomModes.ffa;
-    const presentation = mode.results(result);
+    const presentation = matchResultPresentation(result);
     document.getElementById("results-reason")!.textContent = presentation.summary;
     document.getElementById("results-rows")!.replaceChildren(
       ...presentation.rows.map(({ participant: row, outcome }) => {

@@ -308,3 +308,28 @@ test("bot configuration validates capacity, mode and prepared models without par
   expect(match.roster).toEqual([]);
   expect(match.stage).toBe("ready");
 });
+
+test("finished FFA keeps its mode after the host switches the next match to tournament", () => {
+  const state = fixture();
+  const match = freezeRoster(state, "host", 200);
+  retainResult(state, match.id, {
+    sessionId: match.id,
+    completion: { tick: 600, reasons: 2, winners: 1 },
+    participants: match.roster.map((entry, slot) => ({
+      identity: { participant: (slot + 1).toString(16).padStart(16, "0"), slot },
+      credential: entry.credential,
+      score: { frags: slot === 0 ? 20 : 3, deaths: 1 },
+    })),
+  });
+  expect(state.result?.modeId).toBe("ffa");
+  const saved = structuredClone(state.result);
+  resetMatch(state, "Finished", 300);
+  edit(state, "host", {
+    name: "Tournament next",
+    modeId: "tournament",
+    capacity: 2,
+    mapId: "construction-yard",
+  });
+  expect(snapshot(state, "host").modeId).toBe("tournament");
+  expect(snapshot(state, "host").result).toEqual(saved);
+});

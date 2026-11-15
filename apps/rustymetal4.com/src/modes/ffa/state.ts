@@ -47,3 +47,17 @@ export function ffaSelectedCar(state: RoomState): string | null {
 export function ffaPlayerChoice(state: RoomState) {
   return { car: ffaSelectedCar(state), ready: false };
 }
+
+export function ffaRoomReceived(
+  state: RoomState,
+  reset: boolean,
+  republish: boolean,
+): FfaSlice["ffa"] {
+  if (reset) return initialFfaState();
+  if (republish && state.room?.modeId === "ffa")
+    return { ...state.ffa, carDraft: state.ffa.carDraft ?? roomMember(state)?.car ?? undefined };
+  return state.ffa;
+}
+export function ffaPlayerRequestFinished(state: RoomState): FfaSlice["ffa"] {
+  return state.ffa.carDraft === undefined ? state.ffa : { ...state.ffa, carDraft: undefined };
+}

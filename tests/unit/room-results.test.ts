@@ -42,3 +42,33 @@ test("private final results validate authoritative sparse participants and all t
     }).success,
   ).toBe(true);
 });
+
+test("room results require an explicit mode and choose presentation from it", async () => {
+  const { roomResultSchema } = await import("@tm4/rooms-client/schemas");
+  const { matchResultPresentation } =
+    await import("../../apps/rustymetal4.com/src/match-results.ts");
+  const common = {
+    matchId: result.sessionId,
+    completion: { tick: 600, reasons: 2, winners: 1 },
+    participants: [
+      {
+        memberId: "e9898e1f-2946-45b5-a210-4bba96b22986",
+        name: "Host",
+        identity: { participant: "0000000000000001", slot: 0 },
+        score: { frags: 20, deaths: 1 },
+        winner: true,
+      },
+    ],
+  };
+  expect(roomResultSchema.safeParse(common).success).toBe(false);
+  expect(roomResultSchema.safeParse({ ...common, modeId: "unknown" }).success).toBe(false);
+  const ffa = roomResultSchema.parse({ ...common, modeId: "ffa" });
+  expect(matchResultPresentation(ffa).summary).toBe("Frag limit reached · Winner: Host");
+  const tournament = roomResultSchema.parse({
+    ...common,
+    modeId: "tournament",
+    completion: { ...common.completion, reasons: 4 },
+  });
+  expect(matchResultPresentation(tournament).summary).toBe("Tournament battle won · Team: Host");
+  expect(matchResultPresentation(tournament).rows[0]?.outcome).toBe("Victory");
+});
