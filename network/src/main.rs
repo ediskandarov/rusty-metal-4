@@ -2,6 +2,7 @@ mod assets;
 mod health;
 mod journal;
 mod management;
+mod resources;
 mod resume;
 mod server;
 mod simulator;

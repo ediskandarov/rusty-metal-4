@@ -3,6 +3,7 @@ use crate::management::{
     Control, MatchSetup, MembershipCommand, Phase, PublishedState, RoomMembership, RosterMember,
     ServerLocation, SetupRequest, SharedState, Status,
 };
+use crate::resources::{Resource, ResourceStore};
 use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
@@ -13,13 +14,11 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde::Deserialize;
 use std::{
-    collections::BTreeMap,
-    env, fs,
+    env,
     net::{SocketAddr, TcpListener},
-    path::{Component, Path, PathBuf},
+    path::Path,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
@@ -65,29 +64,11 @@ pub fn behind_proxy() -> bool {
     env::var("TM4_BEHIND_PROXY").as_deref() == Ok("1")
 }
 
-#[derive(Clone, Deserialize, Serialize)]
-struct Resource {
-    id: String,
-    size: usize,
-    sha256: String,
-}
-#[derive(Deserialize)]
-struct Reference {
-    files: Vec<Resource>,
-}
-
-struct PrivateDirectory(PathBuf);
-impl Drop for PrivateDirectory {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
 pub struct Launcher {
     pub wasm: Simulation,
     pub control: Control,
     requests: Receiver<SetupRequest>,
-    _private: PrivateDirectory,
+    resources: Arc<ResourceStore>,
     http: Option<thread::JoinHandle<()>>,
 }
 impl Launcher {
@@ -110,32 +91,11 @@ impl Launcher {
             "Invalid TM4_ADMIN_SECRET"
         );
         let wasm = Simulation::load()?;
-        let reference: Reference =
-            serde_json::from_str(include_str!("../../config/resources.json"))?;
-        let resources: BTreeMap<_, _> = reference
-            .files
-            .into_iter()
-            .filter(|f| f.id.ends_with(".MR") || f.id.ends_with(".IMG") || f.id.ends_with(".VAB"))
-            .map(|f| (f.id.clone(), f))
-            .collect();
+        let resources = Arc::new(ResourceStore::stock()?);
         let listener = TcpListener::bind(listen)?;
         let stopped = Arc::new(AtomicBool::new(false));
         let signal = stopped.clone();
         ctrlc::set_handler(move || signal.store(true, Ordering::Relaxed))?;
-        let mut random = [0; 16];
-        getrandom::fill(&mut random)
-            .map_err(|_| anyhow::anyhow!("Private directory allocation failed"))?;
-        let private = env::temp_dir()
-            .canonicalize()?
-            .join(format!("tm4-server-{:032x}", u128::from_le_bytes(random)));
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            fs::DirBuilder::new().mode(0o700).create(&private)?;
-        }
-        #[cfg(not(unix))]
-        fs::create_dir(&private)?;
-        let private = PrivateDirectory(private);
         let status = Status {
             location: ServerLocation::from_environment(|name| env::var(name).ok()),
             session_id: None,
@@ -154,7 +114,7 @@ impl Launcher {
                 format!("ws://{endpoint}")
             },
             uploaded: 0,
-            required: resources.len() + 1,
+            required: resources.required(),
         };
         let health = crate::health::Shared::default();
         let journal = crate::journal::SharedExport::default();
@@ -163,9 +123,8 @@ impl Launcher {
         let (membership_sender, membership_receiver) = mpsc::sync_channel(8);
         let membership = Arc::new(Mutex::new(membership_receiver));
         let service = Arc::new(Service {
-            private: private.0.clone(),
             secret,
-            resources,
+            resources: resources.clone(),
             state: state.clone(),
             health: health.clone(),
             journal: journal.clone(),
@@ -185,7 +144,7 @@ impl Launcher {
                 membership,
             },
             requests,
-            _private: private,
+            resources,
             http: Some(http),
         })
     }
@@ -200,7 +159,7 @@ impl Launcher {
         None
     }
     pub fn resource_directory(&self) -> &Path {
-        &self._private.0
+        self.resources.directory()
     }
 }
 impl Drop for Launcher {
@@ -209,7 +168,7 @@ impl Drop for Launcher {
         if let Some(http) = self.http.take() {
             let _ = http.join();
         }
-        // PrivateDirectory drops only after HTTP work (including blocking publication) ends.
+        // Resources remain alive until HTTP work (including blocking publication) ends.
     }
 }
 
@@ -253,9 +212,8 @@ fn serve_http(
 }
 
 struct Service {
-    private: PathBuf,
     secret: String,
-    resources: BTreeMap<String, Resource>,
+    resources: Arc<ResourceStore>,
     state: SharedState,
     health: crate::health::Shared,
     journal: crate::journal::SharedExport,
@@ -415,7 +373,7 @@ async fn metrics(State(service): State<Arc<Service>>) -> Json<crate::health::Sna
     )
 }
 async fn manifest(State(service): State<Arc<Service>>) -> Json<Vec<Resource>> {
-    Json(service.resources.values().cloned().collect())
+    Json(service.resources.manifest().cloned().collect())
 }
 
 async fn upload(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
@@ -425,15 +383,7 @@ async fn upload(State(service): State<Arc<Service>>, request: Request) -> ApiRes
         .strip_prefix("/api/resources")
         .unwrap_or("")
         .to_owned();
-    let limit = if id == "/DATA/files.tsv" {
-        128 * 1024
-    } else {
-        service
-            .resources
-            .get(&id)
-            .ok_or_else(|| invalid("Resource is not in the server manifest"))?
-            .size
-    };
+    let limit = service.resources.limit(&id).map_err(invalid)?;
     if let Some(length) = request.headers().get(header::CONTENT_LENGTH) {
         let length: usize = length.to_str().map_err(invalid)?.parse().map_err(invalid)?;
         if length > limit {
@@ -633,71 +583,10 @@ impl Service {
         })
     }
     fn publish(&self, id: &str, data: &[u8]) -> Result<()> {
-        if let Some(file) = self.resources.get(id) {
-            ensure!(
-                data.len() == file.size && format!("{:x}", Sha256::digest(data)) == file.sha256,
-                "Stock resource checksum differs"
-            );
-        } else {
-            validate_index(data)?;
-            let text = std::str::from_utf8(data)?;
-            let mut indexed = BTreeMap::new();
-            for line in text.lines() {
-                let fields: Vec<_> = line.split('\t').collect();
-                ensure!(
-                    indexed
-                        .insert(fields[2], fields[1].parse::<usize>()?)
-                        .is_none(),
-                    "Duplicate resource sector index entry"
-                );
-            }
-            ensure!(
-                self.resources
-                    .values()
-                    .all(|file| indexed.get(file.id.as_str()) == Some(&file.size)),
-                "Resource sector index must include each required stock file with its exact size"
-            );
-        }
-        let target = self.private.join(id.trim_start_matches('/'));
-        fs::create_dir_all(target.parent().unwrap())?;
-        let pending = self.private.join("upload.tmp");
-        fs::write(&pending, data)?;
-        fs::rename(pending, target)?;
-        let uploaded = self
-            .resources
-            .keys()
-            .map(String::as_str)
-            .chain(std::iter::once("/DATA/files.tsv"))
-            .filter(|id| self.private.join(id.trim_start_matches('/')).is_file())
-            .count();
+        let uploaded = self.resources.publish(id, data)?;
         self.state.lock().unwrap().status.uploaded = uploaded;
         Ok(())
     }
-}
-
-fn validate_index(data: &[u8]) -> Result<()> {
-    let text = std::str::from_utf8(data)?;
-    ensure!(!text.is_empty(), "Empty resource sector index");
-    for line in text.lines() {
-        let fields: Vec<_> = line.split('\t').collect();
-        ensure!(
-            fields.len() == 3
-                && fields[0].parse::<u32>().is_ok()
-                && fields[1].parse::<u32>().is_ok(),
-            "Invalid sector index row"
-        );
-        let path = fields[2];
-        ensure!(
-            path.starts_with("/DATA/")
-                && !path.contains(['%', '\\'])
-                && !path.bytes().any(|byte| byte.is_ascii_control())
-                && Path::new(path.trim_start_matches('/'))
-                    .components()
-                    .all(|c| matches!(c, Component::Normal(_))),
-            "Invalid sector index path"
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -706,6 +595,8 @@ mod tests {
     use crate::management::MatchResult;
     use axum::body::Bytes;
     use futures_util::stream;
+    use sha2::{Digest, Sha256};
+    use std::{fs, path::PathBuf};
     use std::{
         future::Future,
         task::{Context as TaskContext, Poll, Waker},
@@ -714,20 +605,11 @@ mod tests {
 
     const STOCK: &[u8] = b"test stock fixture";
     struct Fixture {
-        _directory: PrivateDirectory,
         service: Arc<Service>,
         requests: Receiver<SetupRequest>,
     }
     impl Fixture {
         fn new() -> Self {
-            let mut random = [0; 16];
-            getrandom::fill(&mut random).unwrap();
-            let directory = env::temp_dir()
-                .canonicalize()
-                .unwrap()
-                .join(format!("tm4-web-test-{:032x}", u128::from_le_bytes(random)));
-            let private = directory.join("private");
-            fs::create_dir_all(&private).unwrap();
             let resource = Resource {
                 id: "/DATA/MAIN.MR".into(),
                 size: STOCK.len(),
@@ -753,9 +635,8 @@ mod tests {
             let (sender, requests) = mpsc::channel();
             let (membership, _) = mpsc::sync_channel(8);
             let service = Arc::new(Service {
-                private,
                 secret: "test-secret".into(),
-                resources: [(resource.id.clone(), resource)].into(),
+                resources: Arc::new(ResourceStore::new(vec![resource]).unwrap()),
                 state,
                 health: crate::health::Shared::default(),
                 journal: crate::journal::SharedExport::default(),
@@ -763,11 +644,7 @@ mod tests {
                 membership,
                 mutation: Arc::new(AsyncMutex::new(())),
             });
-            Self {
-                _directory: PrivateDirectory(directory),
-                service,
-                requests,
-            }
+            Self { service, requests }
         }
         async fn request(&self, method: &str, path: &str, body: impl Into<Body>) -> Response {
             router(self.service.clone())
@@ -809,7 +686,7 @@ mod tests {
                 .status(),
             StatusCode::NOT_FOUND
         );
-        let path = fixture.service.private.join("journal.tm4j");
+        let path = fixture.service.resources.directory().join("journal.tm4j");
         fs::write(&path, b"committed-unpublished").unwrap();
         *fixture.service.journal.lock().unwrap() = Some(crate::journal::Export { path, length: 9 });
         let response = fixture.request("GET", "/api/journal", Body::empty()).await;
@@ -1090,7 +967,14 @@ mod tests {
             fixture.request("PUT", path, partial).await.status(),
             StatusCode::BAD_REQUEST
         );
-        assert!(!fixture.service.private.join("DATA/MAIN.MR").exists());
+        assert!(
+            !fixture
+                .service
+                .resources
+                .directory()
+                .join("DATA/MAIN.MR")
+                .exists()
+        );
         assert_eq!(fixture.service.state.lock().unwrap().status.uploaded, 0);
         assert_eq!(
             fixture.service.state.lock().unwrap().status.phase,
@@ -1105,10 +989,17 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert_eq!(
-            fs::read(fixture.service.private.join("DATA/MAIN.MR")).unwrap(),
+            fs::read(fixture.service.resources.directory().join("DATA/MAIN.MR")).unwrap(),
             STOCK
         );
-        assert!(!fixture.service.private.join("upload.tmp").exists());
+        assert!(
+            !fixture
+                .service
+                .resources
+                .directory()
+                .join("upload.tmp")
+                .exists()
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -1121,7 +1012,14 @@ mod tests {
         assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
         assert!(fixture.service.mutation.try_lock().is_ok());
         assert_eq!(fixture.service.state.lock().unwrap().status.uploaded, 0);
-        assert!(!fixture.service.private.join("DATA/MAIN.MR").exists());
+        assert!(
+            !fixture
+                .service
+                .resources
+                .directory()
+                .join("DATA/MAIN.MR")
+                .exists()
+        );
     }
 
     #[tokio::test]
@@ -1357,7 +1255,7 @@ mod tests {
     fn shutdown_joins_http_before_removing_private_uploads() {
         let fixture = Fixture::new();
         fixture.service.publish("/DATA/MAIN.MR", STOCK).unwrap();
-        let path = fixture.service.private.clone();
+        let path = fixture.service.resources.directory().to_owned();
         let stopped = Arc::new(AtomicBool::new(false));
         let state = fixture.service.state.clone();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1378,9 +1276,10 @@ mod tests {
                 membership: Arc::new(Mutex::new(mpsc::sync_channel(8).1)),
             },
             requests: fixture.requests,
-            _private: PrivateDirectory(path.clone()),
+            resources: fixture.service.resources.clone(),
             http: Some(http),
         };
+        drop(fixture.service);
         drop(launcher);
         assert!(!path.exists());
     }
