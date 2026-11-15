@@ -1343,3 +1343,131 @@ fn bots_allow_live_humans_within_the_reserved_human_quota() {
     assert_eq!(game.participants.binding(1), bot);
     assert!(game.participants.at_slot(1).original_ai);
 }
+
+#[test]
+fn room_setup_binds_every_human_and_never_assigns_credentials_to_bots() {
+    let mut game = game();
+    game.started = false;
+    game.participants = ParticipantRoster::new(8, &[3, 6]).unwrap();
+    game.participants.add_bot("Pizza Boy".into()).unwrap();
+    game.participants.set_human_limit(4).unwrap();
+    game.controls = (0..8).map(|_| ControllerState::default()).collect();
+    let first = game.participants.binding(3);
+    let second = game.participants.binding(6);
+    let bot = game.participants.binding(0);
+    let member = |identity, token: &str| {
+        (
+            identity,
+            web::RosterMember {
+                credential: token.repeat(32),
+                car: "Orbital".into(),
+            },
+        )
+    };
+    for invalid in [
+        vec![member(first, "aa")],
+        vec![member(first, "aa"), member(bot, "bb")],
+        vec![member(first, "aa"), member(first, "bb")],
+        vec![member(first, "aa"), member(second, "aa")],
+    ] {
+        assert!(game.configure_room(invalid).is_err());
+        assert!(!game.room_only);
+        assert!(
+            game.participants.all_slots().all(|slot| game
+                .participants
+                .at_slot(slot)
+                .room_credential
+                .is_none())
+        );
+    }
+    game.configure_room(vec![member(second, "bb"), member(first, "aa")])
+        .unwrap();
+    assert!(game.room_only);
+    assert_eq!(
+        game.participants.find_room_credential(&"aa".repeat(32)),
+        Some(first)
+    );
+    assert_eq!(
+        game.participants.find_room_credential(&"bb".repeat(32)),
+        Some(second)
+    );
+    assert_eq!(
+        game.participants.at_slot(0).car.as_deref(),
+        Some("Pizza Boy")
+    );
+    assert!(game.participants.at_slot(0).room_credential.is_none());
+    assert!(game.participants.at_slot(0).credential.is_none());
+    assert!(game.participants.at_slot(0).original_ai);
+    assert!(
+        game.configure_room(vec![member(first, "aa"), member(second, "bb")])
+            .is_err()
+    );
+}
+
+#[test]
+#[ignore = "requires private resources and diagnostic Wasm"]
+fn room_start_with_one_human_and_bots_reaches_real_simulation() -> anyhow::Result<()> {
+    let mut world = World::new();
+    let mut game = game();
+    game.started = false;
+    game.tick = 0;
+    game.session = None;
+    game.initial_digest = None;
+    game.last_state = None;
+    game.prediction = Default::default();
+    game.selected_world = Some("Construction Yard".into());
+    game.participants = ParticipantRoster::new(8, &[0]).unwrap();
+    for model in ["Pizza Boy", "Orbital"] {
+        game.participants.add_bot(model.into()).unwrap();
+    }
+    game.participants.set_human_limit(4).unwrap();
+    game.controls = (0..8).map(|_| ControllerState::default()).collect();
+    let identity = game.participants.binding(0);
+    let token = "ab".repeat(32);
+    game.configure_room(vec![(
+        identity,
+        web::RosterMember {
+            credential: token.clone(),
+            car: "Orbital".into(),
+        },
+    )])
+    .unwrap();
+    let compatibility = game.compatibility.clone().unwrap();
+    let wasm = std::fs::read(env::var("TM4_SIMULATION_WASM")?)?;
+    let resources = PathBuf::from(env::var("TM4_RESOURCE_DIR")?);
+    world.insert_non_send(simulator::Simulator::new(
+        &wasm,
+        &resources,
+        compatibility.clone(),
+    )?);
+    world.insert_resource(LocalTimeline::default());
+    world.insert_resource(game);
+    let client = connection(&mut world, 71);
+    request(
+        &mut world,
+        client,
+        Request::Resume {
+            token,
+            compatibility,
+        },
+    );
+    world.run_system_once(update).unwrap();
+    let game = world.resource::<Match>();
+    assert!(game.started && !game.ended);
+    let session = game.session.as_ref().unwrap();
+    assert_eq!(session.slots, [0, 1, 2]);
+    assert_eq!(session.bots, [1, 2]);
+    assert_eq!(session.cars, ["Orbital", "Pizza Boy", "Orbital"]);
+    assert!(game.initial_digest.is_some());
+    assert_eq!(game.participants.human_slots().collect::<Vec<_>>(), [0]);
+    assert!(game.controls[1].connection.is_none());
+    assert!(game.controls[2].connection.is_none());
+    assert_eq!(
+        world
+            .non_send_mut::<simulator::Simulator>()
+            .state()?
+            .remaining,
+        3
+    );
+    Ok(())
+}

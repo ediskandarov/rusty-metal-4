@@ -130,7 +130,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     // The mode assigns initial room members once. Admission uses these bindings,
     // never a room-list ordinal as a gameplay slot.
     let room_members = participants
-        .slots()
+        .human_slots()
         .map(|slot| participants.binding(slot))
         .zip(room_roster)
         .collect();

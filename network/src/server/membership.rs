@@ -32,7 +32,7 @@ impl Match {
             || self.ended
             || self.room_only
             || members.is_empty()
-            || members.len() != self.participants.count()
+            || members.len() != self.participants.human_slots().count()
             || self
                 .controls
                 .iter()
@@ -44,6 +44,7 @@ impl Match {
         let mut credentials = HashSet::new();
         if members.iter().any(|(binding, member)| {
             self.participants.resolve(binding).is_none()
+                || !self.participants.human(usize::from(binding.slot))
                 || !identities.insert(binding.participant)
                 || !credentials.insert(&member.credential)
                 || member.credential.len() != 64
