@@ -103,9 +103,33 @@ pub fn behind_proxy() -> bool {
     env::var("TM4_BEHIND_PROXY").as_deref() == Ok("1")
 }
 
+#[derive(Clone, Serialize, Debug, PartialEq)]
+pub struct ServerLocation {
+    region: Option<String>,
+    country: Option<String>,
+    location: Option<String>,
+}
+impl ServerLocation {
+    fn from_environment(mut lookup: impl FnMut(&str) -> Option<String>) -> Option<Self> {
+        let mut value = |name| {
+            lookup(name)
+                .map(|value| value.trim().to_owned())
+                .filter(|value| !value.is_empty())
+        };
+        let location = Self {
+            region: value("CLOUDFLARE_REGION"),
+            country: value("CLOUDFLARE_COUNTRY_A2"),
+            location: value("CLOUDFLARE_LOCATION"),
+        };
+        (location.region.is_some() || location.country.is_some() || location.location.is_some())
+            .then_some(location)
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    pub location: Option<ServerLocation>,
     pub session_id: Option<String>,
     pub cars: Vec<String>,
     pub compatibility: Option<Compatibility>,
@@ -212,6 +236,7 @@ impl Launcher {
         fs::create_dir(&private)?;
         let private = PrivateDirectory(private);
         let status = Arc::new(Mutex::new(Status {
+            location: ServerLocation::from_environment(|name| env::var(name).ok()),
             session_id: None,
             cars: Vec::new(),
             compatibility: None,
@@ -782,6 +807,34 @@ mod tests {
     };
     use tower::ServiceExt;
 
+    #[test]
+    fn server_location_uses_container_environment() {
+        let location = ServerLocation::from_environment(|name| match name {
+            "CLOUDFLARE_REGION" => Some("WEUR".into()),
+            "CLOUDFLARE_COUNTRY_A2" => Some("DE".into()),
+            "CLOUDFLARE_LOCATION" => Some("FRA".into()),
+            _ => panic!("unexpected environment variable"),
+        });
+        assert_eq!(
+            serde_json::to_value(location).unwrap(),
+            serde_json::json!({
+                "region": "WEUR", "country": "DE", "location": "FRA"
+            })
+        );
+        assert_eq!(ServerLocation::from_environment(|_| None), None);
+        assert_eq!(
+            ServerLocation::from_environment(|_| Some("  ".into())),
+            None
+        );
+        let partial = ServerLocation::from_environment(|name| {
+            (name == "CLOUDFLARE_REGION").then(|| " WEUR ".into())
+        })
+        .unwrap();
+        assert_eq!(partial.region.as_deref(), Some("WEUR"));
+        assert_eq!(partial.country, None);
+        assert_eq!(partial.location, None);
+    }
+
     const STOCK: &[u8] = b"test stock fixture";
     struct Fixture {
         _directory: PrivateDirectory,
@@ -804,6 +857,7 @@ mod tests {
                 sha256: format!("{:x}", Sha256::digest(STOCK)),
             };
             let status = Arc::new(Mutex::new(Status {
+                location: None,
                 session_id: None,
                 cars: Vec::new(),
                 compatibility: None,

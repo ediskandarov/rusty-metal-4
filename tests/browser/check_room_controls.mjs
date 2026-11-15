@@ -46,6 +46,7 @@ try {
   await host.locator("#create-name").fill("Controls");
   await host.locator("#create-form button").click();
   await host.waitForURL(/\/rooms\/[a-f0-9]{32}$/);
+  await host.locator("#server-region").filter({ hasText: "Not allocated" }).waitFor();
   const invite = host.url();
   const id = new URL(invite).pathname.split("/").pop();
   const view = async () =>
@@ -220,6 +221,10 @@ try {
   await post(`match/${match.id}/prepare`);
   await eventually(view, (room) => room.match?.stage === "ready");
   for (const page of [host, guest]) {
+    await page
+      .locator("#server-region")
+      .filter({ hasText: "Western Europe · Germany · FRA" })
+      .waitFor();
     await page.waitForFunction(() => !document.getElementById("room-ready").disabled);
     await page.locator("#room-ready").click();
   }

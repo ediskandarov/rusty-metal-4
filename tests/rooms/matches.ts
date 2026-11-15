@@ -110,6 +110,25 @@ try {
     "two prepared participants start an eight-place native authority",
   );
   await eventually(view, (state) => state.match?.stage === "playing");
+  assert.deepEqual((await view()).match?.location, {
+    region: "WEUR",
+    country: "DE",
+    location: "FRA",
+  });
+  const locationVersion = (await view()).version;
+  await server().configureForTest({ location: { region: "ENAM", country: "US", location: "IAD" } });
+  await room.checkMatchForTest();
+  const relocated = await view();
+  assert.equal(relocated.match?.stage, "playing");
+  assert.deepEqual(relocated.match?.location, { region: "ENAM", country: "US", location: "IAD" });
+  assert(
+    relocated.version > locationVersion,
+    "region changes must publish a new snapshot without a stage change",
+  );
+  assert.deepEqual(
+    (await room.restoreMatchFromStorageForTest())?.location,
+    relocated.match?.location,
+  );
   assert.equal((await stranger(path + "/join", { playerName: "Late" })).status, 200);
   assert.equal(
     (await stranger(path + "/player", { car: "Pizza Boy", compatibility, ready: true })).status,

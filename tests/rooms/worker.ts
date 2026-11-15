@@ -1,5 +1,6 @@
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
 import { ffaCapacity, type RoomSummary } from "@tm4/rooms-client/schemas";
+import type { ServerLocation } from "@tm4/rustymetal-server-client/schemas";
 import { DurableObject } from "cloudflare:workers";
 
 import type { RoomState } from "../../apps/rustymetal4.com/src/room-state.ts";
@@ -99,6 +100,11 @@ export class RoomDirectory extends ProductionDirectory {
 
 // A deterministic native boundary for authority tests. Real game coverage uses the local process bridge.
 export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
+  private location: ServerLocation | null = {
+    region: "WEUR",
+    country: "DE",
+    location: "FRA",
+  };
   private phase = "setup";
   private sessionId: string | null = null;
   private starts = 0;
@@ -121,6 +127,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
   }
 
   configureForTest(options: {
+    location?: ServerLocation | null;
     phase?: string;
     failUpload?: boolean;
     failStop?: boolean;
@@ -257,6 +264,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
         return new Response("Temporary monitoring outage", { status: 503 });
       if (this.statusFailure === "timeout") await scheduler.wait(6000);
       return Response.json({
+        location: this.location,
         phase: this.phase,
         players: this.players,
         worlds: ["Construction Yard"],

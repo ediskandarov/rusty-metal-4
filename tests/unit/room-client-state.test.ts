@@ -23,6 +23,7 @@ const host = "9bad46c2-542d-4d6e-a78a-2ec81a700a23";
 const compatibility = { protocol: 16, build: "b".repeat(64), content: "c".repeat(64) };
 const disc = { compatibility, cars: ["Calypso", "Quatro"] };
 const match: MatchSnapshot = {
+  location: null,
   id: "74433021-24b5-43fe-b1b9-eb16565b6092",
   stage: "ready",
   deadline: 0,

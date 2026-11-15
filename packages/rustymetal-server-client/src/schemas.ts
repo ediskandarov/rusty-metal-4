@@ -8,7 +8,17 @@ import {
 } from "@tm4/lightyear-client/schemas";
 import { z } from "zod";
 const count = z.number().int().nonnegative();
+export const serverLocationSchema = z.object({
+  region: z.string().min(1).nullable(),
+  country: z
+    .string()
+    .regex(/^[A-Z]{2}$/)
+    .nullable(),
+  location: z.string().min(1).nullable(),
+});
+export type ServerLocation = z.infer<typeof serverLocationSchema>;
 export const serverStatusSchema = z.object({
+  location: serverLocationSchema.nullable().default(null),
   phase: z.enum([
     "setup",
     "loading",

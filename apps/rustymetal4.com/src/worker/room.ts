@@ -298,6 +298,11 @@ export class Room extends DurableObject<Env> {
         const result = await this.api().results();
         if (!retainResult(state, match.id, result)) throw new Error("Stale match result");
       }
+      const locationChanged =
+        match.location?.region !== status.location?.region ||
+        match.location?.country !== status.location?.country ||
+        match.location?.location !== status.location?.location;
+      match.location = status.location;
       // General status alone cannot recover a membership or final-result outage.
       // Clear the first deadline only after all required checks have succeeded,
       // including before any state-transition or reconciliation commit returns.
@@ -351,6 +356,10 @@ export class Room extends DurableObject<Env> {
         match.message =
           "Server ready. Choose cars and ready every participant; the host can start with 1–8 players.";
         invalidateReady(state);
+        await this.commit();
+        return;
+      }
+      if (locationChanged) {
         await this.commit();
         return;
       }

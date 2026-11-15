@@ -5,6 +5,7 @@ import {
   scoreSchema,
   sha256Schema,
 } from "@tm4/lightyear-client/schemas";
+import { serverLocationSchema } from "@tm4/rustymetal-server-client/schemas";
 import { z } from "zod";
 export { compatibilitySchema };
 export type { Compatibility } from "@tm4/lightyear-client/schemas";
@@ -62,6 +63,7 @@ export const roomSummarySchema = roomSettingsSchema.extend({
 });
 export type RoomSummary = z.infer<typeof roomSummarySchema>;
 export const matchSnapshotSchema = z.object({
+  location: serverLocationSchema.nullable().default(null),
   id: matchIdSchema,
   stage: z.enum([
     "uploading",

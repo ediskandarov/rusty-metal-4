@@ -2,6 +2,7 @@ import { createRoomsClient, RoomsApiError as ApiError } from "@tm4/rooms-client"
 import { mapLabel, modeLabel, type RoomSummary } from "@tm4/rooms-client/schemas";
 
 import { matchControls } from "./match-controls.ts";
+import { serverLocationLabel } from "./server-location.ts";
 import { createRoomStore, roomConnectionLabel } from "./state/room.ts";
 
 const rooms = createRoomsClient({ baseURL: new URL("/api/", location.href) });
@@ -191,6 +192,9 @@ async function room(): Promise<void> {
     document.title = `${room.name} · Rusty Metal 4`;
     element("room-mode").textContent = modeLabel(room.modeId);
     element("room-map").textContent = mapLabel(room.mapId);
+    element("server-region").textContent = room.match
+      ? serverLocationLabel(room.match.location)
+      : "Not allocated";
     element("room-capacity").textContent = `${room.participantCount} / ${room.capacity} players`;
     element("member-count").textContent = String(room.participantCount);
     element("room-free").textContent =

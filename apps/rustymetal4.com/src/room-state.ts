@@ -11,7 +11,7 @@ import {
   type RoomSnapshot,
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
-import type { AuthoritativeResult } from "@tm4/rustymetal-server-client/schemas";
+import type { AuthoritativeResult, ServerLocation } from "@tm4/rustymetal-server-client/schemas";
 
 export const reconnectGrace = 45_000;
 export const emptyGrace = 30_000;
@@ -61,6 +61,7 @@ export const emptyMatchGrace = 120_000;
 export const monitoringGrace = 30_000;
 export const monitoringTimeout = 5000;
 export interface RoomMatch {
+  location: ServerLocation | null;
   id: string;
   ownerId: string;
   stage: MatchSnapshot["stage"];
@@ -247,6 +248,7 @@ export function snapshot(state: RoomState, key: string): RoomSnapshot {
     })),
     match: state.match
       ? {
+          location: state.match.location ?? null,
           id: state.match.id,
           stage: state.match.stage,
           deadline: state.match.deadline,
@@ -343,6 +345,7 @@ export function beginPreparation(state: RoomState, key: string, now: number): Ro
   invalidateReady(state);
   state.notice = "";
   return (state.match = {
+    location: null,
     id: crypto.randomUUID(),
     ownerId: host.id,
     stage: "uploading",
