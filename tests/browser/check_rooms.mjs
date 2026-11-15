@@ -44,9 +44,11 @@ try {
   assert.equal(
     await a.locator('[name="capacity"]').count(),
     0,
-    "FFA has no configurable player limit",
+    "Physical slot capacity is not a room setting",
   );
-  assert.equal(await a.locator("#room-capacity").textContent(), "1 / 8 players");
+  assert.equal(await a.locator("#room-capacity").textContent(), "1 / 8 humans · 0 bots");
+  assert.equal(await a.locator("#edit-human-limit").inputValue(), "8");
+  assert(await a.locator("#edit-human-limit").isEnabled());
   const invite = await a.locator("#invite-link").inputValue();
   assert.match(invite, /^http:\/\/[^/]+\/rooms\/[a-f0-9]{32}$/);
   await b.goto(url);
@@ -79,7 +81,7 @@ try {
   await a.reload();
   await a.locator("#settings-panel").waitFor();
   assert.equal(await a.locator("#participants li").count(), 2);
-  assert.equal(await a.locator("#room-capacity").textContent(), "2 / 8 players");
+  assert.equal(await a.locator("#room-capacity").textContent(), "2 / 8 humans · 0 bots");
   assert.equal(await a.evaluate(() => document.cookie), "", "session credential is HttpOnly");
   const cookies = await contextA.cookies();
   assert(cookies.find((cookie) => cookie.name === "rm4_session").httpOnly);
