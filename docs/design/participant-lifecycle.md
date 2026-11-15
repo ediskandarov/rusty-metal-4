@@ -3,7 +3,7 @@
 Design and implementation boundaries for dynamic membership. This extends the identity
 model in [network requirements v0.1](../network-requirements-v0.1.md). The first network
 FFA builds on the live membership foundation. Offline modes retain the original rules.
-Updated 2026-11-14.
+Updated 2026-11-15.
 
 ## Evidence and scope
 
@@ -210,6 +210,34 @@ FFA schedules the shared respawn operation when removal commits. The original-ru
 and manual-respawn startup entry point exists only in diagnostic builds for focused
 foundation fixtures. Production network startup accepts FFA only. Live replacement
 remains deferred; offline round rules are unchanged.
+
+## Original AI participants
+
+The initial AI delivery is exactly one human and one explicitly configured original-AI
+opponent in a standalone FFA. It does not fill vacant seats. Room setup and live admission
+into an AI match are rejected; human-only live membership retains its existing behavior.
+Temporary human disconnection keeps the lease for ordinary recovery. Explicit departure
+of the last human retires the bot in the same authoritative membership batch and stops
+the abandoned match.
+
+Both seats use the common identity, scoring, prepared model pool and respawn policy.
+Network participant roots use the existing player/camera arrays for both kinds of seat;
+original offline computer-roster counts stay separate. Immutable startup bot slots select
+`CarAiUpdateControls` during ordinary car construction and respawn. No bot connection,
+native input controller or reconnect credential exists. Client readiness, clock votes and
+accepted-input frontiers count human controllers only. Bot input rows are neutral; original
+C AI decisions run on the authority and predicting peers at their original four-phase cadence.
+The enemy driver kind selects original AI without ally health bonuses. Original enemy damage
+reductions do not apply in network FFA; offline rules retain them.
+
+Local rollback retains mutable resource-node search state alongside its generation counters.
+Portable recovery describes all used AI runtime fields, car references, nearby-array offsets
+and state callback IDs, plus the shared search fields. Constructors prepare resources before
+state restoration; the session restores saved RNG state afterward. Canonical digests include
+AI decisions and navigation scratch, so confirmation checks their behavior as well as physics.
+The focused stock-resource validation starts with Construction Yard, Orbital and Pizza Boy;
+this does not establish all-map or all-model coverage. Maps without enabled original AI
+navigation are rejected before client prediction can start.
 
 ## Authoritative event boundary
 

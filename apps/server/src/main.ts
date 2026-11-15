@@ -11,6 +11,8 @@ function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
 const matchOptions = element("match-options", HTMLFormElement);
 const world = element("world", HTMLSelectElement);
 const start = element("start", HTMLButtonElement);
+const bot = element("bot", HTMLSelectElement);
+let botCatalogKey = "";
 let catalogKey = "";
 const form = element("provision", HTMLFormElement);
 const secret = element("secret", HTMLInputElement);
@@ -40,7 +42,16 @@ async function refresh() {
       playerCount.value = String(state.players);
       playerCountInitialized = true;
     }
-    playerCount.disabled = busy || !editable;
+    playerCount.disabled = busy || !editable || !!bot.value;
+    const botKey = JSON.stringify(state.cars);
+    if (state.phase === "ready" && state.cars.length && botKey !== botCatalogKey) {
+      bot.replaceChildren(
+        new Option("None", ""),
+        ...state.cars.map((name) => new Option(name, name)),
+      );
+      botCatalogKey = botKey;
+    }
+    bot.disabled = busy || state.phase !== "ready";
     const key = JSON.stringify(state.worlds);
     if (state.worlds.length && key !== catalogKey) {
       world.replaceChildren(...state.worlds.map((name) => new Option(name, name)));
@@ -117,6 +128,11 @@ async function provision() {
   }
 }
 
+bot.addEventListener("change", () => {
+  if (bot.value) playerCount.value = "1";
+  playerCount.disabled = !!bot.value;
+});
+
 matchOptions.addEventListener("submit", (event) => {
   event.preventDefault();
   if (!busy) void openMatch();
@@ -126,6 +142,7 @@ async function openMatch() {
   const options = {
     players: Number(playerCount.value),
     world: world.value,
+    ...(bot.value ? { bot: bot.value } : {}),
     limits: ffaDefaultLimits,
   };
   busy = true;

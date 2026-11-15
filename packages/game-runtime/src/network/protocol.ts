@@ -79,7 +79,7 @@ export interface NetworkPort {
 
 export function configureMatch(engine: NetworkEngine, proposed: Start, view: number) {
   const start = startSchema.parse(proposed);
-  if (!Number.isInteger(view) || view < 0 || view >= start.capacity)
+  if (!Number.isInteger(view) || view < 0 || view >= start.capacity || start.bots.includes(view))
     throw new Error("Invalid local gameplay slot");
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
   if (world < 0) throw new Error("Session map is missing locally");
@@ -99,6 +99,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       "string",
       "number",
       "number",
+      "number",
     ],
     [
       start.capacity,
@@ -113,6 +114,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       start.modelPool.join("\n"),
       start.limits.timeLimitTicks,
       start.limits.fragLimit,
+      start.bots.reduce((mask, slot) => mask | (1 << slot), 0),
     ],
   );
 }

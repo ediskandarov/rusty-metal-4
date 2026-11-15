@@ -94,7 +94,7 @@ fn prepare_session(
         || (!game.started
             && (game.participants.count() < MIN_PARTICIPANTS
                 || game.controls.iter().enumerate().any(|(slot, player)| {
-                    game.participants.contains(slot)
+                    game.participants.human(slot)
                         && (player.connection.is_none()
                             || !game.participants.at_slot(slot).lobby_ready)
                 })))
@@ -103,7 +103,7 @@ fn prepare_session(
     }
     if !game.started {
         if game.controls.iter().enumerate().any(|(slot, player)| {
-            game.participants.contains(slot) && player.compatibility != game.compatibility
+            game.participants.human(slot) && player.compatibility != game.compatibility
         }) {
             game.fail(
                 links,
@@ -128,6 +128,12 @@ fn prepare_session(
         let model_pool =
             tm4_network::protocol::prepared_model_pool(&game.catalog.as_ref().unwrap().cars, &cars);
         let start = SessionStart {
+            bots: game
+                .participants
+                .slots()
+                .filter(|slot| !game.participants.human(*slot))
+                .map(|slot| slot as u8)
+                .collect(),
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: game.limits,
             respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
@@ -184,7 +190,7 @@ fn synchronize_clock(
             .controls
             .iter()
             .enumerate()
-            .any(|(slot, player)| game.participants.contains(slot) && player.connection.is_none())
+            .any(|(slot, player)| game.participants.human(slot) && player.connection.is_none())
     {
         game.fail(
             links,
@@ -198,7 +204,7 @@ fn synchronize_clock(
         || (game.prediction.anchor.is_none()
             && game
                 .participants
-                .slots()
+                .human_slots()
                 .any(|slot| !game.controls[slot].ready))
     {
         if now.duration_since(game.loading_since) > Duration::from_secs(45) {
@@ -208,7 +214,7 @@ fn synchronize_clock(
     }
     if game.tick == 0
         && game.controls.iter().enumerate().any(|(slot, p)| {
-            game.participants.contains(slot) && p.initial_digest != game.initial_digest
+            game.participants.human(slot) && p.initial_digest != game.initial_digest
         })
     {
         game.fail(
@@ -239,7 +245,7 @@ fn synchronize_clock(
             }
         }
     }
-    let slots: Vec<_> = game.participants.slots().collect();
+    let slots: Vec<_> = game.participants.human_slots().collect();
     let loading_expired = now.duration_since(game.loading_since) > Duration::from_secs(45);
     if game.prediction.anchor.is_none() {
         if loading_expired {
@@ -349,7 +355,7 @@ fn advance_simulation(
                 },
             );
         }
-        let occupied: Vec<_> = game.participants.slots().collect();
+        let occupied: Vec<_> = game.participants.human_slots().collect();
         let inputs: Vec<_> = game
             .controls
             .iter_mut()
@@ -381,6 +387,15 @@ fn advance_simulation(
                         .event("rustymetal4_simulation_unsupported_total");
                 }
                 game.completed(links, tick, inputs, changes, state, now);
+                if game.participants.count() == 0
+                    && game
+                        .session
+                        .as_ref()
+                        .is_some_and(|session| !session.bots.is_empty())
+                {
+                    game.ended = true;
+                    game.finish_journal(journal::End::Aborted);
+                }
                 if game.tick == tick + 1 {
                     game.health
                         .lock()

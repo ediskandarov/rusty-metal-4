@@ -15,7 +15,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 11,
+    SessionVersion = 12,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -53,7 +53,7 @@ typedef struct {
     u32 lists[OBJECT_LIST_COUNT], active_cells;
     u32 squares, gte_length;
     u8 gte[256];
-    u32 respawn_delay_ticks;
+    u32 respawn_delay_ticks, bot_slots;
     u32 time_limit_ticks, frag_limit;
     WebFfaResult ffa;
     char model_pool[8][64];
@@ -164,6 +164,7 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     memset(&record, 0, sizeof(record));
     record.version = SessionVersion;
     record.respawn_delay_ticks = WebNetFfaRespawnDelay();
+    record.bot_slots = WebNetBotSlots();
     record.time_limit_ticks = WebNetFfaTimeLimit();
     record.frag_limit = WebNetFfaFragLimit();
     record.ffa = WebFfaCapture();
@@ -316,7 +317,7 @@ int WebSnapshotSessionPrepare(const u8* input, u32 length)
     WebNetInitialParticipantIds((u32*)initial);
     char pool[8][64];
     WebNetModelPool(pool);
-    if (memcmp(pool, record.model_pool, sizeof(pool))
+    if (memcmp(pool, record.model_pool, sizeof(pool)) || record.bot_slots != WebNetBotSlots()
         || record.respawn_delay_ticks != WebNetFfaRespawnDelay()
         || record.time_limit_ticks != WebNetFfaTimeLimit()
         || record.frag_limit != WebNetFfaFragLimit()

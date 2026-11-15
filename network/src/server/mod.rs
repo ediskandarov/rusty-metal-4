@@ -251,7 +251,7 @@ impl Match {
             session.portable &= portable;
             if session.portable {
                 for (slot, player) in self.controls.iter().enumerate() {
-                    if !self.participants.contains(slot) {
+                    if !self.participants.human(slot) {
                         continue;
                     }
                     let participant = self.participants.at_slot_mut(slot);
@@ -283,6 +283,7 @@ impl Match {
                     .enumerate()
                     .filter(|(slot, _)| self.participants.contains(*slot))
                     .map(|(slot, player)| LobbyPlayer {
+                        bot: !self.participants.human(slot),
                         slot,
                         connected: player.connection.is_some(),
                         car: self.participants.at_slot(slot).car.clone(),

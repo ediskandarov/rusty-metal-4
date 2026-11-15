@@ -7,6 +7,7 @@ use tm4_network::protocol::{Catalog, ControllerIdentity, MAX_PLAYERS, Participan
 #[derive(Default)]
 pub(crate) struct Participant {
     pub joining: bool,
+    pub original_ai: bool,
     /// Admission selection only; C owns the current car model after respawn.
     pub car: Option<String>,
     pub lobby_ready: bool,
@@ -71,6 +72,31 @@ impl ParticipantRoster {
 
     pub fn capacity(&self) -> usize {
         self.slots.len()
+    }
+    pub fn human(&self, slot: usize) -> bool {
+        self.contains(slot) && !self.at_slot(slot).original_ai
+    }
+    pub fn human_slots(&self) -> impl Iterator<Item = usize> + '_ {
+        self.slots().filter(|slot| self.human(*slot))
+    }
+    pub fn add_bot(&mut self, car: String) -> Result<(), &'static str> {
+        if self.frozen
+            || self.count() != 1
+            || self.slots().any(|slot| self.at_slot(slot).original_ai)
+        {
+            return Err("Original AI currently requires exactly one human and one bot.");
+        }
+        let slot = self
+            .slots
+            .iter()
+            .position(Option::is_none)
+            .ok_or("The match is full.")?;
+        self.reserve(slot)?;
+        let participant = self.at_slot_mut(slot);
+        participant.original_ai = true;
+        participant.car = Some(car);
+        participant.lobby_ready = true;
+        Ok(())
     }
     pub fn count(&self) -> usize {
         self.slots().count()
@@ -206,6 +232,26 @@ impl ParticipantRoster {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn original_ai_is_an_explicit_participant_without_a_client_credential() {
+        let mut roster = ParticipantRoster::new(8, &[0]).unwrap();
+        roster.add_bot("Pizza Boy".into()).unwrap();
+        assert_eq!(roster.count(), 2);
+        assert_eq!(roster.human_slots().collect::<Vec<_>>(), [0]);
+        assert_eq!(roster.binding(1).participant, ParticipantId(2));
+        assert_eq!(roster.at_slot(1).car.as_deref(), Some("Pizza Boy"));
+        assert!(roster.at_slot(1).lobby_ready);
+        assert!(roster.at_slot(1).credential.is_none());
+        assert!(roster.at_slot(1).room_credential.is_none());
+        assert!(roster.add_bot("Orbital".into()).is_err());
+        assert!(
+            ParticipantRoster::new(8, &[0, 1])
+                .unwrap()
+                .add_bot("Orbital".into())
+                .is_err()
+        );
+    }
 
     #[test]
     fn capacity_vacancy_reuse_and_running_fence() {

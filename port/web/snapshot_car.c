@@ -252,29 +252,128 @@ static const SnapshotList contacts = {
     .discard_on_target_destroy = 1,
 };
 
+CarAiStateTransition CarAiApproachTarget(Car* car);
+CarAiStateTransition CarAiSeekHealth(Car* car);
+CarAiStateTransition CarAiPatrol(Car* car);
+CarAiStateTransition CarAiPursueTarget(Car* car);
+CarAiStateTransition CarAiFollowTargetRoute(Car* car);
+CarAiStateTransition CarAiFlee(Car* car);
+CarAiStateTransition CarAiDriveOffRoute(Car* car);
+CarAiStateTransition CarAiRetreatFromTarget(Car* car);
+CarAiStateTransition CarAiRecoverFromObstacle(Car* car);
+static const CarAiStateCallback ai_states[] = { NULL, CarAiApproachTarget, CarAiSeekHealth,
+    CarAiPatrol, CarAiPursueTarget, CarAiFollowTargetRoute, CarAiFlee, CarAiDriveOffRoute,
+    CarAiRetreatFromTarget, CarAiRecoverFromObstacle };
+
+u32 WebSnapshotCarAiStateId(CarAiStateCallback callback)
+{
+    for (u32 i = 0; i < ArrayCount(ai_states); ++i)
+        if (ai_states[i] == callback)
+            return i;
+    return UINT32_MAX;
+}
+
+static u32 ai_capacity(const void* payload)
+{
+    return WebNetSlotCapacity();
+}
+static void* nearby_base(const void* payload)
+{
+    return ((const CarAiRuntime*)payload)->nearby_records;
+}
+static const SnapshotIndexBinding nearby_indices = {
+    nearby_base,
+    ai_capacity,
+    sizeof(CarAiNearbyCar),
+};
+static const SnapshotField damage_fields[] = {
+    { SnapshotPod, 0, sizeof(s32) },
+    { 0 },
+};
+static const SnapshotArray attacker_damage = { damage_fields, sizeof(s32), ai_capacity, 8 };
+static const SnapshotField nearby_fields[] = {
+    SNAP_WEAK_REF(CarAiNearbyCar, car, "car"),
+    SNAP_POD(CarAiNearbyCar, distance),
+    SNAP_POD(CarAiNearbyCar, angle),
+    SNAP_POD(CarAiNearbyCar, other_angle),
+    SNAP_DERIVED(CarAiNearbyCar, next),
+    { 0 },
+};
+static const SnapshotArray nearby_records
+    = { nearby_fields, sizeof(CarAiNearbyCar), ai_capacity, 8 };
 static const SnapshotField driver_location_fields[] = {
+    SNAP_POD(CarAiRuntime, steering_input),
     SNAP_POD(CarAiRuntime, update_slot),
     SNAP_POD(CarAiRuntime, update_phase),
+    SNAP_POD(CarAiRuntime, reverse_ticks),
+    SNAP_POD(CarAiRuntime, recovery_delay),
+    SNAP_POD(CarAiRuntime, recovery_phase),
     SNAP_POD(CarAiRuntime, health_fraction),
     SNAP_POD(CarAiRuntime, position),
     SNAP_POD(CarAiRuntime, probe_center),
+    SNAP_POD(CarAiRuntime, forward_probe),
+    SNAP_POD(CarAiRuntime, left_probe),
+    SNAP_POD(CarAiRuntime, right_probe),
     SNAP_POD(CarAiRuntime, probe_direction),
+    SNAP_POD(CarAiRuntime, probe_hit),
     SNAP_POD(CarAiRuntime, path_direction),
     SNAP_POD(CarAiRuntime, node_direction),
     SNAP_POD(CarAiRuntime, node_distance),
     SNAP_POD(CarAiRuntime, selected_node),
     SNAP_POD(CarAiRuntime, previous_node),
     SNAP_POD(CarAiRuntime, probe_length),
+    SNAP_POD(CarAiRuntime, path_count),
+    SNAP_POD(CarAiRuntime, path_index),
+    SNAP_POD(CarAiRuntime, node_flags),
+    SNAP_POD(CarAiRuntime, maneuver_flag),
+    SNAP_POD(CarAiRuntime, turbo_ticks),
+    SNAP_POD(CarAiRuntime, fire_delay),
+    SNAP_POD(CarAiRuntime, fire_delay_ai_to_ai),
+    SNAP_POD(CarAiRuntime, fire_ticks),
+    SNAP_POD(CarAiRuntime, weapon_press_ticks),
+    SNAP_POD(CarAiRuntime, extinguish_delay),
+    SNAP_POD(CarAiRuntime, extinguish_ticks),
+    SNAP_POD(CarAiRuntime, jump_delay),
+    SNAP_POD(CarAiRuntime, jump_ticks),
+    SNAP_POD(CarAiRuntime, invisibility_delay),
+    SNAP_POD(CarAiRuntime, invisibility_ticks),
+    SNAP_POD(CarAiRuntime, shield_delay),
+    SNAP_POD(CarAiRuntime, shield_ticks),
+    SNAP_POD(CarAiRuntime, flee_delay),
+    SNAP_POD(CarAiRuntime, flee_ticks),
+    SNAP_POD(CarAiRuntime, hyperspace_limit),
+    SNAP_POD(CarAiRuntime, sectors),
+    SNAP_POD(CarAiRuntime, targeting_count),
+    SNAP_POD(CarAiRuntime, targeting_limit),
+    SNAP_POD(CarAiRuntime, target_previous_node),
+    SNAP_POD(CarAiRuntime, path_speed_factor),
+    SNAP_POD(CarAiRuntime, pathing_speed),
+    SNAP_POD(CarAiRuntime, braking_start_length),
+    SNAP_POD(CarAiRuntime, braking),
+    SNAP_POD(CarAiRuntime, path_attempts),
+    SNAP_POD(CarAiRuntime, path),
+    SNAP_POD(CarAiRuntime, health_threshold),
+    SNAP_POD(CarAiRuntime, health_entry_index),
     SNAP_DERIVED(CarAiRuntime, area),
     SNAP_DERIVED(CarAiRuntime, spatial_node),
     SNAP_WEAK_REF(CarAiRuntime, target, "car"),
+    SNAP_LOCAL_ARRAY(CarAiRuntime, attacker_damage, &attacker_damage),
+    SNAP_LOCAL_ARRAY(CarAiRuntime, nearby_records, &nearby_records),
+    SNAP_INDEX(CarAiRuntime, target_entry, &nearby_indices),
+    SNAP_INDEX(CarAiRuntime, nearby_list, &nearby_indices),
     { 0 },
 };
 static const SnapshotGroupFields driver_location = { driver_location_fields, NULL };
 
+u32 WebSnapshotCarAiCapture(const Car* car, u8* output, u32 capacity)
+{
+    const SnapshotType type = { .fields = driver_location_fields };
+    return WebSnapshotFieldsCapture(&type, &car->ai, output, capacity);
+}
+
 typedef struct {
     char model[64];
-    s32 entrant, slot;
+    s32 entrant, slot, control_kind;
 } CarConstruction;
 
 static int capture_construction(const void* payload, void* output)
@@ -287,6 +386,7 @@ static int capture_construction(const void* payload, void* output)
     memcpy(record->model, car->character_name, length + 1);
     record->entrant = car->index;
     record->slot = car->controller_index;
+    record->control_kind = car->control_kind;
     return 1;
 }
 
@@ -296,15 +396,17 @@ static int restore_construction(void* payload, const void* input)
     const CarConstruction* record = input;
     if (!memchr(record->model, 0, sizeof(record->model)) || record->entrant < 0
         || record->entrant >= GameInfo.player_car_count
+        || record->control_kind != WebNetParticipantControlKind(record->slot)
         || WebNetParticipantSlot(record->entrant) != record->slot
         || strcmp(record->model, GameInfo.character_names[record->entrant]))
         return 0;
     if (car->character_name)
         return car->index == record->entrant && car->controller_index == record->slot
+            && car->control_kind == record->control_kind
             && !strcmp(car->character_name, record->model);
     SVECTOR position = { 0 }, heading = { .vz = ONE };
     if (!CarPrepareResources(car, (char*)record->model, record->entrant, record->slot,
-            CAR_CONTROL_PLAYER, &position, &heading))
+            record->control_kind, &position, &heading))
         return 0;
     const CarCallbackBinding* callbacks = find_callbacks(car);
     if (!callbacks)
@@ -384,8 +486,7 @@ static const SnapshotArray lights = {
     light_contribution_fields, sizeof(CarLightContribution), NULL, ArrayCount(((Car*)0)->lights),
 };
 
-/* Bot steering, plans and target lists are inactive with CarPlayerInput. The
- * common navigation probe still runs for human cars when the map has AI data. */
+/* AI decisions are canonical simulation state on every predicting peer. */
 static const SnapshotField car_fields[] = {
     { SnapshotConstruction, .binding = &construction },
     SNAP_LOCAL(Car, display_list_count),
@@ -511,11 +612,11 @@ static const SnapshotField car_fields[] = {
     SNAP_LOCAL(Car, ai_config),
     SNAP_DERIVED(Car, ai_input_callback),
     SNAP_DERIVED(Car, ai_saved_input_callback),
-    SNAP_LOCAL(Car, ai_state_callback),
-    SNAP_LOCAL(Car, ai_saved_state_callback),
+    SNAP_DERIVED(Car, ai_state_callback),
+    SNAP_DERIVED(Car, ai_saved_state_callback),
     SNAP_LOCAL(Car, control_kind),
-    SNAP_TRANSIENT(Car, ai_throttle_input),
-    SNAP_TRANSIENT(Car, ai_brake_input),
+    SNAP_POD(Car, ai_throttle_input),
+    SNAP_POD(Car, ai_brake_input),
     SNAP_TRANSIENT(Car, unknownc8f),
     SNAP_GROUP(Car, ai, &driver_location),
     SNAP_POD(Car, special_regeneration_ticks),
@@ -567,14 +668,19 @@ static int turbo_resources_valid(const Car* car)
 static int car_valid(const void* payload)
 {
     const Car* car = payload;
-    if (car->control_kind != CAR_CONTROL_PLAYER || !CarPhysicsResourcesValid(car) || !car->weapons
-        || !car->character_name || !turbo_resources_valid(car)
-        || !((car->ai_input_callback == CarPlayerInput && !car->ai_saved_input_callback)
-            || (!car->ai_input_callback && car->ai_saved_input_callback == CarPlayerInput))
-        || car->ai_state_callback != CarAiApproachTarget || car->ai_saved_state_callback
+    const CarAiInputCallback driver
+        = car->control_kind == CAR_CONTROL_PLAYER ? CarPlayerInput : CarAiUpdateControls;
+    if ((car->control_kind != CAR_CONTROL_PLAYER && car->control_kind != CAR_CONTROL_ENEMY)
+        || !CarPhysicsResourcesValid(car) || !car->weapons || !car->character_name
+        || !turbo_resources_valid(car)
+        || !((car->ai_input_callback == driver && !car->ai_saved_input_callback)
+            || (!car->ai_input_callback && car->ai_saved_input_callback == driver))
+        || !car->ai_state_callback || WebSnapshotCarAiStateId(car->ai_state_callback) == UINT32_MAX
+        || WebSnapshotCarAiStateId(car->ai_saved_state_callback) == UINT32_MAX
         || !WebSnapshotCarCallbackType(car) || car->active_collision_particle
-        || car->active_collision_hit || !display_state_valid(car) || car->ai.target_entry
-        || car->ai.nearby_list || car->ai.targeting_count || car->health <= 0
+        || car->active_collision_hit || !display_state_valid(car) || !car->ai.attacker_damage
+        || !car->ai.nearby_records || car->ai.path_count > CAR_AI_PATH_CAPACITY
+        || car->ai.path_index > car->ai.path_count || car->health <= 0
         || car->health > car->maximum_health || car->controls.gear < CAR_GEAR_REVERSE
         || car->controls.gear > CAR_GEAR_FOURTH || car->controls.action < CarActionNone
         || car->controls.action >= CarActionCount || car->controls.selected_weapon < 0
@@ -608,7 +714,8 @@ static int car_valid(const void* payload)
 
 typedef struct {
     u16 area, node;
-    u8 suspended, copied_faces, copied_colors;
+    u8 suspended, copied_faces, copied_colors, state, saved_state;
+    u8 nearby_next[8];
 } DriverBinding;
 
 static u32 capture_driver(const void* payload, u8* output, u32 capacity)
@@ -619,6 +726,17 @@ static u32 capture_driver(const void* payload, u8* output, u32 capacity)
     DriverBinding binding;
     memset(&binding, 0, sizeof(binding));
     binding.suspended = !car->ai_input_callback;
+    binding.state = WebSnapshotCarAiStateId(car->ai_state_callback);
+    binding.saved_state = WebSnapshotCarAiStateId(car->ai_saved_state_callback);
+    for (u32 i = 0; i < ai_capacity(&car->ai); ++i) {
+        const CarAiNearbyCar* next = car->ai.nearby_records[i].next;
+        if (next) {
+            const uintptr_t offset = (uintptr_t)next - (uintptr_t)car->ai.nearby_records;
+            if (offset % sizeof(*next) || offset / sizeof(*next) >= ai_capacity(&car->ai))
+                return 0;
+            binding.nearby_next[i] = offset / sizeof(*next) + 1;
+        }
+    }
     binding.copied_faces = car->original_faces != NULL;
     binding.copied_colors = car->original_colors != NULL;
     for (u32 i = 0; i < ArrayCount(aiWorldInfo.areas); ++i)
@@ -660,7 +778,8 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
         return 0;
     memcpy(&binding, input, sizeof(binding));
     if (!binding.area || binding.area > ArrayCount(aiWorldInfo.areas) || binding.suspended > 1
-        || binding.copied_faces > 1 || binding.copied_colors > 1)
+        || binding.copied_faces > 1 || binding.copied_colors > 1 || !binding.state
+        || binding.state >= ArrayCount(ai_states) || binding.saved_state >= ArrayCount(ai_states))
         return 0;
     CarAiArea* area = &aiWorldInfo.areas[binding.area - 1];
     if (binding.node > area->node_count || (binding.node && !area->nodes)
@@ -669,8 +788,18 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
         return 0;
     car->ai.area = area;
     car->ai.spatial_node = binding.node ? &area->nodes[binding.node - 1] : NULL;
-    car->ai_input_callback = binding.suspended ? NULL : CarPlayerInput;
-    car->ai_saved_input_callback = binding.suspended ? CarPlayerInput : NULL;
+    const CarAiInputCallback driver
+        = car->control_kind == CAR_CONTROL_PLAYER ? CarPlayerInput : CarAiUpdateControls;
+    car->ai_input_callback = binding.suspended ? NULL : driver;
+    car->ai_saved_input_callback = binding.suspended ? driver : NULL;
+    car->ai_state_callback = ai_states[binding.state];
+    car->ai_saved_state_callback = ai_states[binding.saved_state];
+    for (u32 i = 0; i < ai_capacity(&car->ai); ++i) {
+        const u32 next = binding.nearby_next[i];
+        if (next > ai_capacity(&car->ai))
+            return 0;
+        car->ai.nearby_records[i].next = next ? &car->ai.nearby_records[next - 1] : NULL;
+    }
     if (!car->turbo_emitter_count) {
         MemFree(car->turbo_emitters);
         car->turbo_emitters = NULL;

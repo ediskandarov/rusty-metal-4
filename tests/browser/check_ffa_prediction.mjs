@@ -54,6 +54,7 @@ try {
     });
     const start = (timeLimitTicks = 100, fragLimit = 20) => ({
       mode: "ffa",
+      bots: [],
       limits: { timeLimitTicks, fragLimit },
       respawnDelayTicks: 90,
       capacity: 8,

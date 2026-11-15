@@ -22,6 +22,7 @@ interface RustClient {
     participants: string,
     preparedPool: string,
     resuming: boolean,
+    botMask: number,
   ): void;
   prediction_clock(): number;
   begin_prediction(
@@ -97,12 +98,14 @@ export async function connectNetwork(endpoint: string) {
       participants: string[],
       preparedPool: string[],
       resuming: boolean,
+      botMask: number,
     ) =>
       client.prepare_prediction(
         slotMask,
         JSON.stringify(participants),
         JSON.stringify(preparedPool),
         resuming,
+        botMask,
       ),
     predictionClock: () => client.prediction_clock(),
     beginPrediction: (

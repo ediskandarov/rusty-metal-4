@@ -24,6 +24,13 @@ typedef struct {
     Tm4WorldSquare* next;
 } CellLinks;
 
+/* Resource-node search scratch is outside the checkpoint allocation heap. */
+typedef struct {
+    u16 cost, generation;
+    u8 depth, state;
+    s16 predecessor, previous, next;
+} NavigationSearch;
+
 typedef struct {
     Tm4GameInfo game;
     WebParticipantState participants;
@@ -143,7 +150,8 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
         || WebNetCaptureDigest(1).unsupported)
         return 0;
 
-    const u32 roots_length = sizeof(SimulationRoots) + count * sizeof(CellLinks);
+    const u32 roots_length = sizeof(SimulationRoots) + count * sizeof(CellLinks)
+        + aiWorldInfo.resource.node_count * sizeof(NavigationSearch);
     const u32 arena_length = WebCheckpointArenaCapture(NULL, 0);
     const u32 snapshot_bytes = roots_length + arena_length;
     const u32 retained_bytes = retain_history
@@ -194,6 +202,12 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
             square->interaction_objects,
             square->active_next,
         };
+    }
+    NavigationSearch* searches = (NavigationSearch*)&roots->cells[count];
+    for (u32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
+        const CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+        searches[i] = (NavigationSearch) { node->cost, node->search_generation, node->path_depth,
+            node->search_state, node->predecessor, node->previous, node->next };
     }
     if (!retain_history)
         WebCheckpointDiscard();
@@ -287,6 +301,18 @@ const char* WebCheckpointRestore(u32 tick)
     ObjectNextSerial = roots->serial;
     CarDetonationDevices = roots->detonation;
     aiWorldInfo = roots->ai;
+    const NavigationSearch* searches = (const NavigationSearch*)&roots->cells[roots->square_count];
+    for (u32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
+        CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+        const NavigationSearch* search = &searches[i];
+        node->cost = search->cost;
+        node->search_generation = search->generation;
+        node->path_depth = search->depth;
+        node->search_state = search->state;
+        node->predecessor = search->predecessor;
+        node->previous = search->previous;
+        node->next = search->next;
+    }
     memcpy(CarHealthPickups, roots->health_pickups, sizeof(CarHealthPickups));
     CarHealthPickupCount = roots->health_pickup_count;
     CarPathSearchGeneration = roots->path_generation;

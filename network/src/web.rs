@@ -41,6 +41,7 @@ pub enum SetupRequest {
 }
 #[derive(Debug, PartialEq)]
 pub struct MatchSetup {
+    pub bot: Option<String>,
     pub roster: Vec<RosterMember>,
     pub limits: tm4_network::protocol::FfaLimits,
     pub players: usize,
@@ -55,6 +56,8 @@ pub struct RosterMember {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartOptions {
+    #[serde(default)]
+    bot: Option<String>,
     limits: tm4_network::protocol::FfaLimits,
     #[serde(default)]
     session_id: Option<String>,
@@ -681,6 +684,13 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
     }
     {
         let mut status = service.status.lock().unwrap();
+        if options.bot.as_ref().is_some_and(|bot| {
+            options.players != 1 || !options.roster.is_empty() || !status.cars.contains(bot)
+        }) {
+            return Err(invalid(
+                "Original AI currently requires one human, one stock bot and standalone setup.",
+            ));
+        }
         if !status.worlds.contains(&options.world) {
             return Err(invalid("Choose a map from the server catalog"));
         }
@@ -711,6 +721,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         status.message = "Opening match…".into();
     }
     service.send(SetupRequest::Start(MatchSetup {
+        bot: options.bot,
         roster: options.roster,
         limits: options.limits,
         players: options.players,
@@ -1052,6 +1063,7 @@ mod tests {
         assert_eq!(
             fixture.requests.try_recv().unwrap(),
             SetupRequest::Start(MatchSetup {
+                bot: None,
                 roster: Vec::new(),
                 limits: Default::default(),
                 players: 1,

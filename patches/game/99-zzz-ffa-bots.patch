@@ -1,0 +1,82 @@
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -165,7 +165,9 @@
+     car->ai.attacker_damage = MemAlloc(capacity * sizeof(*car->ai.attacker_damage));
+     if (!car->ai.attacker_damage)
+         return 0;
+-    car->ai.nearby_records = MemAlloc(capacity * sizeof(*car->ai.nearby_records));
++    car->ai.nearby_records = WebNetMatchActive()
++        ? MemCalloc(capacity, sizeof(*car->ai.nearby_records))
++        : MemAlloc(capacity * sizeof(*car->ai.nearby_records));
+     if (!car->ai.nearby_records) {
+         if (car->ai.attacker_damage)
+             MemFree(car->ai.attacker_damage);
+@@ -173,7 +173,9 @@
+         return 0;
+     }
+     car->control_kind = type;
+-    car->ai.update_phase = car->ai.update_slot = car->index % 4;
++    /* A respawn keeps the participant's phase; car-list compaction cannot move it. */
++    car->ai.update_phase = car->ai.update_slot
++        = (WebNetMatchActive() ? car->controller_index : car->index) % 4;
+     car->ai.recovery_phase = 0;
+     car->ai.recovery_delay = 40;
+     car->ai.probe_center.x = 0;
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -174,6 +174,8 @@
+     car->turbo_fuel = car->maximum_turbo_fuel = turbo;
+     car->energy = car->maximum_energy = energy;
+     car->health = health;
++    if (WebNetMatchActive())
++        type = WebNetParticipantControlKind(index);
+     if (!CarWeaponConstructor(car, type) || !CarPhysicsConstructor(car, position, heading)
+         || !CarAiConstructor(car, type) || !CarDisplayConstructor(car)
+         || !CarPhysicsConstructorPostDisplayConstructor(car, 0)) {
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -515,6 +515,7 @@
+ void CarDestructor(void* payload)
+ {
+     Car* car = payload;
++    WebNetCarLeaving(car);
+     CarReleaseResources(car);
+     if (car->fire_effect)
+         ObjectDestroy(car->fire_effect);
+--- a/src/modules/interact/damage.c
++++ b/src/modules/interact/damage.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/web/net_match.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/fixed.h"
+@@ -126,7 +127,8 @@
+     }
+     team = car->control_kind;
+     owner = ObjectGetHeader(wave)->owner;
+-    if (team == CAR_CONTROL_ENEMY && owner && !strcmp(ObjectGetHeader(owner)->name, InteractNameCar)
++    if (!WebNetFfaTimeLimit() && team == CAR_CONTROL_ENEMY && owner
++        && !strcmp(ObjectGetHeader(owner)->name, InteractNameCar)
+         && owner->control_kind == team)
+         damage /= 8;
+     if (Import_CarApplyParticipantDamage(
+--- a/src/modules/lightn/lightning.c
++++ b/src/modules/lightn/lightning.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/web/net_match.h"
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -70,7 +71,7 @@
+         owner = ObjectGetHeader(emitter)->owner;
+         damage = bolt->damage;
+         if (GameIsCarRegistered(owner)) {
+-            if (target->control_kind == CAR_CONTROL_ENEMY
++            if (!WebNetFfaTimeLimit() && target->control_kind == CAR_CONTROL_ENEMY
+                 && owner->control_kind == CAR_CONTROL_ENEMY)
+                 damage /= 4;
+             if (Import_CarApplyParticipantDamage(

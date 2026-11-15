@@ -42,6 +42,7 @@ fn game() -> Match {
         loading_since: Instant::now(),
         last_step_duration: None,
         session: Some(SessionStart {
+            bots: vec![],
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: tm4_network::protocol::FfaLimits::default(),
             respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
@@ -1287,4 +1288,23 @@ fn shutdown_seals_active_match_journal_once() {
     assert_eq!(summary.ticks, 1);
     assert_eq!(summary.end, journal::End::Aborted);
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn last_human_departure_retires_the_explicit_bot_in_the_same_batch() {
+    let mut world = World::new();
+    let mut game = game();
+    game.participants = ParticipantRoster::new(8, &[0]).unwrap();
+    game.participants.add_bot("Pizza Boy".into()).unwrap();
+    game.participants.freeze();
+    game.controls = (0..8).map(|_| ControllerState::default()).collect();
+    game.session.as_mut().unwrap().bots = vec![1];
+    let human = game.participants.binding(0);
+    let bot = game.participants.binding(1);
+    assert!(game.reserve_live().is_err());
+    world.insert_resource(game);
+    world.run_system_once(move |mut game: ResMut<Match>, mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>| {
+        let tick = game.schedule_departure(human, &mut links).unwrap();
+        assert_eq!(game.membership.scheduled[&tick], [MembershipChange::Depart { identity: human }, MembershipChange::Depart { identity: bot }]);
+    }).unwrap();
 }

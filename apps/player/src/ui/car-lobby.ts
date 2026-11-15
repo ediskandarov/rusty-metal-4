@@ -53,11 +53,11 @@ export function carLobby(): LobbyView {
         const slot = player.slot;
         const row = document.createElement("li");
         row.textContent =
-          "Player " +
+          (player.bot ? "Bot " : "Player ") +
           (slot + 1) +
           (slot === state.slot ? " (you)" : "") +
           " · " +
-          (player.connected
+          (player.connected || player.bot
             ? (player.car ?? "Choosing…") + " · " + (player.ready ? "Ready" : "Choosing")
             : "Waiting to join");
         return row;

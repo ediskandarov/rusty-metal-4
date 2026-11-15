@@ -420,24 +420,38 @@ impl Simulator {
         let accepted = self.with_string(&pool, |simulator, pool_address| {
             simulator.with_string(&identities, |simulator, identities_address| {
                 simulator.with_string(&names, |simulator, address| {
-                    simulator
-                        .call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32, u32, u32, u32), i32>(
-                            "WebNetStartFfa",
-                            (
-                                session.capacity as i32,
-                                u32::from(session.slot_mask()),
-                                world,
-                                session.seed,
-                                -1,
-                                u32::from(session.portable),
-                                address,
-                                identities_address,
-                                session.respawn_delay_ticks,
-                                pool_address,
-                                session.limits.time_limit_ticks,
-                                session.limits.frag_limit,
-                            ),
-                        )
+                    simulator.call::<(
+                        i32,
+                        u32,
+                        i32,
+                        u32,
+                        i32,
+                        u32,
+                        u32,
+                        u32,
+                        u32,
+                        u32,
+                        u32,
+                        u32,
+                        u32,
+                    ), i32>(
+                        "WebNetStartFfa",
+                        (
+                            session.capacity as i32,
+                            u32::from(session.slot_mask()),
+                            world,
+                            session.seed,
+                            -1,
+                            u32::from(session.portable),
+                            address,
+                            identities_address,
+                            session.respawn_delay_ticks,
+                            pool_address,
+                            session.limits.time_limit_ticks,
+                            session.limits.frag_limit,
+                            u32::from(session.bot_mask()),
+                        ),
+                    )
                 })
             })
         })?;
@@ -822,6 +836,7 @@ mod tests {
     }
     fn session() -> SessionStart {
         SessionStart {
+            bots: vec![],
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: tm4_network::protocol::FfaLimits::default(),
             respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
@@ -893,6 +908,7 @@ mod tests {
     fn sparse_teleports_snap_every_owned_camera() -> Result<()> {
         let (wasm, resources) = paths()?;
         let setup = SessionStart {
+            bots: vec![],
             capacity: 8,
             slots: vec![3, 6],
             ..session()
@@ -925,6 +941,7 @@ mod tests {
             let count = slots.len();
             let winner = i32::from(*slots.last().unwrap());
             let setup = SessionStart {
+                bots: vec![],
                 capacity: 8,
                 participants: (1..=count)
                     .map(|id| tm4_network::protocol::ParticipantId(id as u64))
@@ -1015,6 +1032,7 @@ mod tests {
             if winner < 7 {
                 let mut mismatched = Simulator::new(&wasm, &resources, compatibility())?;
                 mismatched.start(&SessionStart {
+                    bots: vec![],
                     respawn_delay_ticks: 91,
                     ..setup.clone()
                 })?;
@@ -1061,6 +1079,65 @@ mod tests {
                     "Vacancy scored"
                 );
             }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires private resources, diagnostic Wasm and Node original-AI reference"]
+    fn original_ai_node_wasmtime_replay() -> Result<()> {
+        let (wasm, resources) = paths()?;
+        let reference: serde_json::Value =
+            serde_json::from_slice(&fs::read(env::var("TM4_BOT_REFERENCE")?)?)?;
+        let setup = SessionStart {
+            bots: vec![1],
+            respawn_delay_ticks: 12,
+            limits: tm4_network::protocol::FfaLimits {
+                time_limit_ticks: 27000,
+                frag_limit: 100,
+            },
+            ..session()
+        };
+        let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+        world.start(&setup)?;
+        world.restore_portable(&STANDARD.decode(reference["snapshot"].as_str().unwrap())?)?;
+        ensure!(
+            canonical(&mut world)? == STANDARD.decode(reference["before"].as_str().unwrap())?,
+            "Node snapshot differs in Wasmtime"
+        );
+        for (offset, row) in reference["rows"].as_array().unwrap().iter().enumerate() {
+            if [80, 190, 330, 540, 650].contains(&offset) {
+                ensure!(
+                    world.call::<(i32, i32, i32, i32), i32>(
+                        "WebTestPlacePlayerTarget",
+                        (1, 0, 1200, 0)
+                    )? == 1,
+                    "AI combat placement"
+                );
+            }
+            if offset == 120 {
+                ensure!(
+                    world.call::<i32, i32>("WebTestAiRecovery", 1)? == 1,
+                    "AI recovery predicate"
+                );
+            }
+            if offset == 230 || offset == 480 {
+                ensure!(
+                    world.call::<i32, i32>(
+                        "WebTestKillParticipant",
+                        if offset == 230 { 0 } else { 1 }
+                    )? == 1,
+                    "AI death fixture"
+                );
+            }
+            let mut inputs = [Input::default(); 8];
+            inputs[0].buttons = if offset % 120 < 60 { 0x4000 } else { 0 };
+            world.step(30 + offset as u32, &inputs)?;
+            ensure!(
+                canonical(&mut world)? == STANDARD.decode(row.as_str().unwrap())?,
+                "Node/Wasmtime AI differs at tick {}",
+                31 + offset
+            );
         }
         Ok(())
     }
@@ -1178,6 +1255,7 @@ mod tests {
         use tm4_network::protocol::ParticipantId;
         let (wasm, resources) = paths()?;
         let setup = SessionStart {
+            bots: vec![],
             capacity: 8,
             slots: vec![0, 3, 7],
             participants: vec![
@@ -1272,6 +1350,7 @@ mod tests {
         let (wasm, resources) = paths()?;
         for model in ["Orbital", "Crusher", "Trash Man", "Super Auger"] {
             let setup = SessionStart {
+                bots: vec![],
                 capacity: 8,
                 slots: vec![0, 3, 7],
                 participants: vec![
@@ -1417,6 +1496,7 @@ mod tests {
             "Missing roster accepted"
         );
         let setup = SessionStart {
+            bots: vec![],
             capacity: 8,
             slots: vec![0, 3],
             ..session()
@@ -1443,6 +1523,7 @@ mod tests {
         world.step(0, &vec![Input::default(); 8])?;
         world.finish()?;
         let (state, _) = world.start(&SessionStart {
+            bots: vec![],
             capacity: 8,
             slots: vec![1, 3],
             portable: false,
@@ -1673,6 +1754,7 @@ mod tests {
         );
         let mut world = Simulator::new(&bytes, &resources, compatibility())?;
         let setup = SessionStart {
+            bots: vec![],
             world: record.world.clone(),
             cars: record.cars.clone(),
             model_pool: record.model_pool.clone(),

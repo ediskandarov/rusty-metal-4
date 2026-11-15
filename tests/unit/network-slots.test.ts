@@ -9,6 +9,7 @@ import { checksum, SnapshotReplay } from "@tm4/game-runtime/network/replay";
 import { messageSchema, startSchema } from "@tm4/lightyear-client/schemas";
 const start = {
   mode: "ffa" as const,
+  bots: [],
   limits: { timeLimitTicks: 27000, fragLimit: 20 },
   respawnDelayTicks: 90,
   capacity: 8,
@@ -82,6 +83,7 @@ test("startup validates capacity, unique actual slots and one mode car per occup
     start.modelPool.join("\n"),
     start.limits.timeLimitTicks,
     start.limits.fragLimit,
+    0,
   ]);
   expect(configureMatch(engine, start, 1)).toBe(1);
   expect(() => configureMatch(engine, start, 8)).toThrow();
@@ -191,4 +193,28 @@ test("solo FFA keeps eight slots and rejects an empty initial roster", () => {
   expect(startSchema.safeParse({ ...solo, slots: [], participants: [], cars: [] }).success).toBe(
     false,
   );
+});
+
+test("original AI occupies one explicit seat and cannot become the local controller", () => {
+  const setup = {
+    ...start,
+    slots: [0, 1],
+    bots: [1],
+    cars: start.cars.slice(0, 2),
+    participants: start.participants.slice(0, 2),
+  };
+  expect(startSchema.parse(setup)).toEqual(setup);
+  const calls: unknown[][] = [];
+  const engine = {
+    ccall(name: string, _result: string, _types: string[], values: unknown[]) {
+      calls.push([name, ...values]);
+      return 1;
+    },
+  } as NetworkEngine;
+  expect(configureMatch(engine, setup, 0)).toBe(1);
+  expect(calls.at(-1)?.at(-1)).toBe(2);
+  expect(() => configureMatch(engine, setup, 1)).toThrow();
+  expect(startSchema.safeParse({ ...setup, bots: [2] }).success).toBe(false);
+  expect(startSchema.safeParse({ ...setup, bots: [0, 1] }).success).toBe(false);
+  expect(startSchema.safeParse({ ...start, bots: [1] }).success).toBe(false);
 });

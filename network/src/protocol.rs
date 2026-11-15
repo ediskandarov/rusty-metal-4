@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 17;
+pub const PROTOCOL_VERSION: u16 = 18;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 130;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -271,6 +271,7 @@ pub struct Catalog {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct LobbyPlayer {
+    pub bot: bool,
     pub slot: usize,
     pub connected: bool,
     pub car: Option<String>,
@@ -356,6 +357,8 @@ pub fn ffa_respawn_delay_ticks() -> u32 {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionStart {
+    /// Explicit original-AI slots; every other occupied slot belongs to a client.
+    pub bots: Vec<u8>,
     pub mode: MatchMode,
     pub limits: FfaLimits,
     #[serde(rename = "respawnDelayTicks")]
@@ -396,6 +399,10 @@ pub fn prepared_model_pool(catalog: &[String], cars: &[String]) -> Vec<String> {
 impl SessionStart {
     pub fn valid_slots(&self) -> bool {
         self.limits.valid()
+            && (self.bots.is_empty()
+                || (self.bots.len() == 1
+                    && self.slots.len() == 2
+                    && self.slots.contains(&self.bots[0])))
             && self.capacity == MAX_PLAYERS
             && (1..=3600).contains(&self.respawn_delay_ticks)
             && (1..=self.capacity).contains(&self.slots.len())
@@ -426,6 +433,9 @@ impl SessionStart {
                 .slots
                 .iter()
                 .all(|slot| usize::from(*slot) < self.capacity)
+    }
+    pub fn bot_mask(&self) -> u8 {
+        self.bots.iter().fold(0, |mask, slot| mask | (1 << slot))
     }
     pub fn slot_mask(&self) -> u8 {
         self.slots.iter().fold(0, |mask, slot| mask | (1 << slot))

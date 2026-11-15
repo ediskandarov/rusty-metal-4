@@ -2,6 +2,8 @@
 #define TM4_WEB_NET_MATCH_H
 
 struct WebParticipantState;
+struct Car;
+void WebNetCarLeaving(struct Car* car);
 void WebNetInitialParticipantIds(unsigned int output[16]);
 unsigned int WebNetParticipantIdentityPart(int slot, int part);
 /* Authoritative events apply before inputs at the named simulation boundary. */
@@ -23,6 +25,9 @@ void WebNetModelPool(char output[8][64]);
 int WebNetSlotCapacity(void);
 int WebNetSlotMask(void);
 int WebNetParticipantSlot(int index);
+int WebNetParticipantControlKind(int slot);
+unsigned int WebNetBotSlots(void);
+const char* WebNetAiBlocker(void);
 int WebNetSlotOccupied(int slot);
 int WebNetLocalViewCount(void);
 int WebNetGameplaySlot(int view);

@@ -14,16 +14,19 @@ await runCli(async () => {
     options: {
       help: { type: "boolean", short: "h" },
       diagnostic: { type: "boolean", default: false },
+      bot: { type: "string" },
     },
   });
   if (values.help) {
-    console.log("Usage: bun run match [1–8] [--diagnostic]");
+    console.log("Usage: bun run match [1–8] [--diagnostic] [--bot MODEL]");
     return;
   }
   const mode = values.diagnostic ? "diagnostic" : "dev";
   const players = Number(positionals[0] ?? "2");
   if (positionals.length > 1 || !Number.isInteger(players) || players < 1 || players > 8)
     throw new UsageError("Usage: bun run match [1–8] [--diagnostic]");
+  if (values.bot && players !== 1)
+    throw new UsageError("Original AI currently requires one human and one bot");
   const site = new URL(process.env.TM4_WEB_URL ?? "http://127.0.0.1:8120/");
   const listen = process.env.TM4_MATCH_LISTEN ?? "127.0.0.1:8122";
   const endpoint = process.env.TM4_MATCH_ENDPOINT ?? "ws://127.0.0.1:8122";
@@ -38,24 +41,31 @@ await runCli(async () => {
   );
   const executable =
     process.platform === "win32" ? "tm4-deathmatch-server.exe" : "tm4-deathmatch-server";
-  const server = Bun.spawn([join(target, "debug", executable), String(players)], {
-    env: {
-      ...process.env,
-      TM4_MATCH_LISTEN: listen,
-      TM4_SIMULATION_BUILD: resolve(
-        root,
-        process.env.TM4_SIMULATION_BUILD ?? `build/${mode}/server/simulation-build.json`,
-      ),
-      TM4_SIMULATION_WASM: resolve(
-        root,
-        process.env.TM4_SIMULATION_WASM ?? `build/${mode}/server/tm4_standalone.wasm`,
-      ),
-      TM4_RESOURCE_DIR: resolve(root, process.env.TM4_RESOURCE_DIR ?? "build/resources"),
-      TM4_JOURNAL_DIR: process.env.TM4_JOURNAL_DIR ?? join(root, "build/network-journals"),
+  const server = Bun.spawn(
+    [
+      join(target, "debug", executable),
+      String(players),
+      ...(values.bot ? ["--bot", values.bot] : []),
+    ],
+    {
+      env: {
+        ...process.env,
+        TM4_MATCH_LISTEN: listen,
+        TM4_SIMULATION_BUILD: resolve(
+          root,
+          process.env.TM4_SIMULATION_BUILD ?? `build/${mode}/server/simulation-build.json`,
+        ),
+        TM4_SIMULATION_WASM: resolve(
+          root,
+          process.env.TM4_SIMULATION_WASM ?? `build/${mode}/server/tm4_standalone.wasm`,
+        ),
+        TM4_RESOURCE_DIR: resolve(root, process.env.TM4_RESOURCE_DIR ?? "build/resources"),
+        TM4_JOURNAL_DIR: process.env.TM4_JOURNAL_DIR ?? join(root, "build/network-journals"),
+      },
+      stdout: "pipe",
+      stderr: "inherit",
     },
-    stdout: "pipe",
-    stderr: "inherit",
-  });
+  );
   const output = (async () => {
     let pending = "";
     let announced = false;

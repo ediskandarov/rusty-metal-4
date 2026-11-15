@@ -26,12 +26,14 @@ async function observeAcceptedFrames(reference, clients) {
   let error;
   const pending = new Map();
   let started = false;
+  let configuration;
   let head = 0;
   const receive = (messages) => {
     tail = tail
       .then(async () => {
         for (const message of messages) {
           if (message.type === "prediction_prepare" && !started) {
+            configuration = message;
             await reference.evaluate((start) => {
               const { Module } = globalThis;
               const world = Module.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
@@ -52,6 +54,7 @@ async function observeAcceptedFrames(reference, clients) {
                     "string",
                     "number",
                     "number",
+                    "number",
                   ],
                   [
                     start.capacity,
@@ -66,6 +69,7 @@ async function observeAcceptedFrames(reference, clients) {
                     start.modelPool.join("\n"),
                     start.limits.timeLimitTicks,
                     start.limits.fragLimit,
+                    start.bots.reduce((mask, slot) => mask | (1 << slot), 0),
                   ],
                 )
               )
@@ -141,6 +145,9 @@ NetworkClient.prototype.update = function() {
     });
   }
   return {
+    get configuration() {
+      return configuration;
+    },
     get error() {
       return error;
     },

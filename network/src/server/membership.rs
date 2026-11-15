@@ -168,7 +168,11 @@ impl Match {
     }
 
     pub(super) fn reserve_live(&mut self) -> Result<ControllerIdentity, &'static str> {
-        if !self.started
+        if self
+            .participants
+            .slots()
+            .any(|slot| !self.participants.human(slot))
+            || !self.started
             || self.tick == 0
             || self.ended
             || self
@@ -252,7 +256,29 @@ impl Match {
         if !self.membership.departing.insert(identity.participant) {
             return Err("Departure is already scheduled.");
         }
-        Ok(self.schedule_membership(MembershipChange::Depart { identity }, links))
+        let tick = self.schedule_membership(MembershipChange::Depart { identity }, links);
+        // Bot seats do not keep an otherwise abandoned match alive. Retire them
+        // through the same ordered event row as the last human's explicit leave.
+        if self.participants.human(usize::from(identity.slot))
+            && self.participants.human_slots().all(|slot| {
+                self.membership
+                    .departing
+                    .contains(&self.participants.binding(slot).participant)
+            })
+        {
+            let bots: Vec<_> = self
+                .participants
+                .slots()
+                .filter(|slot| !self.participants.human(*slot))
+                .map(|slot| self.participants.binding(slot))
+                .collect();
+            for bot in bots {
+                if self.membership.departing.insert(bot.participant) {
+                    self.schedule_membership(MembershipChange::Depart { identity: bot }, links);
+                }
+            }
+        }
+        Ok(tick)
     }
 
     pub(super) fn schedule_admission(
@@ -417,6 +443,7 @@ impl Match {
                     .map(|session| session.model_pool.clone())
                     .unwrap_or_default(),
                 players: vec![tm4_network::protocol::LobbyPlayer {
+                    bot: false,
                     slot,
                     connected: true,
                     car: self.participants.at_slot(slot).car.clone(),

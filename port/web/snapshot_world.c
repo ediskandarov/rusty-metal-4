@@ -12,9 +12,9 @@
 #endif
 
 enum {
-    WorldVersion = 1,
+    WorldVersion = 2,
     MaxWorldFields = 128 * 1024,
-    MaxWorldDelta = 8192,
+    MaxWorldDelta = 32768,
     WorldHeaderWords = 4,
     WorldRecordWords = 2,
 };
@@ -144,9 +144,17 @@ static int remember_world(void)
             if (!remember(&area->edges[edge].enabled, WorldByte))
                 return 0;
     }
-    for (s32 i = 0; i < aiWorldInfo.resource.node_count; ++i)
-        if (!remember(&aiWorldInfo.resource.nodes[i].enabled, WorldByte))
+    /* Searches share mutable resource nodes. Their generations alone are not enough
+     * to rewind a future search, especially at generation wraparound. */
+    for (s32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
+        CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+        if (!remember(&node->enabled, WorldByte) || !remember(&node->cost, WorldShort)
+            || !remember(&node->search_generation, WorldShort)
+            || !remember(&node->path_depth, WorldByte) || !remember(&node->search_state, WorldByte)
+            || !remember(&node->predecessor, WorldShort) || !remember(&node->previous, WorldShort)
+            || !remember(&node->next, WorldShort))
             return 0;
+    }
     return 1;
 }
 

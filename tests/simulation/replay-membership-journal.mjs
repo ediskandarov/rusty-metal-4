@@ -50,6 +50,7 @@ try {
             pool,
             start.limits.timeLimitTicks,
             start.limits.fragLimit,
+            start.bots.reduce((mask, slot) => mask | (1 << slot), 0),
           ),
           1,
         ),

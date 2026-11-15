@@ -404,6 +404,7 @@ mod tests {
     fn header(players: usize) -> Header {
         Header {
             start: SessionStart {
+                bots: vec![],
                 mode: tm4_network::protocol::MatchMode::Ffa,
                 limits: tm4_network::protocol::FfaLimits::default(),
                 respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),

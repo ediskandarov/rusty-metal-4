@@ -165,6 +165,9 @@ pub(super) fn accept_native_inputs(
         let Some(slot) = game.participants.resolve(identity) else {
             continue;
         };
+        if !game.participants.human(slot) {
+            continue;
+        }
         let player = &mut game.controls[slot];
         if player.controller != Some(controller)
             || player.connection != Some(owner.owner)

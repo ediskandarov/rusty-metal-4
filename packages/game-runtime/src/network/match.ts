@@ -321,6 +321,7 @@ export async function joinMatch(
           const slot = session.slot;
           journal.identify({
             world: message.world,
+            bots: message.bots,
             cars: message.cars,
             modelPool: message.modelPool,
             seed: message.seed,
@@ -341,6 +342,7 @@ export async function joinMatch(
             message.participants,
             message.modelPool,
             message.type === "resume_prepare",
+            message.bots.reduce((mask, slot) => mask | (1 << slot), 0),
           );
           if (!configureMatch(engine, message, slot))
             throw new Error(port.netSession?.message ?? "The game refused the match setup");

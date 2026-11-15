@@ -1,3 +1,4 @@
+#include "net_match.h"
 #include "net_state_fields.h"
 #include "snapshot_types.h"
 #include "src/modules/car/private.h"
@@ -125,6 +126,23 @@ static void car_state(NetStateOutput* hash, const Car* car)
     }
     for (const CarSpring* s = car->springs; s < car->spring_end; ++s)
         XYZ(s->direction);
+    VALUE(car->ai_input_callback != NULL);
+    VALUE(WebSnapshotCarAiStateId(car->ai_state_callback));
+    VALUE(WebSnapshotCarAiStateId(car->ai_saved_state_callback));
+    VALUE(car->ai_throttle_input);
+    VALUE(car->ai_brake_input);
+    VALUE(car->ai.area ? car->ai.area - aiWorldInfo.areas + 1 : 0);
+    VALUE(
+        car->ai.spatial_node && car->ai.area ? car->ai.spatial_node - car->ai.area->nodes + 1 : 0);
+    u8 ai_bytes[2048];
+    const u32 ai_length = WebSnapshotCarAiCapture(car, ai_bytes, sizeof(ai_bytes));
+    VALUE(ai_length);
+    for (u32 i = 0; i < ai_length; ++i)
+        state_byte(hash, ai_bytes[i]);
+    for (s32 i = 0; i < WebNetSlotCapacity(); ++i)
+        VALUE(car->ai.nearby_records[i].next
+                ? car->ai.nearby_records[i].next - car->ai.nearby_records + 1
+                : 0);
     controls(hash, &car->controls);
     for (s32 i = 0; i < CarWeaponCount; ++i) {
         const CarWeaponInstance* weapon = &car->weapons[i];
@@ -168,6 +186,9 @@ const char* WebNetWriteCars(NetStateOutput* hash)
         if (!car)
             continue;
         const SnapshotType* type = WebSnapshotCarCallbackType(car);
+        u8 ai_state[2048];
+        if (!WebSnapshotCarAiCapture(car, ai_state, sizeof(ai_state)))
+            unsupported = "car AI state";
         u8 state[256];
         const u32 length = type
             ? WebSnapshotFieldsCapture(type, car->callback_context, state, sizeof(state))

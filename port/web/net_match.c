@@ -1,8 +1,8 @@
 #include "net_match.h"
-#include "ffa.h"
 #include "cheats.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
+#include "ffa.h"
 #include "interpolation.h"
 #include "level.h"
 #include "net_state.h"
@@ -11,6 +11,7 @@
 #include "snapshot.h"
 #include "snapshot_world.h"
 #include "src/main/object/private.h"
+#include "src/modules/car/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
 #include "tm4/main/pad.h"
@@ -37,6 +38,7 @@ typedef struct NetPadInput {
 typedef struct NetMatchSetup {
     s32 capacity;
     u32 slots;
+    u32 bot_slots;
     char* cars[8];
     char* model_pool[8];
     u32 model_count;
@@ -140,6 +142,29 @@ void WebNetModelPool(char output[8][64])
         strcpy(output[i], match.setup.model_pool[i]);
 }
 
+u32 WebNetBotSlots(void)
+{
+    return match.setup.bot_slots;
+}
+const char* WebNetAiBlocker(void)
+{
+    if (!match.setup.bot_slots)
+        return NULL;
+    if (!aiWorldInfo.enabled || !aiWorldInfo.resource.node_count)
+        return "the selected map has no original AI navigation";
+    for (s32 slot = 0; slot < match.setup.capacity; ++slot)
+        if ((match.setup.bot_slots & (1u << slot)) && GameInfo.players[slot].car
+            && !GameInfo.players[slot].car->ai_config.enabled)
+            return "the selected car has disabled original AI settings";
+    return NULL;
+}
+
+int WebNetParticipantControlKind(int slot)
+{
+    return slot >= 0 && slot < 8 && (match.setup.bot_slots & (1u << slot)) ? CAR_CONTROL_ENEMY
+                                                                           : CAR_CONTROL_PLAYER;
+}
+
 int WebNetSlotCapacity(void)
 {
     return match.setup.capacity;
@@ -194,6 +219,39 @@ int WebNetParticipantModelsValid(const WebParticipantState* state, u32 slots)
     return 1;
 }
 
+void WebNetCarLeaving(Car* target)
+{
+    if (!WebNetMatchActive())
+        return;
+    for (s32 i = 0; i < GameInfo.car_count; ++i) {
+        Car* car = GameInfo.cars[i];
+        if (car == target || !car->ai.attacker_damage || !car->ai.nearby_records)
+            continue;
+        if (car->ai.target == target) {
+            if (car->control_kind == CAR_CONTROL_PLAYER)
+                car->ai.target = NULL;
+            else
+                CarAiSetTarget(car, NULL, NULL);
+        }
+        CarAiNearbyCar** link = &car->ai.nearby_list;
+        for (s32 visited = 0; *link && visited < WebNetSlotCapacity(); ++visited) {
+            CarAiNearbyCar* entry = *link;
+            if (entry->car == target)
+                *link = entry->next;
+            else
+                link = &entry->next;
+        }
+        for (s32 entry = 0; entry < WebNetSlotCapacity(); ++entry)
+            if (car->ai.nearby_records[entry].car == target) {
+                if (car->ai.target_entry == &car->ai.nearby_records[entry])
+                    car->ai.target_entry = NULL;
+                car->ai.nearby_records[entry] = (CarAiNearbyCar) { 0 };
+            }
+        if (target->index >= 0 && target->index < WebNetSlotCapacity())
+            car->ai.attacker_damage[target->index] = 0;
+    }
+}
+
 void WebNetRestoreParticipantConfiguration(void)
 {
     WebParticipantState participants;
@@ -222,8 +280,9 @@ static int membership_boundary(u32 tick)
 
 static u32 admission_model(u32 tick, s32 slot, u32 low, u32 high, const char* model)
 {
-    if (!membership_boundary(tick) || GameInfo.deathmatch_finished || slot < 0
-        || slot >= match.setup.capacity || WebNetSlotOccupied(slot) || (!low && !high) || !model)
+    if (match.setup.bot_slots || !membership_boundary(tick) || GameInfo.deathmatch_finished
+        || slot < 0 || slot >= match.setup.capacity || WebNetSlotOccupied(slot) || (!low && !high)
+        || !model)
         return 0;
     WebParticipantState previous;
     WebParticipantCapture(&previous);
@@ -335,11 +394,14 @@ EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u3
  * selection, failed request or cancelled match can contribute configuration. */
 static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot, u32 flags,
     const char* car_names, const char* participant_ids, u32 respawn_delay_ticks,
-    const char* pool_names, u32 time_limit_ticks, u32 frag_limit)
+    const char* pool_names, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8 || !slots
-        || (slots & ~((1u << capacity) - 1)) || view_slot < -1
-        || view_slot >= capacity || world < 0 || world >= GameGetNumberOfWorlds() || flags > 3
+        || (slots & ~((1u << capacity) - 1)) || view_slot < -1 || view_slot >= capacity || world < 0
+        || world >= GameGetNumberOfWorlds() || flags > 3
+        || (bot_slots
+            && (__builtin_popcount(bot_slots) != 1 || __builtin_popcount(slots) != 2
+                || (bot_slots & ~slots) || (view_slot >= 0 && (bot_slots & (1u << view_slot)))))
         || !car_names || ((flags & 2) && (view_slot < 0 || WebSimulationOnly())))
         return reject_start("Invalid explicit match configuration or session already running");
 #ifndef TM4_STANDALONE
@@ -351,6 +413,7 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
         return reject_start("Missing or oversized mode car roster");
     NetMatchSetup candidate = { .capacity = capacity,
         .slots = slots,
+        .bot_slots = bot_slots,
         .world = GameGetWorldName(world),
         .seed = seed,
         .view_slot = view_slot,
@@ -460,14 +523,14 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
  * to diagnostic fixtures that verify the shared lifecycle independently of policy. */
 EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot,
     u32 flags, const char* car_names, const char* participant_ids, u32 delay,
-    const char* model_pool, u32 time_limit_ticks, u32 frag_limit)
+    const char* model_pool, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots)
 {
     if (capacity != 8 || !delay || delay > 3600 || !model_pool
         || !time_limit_ticks || time_limit_ticks > 0x7fffffffu
         || !frag_limit || frag_limit > 0x7fffffffu)
         return reject_start("Invalid FFA respawn delay or gameplay capacity");
     return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
-        delay, model_pool, time_limit_ticks, frag_limit);
+        delay, model_pool, time_limit_ticks, frag_limit, bot_slots);
 }
 
 int WebNetDeparting(void)
@@ -494,8 +557,8 @@ u32 WebNetFfaRespawnDelay(void)
 EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u32 seed,
     s32 view_slot, u32 flags, const char* car_names, const char* participant_ids)
 {
-    return start_match(
-        capacity, slots, world, seed, view_slot, flags, car_names, participant_ids, 0, NULL, 0, 0);
+    return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
+        0, NULL, 0, 0, 0);
 }
 #endif
 
@@ -552,6 +615,9 @@ static const char* checkpoint_resource_blocker(void)
     if (EM_ASM_INT({ return !!Module.tm4CodeMods ?.size; }))
         return "independent module state";
 #endif
+    const char* ai = WebNetAiBlocker();
+    if (ai)
+        return ai;
     if (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count != 0)
         return "game mode state";
     return NULL;
@@ -846,7 +912,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetSetInput(u32 tick, s32 slot, u32 buttons, u32 axe
 {
     if (!WebNetMatchActive() || !WebLevelActive() || tick != match.tick || match.stepping
         || match.tick_pending || !WebNetSlotOccupied(slot) || buttons > 0xffff
-        || (analog != 0 && analog != 1))
+        || (analog != 0 && analog != 1)
+        || ((match.setup.bot_slots & (1u << slot)) && (buttons || analog)))
         return 0;
 
     match.inputs[slot] = (NetPadInput) {

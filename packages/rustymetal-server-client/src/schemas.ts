@@ -59,6 +59,7 @@ export type ResourceManifest = z.infer<typeof resourceManifestSchema>;
 export const startOptionsSchema = z
   .object({
     limits: ffaLimitsSchema,
+    bot: z.string().min(1).max(63).optional(),
     players: count.min(1).max(8),
     world: z.string().min(1),
     sessionId: z.string().uuid().optional(),
@@ -66,12 +67,14 @@ export const startOptionsSchema = z
   })
   .refine(
     (value) =>
-      (value.sessionId === undefined && value.roster === undefined) ||
-      (value.sessionId !== undefined &&
-        value.roster !== undefined &&
-        value.roster.length >= 1 &&
-        value.roster.length <= value.players &&
-        new Set(value.roster.map((member) => member.credential)).size === value.roster.length),
+      (value.bot === undefined ||
+        (value.players === 1 && value.sessionId === undefined && value.roster === undefined)) &&
+      ((value.sessionId === undefined && value.roster === undefined) ||
+        (value.sessionId !== undefined &&
+          value.roster !== undefined &&
+          value.roster.length >= 1 &&
+          value.roster.length <= value.players &&
+          new Set(value.roster.map((member) => member.credential)).size === value.roster.length)),
     "Invalid initial room roster",
   );
 export type StartOptions = z.infer<typeof startOptionsSchema>;

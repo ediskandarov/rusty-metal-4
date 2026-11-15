@@ -129,7 +129,10 @@ try {
       ...Array.from({ length: 6 }, () => ({ frags: 0, deaths: 0 })),
     ]);
     assert(result.car > waiting.before, "respawn creates a new car serial");
-    assert.equal(result.model, waiting.model);
+    assert(
+      observation.configuration.modelPool.includes(result.model),
+      "FFA respawn uses the declared prepared model pool",
+    );
     assert(result.health > 1, "respawn does not inherit the one-health target state");
     assert(result.confirmed > death.due && result.local.tick >= result.confirmed);
     assert(!/diverged|unsupported/i.test(result.status));
@@ -204,7 +207,7 @@ try {
       );
   }
   console.log(
-    "PASS contact, real weapon kill, same-model FFA respawn, preserved combat scores, explicit departure/teardown and two fresh C sessions",
+    "PASS contact, real weapon kill, prepared-pool FFA respawn, preserved combat scores, explicit departure/teardown and two fresh C sessions",
   );
 } catch (error) {
   console.error("REFERENCE", observation?.error);

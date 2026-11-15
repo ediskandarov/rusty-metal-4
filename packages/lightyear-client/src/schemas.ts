@@ -9,7 +9,7 @@ export const ffaLimitsSchema = z.object({
   timeLimitTicks: z.number().int().min(1).max(0x7fffffff),
   fragLimit: z.number().int().min(1).max(0x7fffffff),
 });
-export const networkProtocolVersion = 17;
+export const networkProtocolVersion = 18;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -69,6 +69,7 @@ export const participantIdSchema = z
 export const startSchema = slotConfigurationSchema
   .safeExtend({
     mode: z.literal("ffa"),
+    bots: z.array(z.number().int().min(0).max(7)).max(1),
     limits: ffaLimitsSchema,
     respawnDelayTicks: z.number().int().min(1).max(3600),
     world: z
@@ -103,6 +104,8 @@ export const startSchema = slotConfigurationSchema
   .refine(
     (start) =>
       start.capacity === 8 &&
+      (start.bots.length === 0 ||
+        (start.slots.length === 2 && start.slots.includes(start.bots[0]!))) &&
       start.cars.length === start.slots.length &&
       new Set(start.modelPool).size === start.modelPool.length &&
       start.cars.every((car) => start.modelPool.includes(car)) &&
@@ -118,6 +121,7 @@ export const lobbySchema = z.object({
       z.object({
         slot: z.number().int().min(0).max(7),
         connected: z.boolean(),
+        bot: z.boolean(),
         car: z.string().nullable(),
         ready: z.boolean(),
       }),

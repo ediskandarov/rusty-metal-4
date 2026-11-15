@@ -61,6 +61,7 @@ afterEach(async () => {
 const compatibility = { protocol: 16, build: "a".repeat(64), content: "b".repeat(64) };
 const start = {
   mode: "ffa" as const,
+  bots: [],
   limits: { timeLimitTicks: 27000, fragLimit: 20 },
   respawnDelayTicks: 90,
   capacity: 8,

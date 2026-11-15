@@ -1,9 +1,10 @@
-#include "port/web/ffa.h"
 #include "net_state.h"
 #include "interpolation.h"
 #include "net_match.h"
 #include "net_state_fields.h"
 #include "participant.h"
+#include "port/web/ffa.h"
+#include "src/modules/car/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
 #include "tm4/main/pad.h"
@@ -22,8 +23,9 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(17); /* State record schema. */
+    VALUE(18); /* State record schema. */
     VALUE(WebNetFfaRespawnDelay());
+    VALUE(WebNetBotSlots());
     VALUE(WebNetFfaTimeLimit());
     VALUE(WebNetFfaFragLimit());
     const WebFfaResult ffa = WebFfaCapture();
@@ -91,6 +93,8 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
 
     output.checksum = &result.cars;
     result.unsupported = WebNetWriteCars(hash);
+    if (!result.unsupported)
+        result.unsupported = WebNetAiBlocker();
 
     output.checksum = &result.objects;
     VALUE(ObjectNextSerial);
@@ -122,6 +126,24 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
         VALUE(CollisionPolygonEnabled(polygon));
         VALUE(handle(polygon->owner));
     }
+    VALUE(CarPathSearchGeneration);
+    VALUE(CarRandomSearchGeneration[0]);
+    VALUE(CarHealthSearchGeneration);
+    VALUE(aiWorldInfo.resource.node_count);
+    for (u32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
+        const CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+        VALUE(node->enabled);
+        VALUE(node->cost);
+        VALUE(node->search_generation);
+        VALUE(node->path_depth);
+        VALUE(node->search_state);
+        VALUE(node->predecessor);
+        VALUE(node->previous);
+        VALUE(node->next);
+    }
+    for (u32 i = 0; i < aiWorldInfo.resource.area_count; ++i)
+        for (u32 edge = 0; edge < aiWorldInfo.areas[i].edge_count; ++edge)
+            VALUE(aiWorldInfo.areas[i].edges[edge].enabled);
     return result;
 }
 

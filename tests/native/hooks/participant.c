@@ -495,3 +495,111 @@ void WebTestApplyParticipantActions(void)
         }
     }
 }
+
+/* Observe the original AI without replacing its decisions. */
+EMSCRIPTEN_KEEPALIVE s32 WebTestAiState(s32 slot, s32 field)
+{
+    Car* car = WebNetSlotOccupied(slot) ? GameInfo.players[slot].car : NULL;
+    if (!car)
+        return -1;
+    switch (field) {
+    case 0:
+        return car->control_kind;
+    case 1:
+        return WebSnapshotCarAiStateId(car->ai_state_callback);
+    case 2:
+        return car->ai.path_count;
+    case 3:
+        return car->ai.path_index;
+    case 4:
+        return WebSnapshotLiveHandle(car->ai.target);
+    case 5:
+        return car->ai.selected_node;
+    case 6:
+        return car->controls.weapon_pressed;
+    case 7:
+        return car->ai.targeting_count;
+    case 8:
+        return car->health;
+    case 9:
+        return aiWorldInfo.enabled && car->ai_config.enabled;
+    case 10:
+        return car->ai.update_slot;
+    case 11:
+        return car->ai_saved_state_callback != NULL;
+    case 12:
+        return car->ai.nearby_list != NULL;
+    case 13:
+        return car->ai.target_entry != NULL;
+    case 14:
+        return CarPathSearchGeneration;
+    case 15:
+        return CarRandomSearchGeneration[0];
+    case 16:
+        return CarHealthSearchGeneration;
+    case 18:
+        return car->ai.fire_ticks;
+    case 19:
+        return car->ai.weapon_press_ticks;
+    case 20:
+        return car->ai.nearby_list ? car->ai.nearby_list->distance : -1;
+    case 21:
+        return car->ai.nearby_list ? car->ai.nearby_list->angle : -9999;
+    case 22:
+        return car->ai_config.far_distance;
+    case 23:
+        return car->weapons[car->controls.selected_weapon].amount;
+    case 24: {
+        s32 count = 0;
+        const WebParticipantId source = WebParticipantObjectIdentity(car);
+        for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list)
+            for (Tm4ObjectHeader* object = ObjectLists[list].first; object; object = object->next)
+                if (object->participant.low == source.low && object->participant.high == source.high
+                    && (!strcmp(object->name, "weaponProjectile") || !strcmp(object->name, "bullet")
+                        || !strcmp(object->name, "weaponBomb")))
+                    ++count;
+        return count;
+    }
+    case 17: {
+        s32 latest = 0;
+        for (s32 weapon = 0; weapon < CarWeaponCount; ++weapon)
+            if (car->weapons[weapon].next_time > latest)
+                latest = car->weapons[weapon].next_time;
+        return latest;
+    }
+    default:
+        return -1;
+    }
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestAiSearch(s32 kind, s16 start, s16 end)
+{
+    s16 path[CAR_AI_PATH_CAPACITY], selected;
+    if (!aiWorldInfo.enabled || start < 0 || start >= aiWorldInfo.resource.node_count || end < 0
+        || end >= aiWorldInfo.resource.node_count)
+        return -1;
+    if (kind == 0)
+        return CarAiFindShortestPath(path, start, end);
+    if (kind == 1)
+        return CarAiFindRandomPath(path, start, 15);
+    if (kind == 2 && CarHealthPickupCount)
+        return CarAiFindHealthPickup(path, &selected, start);
+    return -1;
+}
+
+CarAiStateTransition CarAiRecoverFromObstacle(Car* car);
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestAiRecovery(s32 slot)
+{
+    Car* car = WebNetSlotOccupied(slot) ? GameInfo.players[slot].car : NULL;
+    if (!car || car->control_kind != CAR_CONTROL_ENEMY)
+        return 0;
+    /* Controlled obstacle fixture enters through the original transition predicate. */
+    car->freeze_ticks = 0;
+    car->ai.probe_length = 0;
+    car->ai.recovery_delay = 0;
+    if (!CarAiCheckRecovery(car))
+        return 0;
+    car->ai_state_callback = CarAiRecoverFromObstacle;
+    return car->ai_saved_state_callback != NULL;
+}

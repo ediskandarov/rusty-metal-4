@@ -116,7 +116,7 @@ impl Match {
                     .iter()
                     .enumerate()
                     .find(|(slot, player)| {
-                        self.participants.contains(*slot) && player.connection.is_none()
+                        self.participants.human(*slot) && player.connection.is_none()
                     })
                     .map(|(slot, _)| slot)
                 {

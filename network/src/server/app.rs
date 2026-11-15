@@ -153,7 +153,14 @@ pub(crate) fn run_match(
         app.update();
         thread::sleep(Duration::from_millis(1));
     }
-    println!("Lightyear listening on ws://{addr} for {count} players");
+    println!(
+        "Lightyear listening on ws://{addr} for {count} participants ({} human clients)",
+        app.world()
+            .resource::<Match>()
+            .participants
+            .human_slots()
+            .count()
+    );
     if let Some(launcher) = launcher {
         launcher.phase(
             "lobby",

@@ -46,14 +46,19 @@ impl MembershipPredictionFixture {
         world.resource_mut::<LocalTimeline>().apply_delta(10);
         let anchor = world.resource::<LocalTimeline>().tick();
         let mask = start.slot_mask();
+        let bot_mask = start.bot_mask();
         prepare(
             world,
             mask,
             start.participants.clone(),
             start.model_pool,
             false,
+            bot_mask,
         );
         for (&slot, participant) in start.slots.iter().zip(start.participants) {
+            if bot_mask & (1 << slot) != 0 {
+                continue;
+            }
             let entity = world
                 .spawn((
                     ControllerIdentity { slot, participant },

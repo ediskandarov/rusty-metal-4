@@ -117,6 +117,7 @@ impl Session {
 #[derive(Resource, Default)]
 pub struct LivePrediction {
     pub expected_slot_mask: Option<u8>,
+    bot_mask: u8,
     expected_participants: Vec<crate::protocol::ParticipantId>,
     prepared_pool: Vec<String>,
     plans: BTreeMap<u32, Vec<MembershipChange>>,
@@ -168,6 +169,9 @@ impl LivePrediction {
     // A reserved controller has no input timeline. Admission supplies its
     // neutral pre-activation boundary before Lightyear receives the first row.
     pub fn input_origin(&self, identity: ControllerIdentity) -> Option<Option<Tick>> {
+        if identity.slot < 8 && self.bot_mask & (1 << identity.slot) != 0 {
+            return None;
+        }
         if let Some(mask) = self.expected_slot_mask {
             let index = (0..identity.slot.min(8))
                 .filter(|slot| mask & (1 << slot) != 0)
@@ -321,6 +325,7 @@ impl LivePrediction {
                         participant,
                     })
                 })
+                .filter(|identity| state.bot_mask & (1 << identity.slot) == 0)
                 .any(|identity| {
                     frontier
                         .get(&identity)
@@ -431,10 +436,12 @@ pub fn prepare(
     participants: Vec<crate::protocol::ParticipantId>,
     prepared_pool: Vec<String>,
     resuming: bool,
+    bot_mask: u8,
 ) {
     {
         let mut state = world.resource_mut::<LivePrediction>();
         state.expected_slot_mask = Some(slot_mask);
+        state.bot_mask = bot_mask;
         state.expected_participants = participants;
         state.prepared_pool = prepared_pool;
         if state
@@ -491,10 +498,11 @@ pub fn ready(world: &mut World) -> bool {
                 .count_ones() as usize;
             identity.slot < 8
                 && expected & (1 << identity.slot) != 0
+                && state.bot_mask & (1 << identity.slot) == 0
                 && state.expected_participants.get(index) == Some(&identity.participant)
         })
         .count()
-        == expected.count_ones() as usize
+        == (expected & !world.resource::<LivePrediction>().bot_mask).count_ones() as usize
         && world
             .query_filtered::<Entity, With<InputMarker<ControllerCommand>>>()
             .iter(world)
@@ -606,6 +614,7 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
     let mut present = [false; MAX_SLOTS];
     let mut participants = std::collections::HashSet::new();
     let dynamic = world.resource::<LivePrediction>().dynamic_membership;
+    let bot_mask = world.resource::<LivePrediction>().bot_mask;
     let expected = &world.resource::<LivePrediction>().expected_participants;
     let bindings: Vec<_> = (0..session.capacity)
         .filter(|slot| session.contains(*slot))
@@ -623,6 +632,7 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
             continue;
         }
         if !session.contains(identity.slot)
+            || bot_mask & (1 << identity.slot) != 0
             || !bindings.contains(&(identity.slot, identity.participant))
             || present[slot]
             || !participants.insert(identity.participant)
@@ -632,11 +642,9 @@ fn validate_native_roster(world: &mut World, session: Session) -> Result<(), &'s
         }
         present[slot] = true;
     }
-    if present
-        .iter()
-        .enumerate()
-        .any(|(slot, present)| *present != session.contains(slot as u8))
-    {
+    if present.iter().enumerate().any(|(slot, present)| {
+        *present != (session.contains(slot as u8) && bot_mask & (1 << slot) == 0)
+    }) {
         return Err("A native controller slot was not replicated before play");
     }
     let local: Vec<_> = world
@@ -666,6 +674,7 @@ fn start_at(
         || world.resource::<LivePrediction>().session.is_some()
         || world.resource::<LivePrediction>().expected_slot_mask != Some(session.mask)
         || !(2..=8).contains(&session.capacity)
+        || (world.resource::<LivePrediction>().bot_mask & (1 << session.local_slot.min(7)) != 0)
         || (session.local_slot >= session.capacity
             || (!session.contains(session.local_slot)
                 && !world.resource::<LivePrediction>().dynamic_membership))
@@ -802,6 +811,11 @@ fn step_world(
     state.expected_slot_mask = Some(session.mask);
     state.expected_participants = bindings.into_iter().flatten().collect();
     let mut inputs = [None; MAX_SLOTS];
+    for slot in 0..session.capacity {
+        if session.contains(slot) && state.bot_mask & (1 << slot) != 0 {
+            inputs[slot as usize] = Some(Input::default());
+        }
+    }
     for (identity, accepted, mut buffer) in &mut slots {
         let slot = identity.slot;
         if slot >= session.capacity || bindings[usize::from(slot)] != Some(identity.participant) {
@@ -936,6 +950,7 @@ fn update_prediction_wait(
     } else {
         return;
     };
+    let slots = slots & !state.bot_mask;
     if state.restoring || state.error.is_some() {
         return;
     }
@@ -1127,6 +1142,32 @@ mod tests {
             checksums: (32..=48).map(row).collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn original_ai_confirmation_does_not_require_a_fake_controller_frontier() {
+        let mut state = state();
+        state.bot_mask = 2;
+        let mut frontier = frontiers(Some(session().anchor + 48));
+        frontier.remove(&ControllerIdentity {
+            participant: ParticipantId(2),
+            slot: 1,
+        });
+        assert_eq!(
+            state
+                .verify_confirmations(session(), &frontier, vec![frame(32)])
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(state.confirmed, 32);
+        assert_eq!(
+            state.input_origin(ControllerIdentity {
+                participant: ParticipantId(2),
+                slot: 1
+            }),
+            None
+        );
     }
 
     #[test]

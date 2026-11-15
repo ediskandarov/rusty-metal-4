@@ -44,7 +44,7 @@ import { Content as SetupInstructions } from "../content/setup.md";
       </form>
       <form id="match-options">
         <label>
-          Players
+          Human players
           <select id="player-count" disabled>
             <option value="1">1</option>
             <option value="2" selected>
@@ -64,6 +64,13 @@ import { Content as SetupInstructions } from "../content/setup.md";
             <option value="">Prepare resources to load maps</option>
           </select>
         </label>
+        <label>
+          Original AI opponent
+          <select id="bot" disabled>
+            <option value="">None</option>
+          </select>
+        </label>
+        <p>Choose one AI opponent to play with one human. Empty seats stay empty.</p>
         <button id="start" type="submit" disabled>
           Open match
         </button>

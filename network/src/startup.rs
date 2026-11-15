@@ -41,6 +41,17 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     if !(1..=MAX_PLAYERS).contains(&count) {
         return Err("Expected a player count from 1 to 8".into());
     }
+    let command_bot = match args.next() {
+        None => None,
+        Some(flag) if flag == "--bot" && !serve && count == 1 => Some(
+            args.next()
+                .ok_or("Expected an original-AI car model after --bot")?,
+        ),
+        _ => return Err("Use --bot MODEL with a one-human standalone match".into()),
+    };
+    if args.next().is_some() {
+        return Err("Unexpected match setup argument".into());
+    }
     let addr: SocketAddr = env::var("TM4_MATCH_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8122".into())
         .parse()?;
@@ -56,7 +67,8 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let (count, selected_world, room_roster, limits, simulator) = if let Some(launcher) = &launcher
+    let (count, selected_world, room_roster, limits, bot, simulator) = if let Some(launcher) =
+        &launcher
     {
         loop {
             let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
@@ -77,6 +89,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                         Some(setup.world),
                         setup.roster,
                         setup.limits,
+                        setup.bot,
                         simulator,
                     );
                 }
@@ -91,6 +104,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
             None,
             Vec::new(),
             Default::default(),
+            command_bot,
             simulator::Simulator::from_environment()?,
         )
     };
@@ -99,8 +113,14 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     } else {
         room_roster.len()
     };
-    let participants =
+    let mut participants =
         ParticipantRoster::new(MAX_PLAYERS, &(0..initial_count).collect::<Vec<_>>())?;
+    if let Some(model) = bot {
+        if !simulator.catalog.cars.contains(&model) {
+            return Err("Bot model is unavailable".into());
+        }
+        participants.add_bot(model)?;
+    }
     if !room_roster.is_empty() && !(1..=count).contains(&room_roster.len()) {
         return Err("Room members do not match the prepared participant roster".into());
     }
