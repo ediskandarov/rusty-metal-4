@@ -177,9 +177,8 @@ impl Match {
             || self.tick == 0
             || self.ended
             || self
-                .last_state
-                .as_ref()
-                .is_some_and(|state| state.round_finished || state.next_mode != 0)
+                .battle_progress()
+                .is_some_and(|progress| progress != super::BattleProgress::Playing)
             || self.prediction.anchor.is_none()
             || !self
                 .session
@@ -367,19 +366,9 @@ impl Match {
             send(
                 links,
                 connection,
-                &if let Some(state) = self
-                    .last_state
-                    .as_ref()
-                    .filter(|state| self.ended && state.completion.reasons != 0)
-                {
-                    Message::Finished {
-                        state: state.clone(),
-                    }
-                } else {
-                    Message::Error {
-                        message: "This admission preparation was cancelled.".into(),
-                    }
-                },
+                &self.final_message().unwrap_or_else(|| Message::Error {
+                    message: "This admission preparation was cancelled.".into(),
+                }),
             );
         }
         self.retire_live(identity, commands);
@@ -399,17 +388,16 @@ impl Match {
             let (_, entity) = self.membership.retired.pop_front().unwrap();
             commands.entity(entity).try_despawn();
         }
-        let round_finished = self
-            .last_state
-            .as_ref()
-            .is_some_and(|state| state.round_finished);
+        let admission_closed = self
+            .battle_progress()
+            .is_some_and(|progress| progress != super::BattleProgress::Playing);
         let expired: Vec<_> = self
             .participants
             .all_slots()
             .filter(|slot| self.participants.joining(*slot))
             .filter(|slot| {
                 self.ended
-                    || round_finished
+                    || admission_closed
                     || self
                         .membership
                         .pending

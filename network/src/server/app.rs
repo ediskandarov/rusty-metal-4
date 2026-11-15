@@ -1,5 +1,5 @@
 use super::{
-    AcceptedTimeline, ControllerState, MIN_PARTICIPANTS, Match, ParticipantRoster, STEP,
+    AcceptedTimeline, ControllerState, Match, ParticipantRoster, STEP,
     control::{Admission, accept_native_inputs, bound_reliable_history, reap_closed_links},
     tick::update,
 };
@@ -37,9 +37,12 @@ pub(crate) fn run_match(
 ) -> Result<(), Box<dyn Error>> {
     let count = participants.count();
     let capacity = participants.capacity();
-    if !(MIN_PARTICIPANTS..=capacity).contains(&count) {
-        return Err("FFA needs at least one prepared participant".into());
-    }
+    let humans = participants.human_slots().count();
+    mode.validate_roster(&tm4_network::modes::PreparedRoster {
+        capacity,
+        humans,
+        bots: count - humans,
+    })?;
     let compatibility = simulator.compatibility.clone();
     let catalog = simulator.catalog.clone();
     let mut app = App::new();
@@ -202,11 +205,7 @@ pub(crate) fn run_match(
                     );
                 }
                 if game.ended {
-                    if game
-                        .last_state
-                        .as_ref()
-                        .is_some_and(|state| state.completion.reasons != 0 || state.next_mode != 0)
-                    {
+                    if game.result_state().is_some() {
                         let mut result = launcher.results.lock().unwrap();
                         if result.is_none() {
                             *result = game.final_result(
@@ -217,16 +216,29 @@ pub(crate) fn run_match(
                             );
                         }
                         status.phase = "results".into();
-                        status.message =
-                            "Match finished. Restart the server to prepare the next match.".into();
+                        status.message = game
+                            .mode
+                            .status_message(super::BattleProgress::Completed)
+                            .into();
                     } else {
                         status.phase = "closed".into();
-                        status.message =
-                            "Match stopped. Restart the server to prepare a new match.".into();
+                        status.message = if game.battle_progress()
+                            == Some(super::BattleProgress::TransitionRequested)
+                        {
+                            tm4_network::modes::TRANSITION_MESSAGE.into()
+                        } else {
+                            "Match stopped. Restart the server to prepare a new match.".into()
+                        };
                     }
                 } else if game.started && game.tick > 0 {
                     status.phase = "match".into();
-                    status.message = "Live admission uses the prepared model pool; existing participants can reconnect.".into();
+                    status.message = game
+                        .mode
+                        .status_message(
+                            game.battle_progress()
+                                .unwrap_or(super::BattleProgress::Playing),
+                        )
+                        .into();
                 }
             }
         }

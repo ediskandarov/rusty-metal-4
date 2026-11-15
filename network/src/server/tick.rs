@@ -1,5 +1,5 @@
 use super::{
-    MIN_PARTICIPANTS, Match, STEP,
+    Match, STEP,
     control::{Admission, bind_controllers, receive_requests, send},
     prediction::PredictionStart,
 };
@@ -92,7 +92,7 @@ fn prepare_session(
     }
     if game.ended
         || (!game.started
-            && (game.participants.count() < MIN_PARTICIPANTS
+            && (game.validate_start_roster().is_err()
                 || game.controls.iter().enumerate().any(|(slot, player)| {
                     game.participants.human(slot)
                         && (player.connection.is_none()

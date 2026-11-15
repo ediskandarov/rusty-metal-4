@@ -1,4 +1,6 @@
-use super::{INVALID_LIMITS, SessionParameters, StartSettings, prepared_model_pool};
+use super::{
+    INVALID_LIMITS, PreparedRoster, SessionParameters, StartSettings, prepared_model_pool,
+};
 use crate::protocol::{FfaLimits, SessionStart};
 
 const INITIAL_WORLD: &str = "Construction Yard";
@@ -40,4 +42,14 @@ pub(super) fn valid_session(session: &SessionStart) -> bool {
 
 pub(super) fn check_live_membership() -> Result<(), &'static str> {
     Err("Tournament participants are fixed until the battle ends.")
+}
+
+pub(super) const PLAYING_MESSAGE: &str =
+    "Tournament participants are fixed for this battle; existing participants can reconnect.";
+
+pub(super) fn validate_roster(roster: &PreparedRoster) -> Result<(), &'static str> {
+    if roster.humans != 2 || roster.bots != 0 {
+        return Err("Tournament requires two prepared human participants and no lobby bots.");
+    }
+    Ok(())
 }

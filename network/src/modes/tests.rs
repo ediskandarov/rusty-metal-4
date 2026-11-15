@@ -104,3 +104,46 @@ fn session_validation_keeps_mode_rules_and_common_slot_guards() {
         );
     }
 }
+
+#[test]
+fn roster_rules_distinguish_humans_from_bots_and_enforce_capacity() {
+    for (humans, bots, ffa, tournament) in [
+        (0, 0, false, false),
+        (0, 2, false, false),
+        (1, 0, true, false),
+        (1, 7, true, false),
+        (2, 0, true, true),
+        (2, 1, true, false),
+        (8, 0, true, false),
+        (8, 1, false, false),
+        (9, 0, false, false),
+    ] {
+        let roster = PreparedRoster {
+            capacity: 8,
+            humans,
+            bots,
+        };
+        assert_eq!(
+            MatchMode::Ffa.validate_roster(&roster).is_ok(),
+            ffa,
+            "{humans} humans, {bots} bots"
+        );
+        assert_eq!(
+            MatchMode::Tournament.validate_roster(&roster).is_ok(),
+            tournament
+        );
+    }
+    for capacity in [0, 1, 9] {
+        let roster = PreparedRoster {
+            capacity,
+            humans: 2,
+            bots: 0,
+        };
+        assert!(MatchMode::Ffa.validate_roster(&roster).is_err());
+        assert!(MatchMode::Tournament.validate_roster(&roster).is_err());
+    }
+    assert_ne!(
+        MatchMode::Ffa.status_message(BattleProgress::Playing),
+        MatchMode::Tournament.status_message(BattleProgress::Playing)
+    );
+}

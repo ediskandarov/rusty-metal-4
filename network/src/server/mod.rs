@@ -20,6 +20,7 @@ use std::{
     path::PathBuf,
     time::{Duration, Instant},
 };
+use tm4_network::modes::{self, BattleProgress, PreparedRoster};
 use tm4_network::protocol as game_protocol;
 use tm4_network::{
     input::{Input, InputHistory},
@@ -30,7 +31,6 @@ use tm4_network::{
 
 const TICK_RATE: u64 = 30;
 const STEP: Duration = Duration::from_nanos(1_000_000_000 / TICK_RATE);
-const MIN_PARTICIPANTS: usize = 1;
 
 // Connection, synchronization and command acceptance outlive individual links,
 // but are independent of participant data and its gameplay-slot binding.
@@ -98,11 +98,34 @@ struct Match {
 }
 
 impl Match {
-    fn final_result(&self, session_id: &str) -> Option<web::MatchResult> {
-        let state = self.last_state.as_ref()?;
-        if !self.ended || state.completion.reasons == 0 {
+    fn validate_start_roster(&self) -> Result<(), &'static str> {
+        let humans = self.participants.human_slots().count();
+        self.mode.validate_roster(&PreparedRoster {
+            capacity: self.participants.capacity(),
+            humans,
+            bots: self.participants.count() - humans,
+        })
+    }
+
+    fn battle_progress(&self) -> Option<BattleProgress> {
+        self.last_state.as_ref().map(BattleProgress::from_state)
+    }
+
+    fn result_state(&self) -> Option<&RoundState> {
+        self.last_state.as_ref().filter(|state| {
+            self.ended && BattleProgress::from_state(state) == BattleProgress::Completed
+        })
+    }
+
+    fn final_message(&self) -> Option<Message> {
+        if !self.ended {
             return None;
         }
+        self.last_state.as_ref().and_then(modes::final_message)
+    }
+
+    fn final_result(&self, session_id: &str) -> Option<web::MatchResult> {
+        let state = self.result_state()?;
         Some(web::MatchResult {
             session_id: session_id.into(),
             completion: state.completion.clone(),
@@ -196,7 +219,7 @@ impl Match {
             return;
         }
         self.tick += 1;
-        self.ended = state.completion.reasons != 0 || state.next_mode != 0;
+        self.ended = BattleProgress::from_state(&state).stops_simulation();
         if self.ended && !self.finish_journal(journal::End::Finished) {
             self.fail(links, "The match journal could not be finalized.");
             return;
@@ -207,16 +230,13 @@ impl Match {
             inputs,
             state: state.clone(),
         };
+        let final_message = modes::final_message(&state);
         for player in &mut self.controls {
-            if self.ended && player.resume.is_some() {
+            if player.resume.is_some()
+                && let Some(message) = &final_message
+            {
                 if let Some(entity) = player.connection {
-                    send(
-                        links,
-                        entity,
-                        &Message::Finished {
-                            state: state.clone(),
-                        },
-                    );
+                    send(links, entity, message);
                 }
             } else if let Some(attempt) = player.resume.as_mut() {
                 if attempt.target.is_some_and(|target| tick >= target) {

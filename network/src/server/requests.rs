@@ -204,18 +204,9 @@ impl Match {
                         .session
                         .as_ref()
                         .is_some_and(|session| session.compatibility == compatibility)
-                    && let Some(state) = self
-                        .last_state
-                        .as_ref()
-                        .filter(|state| state.completion.reasons != 0)
+                    && let Some(message) = self.final_message()
                 {
-                    send(
-                        links,
-                        entity,
-                        &Message::Finished {
-                            state: state.clone(),
-                        },
-                    );
+                    send(links, entity, &message);
                     return;
                 }
                 let session = self.session.as_ref().filter(|session| {

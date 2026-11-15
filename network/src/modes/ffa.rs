@@ -1,4 +1,6 @@
-use super::{INVALID_LIMITS, SessionParameters, StartSettings, prepared_model_pool};
+use super::{
+    INVALID_LIMITS, PreparedRoster, SessionParameters, StartSettings, prepared_model_pool,
+};
 use crate::protocol::{FfaLimits, SessionStart};
 use serde::Deserialize;
 
@@ -56,4 +58,14 @@ pub(super) fn session_parameters(
 
 pub(super) fn valid_session(session: &SessionStart) -> bool {
     session.limits.valid() && (1..=3600).contains(&session.respawn_delay_ticks)
+}
+
+pub(super) const PLAYING_MESSAGE: &str =
+    "Live admission uses the prepared model pool; existing participants can reconnect.";
+
+pub(super) fn validate_roster(roster: &PreparedRoster) -> Result<(), &'static str> {
+    if roster.humans == 0 {
+        return Err("FFA needs at least one prepared human participant.");
+    }
+    Ok(())
 }

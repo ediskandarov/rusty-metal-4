@@ -1,7 +1,15 @@
+mod battle;
+pub use battle::{BattleProgress, TRANSITION_MESSAGE, final_message};
 pub mod ffa;
 mod tournament;
 
 use crate::protocol::{FfaLimits, MAX_PLAYERS, MatchMode, SessionStart};
+
+pub struct PreparedRoster {
+    pub capacity: usize,
+    pub humans: usize,
+    pub bots: usize,
+}
 
 pub struct StartSettings<'a> {
     pub human_capacity: usize,
@@ -21,6 +29,35 @@ const INVALID_LIMITS: &str =
     "FFA requires positive time and frag limits; tournament uses original rules";
 
 impl MatchMode {
+    pub fn validate_roster(self, roster: &PreparedRoster) -> Result<(), &'static str> {
+        if !(1..=MAX_PLAYERS).contains(&roster.capacity)
+            || roster.humans > roster.capacity
+            || roster.bots > roster.capacity - roster.humans
+        {
+            return Err("Participants do not fit within the gameplay slots.");
+        }
+        match self {
+            Self::Ffa => ffa::validate_roster(roster),
+            Self::Tournament => tournament::validate_roster(roster),
+        }
+    }
+
+    pub fn status_message(self, progress: BattleProgress) -> &'static str {
+        match progress {
+            BattleProgress::Playing => match self {
+                Self::Ffa => ffa::PLAYING_MESSAGE,
+                Self::Tournament => tournament::PLAYING_MESSAGE,
+            },
+            BattleProgress::RoundOver => {
+                "The round is ending; waiting for the confirmed match result."
+            }
+            BattleProgress::Completed => {
+                "Match finished. Restart the server to prepare the next match."
+            }
+            BattleProgress::TransitionRequested => TRANSITION_MESSAGE,
+        }
+    }
+
     pub fn validate_start(self, settings: &StartSettings<'_>) -> Result<FfaLimits, &'static str> {
         match self {
             Self::Ffa => ffa::validate_start(settings),

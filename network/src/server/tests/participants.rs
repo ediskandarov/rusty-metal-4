@@ -1515,3 +1515,74 @@ fn tournament_preserves_membership_inspection_but_rejects_live_changes() {
         2
     );
 }
+
+#[test]
+fn battle_signals_distinguish_round_end_results_and_engine_transitions() {
+    use tm4_network::modes::{BattleProgress, final_message};
+    for reasons in [0, 1, 2, 3, 4, 8] {
+        for round_finished in [false, true] {
+            for next_mode in [0, 1] {
+                let mut game = game();
+                let state = game.last_state.as_mut().unwrap();
+                state.completion.reasons = reasons;
+                state.completion.tick = if reasons == 0 { 0 } else { 100 };
+                state.round_finished = round_finished;
+                state.next_mode = next_mode;
+                let expected = if reasons != 0 {
+                    BattleProgress::Completed
+                } else if next_mode != 0 {
+                    BattleProgress::TransitionRequested
+                } else if round_finished {
+                    BattleProgress::RoundOver
+                } else {
+                    BattleProgress::Playing
+                };
+                assert_eq!(BattleProgress::from_state(state), expected);
+                assert_eq!(expected.stops_simulation(), reasons != 0 || next_mode != 0);
+                let notification = final_message(state);
+                match (reasons, next_mode, notification) {
+                    (1.., _, Some(Message::Finished { state })) => {
+                        assert_eq!(state.completion.reasons, reasons);
+                    }
+                    (0, 1, Some(Message::Error { .. })) => {}
+                    (0, 0, None) => {}
+                    _ => panic!("unexpected terminal notification"),
+                }
+                assert!(game.final_result("match").is_none());
+                assert!(game.final_message().is_none());
+                game.ended = expected.stops_simulation();
+                assert_eq!(game.final_result("match").is_some(), reasons != 0);
+                assert_eq!(
+                    game.final_message().is_some(),
+                    reasons != 0 || next_mode != 0
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn round_end_closes_ffa_admission_without_publishing_premature_results() {
+    let mut world = World::new();
+    let mut game = live_game();
+    let pending = game.reserve_live().unwrap();
+    game.last_state.as_mut().unwrap().round_finished = true;
+    assert!(game.reserve_live().is_err());
+    assert!(!game.ended);
+    assert!(game.final_result("match").is_none());
+    assert!(game.final_message().is_none());
+    world.insert_resource(game);
+    world
+        .run_system_once(
+            |mut game: ResMut<Match>,
+             mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+             mut commands: Commands| {
+                game.maintain_membership(&mut links, &mut commands);
+            },
+        )
+        .unwrap();
+    let game = world.resource::<Match>();
+    assert!(!game.participants.joining(usize::from(pending.slot)));
+    assert!(game.membership.pending.is_empty());
+    assert!(!game.ended);
+}
