@@ -1,7 +1,13 @@
 import { getBuildManifest } from "@tm4/lightyear-client";
 import { playerMessageSchema, type RoomAction, type RoomCommand } from "@tm4/room-player-protocol";
 
-import { roomCarChoices, roomMember, roomSelectedCar, type RoomStore } from "./state/room.ts";
+import {
+  roomCarChoices,
+  roomMember,
+  roomSelectedCar,
+  type RoomStore,
+  roomTournamentStatus,
+} from "./state/room.ts";
 
 export function matchControls(id: string, store: RoomStore) {
   const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -17,6 +23,7 @@ export function matchControls(id: string, store: RoomStore) {
   let delivered: { sessionId: string; action: "upload" | "join" } | null = null;
   let sentStatus: string | null = null;
   let selectionId: string | null = null;
+  let sentSelectionStatus: string | null = null;
   const send = (value: RoomAction) =>
     frame.contentWindow?.postMessage(
       { type: "rm4-room", roomId: id, ...value } satisfies RoomCommand,
@@ -94,6 +101,7 @@ export function matchControls(id: string, store: RoomStore) {
       delivered = null;
       sentStatus = null;
       selectionId = null;
+      sentSelectionStatus = null;
       return;
     }
     if (state.runtime === "available" && !frame.hasAttribute("src")) {
@@ -120,6 +128,16 @@ export function matchControls(id: string, store: RoomStore) {
     } else if ((!disc || !tournament) && selectionId) {
       send({ action: "car-selection", requestId: selectionId, enabled: false });
       selectionId = null;
+      sentSelectionStatus = null;
+    }
+    if (selectionId) {
+      const status = roomTournamentStatus(state);
+      const signature = JSON.stringify(status);
+      if (sentSelectionStatus !== signature) {
+        sentSelectionStatus = signature;
+        send({ action: "car-selection-status", requestId: selectionId, status });
+      }
+      el("player-status").textContent = status.title + ". " + status.message;
     }
     car.closest("label")!.hidden = tournament;
     ready.hidden = tournament;
@@ -227,6 +245,7 @@ export function matchControls(id: string, store: RoomStore) {
         break;
       case "unloaded":
         selectionId = null;
+        sentSelectionStatus = null;
         delivered = null;
         sentStatus = null;
         store.getState().playerLoaded(null);

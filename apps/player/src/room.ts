@@ -47,6 +47,7 @@ export async function roomPlayerReady(engine: GameModule, sources: DiscSources):
   const id = roomId;
   selection?.stop();
   selection = null;
+  document.getElementById("tournament-status")!.hidden = true;
   playerEngine = engine;
   session?.dispose();
   session = createRoomSession({
@@ -68,12 +69,22 @@ if (inRoom) {
     const parsed = roomCommandSchema.safeParse(event.data);
     if (!parsed.success || parsed.data.roomId !== roomId) return;
     const command = parsed.data;
+    if (command.action === "car-selection-status") {
+      if (selection?.id !== command.requestId) return;
+      const panel = document.getElementById("tournament-status")!;
+      panel.hidden = false;
+      panel.dataset.phase = command.status.phase;
+      document.getElementById("tournament-status-title")!.textContent = command.status.title;
+      document.getElementById("tournament-status-message")!.textContent = command.status.message;
+      return;
+    }
     if (command.action === "car-selection") {
       if (!playerEngine) return;
       if (!command.enabled) {
         if (selection?.id === command.requestId) {
           selection.stop();
           selection = null;
+          document.getElementById("tournament-status")!.hidden = true;
           document.getElementById("status")!.hidden = false;
           matchStatus(document.getElementById("status")!)(
             "lobby",
@@ -88,19 +99,13 @@ if (inRoom) {
         const stop = selectTournamentCar(playerEngine, (car) => {
           if (selection?.id === command.requestId) {
             notify({ event: "car-selection", requestId: command.requestId, car });
-            notify({
-              event: "status",
-              sessionId: null,
-              message: car
-                ? `${car} confirmed. Use Back in the game to change your choice.`
-                : "Choose your car in the game, then press Done.",
-            });
           }
         });
         selection = { id: command.requestId, stop };
         document.getElementById("status")!.hidden = true;
       } catch (error) {
         selection = null;
+        document.getElementById("tournament-status")!.hidden = true;
         document.getElementById("status")!.hidden = false;
         matchStatus(document.getElementById("status")!)("error", String(error));
       }
@@ -111,6 +116,7 @@ if (inRoom) {
       if (command.action === "status" || command.action === "stop") return;
       selection.stop();
       selection = null;
+      document.getElementById("tournament-status")!.hidden = true;
     }
     document.getElementById("status")!.hidden = false;
     session?.handle(command);

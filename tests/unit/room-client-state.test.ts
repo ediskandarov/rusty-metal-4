@@ -7,6 +7,7 @@ import {
   createRoomStore,
   roomCarChoices,
   roomSelectedCar,
+  roomTournamentStatus,
 } from "../../apps/rustymetal4.com/src/state/room.ts";
 
 function deferred<T>() {
@@ -407,11 +408,15 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     messages.length = 0;
     // Version 11 ended the FFA match while this client was disconnected.
     store.getState().receive({ ...snapshot(12), modeId: "tournament", capacity: 2 });
-    expect(messages.map(({ action }) => action)).toEqual(["stop", "car-selection"]);
+    expect(messages.map(({ action }) => action)).toEqual([
+      "stop",
+      "car-selection",
+      "car-selection-status",
+    ]);
     expect(messages[0]?.sessionId).toBe(match.id);
     expect(messages[1]?.enabled).toBe(true);
     store.setState({ playerStatus: "Refreshed" });
-    expect(messages).toHaveLength(2);
+    expect(messages).toHaveLength(3);
   } finally {
     dispose?.();
     for (const [key, descriptor] of originals) {
@@ -419,4 +424,44 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
       else Reflect.deleteProperty(globalThis, key);
     }
   }
+});
+
+test("tournament waiting status follows confirmed room state rather than local Done", () => {
+  const { store } = setup();
+  const current: RoomSnapshot = { ...snapshot(10), modeId: "tournament", capacity: 2 };
+  store.setState({ room: current, connection: "live", playerNeedsSync: false });
+  expect(roomTournamentStatus(store.getState()).phase).toBe("choosing");
+  store.setState({ tournamentChoice: { car: "Calypso" }, operation: "player" });
+  expect(roomTournamentStatus(store.getState()).phase).toBe("confirming");
+  store.setState({ operation: null });
+  expect(roomTournamentStatus(store.getState()).phase).toBe("choosing");
+  current.participants[0]!.ready = true;
+  store.getState().receive({ ...current, version: 11 });
+  expect(roomTournamentStatus(store.getState()).message).toContain("second player to join");
+  const guest = { ...current.participants[0]!, id: "guest", name: "Guest", ready: false };
+  store
+    .getState()
+    .receive({ ...current, version: 12, participants: [...current.participants, guest] });
+  expect(roomTournamentStatus(store.getState()).message).toContain("Guest to choose");
+  store.getState().receive({
+    ...current,
+    version: 13,
+    participants: [...current.participants, { ...guest, ready: true }],
+  });
+  expect(roomTournamentStatus(store.getState()).phase).toBe("ready");
+  store.setState({ connection: "reconnecting" });
+  expect(roomTournamentStatus(store.getState()).phase).toBe("reconnecting");
+  store.setState({ connection: "live" });
+  store.getState().receive({
+    ...current,
+    version: 14,
+    participants: [...current.participants, { ...guest, connected: false }],
+  });
+  expect(roomTournamentStatus(store.getState()).message).toContain("Guest to reconnect");
+  store.setState({ errors: { ...store.getState().errors, player: "Resources differ" } });
+  expect(roomTournamentStatus(store.getState())).toMatchObject({
+    phase: "error",
+    title: "Your choice was not confirmed",
+  });
+  expect(roomTournamentStatus(store.getState()).message).toContain("Done to retry");
 });

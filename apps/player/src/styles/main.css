@@ -358,3 +358,27 @@ html.network-game :is(#cheat-settings, #mods, #startup-mods, #mod-drop-hint) {
   min-width: 135px;
   padding: 4px 0;
 }
+
+#tournament-status {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  transform: translateX(-50%);
+  width: min(540px, calc(100% - 32px));
+  box-sizing: border-box;
+  padding: 10px 16px;
+  border: 1px solid #455061;
+  border-radius: 8px;
+  background: #111821eb;
+  color: #eef3fc;
+  text-align: center;
+  font-size: clamp(12px, 1.5vw, 16px);
+  line-height: 1.4;
+  pointer-events: none;
+}
+#tournament-status p {
+  margin: 4px 0 0;
+}
+#tournament-status[data-phase="error"] {
+  border-color: #a7696e;
+}

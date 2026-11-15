@@ -66,6 +66,11 @@ try {
         .locator("#player-status")
         .filter({ hasText: "Temporary confirmation failure" })
         .waitFor();
+      await frame.locator('#tournament-status[data-phase="error"]').waitFor();
+      assert.match(
+        await frame.locator("#tournament-status-message").textContent(),
+        /Done to retry/,
+      );
       const revision = await frame.evaluate(() => Module._WebTournamentSelectionRevision());
       // Let the 30 Hz menu sample key-up before pressing Done for a second time.
       await page.waitForTimeout(100);
@@ -76,6 +81,14 @@ try {
       );
     }
     frames.push(frame);
+    if (page === host) {
+      await frame.locator('#tournament-status[data-phase="waiting"]').waitFor();
+      assert.match(
+        await frame.locator("#tournament-status-message").textContent(),
+        /Guest to choose/,
+      );
+      await page.screenshot({ path: "build/checks/tournament-waiting.png", fullPage: true });
+    }
   }
   const confirmed = await eventually(
     view,
@@ -83,6 +96,13 @@ try {
     15000,
   );
   assert(rejectedConfirmation, "Retry exercised a failed confirmation");
+  for (const frame of frames) {
+    await frame.locator('#tournament-status[data-phase="ready"]').waitFor();
+    assert.equal(
+      await frame.locator("#tournament-status-title").textContent(),
+      "Both cars confirmed",
+    );
+  }
   assert(confirmed.participants.every((p) => p.car));
   assert.equal(confirmed.capacity, 2);
   assert.equal(confirmed.freePlaces, 0);
@@ -119,6 +139,8 @@ try {
       !room.participants[1].ready &&
       room.participants[1].car === null,
   );
+  await frames[0].locator('#tournament-status[data-phase="waiting"]').waitFor();
+  await frames[1].locator('#tournament-status[data-phase="choosing"]').waitFor();
   await host.bringToFront();
   await host.locator('[name="modeId"]').selectOption("ffa");
   await host.locator('#settings-form button[type="submit"]').click();
@@ -127,6 +149,7 @@ try {
     (room) => room.modeId === "ffa" && room.participants.every((p) => !p.ready && p.car),
   );
   for (const frame of frames) await frame.waitForFunction(() => !tm4Port.menuReady);
+  for (const frame of frames) assert(await frame.locator("#tournament-status").isHidden());
   assert(await host.locator("#room-car").isVisible());
   assert.deepEqual(errors, []);
   console.log(
