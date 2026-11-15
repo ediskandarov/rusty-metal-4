@@ -2,7 +2,6 @@ import type { RoomAction } from "@tm4/room-player-protocol";
 import type { RoomResult, RoomSettings } from "@tm4/rooms-client/schemas";
 
 import type { RoomStore } from "../state/room.ts";
-import type { ModeRules } from "./rules-types.ts";
 export type RoomState = ReturnType<RoomStore["getState"]>;
 export type SendPlayerAction = (action: RoomAction) => void;
 export interface ModeControls {
@@ -20,11 +19,10 @@ export interface ModeSettings {
   read(
     form: HTMLFormElement,
     target: EventTarget | null,
-  ): { mapId: string; modeOptions?: RoomSettings["modeOptions"] };
+  ): Pick<RoomSettings, "mapId" | "modeOptions">;
 }
 export interface RoomMode {
   settings: ModeSettings;
-  rules: ModeRules;
   createControls(store: RoomStore, send: SendPlayerAction): ModeControls;
   results(result: RoomResult): ResultPresentation;
 }

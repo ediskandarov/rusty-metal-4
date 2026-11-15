@@ -2,6 +2,7 @@ import { type createRoomsClient, RoomsApiError } from "@tm4/rooms-client";
 import {
   type Compatibility,
   roomModeCapacity,
+  type RoomSettings,
   roomSettingsSchema,
   type RoomSnapshot,
 } from "@tm4/rooms-client/schemas";
@@ -22,12 +23,7 @@ type RoomsClient = ReturnType<typeof createRoomsClient>;
 type Operation = "join" | "settings" | "leave" | "player" | "prepare" | "cancel" | "start";
 type ErrorTarget = "room" | "join" | "settings" | "player";
 type Connection = "loading" | "live" | "reconnecting" | "viewing" | "unavailable" | "expired";
-interface SettingsDraft {
-  name: string;
-  modeId: RoomSnapshot["modeId"];
-  mapId: string;
-  modeOptions?: { ffa: { bots: string[]; humanLimit: number } };
-}
+type SettingsDraft = Omit<RoomSettings, "capacity">;
 interface Disc {
   compatibility: Compatibility;
   cars: readonly string[];

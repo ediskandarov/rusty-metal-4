@@ -1,4 +1,5 @@
 import { ffaCapacity } from "@tm4/rooms-client/modes";
+import { roomSettingsSchema } from "@tm4/rooms-client/schemas";
 
 import type { ModeSettings } from "../types.ts";
 export const ffaSettings: ModeSettings = {
@@ -24,15 +25,15 @@ export const ffaSettings: ModeSettings = {
   },
   read(form, target) {
     const field = (name: string) => (form.elements.namedItem(name) as HTMLInputElement).value;
-    if (target === form.elements.namedItem("modeId"))
-      return { mapId: field("mapId"), modeOptions: undefined };
+    const mapId = roomSettingsSchema.shape.mapId.parse(field("mapId"));
+    if (target === form.elements.namedItem("modeId")) return { mapId, modeOptions: undefined };
     const bots = Array.from(
       (form.elements.namedItem("bots") as HTMLSelectElement).selectedOptions,
       (option) => option.value,
     );
     const humanLimit = Number(field("humanLimit"));
     return {
-      mapId: field("mapId"),
+      mapId,
       modeOptions: {
         ffa: {
           bots,

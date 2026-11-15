@@ -75,7 +75,7 @@ async function settled(store: ReturnType<typeof createRoomStore>) {
 
 test("old HTTP snapshots cannot replace newer live room state or a settings draft", () => {
   const { store } = setup();
-  const draft = { name: "Draft", modeId: "ffa" as const, mapId: "road-rage" };
+  const draft = { name: "Draft", modeId: "ffa", mapId: "road-rage" } as const;
   store.getState().editSettings(draft);
   store.getState().receive({ ...snapshot(3), name: "Newest" });
   store.getState().receive({ ...snapshot(2), name: "Old response" });
@@ -697,4 +697,107 @@ test("tournament controls derive waiting status without modifying the selection"
   expect(tournamentControls(before)?.selectionStatus?.phase).toBe("waiting");
   expect(tournamentControls(before)?.selectionStatus?.message).toContain("second player");
   expect(store.getState()).toBe(before);
+});
+
+test("preparation controls follow host authority, upload stage and each mode's minimum roster", async () => {
+  const { matchPreparationControls } =
+    await import("../../apps/rustymetal4.com/src/state/match-preparation.ts");
+  const { store } = setup();
+  expect(matchPreparationControls(store.getState())).toMatchObject({
+    prepare: { hidden: false, disabled: false, label: "Prepare server from my disc" },
+    cancel: { hidden: true },
+    start: { hidden: true },
+  });
+  store.setState({ disc: null });
+  expect(matchPreparationControls(store.getState())?.prepare.disabled).toBe(true);
+  store.setState({ disc, room: { ...snapshot(2), match: { ...match, stage: "uploading" } } });
+  expect(matchPreparationControls(store.getState())).toMatchObject({
+    prepare: { hidden: false, label: "Resume resource upload" },
+    cancel: { hidden: false, disabled: false },
+    start: { hidden: true },
+  });
+  const ready = { ...snapshot(3), match };
+  ready.participants[0]!.ready = true;
+  store.setState({ room: ready });
+  expect(matchPreparationControls(store.getState())).toMatchObject({
+    prepare: { hidden: true },
+    start: { hidden: false, disabled: false },
+  });
+  store.setState({ room: { ...ready, modeId: "tournament", capacity: 2 } });
+  expect(matchPreparationControls(store.getState())?.start.disabled).toBe(true);
+  const guest = { ...ready.participants[0]!, id: "guest", name: "Guest" };
+  const tournament: RoomSnapshot = {
+    ...ready,
+    modeId: "tournament",
+    capacity: 2,
+    participants: [...ready.participants, guest],
+  };
+  store.setState({ room: tournament });
+  expect(matchPreparationControls(store.getState())?.start.disabled).toBe(false);
+  for (const change of [{ ready: false }, { connected: false }]) {
+    store.setState({
+      room: { ...tournament, participants: [tournament.participants[0]!, { ...guest, ...change }] },
+    });
+    expect(matchPreparationControls(store.getState())?.start.disabled).toBe(true);
+  }
+  store.setState({ room: tournament, operation: "start" });
+  expect(matchPreparationControls(store.getState())).toMatchObject({
+    prepare: { disabled: true },
+    cancel: { disabled: true },
+    start: { disabled: true },
+  });
+  store.setState({ operation: null });
+  for (const stage of ["starting", "connecting", "playing", "stopping"] as const) {
+    store.setState({ room: { ...tournament, match: { ...match, stage } } });
+    expect(matchPreparationControls(store.getState())).toMatchObject({
+      prepare: { hidden: true },
+      cancel: { hidden: true },
+      start: { hidden: true },
+    });
+  }
+  for (const change of [{ you: "guest" }, { you: null, hostId: null }, { closed: true }]) {
+    store.setState({ room: { ...tournament, ...change } });
+    expect(matchPreparationControls(store.getState())).toMatchObject({
+      prepare: { hidden: true },
+      cancel: { hidden: true },
+      start: { hidden: true },
+    });
+  }
+  store.setState({ room: tournament, departed: true });
+  expect(matchPreparationControls(store.getState())?.start.hidden).toBe(true);
+  store.setState({ room: null });
+  expect(matchPreparationControls(store.getState())).toBeNull();
+});
+
+test("settings drafts retain invalid in-progress quotas and validate the shared schema on save", async () => {
+  const { api, store } = setup();
+  const draft = {
+    name: "",
+    modeId: "ffa" as const,
+    mapId: "road-rage" as const,
+    modeOptions: { ffa: { bots: ["Quatro"], humanLimit: 0 } },
+  };
+  let saves = 0;
+  api.settings = (_id, input) => {
+    saves++;
+    return Promise.resolve({ ...snapshot(3), ...input });
+  };
+  store.getState().editSettings(draft);
+  store.getState().receive(snapshot(2));
+  expect(store.getState().settingsDraft).toBe(draft);
+  await store.getState().saveSettings();
+  expect(saves).toBe(0);
+  expect(store.getState().settingsDraft).toBe(draft);
+  expect(store.getState().errors.settings).not.toBeNull();
+  store
+    .getState()
+    .editSettings({
+      ...draft,
+      name: "Valid",
+      modeOptions: { ffa: { bots: ["Quatro"], humanLimit: 7 } },
+    });
+  await store.getState().saveSettings();
+  expect(saves).toBe(1);
+  expect(store.getState().settingsDraft).toBeNull();
+  expect(store.getState().room?.modeOptions).toEqual({ ffa: { bots: ["Quatro"], humanLimit: 7 } });
 });

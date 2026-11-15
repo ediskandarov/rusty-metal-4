@@ -1,11 +1,9 @@
 import type { RoomMode } from "../types.ts";
-import { tournamentRules } from "./rules.ts";
 import { tournamentControls } from "./selectors.ts";
 import { tournamentSettings } from "./settings.ts";
 import { tournamentChoosing } from "./state.ts";
 import { tournamentSelectionStatus } from "./status.ts";
 export const tournament: RoomMode = {
-  rules: tournamentRules,
   settings: tournamentSettings,
   createControls(store, send) {
     return {

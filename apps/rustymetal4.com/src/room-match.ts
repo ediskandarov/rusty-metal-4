@@ -85,7 +85,7 @@ export function roomMatch(id: string, store: RoomStore) {
     }
     mode!.sync(previous);
     mode!.render();
-    prepare(roomModes[room.modeId].rules.minimumPlayers);
+    prepare();
     journal.hidden = !(match || room.journal);
     journal.disabled = state.journal.downloading;
     const busy = operation !== null;

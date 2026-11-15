@@ -1,3 +1,4 @@
+import { matchPreparationControls } from "./state/match-preparation.ts";
 import type { RoomStore } from "./state/room.ts";
 export function matchPreparation(store: RoomStore, upload: (sessionId: string) => void) {
   const prepare = document.getElementById("prepare-match") as HTMLButtonElement;
@@ -14,23 +15,15 @@ export function matchPreparation(store: RoomStore, upload: (sessionId: string) =
   start.onclick = () => {
     void store.getState().start();
   };
-  return (minimumPlayers: number) => {
-    const { room, disc, operation } = store.getState();
-    if (!room) return;
-    const match = room.match;
-    const host = room.you === room.hostId;
-    const busy = operation !== null;
-    const locked =
-      !!match && ["starting", "connecting", "playing", "stopping"].includes(match.stage);
-    prepare.hidden = !host || (!!match && match.stage !== "uploading");
-    prepare.disabled = busy || !disc;
-    prepare.textContent = match ? "Resume resource upload" : "Prepare server from my disc";
-    cancel.hidden = !host || !match || locked;
-    cancel.disabled = busy;
-    start.hidden = !host || match?.stage !== "ready";
-    start.disabled =
-      busy ||
-      room.participants.length < minimumPlayers ||
-      room.participants.some((member) => !member.ready || !member.connected);
+  return () => {
+    const controls = matchPreparationControls(store.getState());
+    if (!controls) return;
+    prepare.hidden = controls.prepare.hidden;
+    prepare.disabled = controls.prepare.disabled;
+    prepare.textContent = controls.prepare.label;
+    cancel.hidden = controls.cancel.hidden;
+    cancel.disabled = controls.cancel.disabled;
+    start.hidden = controls.start.hidden;
+    start.disabled = controls.start.disabled;
   };
 }

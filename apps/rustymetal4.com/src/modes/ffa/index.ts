@@ -1,9 +1,7 @@
 import type { RoomMode } from "../types.ts";
-import { ffaRules } from "./rules.ts";
 import { ffaControls } from "./selectors.ts";
 import { ffaSettings } from "./settings.ts";
 export const ffa: RoomMode = {
-  rules: ffaRules,
   settings: ffaSettings,
   createControls(store, send) {
     const car = document.getElementById("room-car") as HTMLSelectElement;
