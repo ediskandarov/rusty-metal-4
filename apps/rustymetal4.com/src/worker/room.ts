@@ -382,7 +382,6 @@ export class Room extends DurableObject<Env> {
     const match = state.match;
     const parts = new URL(request.url).pathname.split("/");
     if (parts[3] === "journal" && parts.length === 4 && request.method === "GET") {
-      requireHost(state, key);
       const id = parts[2];
       if (
         id !== match?.id &&

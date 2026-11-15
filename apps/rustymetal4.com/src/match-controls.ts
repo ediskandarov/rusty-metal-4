@@ -101,7 +101,7 @@ export function matchControls(id: string, store: RoomStore) {
     const busy = operation !== null;
     const host = room.you === room.hostId;
     const match = room.match;
-    journal.hidden = !host || !(match || room.journal);
+    journal.hidden = !(match || room.journal);
     journal.disabled = state.journal.downloading;
     const joining = match?.stage === "playing" && !match.endpoint;
     const locked =

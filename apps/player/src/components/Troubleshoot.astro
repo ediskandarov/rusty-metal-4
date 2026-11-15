@@ -23,10 +23,11 @@ const commit = import.meta.env.PUBLIC_BUILD_COMMIT;
     <p id="journal-status" role="status">
       No network session recorded yet.
     </p>
-    <button id="download-client-journal" type="button" disabled>
-      Download client journal
+    <button id="download-diagnostics" type="button" disabled>
+      Download diagnostic ZIP
     </button>
     <p>Starting another network session replaces this journal. Download it before reconnecting.</p>
-    <p>No disc resources or access credentials are included.</p>
+    <p>Includes both journals, build and match details, and the current game frame.</p>
+    <p>No disc files or access credentials are included. Server journals are public.</p>
   </aside>
 </details>

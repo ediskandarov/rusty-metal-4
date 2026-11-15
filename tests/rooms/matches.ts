@@ -206,8 +206,9 @@ try {
     "PASS authoritative preparation cancellation, monitoring outage, same-member retry and disconnected pruning",
   );
   const journalPath = path + "/match/" + match.id + "/journal";
-  assert.equal((await guest(journalPath)).status, 403);
-  assert.equal((await stranger(journalPath)).status, 403);
+  assert.equal((await guest(journalPath)).status, 200);
+  assert.equal((await stranger(journalPath)).status, 200);
+  assert.equal((await mf.dispatchFetch(origin + "/api/" + journalPath)).status, 200);
   const liveJournal = await host(journalPath);
   assert.equal(liveJournal.status, 200);
   const journalBytes = await liveJournal.arrayBuffer();
@@ -312,8 +313,8 @@ try {
   assert.deepEqual(returned.result, capturedResult);
   assert.equal(returned.journal?.matchId, firstId);
   assert.deepEqual(await (await host(journalPath)).arrayBuffer(), journalBytes);
-  assert.equal((await guest(journalPath)).status, 403);
-  console.log("PASS host-only server journal download before and after container stop");
+  assert.equal((await guest(journalPath)).status, 200);
+  console.log("PASS public server journal download before and after container stop");
   assert.equal(returned.id, initial.id);
   assert.equal(returned.participantCount, 2);
   assert(returned.participants.every((member) => !member.ready));

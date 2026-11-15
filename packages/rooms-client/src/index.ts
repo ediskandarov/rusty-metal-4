@@ -111,9 +111,9 @@ export function createRoomsClient(options: RoomsClientOptions) {
     async cancel(id: string, session: string) {
       return mutate(match(id, session) + "/cancel");
     },
-    async journal(id: string, session: string) {
+    async journal(id: string, session: string, signal?: AbortSignal) {
       const response = await (options.fetch ?? fetch)(
-        new Request(url(match(id, session) + "/journal"), { cache: "no-store" }),
+        new Request(url(match(id, session) + "/journal"), { cache: "no-store", signal }),
       );
       if (!response.ok)
         throw new RoomsApiError(

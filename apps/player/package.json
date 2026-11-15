@@ -9,8 +9,9 @@
   "dependencies": {
     "@tm4/game-runtime": "workspace:*",
     "@tm4/resources": "workspace:*",
+    "@tm4/room-player-protocol": "workspace:*",
     "@tm4/rooms-client": "workspace:*",
-    "zustand": "5.1.0",
-    "@tm4/room-player-protocol": "workspace:*"
+    "fflate": "0.8.3",
+    "zustand": "5.1.0"
   }
 }

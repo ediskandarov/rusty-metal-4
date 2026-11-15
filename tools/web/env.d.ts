@@ -5,3 +5,7 @@ declare namespace astroHTML.JSX {
     webkitdirectory?: boolean;
   }
 }
+
+interface ImportMetaEnv {
+  readonly PUBLIC_BUILD_COMMIT: string;
+}

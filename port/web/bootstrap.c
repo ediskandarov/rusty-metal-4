@@ -155,6 +155,23 @@ static void count_presented_frame(void)
     }
 }
 
+#ifndef TM4_STANDALONE
+EMSCRIPTEN_KEEPALIVE int WebCaptureFrame(void)
+{
+    if (!presented_frames)
+        return 0;
+    int width, height;
+    unsigned char* pixels = Psyz_VideoAllocCapturedFrame(&width, &height);
+    if (!pixels)
+        return 0;
+    EM_ASM(
+        { Module['onCapturedFrame'] ?.($1, $2, HEAPU8.subarray($0, $0 + $1 * $2 * 3)); }, pixels,
+        width, height);
+    free(pixels);
+    return 1;
+}
+#endif
+
 EMSCRIPTEN_KEEPALIVE unsigned int WebGetPresentedFrames(void)
 {
     return presented_frames;

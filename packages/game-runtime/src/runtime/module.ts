@@ -13,6 +13,7 @@ export interface GameExports extends NetworkEngine {
   _WebSetRenderSmoothing(this: void, enabled: number): void;
   _WebSetRenderSmoothingDelay(this: void, milliseconds: number): void;
   _WebGetPresentedFrames(this: void): number;
+  _WebCaptureFrame(this: void): number;
   _WebGetRenderedFrames(this: void): number;
   _WebGetSimulationSteps(this: void): number;
   _WebSetCheat(this: void, index: number, enabled: number): void;
@@ -45,6 +46,7 @@ export interface ModuleOptions {
   canvas: HTMLCanvasElement;
   tm4ResourceMods?: number;
   tm4LocalCheckpoint?: boolean;
+  onCapturedFrame?(this: void, width: number, height: number, rgb: Uint8Array): void;
   noInitialRun: boolean;
   print(text: string): void;
   printErr(text: string): void;
