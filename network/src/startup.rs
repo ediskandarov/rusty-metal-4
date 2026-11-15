@@ -41,16 +41,18 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     if !(1..=MAX_PLAYERS).contains(&count) {
         return Err("Expected a player count from 1 to 8".into());
     }
-    let command_bot = match args.next() {
-        None => None,
-        Some(flag) if flag == "--bot" && !serve && count == 1 => Some(
+    let mut command_bots = Vec::new();
+    while let Some(flag) = args.next() {
+        if flag != "--bot" || serve {
+            return Err("Use --bot MODEL only with a standalone match".into());
+        }
+        command_bots.push(
             args.next()
                 .ok_or("Expected an original-AI car model after --bot")?,
-        ),
-        _ => return Err("Use --bot MODEL with a one-human standalone match".into()),
-    };
-    if args.next().is_some() {
-        return Err("Unexpected match setup argument".into());
+        );
+    }
+    if count + command_bots.len() > MAX_PLAYERS {
+        return Err("Humans and bots must fit within eight gameplay slots".into());
     }
     let addr: SocketAddr = env::var("TM4_MATCH_LISTEN")
         .unwrap_or_else(|_| "127.0.0.1:8122".into())
@@ -67,7 +69,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let (count, selected_world, room_roster, limits, bot, simulator) = if let Some(launcher) =
+    let (count, selected_world, room_roster, limits, bots, simulator) = if let Some(launcher) =
         &launcher
     {
         loop {
@@ -89,7 +91,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                         Some(setup.world),
                         setup.roster,
                         setup.limits,
-                        setup.bot,
+                        setup.bots,
                         simulator,
                     );
                 }
@@ -104,7 +106,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
             None,
             Vec::new(),
             Default::default(),
-            command_bot,
+            command_bots,
             simulator::Simulator::from_environment()?,
         )
     };
@@ -115,7 +117,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     };
     let mut participants =
         ParticipantRoster::new(MAX_PLAYERS, &(0..initial_count).collect::<Vec<_>>())?;
-    if let Some(model) = bot {
+    for model in bots {
         if !simulator.catalog.cars.contains(&model) {
             return Err("Bot model is unavailable".into());
         }

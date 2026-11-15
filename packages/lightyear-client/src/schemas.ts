@@ -69,7 +69,7 @@ export const participantIdSchema = z
 export const startSchema = slotConfigurationSchema
   .safeExtend({
     mode: z.literal("ffa"),
-    bots: z.array(z.number().int().min(0).max(7)).max(1),
+    bots: z.array(z.number().int().min(0).max(7)).max(7),
     limits: ffaLimitsSchema,
     respawnDelayTicks: z.number().int().min(1).max(3600),
     world: z
@@ -104,8 +104,11 @@ export const startSchema = slotConfigurationSchema
   .refine(
     (start) =>
       start.capacity === 8 &&
-      (start.bots.length === 0 ||
-        (start.slots.length === 2 && start.slots.includes(start.bots[0]!))) &&
+      start.bots.length < start.slots.length &&
+      start.bots.every(
+        (slot, index) =>
+          start.slots.includes(slot) && (index === 0 || slot > start.bots[index - 1]!),
+      ) &&
       start.cars.length === start.slots.length &&
       new Set(start.modelPool).size === start.modelPool.length &&
       start.cars.every((car) => start.modelPool.includes(car)) &&

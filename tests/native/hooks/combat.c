@@ -141,8 +141,10 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceWeaponTarget(s32 distance)
 EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerProjectileTarget(
     s32 source, s32 destination, const char* name)
 {
-    if ((u32)source >= GameInfo.player_car_count || (u32)destination >= GameInfo.player_car_count
-        || source == destination)
+    if (source == destination
+        || (WebNetMatchActive() ? !WebNetSlotOccupied(source) || !WebNetSlotOccupied(destination)
+                                : (u32)source >= GameInfo.player_car_count
+                    || (u32)destination >= GameInfo.player_car_count))
         return 0;
     const Car* shooter = GameInfo.players[source].car;
     Car* target = GameInfo.players[destination].car;
@@ -186,8 +188,10 @@ EMSCRIPTEN_KEEPALIVE int WebTestPlaceProjectileTarget(const char* name)
 EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerTarget(
     s32 source, s32 destination, s32 distance, s32 grab)
 {
-    if ((u32)source >= GameInfo.player_car_count || (u32)destination >= GameInfo.player_car_count
-        || source == destination)
+    if (source == destination
+        || (WebNetMatchActive() ? !WebNetSlotOccupied(source) || !WebNetSlotOccupied(destination)
+                                : (u32)source >= GameInfo.player_car_count
+                    || (u32)destination >= GameInfo.player_car_count))
         return 0;
     Car* shooter = GameInfo.players[source].car;
     Car* target = GameInfo.players[destination].car;

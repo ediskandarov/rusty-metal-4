@@ -213,30 +213,35 @@ remains deferred; offline round rules are unchanged.
 
 ## Original AI participants
 
-The initial AI delivery is exactly one human and one explicitly configured original-AI
-opponent in a standalone FFA. It does not fill vacant seats. Room setup and live admission
-into an AI match are rejected; human-only live membership retains its existing behavior.
-Temporary human disconnection keeps the lease for ordinary recovery. Explicit departure
-of the last human retires the bot in the same authoritative membership batch and stops
-the abandoned match.
+Standalone FFA accepts an explicit startup roster of humans and original-AI opponents
+within eight gameplay slots, with at least one human. Vacancies stay empty. Room setup
+and live admission into an AI match are rejected; human-only live membership retains its
+existing behavior. Temporary human disconnection keeps the lease for ordinary recovery.
+Explicit departure of the last human retires all bots in the same authoritative membership
+batch and lets the native server exit normally.
 
-Both seats use the common identity, scoring, prepared model pool and respawn policy.
+All seats use the common identity, scoring, prepared model pool and respawn policy.
 Network participant roots use the existing player/camera arrays for both kinds of seat;
 original offline computer-roster counts stay separate. Immutable startup bot slots select
 `CarAiUpdateControls` during ordinary car construction and respawn. No bot connection,
 native input controller or reconnect credential exists. Client readiness, clock votes and
 accepted-input frontiers count human controllers only. Bot input rows are neutral; original
 C AI decisions run on the authority and predicting peers at their original four-phase cadence.
-The enemy driver kind selects original AI without ally health bonuses. Original enemy damage
-reductions do not apply in network FFA; offline rules retain them.
+Each participant keeps its slot-derived decision phase through deaths and departures.
+The enemy driver kind selects original AI without ally health bonuses. Network FFA target
+selection, pursuit, firing and homing treat human and AI opponents alike; original enemy
+damage reductions do not apply. Offline allegiance rules retain their original behavior.
+Retaliation history uses stable gameplay slots, while nearby records keep typed car references;
+car destruction clears target associations and history before a replacement can reuse the slot.
 
 Local rollback retains mutable resource-node search state alongside its generation counters.
 Portable recovery describes all used AI runtime fields, car references, nearby-array offsets
 and state callback IDs, plus the shared search fields. Constructors prepare resources before
 state restoration; the session restores saved RNG state afterward. Canonical digests include
 AI decisions and navigation scratch, so confirmation checks their behavior as well as physics.
-The focused stock-resource validation starts with Construction Yard, Orbital and Pizza Boy;
-this does not establish all-map or all-model coverage. Maps without enabled original AI
+Focused stock-resource simulation validation uses Construction Yard, Orbital and Pizza Boy,
+including two humans with three bots and an eight-occupied-slot case with six bots. This does
+not establish all-map or all-model coverage. Maps without enabled original AI
 navigation are rejected before client prediction can start.
 
 ## Authoritative event boundary

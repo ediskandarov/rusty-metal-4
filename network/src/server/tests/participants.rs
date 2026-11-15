@@ -1291,20 +1291,27 @@ fn shutdown_seals_active_match_journal_once() {
 }
 
 #[test]
-fn last_human_departure_retires_the_explicit_bot_in_the_same_batch() {
+fn last_human_departure_retires_all_explicit_bots_in_the_same_batch() {
     let mut world = World::new();
     let mut game = game();
-    game.participants = ParticipantRoster::new(8, &[0]).unwrap();
-    game.participants.add_bot("Pizza Boy".into()).unwrap();
+    game.participants = ParticipantRoster::new(8, &[0, 1]).unwrap();
+    for model in ["Pizza Boy", "Orbital", "Pizza Boy"] {
+        game.participants.add_bot(model.into()).unwrap();
+    }
     game.participants.freeze();
     game.controls = (0..8).map(|_| ControllerState::default()).collect();
-    game.session.as_mut().unwrap().bots = vec![1];
-    let human = game.participants.binding(0);
-    let bot = game.participants.binding(1);
+    game.session.as_mut().unwrap().bots = vec![2, 3, 4];
+    let first = game.participants.binding(0);
+    let last = game.participants.binding(1);
+    let bots: Vec<_> = (2..5).map(|slot| game.participants.binding(slot)).collect();
     assert!(game.reserve_live().is_err());
     world.insert_resource(game);
     world.run_system_once(move |mut game: ResMut<Match>, mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>| {
-        let tick = game.schedule_departure(human, &mut links).unwrap();
-        assert_eq!(game.membership.scheduled[&tick], [MembershipChange::Depart { identity: human }, MembershipChange::Depart { identity: bot }]);
+        let tick = game.schedule_departure(first, &mut links).unwrap();
+        assert_eq!(game.membership.scheduled[&tick], [MembershipChange::Depart { identity: first }]);
+        let last_tick = game.schedule_departure(last, &mut links).unwrap();
+        assert_eq!(last_tick, tick);
+        let expected: Vec<_> = [first, last].into_iter().chain(bots.iter().copied()).map(|identity| MembershipChange::Depart { identity }).collect();
+        assert_eq!(game.membership.scheduled[&tick], expected);
     }).unwrap();
 }

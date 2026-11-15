@@ -603,3 +603,58 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiRecovery(s32 slot)
     car->ai_state_callback = CarAiRecoverFromObstacle;
     return car->ai_saved_state_callback != NULL;
 }
+
+/* Exercise the original crowding-limited retaliation path without changing AI settings. */
+EMSCRIPTEN_KEEPALIVE s32 WebTestAiAccumulateDamage(s32 victim_slot, s32 attacker_slot, s32 damage)
+{
+    Car* victim = WebNetSlotOccupied(victim_slot) ? GameInfo.players[victim_slot].car : NULL;
+    Car* attacker = WebNetSlotOccupied(attacker_slot) ? GameInfo.players[attacker_slot].car : NULL;
+    if (!victim || !attacker || victim == attacker || victim->control_kind != CAR_CONTROL_ENEMY)
+        return 0;
+    CarAiSetTarget(victim, NULL, NULL);
+    const CarAiStateCallback state = victim->ai_state_callback;
+    const u8 targeting = attacker->ai.targeting_count;
+    victim->ai_state_callback = CarAiPatrol;
+    attacker->ai.targeting_count = attacker->ai.targeting_limit;
+    CarAiReactToDamage(victim, attacker, damage);
+    victim->ai_state_callback = state;
+    attacker->ai.targeting_count = targeting;
+    return 1;
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestAiDamageHistory(s32 victim_slot, s32 attacker_slot)
+{
+    Car* victim = WebNetSlotOccupied(victim_slot) ? GameInfo.players[victim_slot].car : NULL;
+    return victim && attacker_slot >= 0 && attacker_slot < WebNetSlotCapacity()
+        ? victim->ai.attacker_damage[attacker_slot]
+        : -1;
+}
+
+/* Exercise retaliation through normal nonlethal damage, with an eligible original AI state. */
+EMSCRIPTEN_KEEPALIVE s32 WebTestAiApplyRetaliationDamage(
+    s32 victim_slot, s32 attacker_slot, s32 damage)
+{
+    Car* victim = WebNetSlotOccupied(victim_slot) ? GameInfo.players[victim_slot].car : NULL;
+    Car* attacker = WebNetSlotOccupied(attacker_slot) ? GameInfo.players[attacker_slot].car : NULL;
+    if (!victim || !attacker || victim->control_kind != CAR_CONTROL_ENEMY
+        || victim->ai.selected_node < 0 || attacker->ai.selected_node < 0
+        || attacker->ai.targeting_count >= attacker->ai.targeting_limit)
+        return 0;
+    if (!damage)
+        damage = victim->ai_config.retaliation_damage_threshold + 1;
+    if (damage <= 0 || damage >= victim->maximum_health)
+        return 0;
+    CarAiSetTarget(victim, NULL, NULL);
+    victim->ai_state_callback = CarAiPatrol;
+    /* A shared valid node keeps route availability from masking retaliation. */
+    victim->ai.selected_node = attacker->ai.selected_node;
+    victim->shield_ticks = 0;
+    victim->health = victim->maximum_health;
+    const s32 before = victim->health;
+    return CarApplyParticipantDamage(
+               victim, attacker, WebParticipantObjectIdentity(attacker), damage, NULL, NULL)
+                == 1
+            && victim->health == before - damage
+        ? damage
+        : 0;
+}

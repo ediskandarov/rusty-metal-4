@@ -171,7 +171,7 @@ impl NetworkClient {
         let participants: Vec<crate::protocol::ParticipantId> = serde_json::from_str(participants)
             .map_err(|_| JsValue::from_str("Invalid prediction participants"))?;
         if bot_mask & !slot_mask != 0
-            || (bot_mask != 0 && (bot_mask.count_ones() != 1 || slot_mask.count_ones() != 2))
+            || bot_mask == slot_mask
             || participants.len() != slot_mask.count_ones() as usize
             || participants
                 .iter()

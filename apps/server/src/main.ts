@@ -11,8 +11,15 @@ function element<T extends HTMLElement>(id: string, type: { new (): T }): T {
 const matchOptions = element("match-options", HTMLFormElement);
 const world = element("world", HTMLSelectElement);
 const start = element("start", HTMLButtonElement);
-const bot = element("bot", HTMLSelectElement);
+const bot = element("bots", HTMLSelectElement);
 let botCatalogKey = "";
+const rosterCapacity = element("roster-capacity", HTMLParagraphElement);
+function updateRosterCapacity() {
+  const total = Number(playerCount.value) + bot.selectedOptions.length;
+  rosterCapacity.textContent = `${total}/8 places selected${total > 8 ? " · Remove opponents or lower the human count" : ""}`;
+  rosterCapacity.hidden = bot.disabled;
+  start.disabled = bot.disabled || total > 8;
+}
 let catalogKey = "";
 const form = element("provision", HTMLFormElement);
 const secret = element("secret", HTMLInputElement);
@@ -42,13 +49,10 @@ async function refresh() {
       playerCount.value = String(state.players);
       playerCountInitialized = true;
     }
-    playerCount.disabled = busy || !editable || !!bot.value;
+    playerCount.disabled = busy || !editable;
     const botKey = JSON.stringify(state.cars);
     if (state.phase === "ready" && state.cars.length && botKey !== botCatalogKey) {
-      bot.replaceChildren(
-        new Option("None", ""),
-        ...state.cars.map((name) => new Option(name, name)),
-      );
+      bot.replaceChildren(...state.cars.map((name) => new Option(name, name)));
       botCatalogKey = botKey;
     }
     bot.disabled = busy || state.phase !== "ready";
@@ -60,7 +64,7 @@ async function refresh() {
     }
     if (!editable && state.world) world.value = state.world;
     world.disabled = busy || state.phase !== "ready";
-    start.disabled = busy || state.phase !== "ready";
+    updateRosterCapacity();
     disc.disabled = busy || !canUpload;
     status.textContent = state.message;
     players.textContent = state.sleeping
@@ -128,10 +132,8 @@ async function provision() {
   }
 }
 
-bot.addEventListener("change", () => {
-  if (bot.value) playerCount.value = "1";
-  playerCount.disabled = !!bot.value;
-});
+bot.addEventListener("change", updateRosterCapacity);
+playerCount.addEventListener("change", updateRosterCapacity);
 
 matchOptions.addEventListener("submit", (event) => {
   event.preventDefault();
@@ -142,7 +144,7 @@ async function openMatch() {
   const options = {
     players: Number(playerCount.value),
     world: world.value,
-    ...(bot.value ? { bot: bot.value } : {}),
+    bots: Array.from(bot.selectedOptions, (option) => option.value),
     limits: ffaDefaultLimits,
   };
   busy = true;

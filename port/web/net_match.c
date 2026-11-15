@@ -247,8 +247,8 @@ void WebNetCarLeaving(Car* target)
                     car->ai.target_entry = NULL;
                 car->ai.nearby_records[entry] = (CarAiNearbyCar) { 0 };
             }
-        if (target->index >= 0 && target->index < WebNetSlotCapacity())
-            car->ai.attacker_damage[target->index] = 0;
+        if (target->controller_index >= 0 && target->controller_index < WebNetSlotCapacity())
+            car->ai.attacker_damage[target->controller_index] = 0;
     }
 }
 
@@ -400,8 +400,8 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
         || (slots & ~((1u << capacity) - 1)) || view_slot < -1 || view_slot >= capacity || world < 0
         || world >= GameGetNumberOfWorlds() || flags > 3
         || (bot_slots
-            && (__builtin_popcount(bot_slots) != 1 || __builtin_popcount(slots) != 2
-                || (bot_slots & ~slots) || (view_slot >= 0 && (bot_slots & (1u << view_slot)))))
+            && ((bot_slots & ~slots) || !(slots & ~bot_slots)
+                || (view_slot >= 0 && (bot_slots & (1u << view_slot)))))
         || !car_names || ((flags & 2) && (view_slot < 0 || WebSimulationOnly())))
         return reject_start("Invalid explicit match configuration or session already running");
 #ifndef TM4_STANDALONE

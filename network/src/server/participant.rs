@@ -80,11 +80,10 @@ impl ParticipantRoster {
         self.slots().filter(|slot| self.human(*slot))
     }
     pub fn add_bot(&mut self, car: String) -> Result<(), &'static str> {
-        if self.frozen
-            || self.count() != 1
-            || self.slots().any(|slot| self.at_slot(slot).original_ai)
-        {
-            return Err("Original AI currently requires exactly one human and one bot.");
+        if self.frozen || self.human_slots().next().is_none() {
+            return Err(
+                "Configure original AI before startup with at least one human participant.",
+            );
         }
         let slot = self
             .slots
@@ -244,9 +243,17 @@ mod tests {
         assert!(roster.at_slot(1).lobby_ready);
         assert!(roster.at_slot(1).credential.is_none());
         assert!(roster.at_slot(1).room_credential.is_none());
-        assert!(roster.add_bot("Orbital".into()).is_err());
+        roster.add_bot("Orbital".into()).unwrap();
+        assert_eq!(roster.count(), 3);
+        assert_eq!(roster.human_slots().collect::<Vec<_>>(), [0]);
+        let mut full = ParticipantRoster::new(8, &[0, 1]).unwrap();
+        for _ in 0..6 {
+            full.add_bot("Orbital".into()).unwrap();
+        }
+        assert!(full.add_bot("Orbital".into()).is_err());
+        assert_eq!(full.human_slots().collect::<Vec<_>>(), [0, 1]);
         assert!(
-            ParticipantRoster::new(8, &[0, 1])
+            ParticipantRoster::new(8, &[])
                 .unwrap()
                 .add_bot("Orbital".into())
                 .is_err()

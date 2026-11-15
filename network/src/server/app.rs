@@ -228,6 +228,16 @@ pub(crate) fn run_match(
                 }
             }
         }
+        let game = app.world().resource::<Match>();
+        if game.ended
+            && game.participants.human_slots().next().is_none()
+            && game
+                .session
+                .as_ref()
+                .is_some_and(|session| !session.bots.is_empty())
+        {
+            break;
+        }
         thread::sleep(Duration::from_millis(1));
     }
     if !app

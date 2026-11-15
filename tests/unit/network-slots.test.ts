@@ -7,6 +7,7 @@ import {
 } from "@tm4/game-runtime/network/protocol";
 import { checksum, SnapshotReplay } from "@tm4/game-runtime/network/replay";
 import { messageSchema, startSchema } from "@tm4/lightyear-client/schemas";
+import { startOptionsSchema } from "@tm4/rustymetal-server-client/schemas";
 const start = {
   mode: "ffa" as const,
   bots: [],
@@ -217,4 +218,44 @@ test("original AI occupies one explicit seat and cannot become the local control
   expect(startSchema.safeParse({ ...setup, bots: [2] }).success).toBe(false);
   expect(startSchema.safeParse({ ...setup, bots: [0, 1] }).success).toBe(false);
   expect(startSchema.safeParse({ ...start, bots: [1] }).success).toBe(false);
+});
+
+test("mixed rosters keep explicit sorted bot slots and at least one human within eight seats", () => {
+  const setup = {
+    ...start,
+    slots: [0, 1, 3, 5, 7],
+    bots: [3, 5, 7],
+    participants: [1, 2, 4, 6, 8].map((id) => id.toString(16).padStart(16, "0")),
+    cars: ["Orbital", "Pizza Boy", "Orbital", "Pizza Boy", "Orbital"],
+  };
+  expect(startSchema.parse(setup)).toEqual(setup);
+  for (const bots of [[3, 3], [7, 3], [2], [0, 1, 3, 5, 7]])
+    expect(startSchema.safeParse({ ...setup, bots }).success).toBe(false);
+  const full = {
+    ...setup,
+    slots: [0, 1, 2, 3, 4, 5, 6, 7],
+    bots: [2, 3, 4, 5, 6, 7],
+    participants: Array.from({ length: 8 }, (_, id) => (id + 1).toString(16).padStart(16, "0")),
+    cars: Array(8).fill("Orbital"),
+  };
+  expect(startSchema.parse(full)).toEqual(full);
+});
+
+test("administrator setup shares eight slots between explicit humans and bots", () => {
+  const options = {
+    players: 2,
+    bots: ["Orbital", "Pizza Boy", "Orbital"],
+    world: "Construction Yard",
+    limits: start.limits,
+  };
+  expect(startOptionsSchema.parse(options)).toEqual(options);
+  expect(startOptionsSchema.safeParse({ ...options, players: 6 }).success).toBe(false);
+  expect(startOptionsSchema.safeParse({ ...options, bot: "Orbital" }).success).toBe(false);
+  expect(
+    startOptionsSchema.safeParse({
+      ...options,
+      sessionId: "00000000-0000-4000-8000-000000000000",
+      roster: [{ credential: "a".repeat(64), car: "Orbital" }],
+    }).success,
+  ).toBe(false);
 });

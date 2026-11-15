@@ -65,12 +65,14 @@ import { Content as SetupInstructions } from "../content/setup.md";
           </select>
         </label>
         <label>
-          Original AI opponent
-          <select id="bot" disabled>
-            <option value="">None</option>
-          </select>
+          Original AI opponents
+          <select id="bots" multiple size="4" disabled />
         </label>
-        <p>Choose one AI opponent to play with one human. Empty seats stay empty.</p>
+        <p>
+          Select zero or more AI opponents. Humans and bots share eight places; empty seats stay
+          empty.
+        </p>
+        <p id="roster-capacity"></p>
         <button id="start" type="submit" disabled>
           Open match
         </button>

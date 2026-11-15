@@ -59,16 +59,17 @@ export type ResourceManifest = z.infer<typeof resourceManifestSchema>;
 export const startOptionsSchema = z
   .object({
     limits: ffaLimitsSchema,
-    bot: z.string().min(1).max(63).optional(),
+    bots: z.array(z.string().min(1).max(63)).max(7).optional(),
     players: count.min(1).max(8),
     world: z.string().min(1),
     sessionId: z.string().uuid().optional(),
     roster: z.array(z.object({ credential: sha256Schema, car: z.string().min(1) })).optional(),
   })
+  .strict()
   .refine(
     (value) =>
-      (value.bot === undefined ||
-        (value.players === 1 && value.sessionId === undefined && value.roster === undefined)) &&
+      value.players + (value.bots?.length ?? 0) <= 8 &&
+      (!value.bots?.length || (value.sessionId === undefined && value.roster === undefined)) &&
       ((value.sessionId === undefined && value.roster === undefined) ||
         (value.sessionId !== undefined &&
           value.roster !== undefined &&

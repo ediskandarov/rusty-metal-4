@@ -41,7 +41,7 @@ pub enum SetupRequest {
 }
 #[derive(Debug, PartialEq)]
 pub struct MatchSetup {
-    pub bot: Option<String>,
+    pub bots: Vec<String>,
     pub roster: Vec<RosterMember>,
     pub limits: tm4_network::protocol::FfaLimits,
     pub players: usize,
@@ -57,7 +57,7 @@ pub struct RosterMember {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartOptions {
     #[serde(default)]
-    bot: Option<String>,
+    bots: Vec<String>,
     limits: tm4_network::protocol::FfaLimits,
     #[serde(default)]
     session_id: Option<String>,
@@ -684,11 +684,13 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
     }
     {
         let mut status = service.status.lock().unwrap();
-        if options.bot.as_ref().is_some_and(|bot| {
-            options.players != 1 || !options.roster.is_empty() || !status.cars.contains(bot)
-        }) {
+        if options.players + options.bots.len() > MAX_PLAYERS
+            || options.bots.iter().any(|bot| !status.cars.contains(bot))
+            || (!options.bots.is_empty()
+                && (options.session_id.is_some() || !options.roster.is_empty()))
+        {
             return Err(invalid(
-                "Original AI currently requires one human, one stock bot and standalone setup.",
+                "Choose stock AI models for a standalone roster of at most eight human and AI participants.",
             ));
         }
         if !status.worlds.contains(&options.world) {
@@ -721,7 +723,7 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         status.message = "Opening match…".into();
     }
     service.send(SetupRequest::Start(MatchSetup {
-        bot: options.bot,
+        bots: options.bots,
         roster: options.roster,
         limits: options.limits,
         players: options.players,
@@ -1009,6 +1011,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_ai_roster_requires_capacity_and_standalone_setup() {
+        let fixture = Fixture::new();
+        {
+            let mut status = fixture.service.status.lock().unwrap();
+            status.phase = "ready".into();
+            status.worlds = vec!["Construction Yard".into()];
+            status.cars = vec!["Orbital".into(), "Pizza Boy".into()];
+        }
+        let valid = serde_json::json!({
+            "players": 2, "bots": ["Orbital", "Pizza Boy", "Orbital"],
+            "world": "Construction Yard", "limits": { "timeLimitTicks": 27000, "fragLimit": 20 }
+        });
+        for changes in [
+            serde_json::json!({ "players": 6 }),
+            serde_json::json!({ "bots": ["Unknown"] }),
+            serde_json::json!({ "bot": "Orbital" }),
+            serde_json::json!({ "sessionId": "00000000-0000-4000-8000-000000000000", "roster": [{ "credential": "a".repeat(64), "car": "Orbital" }] }),
+        ] {
+            let mut invalid = valid.clone();
+            invalid
+                .as_object_mut()
+                .unwrap()
+                .extend(changes.as_object().unwrap().clone());
+            assert_eq!(
+                fixture
+                    .request("POST", "/api/start", invalid.to_string())
+                    .await
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
+            assert!(fixture.requests.try_recv().is_err());
+            assert_eq!(fixture.service.status.lock().unwrap().phase, "ready");
+        }
+        assert_eq!(
+            fixture
+                .request("POST", "/api/start", valid.to_string())
+                .await
+                .status(),
+            StatusCode::ACCEPTED
+        );
+        let SetupRequest::Start(setup) = fixture.requests.try_recv().unwrap() else {
+            panic!("expected startup")
+        };
+        assert_eq!(setup.players, 2);
+        assert_eq!(setup.bots, ["Orbital", "Pizza Boy", "Orbital"]);
+    }
+
+    #[tokio::test]
     async fn browser_options_require_ready_catalog_and_lock_after_start() {
         let fixture = Fixture::new();
         let valid = r#"{"limits":{"timeLimitTicks":27000,"fragLimit":20},"players":1,"world":"The Oil Rig"}"#;
@@ -1063,7 +1113,7 @@ mod tests {
         assert_eq!(
             fixture.requests.try_recv().unwrap(),
             SetupRequest::Start(MatchSetup {
-                bot: None,
+                bots: Vec::new(),
                 roster: Vec::new(),
                 limits: Default::default(),
                 players: 1,

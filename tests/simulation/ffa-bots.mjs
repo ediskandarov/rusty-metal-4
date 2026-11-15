@@ -6,7 +6,11 @@ import { test } from "node:test";
 import { WASI } from "node:wasi";
 
 const compiled = await WebAssembly.compile(fs.readFileSync(process.env.TM4_SIMULATION_WASM));
-async function simulation(bot = true) {
+async function simulation(bot = true, configuration = {}) {
+  const slots = configuration.slots ?? [0, 1];
+  const bots = configuration.bots ?? (bot ? [1] : []);
+  const cars = configuration.cars ?? slots.map((_, index) => (index % 2 ? "Pizza Boy" : "Orbital"));
+  const pool = configuration.pool ?? ["Orbital", "Pizza Boy"];
   const wasi = new WASI({
     version: "preview1",
     preopens: { "/DATA": join(process.env.TM4_RESOURCE_DIR, "DATA") },
@@ -31,25 +35,49 @@ async function simulation(bot = true) {
   };
   assert.equal(x.HeadlessInitialize(), 1);
   const args = [
-    arg("Orbital\nPizza Boy"),
-    arg("0000000000000001\n0000000000000002"),
-    arg("Orbital\nPizza Boy"),
+    arg(cars.join("\n")),
+    arg(slots.map((slot) => (slot + 1).toString(16).padStart(16, "0")).join("\n")),
+    arg(pool.join("\n")),
   ];
   assert.equal(
-    x.WebNetStartFfa(8, 3, 0, 12345, -1, 1, args[0], args[1], 12, args[2], 27000, 100, bot ? 2 : 0),
+    x.WebNetStartFfa(
+      8,
+      slots.reduce((mask, slot) => mask | (1 << slot), 0),
+      0,
+      12345,
+      -1,
+      1,
+      args[0],
+      args[1],
+      12,
+      args[2],
+      27000,
+      100,
+      bots.reduce((mask, slot) => mask | (1 << slot), 0),
+    ),
     1,
   );
   args.forEach((address) => x.free(address));
   const read = (address, length) => Buffer.from(bytes().subarray(address, address + length));
   return {
     x,
-    ai(field) {
-      return x.WebTestAiState(1, field);
+    ai(field, slot = 1) {
+      return x.WebTestAiState(slot, field);
     },
     step(buttons = 0) {
       const tick = x.HeadlessTick();
-      for (const slot of [0, 1])
-        assert.equal(x.WebNetSetInput(tick, slot, slot === 0 ? buttons : 0, 0x80808080, 0), 1);
+      for (let slot = 0; slot < 8; ++slot)
+        if (x.WebNetSlotMask() & (1 << slot))
+          assert.equal(
+            x.WebNetSetInput(
+              tick,
+              slot,
+              Array.isArray(buttons) ? (buttons[slot] ?? 0) : slot === 0 ? buttons : 0,
+              0x80808080,
+              0,
+            ),
+            1,
+          );
       assert.equal(x.WebNetQueueTick(tick), 1);
     },
     canonical() {
@@ -208,15 +236,16 @@ test("all three original navigation searches rewind their shared mutable resourc
   }
 });
 
-test("focused two-seat CPU and snapshot comparison", async () => {
+test("focused two-human CPU and snapshot comparison with explicit bot rosters", async () => {
   const measurements = [];
-  for (const bot of [false, true]) {
-    const world = await simulation(bot);
+  for (const bots of [[], [2, 3, 4], [2, 3, 4, 5, 6, 7]]) {
+    const world = await simulation(false, { slots: [0, 1, ...bots], bots });
     for (let i = 0; i < 60; ++i) world.step();
     const started = performance.now();
     for (let i = 0; i < 300; ++i) world.step();
     measurements.push({
-      bot,
+      humans: 2,
+      bots: bots.length,
       ticks: 300,
       stepMs: performance.now() - started,
       portableBytes: world.snapshot().length,
@@ -257,4 +286,213 @@ test("bot projectile scoring, waiting recovery and respawn retain the same parti
   }
   assert.equal(world.ai(0), 2);
   assert.deepEqual(world.results(1), [2n, 1, 1]);
+});
+
+const multipleRoster = { slots: [0, 1, 3, 5, 7], bots: [3, 5, 7] };
+function multipleActions(world, tick) {
+  const { x } = world;
+  const alive = (slot) => !!x.WebTestCarHandle(slot);
+  if ([80, 240, 500].includes(tick)) {
+    const source = tick < 400 ? 0 : 1;
+    if (alive(source))
+      for (const slot of multipleRoster.bots)
+        if (alive(slot))
+          assert.equal(x.WebTestPlacePlayerTarget(source, slot, 900 + slot * 150, 0), 1);
+  }
+  if (tick === 120 && alive(3)) assert.equal(x.WebTestAiRecovery(3), 1);
+  if (tick === 200 && alive(3) && alive(5)) {
+    assert.equal(x.WebTestPreparePlayerDuel(3, 5, 1200), 1);
+    const projectile = x.WebTestCreateParticipantProjectile(3);
+    assert.ok(projectile);
+    assert.equal(x.WebTestHitParticipant(projectile, 5), 1);
+  }
+  if (tick === 300 && alive(0)) assert.equal(x.WebTestKillParticipant(0), 1);
+  if (tick === 400) assert.equal(x.WebNetDepartParticipant(x.HeadlessTick(), 0, 1, 0), 1);
+  if (tick === 450 && alive(3)) assert.equal(x.WebTestKillParticipant(3), 1);
+}
+
+test("two humans and three sparse-slot bots replay combat, departure and portable recovery exactly", async () => {
+  const world = await simulation(true, multipleRoster);
+  for (let tick = 0; tick < 30; ++tick) world.step();
+  const snapshot = world.snapshot(),
+    before = world.canonical();
+  assert.ok(world.x.WebNetCaptureLocalCheckpoint());
+  const expected = [],
+    checkpoints = [];
+  let humanTargets = 0,
+    botTargets = 0,
+    routes = 0,
+    projectiles = 0;
+  for (let tick = 0; tick < 600; ++tick) {
+    multipleActions(world, tick);
+    world.step();
+    expected.push(world.canonical());
+    if (tick === 200) {
+      assert.deepEqual(world.results(3), [4n, 1, 0]);
+      assert.deepEqual(world.results(5), [6n, 0, 1]);
+    }
+    if ([130, 230, 410, 470].includes(tick))
+      checkpoints.push({ tick: tick + 1, snapshot: world.snapshot(), state: world.canonical() });
+    for (const slot of multipleRoster.bots) {
+      if (!world.x.WebTestCarHandle(slot)) continue;
+      assert.equal(world.ai(0, slot), 2);
+      assert.equal(world.ai(10, slot), slot % 4);
+      const target = world.ai(4, slot);
+      humanTargets +=
+        target > 0 && [0, 1].some((other) => world.x.WebTestCarHandle(other) === target);
+      botTargets +=
+        target > 0 &&
+        multipleRoster.bots.some(
+          (other) => other !== slot && world.x.WebTestCarHandle(other) === target,
+        );
+      routes += world.ai(2, slot) > 1;
+      projectiles += world.ai(24, slot) > 0;
+    }
+  }
+  assert.ok(
+    humanTargets && botTargets && routes && projectiles,
+    "original AI must route, shoot, and target both control sources",
+  );
+  assert.equal(world.x.WebNetRestoreLocalCheckpoint(30), 1);
+  assert.deepEqual(world.canonical(), before);
+  for (let tick = 0; tick < expected.length; ++tick) {
+    multipleActions(world, tick);
+    world.step();
+    assert.deepEqual(world.canonical(), expected[tick], `multiple-bot local tick ${tick}`);
+  }
+  for (const checkpoint of [{ tick: 0, snapshot, state: before }, ...checkpoints]) {
+    const restored = await simulation(true, multipleRoster);
+    restored.restore(checkpoint.snapshot);
+    assert.deepEqual(restored.canonical(), checkpoint.state);
+    for (let tick = checkpoint.tick; tick < expected.length; ++tick) {
+      multipleActions(restored, tick);
+      restored.step();
+      assert.deepEqual(
+        restored.canonical(),
+        expected[tick],
+        `multiple-bot portable ${checkpoint.tick} tick ${tick}`,
+      );
+    }
+  }
+  if (process.env.TM4_MULTI_BOT_REFERENCE) {
+    fs.mkdirSync(join(process.env.TM4_MULTI_BOT_REFERENCE, ".."), { recursive: true });
+    fs.writeFileSync(
+      process.env.TM4_MULTI_BOT_REFERENCE,
+      JSON.stringify({
+        snapshot: snapshot.toString("base64"),
+        before: before.toString("base64"),
+        rows: expected.map((row) => row.toString("base64")),
+      }),
+    );
+  }
+  console.log({ humanTargets, botTargets, routes, projectiles, snapshotBytes: snapshot.length });
+});
+
+test("retaliation history uses stable slots when a human leaves and an attacker dies", async () => {
+  const world = await simulation(true, multipleRoster);
+  for (let tick = 0; tick < 30; ++tick) world.step();
+  assert.equal(world.x.WebTestAiAccumulateDamage(7, 5, 17), 1);
+  assert.equal(world.x.WebTestAiDamageHistory(7, 5), 17);
+  assert.equal(world.x.WebNetDepartParticipant(30, 0, 1, 0), 1);
+  assert.equal(world.x.WebTestAiDamageHistory(7, 5), 17);
+  const snapshot = world.snapshot();
+  const restored = await simulation(true, multipleRoster);
+  restored.restore(snapshot);
+  assert.equal(restored.x.WebTestAiDamageHistory(7, 5), 17);
+  for (const current of [world, restored]) {
+    assert.equal(current.x.WebTestKillParticipant(5), 1);
+    current.step();
+    assert.equal(current.x.WebTestAiDamageHistory(7, 5), 0);
+  }
+  assert.deepEqual(restored.canonical(), world.canonical());
+});
+
+test("normal self damage never provokes AI retaliation but other humans and bots do", async () => {
+  const world = await simulation(true, { slots: [0, 1, 2], bots: [1, 2] });
+  for (let tick = 0; tick < 30; ++tick) world.step();
+  const identity = world.results(1);
+  for (const damage of [0, 1]) {
+    // Zero asks the fixture for threshold + 1; also repeat with one point of self damage.
+    const applied = world.x.WebTestAiApplyRetaliationDamage(1, 1, damage);
+    assert.ok(applied > 0, "eligible bot survives actual self damage");
+    assert.ok(world.ai(8, 1) > 0);
+    assert.equal(world.ai(4, 1), 0, "self damage must not select self as the AI target");
+    assert.equal(
+      world.x.WebTestAiDamageHistory(1, 1),
+      0,
+      "self damage must not accumulate retaliation history",
+    );
+    assert.deepEqual(world.results(1), identity, "nonlethal self damage preserves combat results");
+  }
+  for (const attacker of [0, 2]) {
+    const applied = world.x.WebTestAiApplyRetaliationDamage(1, attacker, 0);
+    assert.ok(
+      applied > 0,
+      `participant ${attacker} applies nonlethal damage above the threshold (applied ${applied})`,
+    );
+    assert.equal(
+      world.ai(4, 1),
+      world.x.WebTestCarHandle(attacker),
+      "another participant still provokes retaliation",
+    );
+    assert.ok(world.ai(2, 1) > 0, "retaliation acquires an original navigation route");
+    assert.deepEqual(world.results(1), identity);
+  }
+});
+
+test("eight occupied slots with two humans and six original bots retain portable determinism", async () => {
+  const configuration = {
+    slots: [0, 1, 2, 3, 4, 5, 6, 7],
+    bots: [2, 3, 4, 5, 6, 7],
+    pool: [
+      "Orbital",
+      "Pizza Boy",
+      "Capt. Grimm",
+      "Calypso",
+      "Quatro",
+      "Goggle Eyes",
+      "Meter Maid",
+      "Gen. Warthog",
+    ],
+  };
+  const world = await simulation(true, configuration);
+  for (let tick = 0; tick < 30; ++tick) world.step();
+  const snapshot = world.snapshot();
+  const expected = [];
+  let botTargets = 0;
+  const models = new Set();
+  for (let tick = 0; tick < 360; ++tick) {
+    if ([180, 240, 300].includes(tick))
+      for (const slot of [2, 4, 6])
+        if (world.x.WebTestCarHandle(slot)) assert.equal(world.x.WebTestKillParticipant(slot), 1);
+    world.step();
+    expected.push(world.canonical());
+    for (const slot of configuration.bots) {
+      if (world.x.WebTestCarHandle(slot)) {
+        assert.equal(world.ai(0, slot), 2);
+        assert.equal(world.ai(10, slot), slot % 4);
+        models.add(world.x.WebTestRespawnState(slot, 4));
+      }
+      const target = world.ai(4, slot);
+      botTargets +=
+        target > 0 &&
+        configuration.bots.some(
+          (other) => other !== slot && world.x.WebTestCarHandle(other) === target,
+        );
+    }
+  }
+  assert.ok(botTargets, "bots must acquire other bots in the full roster");
+  assert.ok(models.size > 2, "random respawn uses the prepared model pool");
+  for (const slot of [2, 4, 6]) assert.ok(world.results(slot)[2] >= 3);
+  console.log({ eightSeatRespawnModels: [...models], snapshotBytes: snapshot.length });
+  const restored = await simulation(true, configuration);
+  restored.restore(snapshot);
+  for (let tick = 0; tick < expected.length; ++tick) {
+    if ([180, 240, 300].includes(tick))
+      for (const slot of [2, 4, 6])
+        if (restored.x.WebTestCarHandle(slot))
+          assert.equal(restored.x.WebTestKillParticipant(slot), 1);
+    restored.step();
+    assert.deepEqual(restored.canonical(), expected[tick], `eight-seat tick ${tick}`);
+  }
 });

@@ -116,25 +116,31 @@ players reaching native match ticks without uploading player files. Rust unit
 tests cover atomic upload publication, index validation, private storage and
 the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
 
-For the first original-AI FFA scenario, choose **1** human and one explicit
-**Original AI opponent** in native administrator setup. Leave the opponent at **None**
-for an ordinary human-only match; vacant places are never filled automatically.
-Room setup remains human-only. A prepared local-resource match can also start with
-`bun run match 1 --diagnostic --bot "Pizza Boy"` (or omit `--diagnostic` for dev).
-The same `TM4_RESOURCE_DIR` and matching simulation manifest used by ordinary
-`bun run match` are required. The browser opens the printed link and readies normally.
-The supported AI boundary and recovery state are described in
+For original-AI FFA, choose the human count and explicit **Original AI opponents**
+in native administrator setup. Humans and selected opponents share eight places; selecting
+none starts a human-only match. Vacancies are never filled automatically. Room setup
+remains human-only. With prepared local resources, for example:
+
+`bun run match 2 --diagnostic --bot "Orbital" --bot "Pizza Boy" --bot "Capt. Grimm"`
+
+Omit `--diagnostic` for dev. The same `TM4_RESOURCE_DIR` and matching simulation
+manifest used by ordinary `bun run match` are required. Each human opens the printed
+link and readies normally. The supported AI boundary and recovery state are described in
 [participant lifecycle](design/participant-lifecycle.md#original-ai-participants).
 
 The focused AI checks use `tests/simulation/ffa-bots.mjs` with `node --test`,
-`TM4_SIMULATION_WASM` and `TM4_RESOURCE_DIR`. Setting `TM4_BOT_REFERENCE` to an ignored
-output path writes its canonical replay tape for the ignored Rust test
-`original_ai_node_wasmtime_replay` and `tests/browser/check_ffa_bots.mjs`.
-The browser check takes `TM4_WEB_URL` and a fresh one-human/one-bot
-`TM4_MATCH_ENDPOINT`; it verifies the playable match, packet delay, rollback and
-reconnect. Its optional reference comparison runs the same tape in browser Wasm.
-Combat placement and obstacle recovery are controlled fixtures; navigation, weapon
-choice and driving still execute through the original C AI.
+`TM4_SIMULATION_WASM` and `TM4_RESOURCE_DIR`. `TM4_BOT_REFERENCE` writes the one-bot
+canonical tape; `TM4_MULTI_BOT_REFERENCE` writes the sparse two-human/three-bot tape.
+The corresponding ignored Rust checks are `original_ai_node_wasmtime_replay` and
+`multiple_original_ai_node_wasmtime_replay`.
+`tests/browser/check_ffa_bots.mjs` takes `TM4_WEB_URL` and a fresh two-human/three-bot
+`TM4_MATCH_ENDPOINT`; it checks playable clients, delayed input rollback, one human's
+reconnect while the other continues, and explicit departures. Its optional
+`TM4_BOT_REFERENCE` and `TM4_MULTI_BOT_REFERENCE` comparisons run the same tapes in
+browser Wasm. Replay the completed authority journal with `tests/simulation/replay-membership-journal.mjs`
+to compare accepted live inputs and all subsystem digests in Node.
+Combat placement and obstacle recovery are controlled simulation fixtures; navigation,
+weapon choice and driving still execute through the original C AI.
 
 ## Browser checks
 

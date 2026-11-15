@@ -80,3 +80,198 @@
                  && owner->control_kind == CAR_CONTROL_ENEMY)
                  damage /= 4;
              if (Import_CarApplyParticipantDamage(
+--- a/src/modules/car/private.h
++++ b/src/modules/car/private.h
+@@ -58,7 +58,7 @@
+ void CarAiAssignUpdateSlots(Car* excluded_car);
+ void CarAiReactToDamage(Car* car, Car* attacker, s32 damage);
+ void CarAiReplanRouteAfterTeleport(void* object);
+-Car* CarAiChooseTarget(void);
++Car* CarAiChooseTarget(Car* source);
+ void CarAiSetTarget(Car* car, Car* target, CarAiNearbyCar* entry);
+ 
+ /* ai_combat.c */
+--- a/src/modules/car/ai_control.c
++++ b/src/modules/car/ai_control.c
+@@ -1,4 +1,6 @@
+ 
++#include "port/web/ffa.h"
++#include "port/web/net_match.h"
+ #include "private.h"
+ #include "tm4_scalar.h"
+ 
+@@ -89,14 +90,17 @@
+ {
+     s32 i;
+-    if (!aiWorldInfo.enabled || !GameIsCarRegistered(attacker)
+-        || car->control_kind != CAR_CONTROL_ENEMY || attacker->control_kind != CAR_CONTROL_PLAYER)
++    if (car == attacker || !aiWorldInfo.enabled || !GameIsCarRegistered(attacker)
++        || car->control_kind != CAR_CONTROL_ENEMY
++        || (!WebFfaActive() && attacker->control_kind != CAR_CONTROL_PLAYER))
+         return;
+     if (car->ai_state_callback != CarAiPatrol && car->ai_state_callback != CarAiFollowTargetRoute)
+         return;
+-    car->ai.attacker_damage[attacker->index] += damage;
++    const s32 attacker_index = WebNetMatchActive() ? attacker->controller_index : attacker->index;
++    car->ai.attacker_damage[attacker_index] += damage;
+     if (attacker->ai.targeting_count < attacker->ai.targeting_limit
+-        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker->index]) {
+-        for (i = GameInfo.entrant_count - 1; i >= 0; i--)
++        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker_index]) {
++        for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0;
++             i--)
+             car->ai.attacker_damage[i] = 0;
+         if (CarAiFindRouteToNode(car, attacker->ai.selected_node)) {
+             CarAiSetTarget(car, attacker, NULL);
+@@ -157,14 +161,17 @@
+         car->ai.extinguish_ticks = (u16)car->ai.extinguish_delay + (rand() % 60) / 4;
+ }
+ 
+-Car* CarAiChooseTarget(void)
++Car* CarAiChooseTarget(Car* source)
+ {
+     Car* choices[ArrayCount(GameInfo.cars)];
+     Car* car;
+     s32 i, count = 0;
+     for (i = GameInfo.car_count - 1; i >= 0; i--) {
+         car = GameInfo.cars[i];
+-        if (car->control_kind == CAR_CONTROL_PLAYER) {
++        if (WebFfaActive()) {
++            if (car != source && car->ai.targeting_count < car->ai.targeting_limit)
++                choices[count++] = car;
++        } else if (car->control_kind == CAR_CONTROL_PLAYER) {
+             if (car->ai.targeting_count < car->ai.targeting_limit)
+                 choices[count++] = car;
+         } else if (car->control_kind == CAR_CONTROL_ALLY && !car->ai.targeting_count) {
+@@ -177,7 +184,7 @@
+ void CarAiSetTarget(Car* car, Car* target, CarAiNearbyCar* entry)
+ {
+     s32 i;
+-    for (i = GameInfo.entrant_count - 1; i >= 0; i--)
++    for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0; i--)
+         car->ai.attacker_damage[i] = 0;
+     /* The target can die before our next AI update or destructor; its storage may be reused. */
+     if (car->ai.target && GameIsCarRegistered(car->ai.target))
+--- a/src/modules/car/ai_combat.c
++++ b/src/modules/car/ai_combat.c
+@@ -1,4 +1,5 @@
+ 
++#include "port/web/ffa.h"
+ #include "private.h"
+ #include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+@@ -28,8 +29,8 @@
+         other = GameInfo.cars[i];
+         if (car->ai.area != other->ai.area)
+             continue;
+-        if (car->control_kind == CAR_CONTROL_ENEMY && other->control_kind == CAR_CONTROL_ENEMY
+-            && other->ai.health_fraction < 1229)
++        if (!WebFfaActive() && car->control_kind == CAR_CONTROL_ENEMY
++            && other->control_kind == CAR_CONTROL_ENEMY && other->ai.health_fraction < 1229)
+             continue;
+         if (other->invisibility_ticks)
+             continue;
+@@ -152,7 +153,7 @@
+     s32 result;
+     if (car->control_kind != CAR_CONTROL_ENEMY)
+         return 0;
+-    target = CarAiChooseTarget();
++    target = CarAiChooseTarget(car);
+     if (!target)
+         return 0;
+     if (CarAiFindRouteToNode(car, target->ai.selected_node)) {
+@@ -323,7 +324,8 @@
+         }
+     }
+     if (car->ai.fire_ticks < 0) {
+-        if (car->ai.target && (u8)car->ai.target->control_kind < CAR_CONTROL_ENEMY)
++        if (car->ai.target
++            && (WebFfaActive() || (u8)car->ai.target->control_kind < CAR_CONTROL_ENEMY))
+             car->ai.fire_ticks = car->ai.fire_delay;
+         else
+             car->ai.fire_ticks = car->ai.fire_delay_ai_to_ai;
+--- a/src/modules/car/ai_driving.c
++++ b/src/modules/car/ai_driving.c
+@@ -1,4 +1,5 @@
+ 
++#include "port/web/ffa.h"
+ #include "private.h"
+ #include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+@@ -47,6 +48,11 @@
+         if (entry->distance <= car->ai_config.enemy_repel_distance)
+             continue;
+         other = entry->car;
++        if (WebFfaActive()) {
++            if (other->ai.targeting_count < other->ai.targeting_limit)
++                return (CarAiStateTransition)select_target(car, other, entry);
++            continue;
++        }
+         switch (other->control_kind) {
+         case CAR_CONTROL_ALLY:
+             if (car->control_kind != CAR_CONTROL_ENEMY)
+@@ -303,7 +309,8 @@
+                 car->controls.turbo_active = 1;
+         } else {
+             if (CarAiFindRouteToNode(car, target->ai.selected_node))
+-                return (CarAiStateTransition)(car->ai.target->control_kind == CAR_CONTROL_ENEMY
++                return (CarAiStateTransition)(!WebFfaActive()
++                            && car->ai.target->control_kind == CAR_CONTROL_ENEMY
+                         ? CarAiFollowTargetRoute
+                         : CarAiPursueTarget);
+             if (CarAiTryTargetRoute(car))
+@@ -391,7 +398,8 @@
+                 return (CarAiStateTransition)CarAiApproachTarget;
+         } else {
+             if (CarAiFindRouteToNode(car, target->ai.selected_node))
+-                return (CarAiStateTransition)(car->ai.target->control_kind == CAR_CONTROL_ENEMY
++                return (CarAiStateTransition)(!WebFfaActive()
++                            && car->ai.target->control_kind == CAR_CONTROL_ENEMY
+                         ? CarAiFollowTargetRoute
+                         : CarAiPursueTarget);
+             if (CarAiTryTargetRoute(car))
+--- a/src/modules/car/weapon_targeting.c
++++ b/src/modules/car/weapon_targeting.c
+@@ -1,4 +1,5 @@
+ 
++#include "port/web/ffa.h"
+ #include "private.h"
+ #include "tm4_scalar.h"
+ 
+@@ -102,7 +103,7 @@
+     kind = car->control_kind;
+     if (kind == CAR_CONTROL_ENEMY && !target) {
+         target = CarFindWeaponTarget(car, matrix);
+-        if (target && target->control_kind == kind)
++        if (!WebFfaActive() && target && target->control_kind == kind)
+             target = NULL;
+     }
+     return target;
+--- a/src/modules/weap/projectile.c
++++ b/src/modules/weap/projectile.c
+@@ -1,4 +1,5 @@
+ 
++#include "port/web/ffa.h"
+ #include "private.h"
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+@@ -73,7 +74,7 @@
+         s32 cpu_kind = CAR_CONTROL_ENEMY;
+         s32 kind = ((Car*)projectile->owner)->control_kind;
+         Car* target_car = (Car*)projectile->target;
+-        if (kind == cpu_kind && target_car->control_kind == kind) {
++        if (!WebFfaActive() && kind == cpu_kind && target_car->control_kind == kind) {
+             projectile->homing_strength = (u32)projectile->homing_strength >> cpu_kind;
+             projectile->seek_always = 0;
+         }
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -303,7 +303,7 @@
+         CarAiSetTarget(car, NULL, NULL);
+     else
+         car->ai.target = NULL;
+-    if (GameIsCarRegistered(car))
++    if (!WebNetMatchActive() && GameIsCarRegistered(car))
+         CarAiAssignUpdateSlots(car);
+     if (car->ai.attacker_damage)
+         MemFree(car->ai.attacker_damage);

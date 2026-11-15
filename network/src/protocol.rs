@@ -399,10 +399,9 @@ pub fn prepared_model_pool(catalog: &[String], cars: &[String]) -> Vec<String> {
 impl SessionStart {
     pub fn valid_slots(&self) -> bool {
         self.limits.valid()
-            && (self.bots.is_empty()
-                || (self.bots.len() == 1
-                    && self.slots.len() == 2
-                    && self.slots.contains(&self.bots[0])))
+            && self.bots.len() < self.slots.len()
+            && self.bots.windows(2).all(|pair| pair[0] < pair[1])
+            && self.bots.iter().all(|slot| self.slots.contains(slot))
             && self.capacity == MAX_PLAYERS
             && (1..=3600).contains(&self.respawn_delay_ticks)
             && (1..=self.capacity).contains(&self.slots.len())

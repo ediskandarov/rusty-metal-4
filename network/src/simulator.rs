@@ -1142,6 +1142,122 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    #[ignore = "requires private resources, diagnostic Wasm and Node multi-bot reference"]
+    fn multiple_original_ai_node_wasmtime_replay() -> Result<()> {
+        let (wasm, resources) = paths()?;
+        let reference: serde_json::Value =
+            serde_json::from_slice(&fs::read(env::var("TM4_MULTI_BOT_REFERENCE")?)?)?;
+        let slots = vec![0, 1, 3, 5, 7];
+        let setup = SessionStart {
+            bots: vec![3, 5, 7],
+            participants: slots
+                .iter()
+                .map(|slot| tm4_network::protocol::ParticipantId(u64::from(*slot) + 1))
+                .collect(),
+            cars: slots
+                .iter()
+                .enumerate()
+                .map(|(index, _)| {
+                    if index % 2 == 0 {
+                        "Orbital".into()
+                    } else {
+                        "Pizza Boy".into()
+                    }
+                })
+                .collect(),
+            slots,
+            respawn_delay_ticks: 12,
+            limits: tm4_network::protocol::FfaLimits {
+                time_limit_ticks: 27000,
+                frag_limit: 100,
+            },
+            ..session()
+        };
+        let mut world = Simulator::new(&wasm, &resources, compatibility())?;
+        world.start(&setup)?;
+        world.restore_portable(&STANDARD.decode(reference["snapshot"].as_str().unwrap())?)?;
+        ensure!(
+            canonical(&mut world)? == STANDARD.decode(reference["before"].as_str().unwrap())?,
+            "Node multi-bot snapshot differs in Wasmtime"
+        );
+        for (offset, row) in reference["rows"].as_array().unwrap().iter().enumerate() {
+            let alive = |world: &mut Simulator, slot| {
+                world
+                    .call::<i32, u32>("WebTestCarHandle", slot)
+                    .map(|handle| handle != 0)
+            };
+            if [80, 240, 500].contains(&offset) {
+                let source = if offset < 400 { 0 } else { 1 };
+                if alive(&mut world, source)? {
+                    for slot in [3, 5, 7] {
+                        if alive(&mut world, slot)? {
+                            ensure!(
+                                world.call::<(i32, i32, i32, i32), i32>(
+                                    "WebTestPlacePlayerTarget",
+                                    (source, slot, 900 + slot * 150, 0)
+                                )? == 1,
+                                "Multi-bot combat placement"
+                            );
+                        }
+                    }
+                }
+            }
+            if offset == 120 && alive(&mut world, 3)? {
+                ensure!(
+                    world.call::<i32, i32>("WebTestAiRecovery", 3)? == 1,
+                    "Multi-bot recovery"
+                );
+            }
+            if offset == 200 && alive(&mut world, 3)? && alive(&mut world, 5)? {
+                ensure!(
+                    world.call::<(i32, i32, i32), i32>("WebTestPreparePlayerDuel", (3, 5, 1200))?
+                        == 1,
+                    "Inter-bot duel"
+                );
+                let projectile = world.call::<i32, u32>("WebTestCreateParticipantProjectile", 3)?;
+                ensure!(
+                    projectile != 0
+                        && world
+                            .call::<(u32, i32), i32>("WebTestHitParticipant", (projectile, 5))?
+                            == 1,
+                    "Inter-bot projectile"
+                );
+            }
+            if (offset == 300 && alive(&mut world, 0)?) || (offset == 450 && alive(&mut world, 3)?)
+            {
+                ensure!(
+                    world.call::<i32, i32>(
+                        "WebTestKillParticipant",
+                        if offset == 300 { 0 } else { 3 }
+                    )? == 1,
+                    "Multi-bot death fixture"
+                );
+            }
+            if offset == 400 {
+                ensure!(
+                    world.membership(
+                        430,
+                        &tm4_network::protocol::MembershipChange::Depart {
+                            identity: tm4_network::protocol::ControllerIdentity {
+                                slot: 0,
+                                participant: tm4_network::protocol::ParticipantId(1)
+                            }
+                        }
+                    )?,
+                    "Human departure"
+                );
+            }
+            world.step(30 + offset as u32, &[Input::default(); 8])?;
+            ensure!(
+                canonical(&mut world)? == STANDARD.decode(row.as_str().unwrap())?,
+                "Node/Wasmtime multi-bot differs at tick {}",
+                31 + offset
+            );
+        }
+        Ok(())
+    }
+
     fn canonical(world: &mut Simulator) -> Result<Vec<u8>> {
         let length = world.call::<(), u32>("HeadlessCapture", ())?;
         ensure!(
