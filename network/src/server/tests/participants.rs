@@ -1180,6 +1180,11 @@ fn confirmed_ffa_end_seals_journal_and_cancels_scheduled_and_preparing_admission
         3,
         "occupied participants retain final score eligibility"
     );
+    assert!(
+        world
+            .resource_mut::<Match>()
+            .finish_journal(journal::End::Aborted)
+    );
     assert_eq!(journal::inspect(&path).unwrap().end, journal::End::Finished);
     assert!(
         room_change(
@@ -1244,4 +1249,42 @@ fn final_result_uses_authority_scores_and_current_sparse_identity_not_dense_orde
     assert_eq!(result.participants[2].score.frags, 7);
     assert_eq!(result.participants[2].score.deaths, 1);
     assert_eq!(result.completion.winners, 128);
+}
+
+#[test]
+fn shutdown_seals_active_match_journal_once() {
+    let mut game = game();
+    let directory = env::temp_dir().join(format!(
+        "rm4-journal-shutdown-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut journal = journal::Journal::create(
+        &directory,
+        &journal::Header {
+            start: game.session.as_ref().unwrap().clone(),
+            initial_digest: 123,
+        },
+    )
+    .unwrap();
+    journal
+        .append(
+            0,
+            &[Input::default(); 8],
+            &[],
+            game.last_state.as_ref().unwrap(),
+        )
+        .unwrap();
+    let path = journal.path.clone();
+    game.journal = Some(journal);
+    assert!(game.finish_journal(journal::End::Aborted));
+    assert!(game.finish_journal(journal::End::Aborted));
+    drop(game);
+    let summary = journal::inspect(&path).unwrap();
+    assert_eq!(summary.ticks, 1);
+    assert_eq!(summary.end, journal::End::Aborted);
+    std::fs::remove_dir_all(directory).unwrap();
 }

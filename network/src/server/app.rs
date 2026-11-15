@@ -223,5 +223,12 @@ pub(crate) fn run_match(
         }
         thread::sleep(Duration::from_millis(1));
     }
+    if !app
+        .world_mut()
+        .resource_mut::<Match>()
+        .finish_journal(crate::journal::End::Aborted)
+    {
+        return Err("Unable to finalize the match journal during shutdown".into());
+    }
     Ok(())
 }

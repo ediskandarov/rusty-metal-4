@@ -121,6 +121,9 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         launcher.as_ref(),
     ) {
         if let Some(launcher) = &launcher {
+            if launcher.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(error);
+            }
             launcher.phase(
                 "closed",
                 &format!("Match server failed: {error}. Restart the server to try again."),

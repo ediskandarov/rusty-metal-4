@@ -4,6 +4,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import { isolated } from "../assets.ts";
 import { exportHealth } from "../telemetry.ts";
+import { shutdownContainer } from "./container-shutdown.ts";
 import { ServerJournal } from "./journal.ts";
 
 export interface ServerEnv {
@@ -45,6 +46,7 @@ export class TestServer extends DurableObject<ServerEnv> {
   }
 
   private starting: Promise<void> | undefined;
+  private stopping: Promise<void> | undefined;
   private previousHealth: HealthSnapshot | undefined;
   private lastExternalActivity = Date.now();
   private emptySince: number | undefined;
@@ -108,6 +110,7 @@ export class TestServer extends DurableObject<ServerEnv> {
   }
 
   override async alarm(): Promise<void> {
+    if (this.stopping) return;
     const container = this.ctx.container!;
     if (!container.running) {
       this.previousHealth = undefined;
@@ -181,23 +184,32 @@ export class TestServer extends DurableObject<ServerEnv> {
     if (container.running) await this.ctx.storage.setAlarm(Date.now() + metricsIntervalMs);
   }
 
+  private async stop(): Promise<void> {
+    await this.ctx.storage.deleteAlarm();
+    this.previousHealth = undefined;
+    this.emptySince = undefined;
+    await this.ctx.storage.delete("emptySince");
+    await this.ctx.storage.delete("previousHealth");
+    await this.archiveJournal();
+    await shutdownContainer(this.ctx.container!);
+    const meta = await this.journal.metadata();
+    await this.ctx.storage.delete("lastExternalActivity");
+    if (meta) await this.ctx.storage.setAlarm(meta.expiresAt);
+  }
+
   override async fetch(request: Request): Promise<Response> {
     if (new URL(request.url).pathname === "/_server/stop") {
-      await this.ctx.storage.deleteAlarm();
-      this.previousHealth = undefined;
-      this.emptySince = undefined;
-      await this.ctx.storage.delete("emptySince");
-      await this.ctx.storage.delete("previousHealth");
-      await this.archiveJournal();
-      if (this.ctx.container!.running) await this.ctx.container!.destroy();
+      this.stopping ??= this.stop().finally(() => {
+        this.stopping = undefined;
+      });
+      await this.stopping;
       const meta = await this.journal.metadata();
-      await this.ctx.storage.delete("lastExternalActivity");
-      if (meta) await this.ctx.storage.setAlarm(meta.expiresAt);
       return new Response(null, {
         status: 204,
         headers: meta ? { "X-Journal-Expires-At": String(meta.expiresAt) } : {},
       });
     }
+    if (this.stopping) return new Response("Server is stopping", { status: 503 });
     const path = new URL(request.url).pathname;
     if (path === "/_server/journal") {
       await this.archiveJournal();
