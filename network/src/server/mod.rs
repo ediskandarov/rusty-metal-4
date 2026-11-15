@@ -11,7 +11,7 @@ mod tick;
 pub(crate) use app::run_match;
 pub(crate) use participant::ParticipantRoster;
 
-use crate::{health, journal, resume, web};
+use crate::{health, journal, management, resume};
 use bevy_ecs::prelude::*;
 use control::send;
 use lightyear::prelude::*;
@@ -68,7 +68,7 @@ impl ControllerState {
 struct Match {
     participants: ParticipantRoster,
     membership: membership::LiveMembership,
-    room_requests: Option<web::MembershipQueue>,
+    room_requests: Option<management::MembershipQueue>,
     controls: Vec<ControllerState>,
     authority_ready: bool,
     compatibility: Option<Compatibility>,
@@ -125,15 +125,15 @@ impl Match {
         self.last_state.as_ref().and_then(modes::final_message)
     }
 
-    fn final_result(&self, session_id: &str) -> Option<web::MatchResult> {
+    fn final_result(&self, session_id: &str) -> Option<management::MatchResult> {
         let state = self.result_state()?;
-        Some(web::MatchResult {
+        Some(management::MatchResult {
             session_id: session_id.into(),
             completion: state.completion.clone(),
             participants: self
                 .participants
                 .slots()
-                .map(|slot| web::ResultParticipant {
+                .map(|slot| management::ResultParticipant {
                     identity: self.participants.binding(slot),
                     credential: self.participants.at_slot(slot).room_credential.clone(),
                     score: state.scores[slot].clone(),

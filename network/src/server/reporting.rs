@@ -1,5 +1,5 @@
 use super::{Match, control::Admission};
-use crate::web::{self, MatchOutcome, MatchUpdate};
+use crate::management::{self, MatchOutcome, MatchUpdate};
 use bevy_ecs::world::World;
 use tm4_network::modes::BattleProgress;
 
@@ -56,8 +56,8 @@ pub(super) fn collect(world: &World, session_id: Option<&str>) -> Report {
     }
 }
 
-pub(super) fn publish(world: &World, launcher: &web::Launcher) {
-    let session_id = launcher.session_id();
+pub(super) fn publish(world: &World, control: &management::Control) {
+    let session_id = control.session_id();
     let report = collect(world, session_id.as_deref());
     {
         let mut health = world.resource::<Match>().health.lock().unwrap();
@@ -65,5 +65,5 @@ pub(super) fn publish(world: &World, launcher: &web::Launcher) {
             health.unacknowledged(slot, count);
         }
     }
-    launcher.publish_match(report.update);
+    control.publish_match(report.update);
 }

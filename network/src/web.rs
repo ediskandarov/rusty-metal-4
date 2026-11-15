@@ -1,5 +1,8 @@
 //! HTTP launcher. Simulation stays on the native game thread.
-mod state;
+use crate::management::{
+    Control, MatchSetup, MembershipCommand, Phase, PublishedState, RoomMembership, RosterMember,
+    ServerLocation, SetupRequest, SharedState, Status,
+};
 use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
@@ -12,8 +15,6 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-pub use state::{MatchOutcome, MatchUpdate, Status};
-use state::{Phase, PublishedState, SharedState};
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -36,27 +37,7 @@ use tokio::{
 use tower::limit::ConcurrencyLimitLayer;
 
 use crate::assets::Simulation;
-use tm4_network::protocol::{Compatibility, MAX_PLAYERS};
-#[derive(Debug, PartialEq)]
-pub enum SetupRequest {
-    Prepare,
-    Start(MatchSetup),
-}
-#[derive(Debug, PartialEq)]
-pub struct MatchSetup {
-    pub mode: tm4_network::protocol::MatchMode,
-    pub bots: Vec<String>,
-    pub roster: Vec<RosterMember>,
-    pub limits: tm4_network::protocol::FfaLimits,
-    pub players: usize,
-    pub world: String,
-}
-#[derive(Clone, Debug, PartialEq, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RosterMember {
-    pub credential: String,
-    pub car: String,
-}
+use tm4_network::protocol::MAX_PLAYERS;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct StartOptions {
@@ -71,67 +52,17 @@ struct StartOptions {
     players: usize,
     world: String,
 }
-#[derive(Clone, Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum RoomMembership {
-    Admit {
-        credential: String,
-        car: String,
-    },
-    Depart {
-        credential: String,
-    },
-    #[serde(skip)]
-    Inspect {
-        credential: String,
-    },
-}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MembershipOptions {
     session_id: String,
     change: RoomMembership,
 }
-#[derive(Serialize)]
-pub struct MembershipReply {
-    pub identity: Option<tm4_network::protocol::ControllerIdentity>,
-    pub tick: Option<u32>,
-    pub pending: bool,
-}
-pub struct MembershipCommand {
-    pub change: RoomMembership,
-    pub response: tokio::sync::oneshot::Sender<std::result::Result<MembershipReply, &'static str>>,
-}
-pub type MembershipQueue = Arc<Mutex<Receiver<MembershipCommand>>>;
-
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 
 // The proxy owns TLS and admission; never enable this on a directly exposed listener.
 pub fn behind_proxy() -> bool {
     env::var("TM4_BEHIND_PROXY").as_deref() == Ok("1")
-}
-
-#[derive(Clone, Serialize, Debug, PartialEq)]
-pub struct ServerLocation {
-    region: Option<String>,
-    country: Option<String>,
-    location: Option<String>,
-}
-impl ServerLocation {
-    fn from_environment(mut lookup: impl FnMut(&str) -> Option<String>) -> Option<Self> {
-        let mut value = |name| {
-            lookup(name)
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-        };
-        let location = Self {
-            region: value("CLOUDFLARE_REGION"),
-            country: value("CLOUDFLARE_COUNTRY_A2"),
-            location: value("CLOUDFLARE_LOCATION"),
-        };
-        (location.region.is_some() || location.country.is_some() || location.location.is_some())
-            .then_some(location)
-    }
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -152,28 +83,10 @@ impl Drop for PrivateDirectory {
     }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MatchResult {
-    pub session_id: String,
-    pub completion: tm4_network::protocol::MatchCompletion,
-    pub participants: Vec<ResultParticipant>,
-}
-#[derive(Clone, Serialize)]
-pub struct ResultParticipant {
-    pub identity: tm4_network::protocol::ControllerIdentity,
-    pub credential: Option<String>,
-    pub score: tm4_network::protocol::Score,
-}
-
 pub struct Launcher {
     pub wasm: Simulation,
-    pub stopped: Arc<AtomicBool>,
-    state: SharedState,
-    pub health: crate::health::Shared,
-    pub journal: crate::journal::SharedExport,
+    pub control: Control,
     requests: Receiver<SetupRequest>,
-    pub membership: MembershipQueue,
     _private: PrivateDirectory,
     http: Option<thread::JoinHandle<()>>,
 }
@@ -264,18 +177,20 @@ impl Launcher {
         println!("Server launcher: http://{listen}/");
         Ok(Self {
             wasm,
-            stopped,
-            state,
-            health,
-            journal,
+            control: Control {
+                stopped,
+                state,
+                health,
+                journal,
+                membership,
+            },
             requests,
-            membership,
             _private: private,
             http: Some(http),
         })
     }
     pub fn wait_for_setup(&self) -> Option<SetupRequest> {
-        while !self.stopped.load(Ordering::Relaxed) {
+        while !self.control.stopped.load(Ordering::Relaxed) {
             match self.requests.recv_timeout(Duration::from_millis(100)) {
                 Ok(path) => return Some(path),
                 Err(mpsc::RecvTimeoutError::Timeout) => (),
@@ -287,31 +202,10 @@ impl Launcher {
     pub fn resource_directory(&self) -> &Path {
         &self._private.0
     }
-    pub fn ready(&self, worlds: Vec<String>, cars: Vec<String>, compatibility: Compatibility) {
-        self.state
-            .lock()
-            .unwrap()
-            .resources_ready(worlds, cars, compatibility);
-    }
-    pub fn preparation_failed(&self, message: &str) {
-        self.state.lock().unwrap().preparation_failed(message);
-    }
-    pub fn listening(&self) {
-        self.state.lock().unwrap().listening();
-    }
-    pub fn close(&self, message: &str) {
-        self.state.lock().unwrap().close(message);
-    }
-    pub fn session_id(&self) -> Option<String> {
-        self.state.lock().unwrap().status.session_id.clone()
-    }
-    pub fn publish_match(&self, update: MatchUpdate) {
-        self.state.lock().unwrap().publish_match(update);
-    }
 }
 impl Drop for Launcher {
     fn drop(&mut self) {
-        self.stopped.store(true, Ordering::Relaxed);
+        self.control.stopped.store(true, Ordering::Relaxed);
         if let Some(http) = self.http.take() {
             let _ = http.join();
         }
@@ -809,6 +703,7 @@ fn validate_index(data: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::management::MatchResult;
     use axum::body::Bytes;
     use futures_util::stream;
     use std::{
@@ -816,34 +711,6 @@ mod tests {
         task::{Context as TaskContext, Poll, Waker},
     };
     use tower::ServiceExt;
-
-    #[test]
-    fn server_location_uses_container_environment() {
-        let location = ServerLocation::from_environment(|name| match name {
-            "CLOUDFLARE_REGION" => Some("WEUR".into()),
-            "CLOUDFLARE_COUNTRY_A2" => Some("DE".into()),
-            "CLOUDFLARE_LOCATION" => Some("FRA".into()),
-            _ => panic!("unexpected environment variable"),
-        });
-        assert_eq!(
-            serde_json::to_value(location).unwrap(),
-            serde_json::json!({
-                "region": "WEUR", "country": "DE", "location": "FRA"
-            })
-        );
-        assert_eq!(ServerLocation::from_environment(|_| None), None);
-        assert_eq!(
-            ServerLocation::from_environment(|_| Some("  ".into())),
-            None
-        );
-        let partial = ServerLocation::from_environment(|name| {
-            (name == "CLOUDFLARE_REGION").then(|| " WEUR ".into())
-        })
-        .unwrap();
-        assert_eq!(partial.region.as_deref(), Some("WEUR"));
-        assert_eq!(partial.country, None);
-        assert_eq!(partial.location, None);
-    }
 
     const STOCK: &[u8] = b"test stock fixture";
     struct Fixture {
@@ -1503,12 +1370,14 @@ mod tests {
         .unwrap();
         let launcher = Launcher {
             wasm: Simulation::File(PathBuf::new()),
-            stopped,
-            state,
-            health: fixture.service.health.clone(),
-            journal: fixture.service.journal.clone(),
+            control: Control {
+                stopped,
+                state,
+                health: fixture.service.health.clone(),
+                journal: fixture.service.journal.clone(),
+                membership: Arc::new(Mutex::new(mpsc::sync_channel(8).1)),
+            },
             requests: fixture.requests,
-            membership: Arc::new(Mutex::new(mpsc::sync_channel(8).1)),
             _private: PrivateDirectory(path.clone()),
             http: Some(http),
         };

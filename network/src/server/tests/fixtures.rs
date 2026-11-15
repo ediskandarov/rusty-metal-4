@@ -1,5 +1,5 @@
 use super::super::{ParticipantRoster, run_match};
-use crate::{simulator, web};
+use crate::{management, simulator};
 use std::env;
 
 // Run the production match path with sparse preparation bindings.
@@ -28,14 +28,14 @@ fn sparse_room_match_browser_fixture() {
     let members = vec![
         (
             roster.binding(6),
-            web::RosterMember {
+            management::RosterMember {
                 credential: "bb".repeat(32),
                 car: "Pizza Boy".into(),
             },
         ),
         (
             roster.binding(3),
-            web::RosterMember {
+            management::RosterMember {
                 credential: "aa".repeat(32),
                 car: "Orbital".into(),
             },

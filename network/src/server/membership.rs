@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tm4_network::protocol::{ControllerIdentity, MembershipChange, Message, ParticipantId};
 
 use super::{ControllerState, Match, control::send};
-use crate::{resume, web};
+use crate::{management, resume};
 
 const ADMISSION_DEADLINE: Duration = Duration::from_secs(45);
 const EVENT_LEAD: u32 = tm4_network::protocol::PREDICTION_DEPTH as u32 * 2;
@@ -26,7 +26,7 @@ pub(super) struct LiveMembership {
 impl Match {
     pub(super) fn configure_room(
         &mut self,
-        members: Vec<(ControllerIdentity, web::RosterMember)>,
+        members: Vec<(ControllerIdentity, management::RosterMember)>,
     ) -> Result<(), &'static str> {
         if self.started
             || self.ended
@@ -71,7 +71,7 @@ impl Match {
 
     pub(super) fn room_membership(
         &mut self,
-        request: web::MembershipCommand,
+        request: management::MembershipCommand,
         links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
         commands: &mut Commands,
     ) {
@@ -82,13 +82,13 @@ impl Match {
             if !self.room_only || !self.started || self.ended {
                 return Err("This room match has ended.");
             }
-            if !matches!(request.change, web::RoomMembership::Inspect { .. }) {
+            if !matches!(request.change, management::RoomMembership::Inspect { .. }) {
                 self.mode.check_live_membership()?;
             }
             match request.change {
-                web::RoomMembership::Inspect { credential } => {
+                management::RoomMembership::Inspect { credential } => {
                     let identity = self.participants.find_room_credential(&credential);
-                    Ok(web::MembershipReply {
+                    Ok(management::MembershipReply {
                         pending: identity.is_some_and(|identity| {
                             self.participants.joining(usize::from(identity.slot))
                         }),
@@ -96,7 +96,7 @@ impl Match {
                         tick: None,
                     })
                 }
-                web::RoomMembership::Admit { credential, car } => {
+                management::RoomMembership::Admit { credential, car } => {
                     if !self
                         .session
                         .as_ref()
@@ -114,7 +114,7 @@ impl Match {
                         {
                             return Err("This reservation already selected another model.");
                         }
-                        return Ok(web::MembershipReply {
+                        return Ok(management::MembershipReply {
                             identity: Some(identity),
                             pending: self.participants.joining(usize::from(identity.slot)),
                             tick: self
@@ -130,17 +130,17 @@ impl Match {
                     participant.car = Some(car);
                     participant.lobby_ready = true;
                     participant.credential = resume::credential();
-                    Ok(web::MembershipReply {
+                    Ok(management::MembershipReply {
                         identity: Some(identity),
                         pending: true,
                         tick: None,
                     })
                 }
-                web::RoomMembership::Depart { credential } => {
+                management::RoomMembership::Depart { credential } => {
                     let Some(identity) = self.participants.find_room_credential(&credential) else {
                         // A preparation deadline or a prior departure may already
                         // have released this lease. Explicit room leave is idempotent.
-                        return Ok(web::MembershipReply {
+                        return Ok(management::MembershipReply {
                             identity: None,
                             pending: false,
                             tick: None,
@@ -148,7 +148,7 @@ impl Match {
                     };
                     if self.participants.joining(usize::from(identity.slot)) {
                         self.cancel_admission(identity, links, commands);
-                        return Ok(web::MembershipReply {
+                        return Ok(management::MembershipReply {
                             identity: Some(identity),
                             pending: false,
                             tick: None,
@@ -160,7 +160,7 @@ impl Match {
                     } else {
                         self.schedule_departure(identity, links)?
                     };
-                    Ok(web::MembershipReply {
+                    Ok(management::MembershipReply {
                         identity: Some(identity),
                         pending: false,
                         tick: Some(tick),

@@ -5,7 +5,7 @@ use tm4_network::protocol::Compatibility;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(super) enum Phase {
+pub(crate) enum Phase {
     Setup,
     Loading,
     Ready,
@@ -44,7 +44,7 @@ pub struct Status {
     pub session_id: Option<String>,
     pub cars: Vec<String>,
     pub compatibility: Option<Compatibility>,
-    pub(super) phase: Phase,
+    pub(crate) phase: Phase,
     pub message: String,
     pub players: usize,
     pub worlds: Vec<String>,
@@ -73,9 +73,9 @@ pub enum MatchOutcome {
     Stopped(&'static str),
 }
 
-pub(super) type SharedState = Arc<Mutex<PublishedState>>;
+pub(crate) type SharedState = Arc<Mutex<PublishedState>>;
 
-pub(super) struct PublishedState {
+pub(crate) struct PublishedState {
     pub status: Status,
     pub result: Option<MatchResult>,
 }

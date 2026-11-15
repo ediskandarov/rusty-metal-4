@@ -282,14 +282,14 @@ fn room_admission_and_preparation_reconnect_use_participant_bindings() {
     game.configure_room(vec![
         (
             b,
-            web::RosterMember {
+            management::RosterMember {
                 credential: "bb".repeat(32),
                 car: "Pizza Boy".into(),
             },
         ),
         (
             a,
-            web::RosterMember {
+            management::RosterMember {
                 credential: "aa".repeat(32),
                 car: "Orbital".into(),
             },
@@ -456,14 +456,14 @@ fn retired_room_credential_cannot_claim_a_reused_slot_and_running_release_is_fen
     game.configure_room(vec![
         (
             retired,
-            web::RosterMember {
+            management::RosterMember {
                 credential: "aa".repeat(32),
                 car: "Orbital".into(),
             },
         ),
         (
             game.participants.binding(1),
-            web::RosterMember {
+            management::RosterMember {
                 credential: "bb".repeat(32),
                 car: "Pizza Boy".into(),
             },
@@ -775,14 +775,14 @@ fn lobby_disconnect_preserves_authenticated_room_identity_but_not_an_open_seat()
             game.configure_room(vec![
                 (
                     game.participants.binding(0),
-                    web::RosterMember {
+                    management::RosterMember {
                         credential: token.clone(),
                         car: "Orbital".into(),
                     },
                 ),
                 (
                     game.participants.binding(1),
-                    web::RosterMember {
+                    management::RosterMember {
                         credential: "cd".repeat(32),
                         car: "Pizza Boy".into(),
                     },
@@ -867,10 +867,10 @@ fn live_game() -> Match {
 
 fn room_change(
     world: &mut World,
-    change: web::RoomMembership,
-) -> Result<web::MembershipReply, &'static str> {
+    change: management::RoomMembership,
+) -> Result<management::MembershipReply, &'static str> {
     let (response, receive) = tokio::sync::oneshot::channel();
-    let mut request = Some(web::MembershipCommand { change, response });
+    let mut request = Some(management::MembershipCommand { change, response });
     world
         .run_system_once(
             move |mut game: ResMut<Match>,
@@ -891,7 +891,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
     assert!(
         room_change(
             &mut world,
-            web::RoomMembership::Admit {
+            management::RoomMembership::Admit {
                 credential: credential.clone(),
                 car: "Minion".into()
             }
@@ -904,7 +904,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
     );
     let first = room_change(
         &mut world,
-        web::RoomMembership::Admit {
+        management::RoomMembership::Admit {
             credential: credential.clone(),
             car: "Orbital".into(),
         },
@@ -914,7 +914,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
     assert_eq!(first.tick, None);
     let inspected = room_change(
         &mut world,
-        web::RoomMembership::Inspect {
+        management::RoomMembership::Inspect {
             credential: credential.clone(),
         },
     )
@@ -924,7 +924,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
 
     let duplicate = room_change(
         &mut world,
-        web::RoomMembership::Admit {
+        management::RoomMembership::Admit {
             credential: credential.clone(),
             car: "Orbital".into(),
         },
@@ -937,7 +937,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
     );
     room_change(
         &mut world,
-        web::RoomMembership::Depart {
+        management::RoomMembership::Depart {
             credential: credential.clone(),
         },
     )
@@ -951,7 +951,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
     );
     let absent = room_change(
         &mut world,
-        web::RoomMembership::Depart {
+        management::RoomMembership::Depart {
             credential: credential.clone(),
         },
     )
@@ -960,7 +960,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
     assert_eq!(absent.tick, None);
     let inspected = room_change(
         &mut world,
-        web::RoomMembership::Inspect {
+        management::RoomMembership::Inspect {
             credential: credential.clone(),
         },
     )
@@ -970,7 +970,7 @@ fn room_live_admission_is_prepared_idempotent_and_cancelled_on_end() {
 
     let next = room_change(
         &mut world,
-        web::RoomMembership::Admit {
+        management::RoomMembership::Admit {
             credential: "cd".repeat(32),
             car: "Orbital".into(),
         },
@@ -1125,7 +1125,7 @@ fn confirmed_ffa_end_seals_journal_and_cancels_scheduled_and_preparing_admission
     world.insert_resource(game);
     let a = room_change(
         &mut world,
-        web::RoomMembership::Admit {
+        management::RoomMembership::Admit {
             credential: "de".repeat(32),
             car: "Orbital".into(),
         },
@@ -1135,7 +1135,7 @@ fn confirmed_ffa_end_seals_journal_and_cancels_scheduled_and_preparing_admission
     .unwrap();
     let b = room_change(
         &mut world,
-        web::RoomMembership::Admit {
+        management::RoomMembership::Admit {
             credential: "ef".repeat(32),
             car: "Pizza Boy".into(),
         },
@@ -1191,7 +1191,7 @@ fn confirmed_ffa_end_seals_journal_and_cancels_scheduled_and_preparing_admission
     assert!(
         room_change(
             &mut world,
-            web::RoomMembership::Admit {
+            management::RoomMembership::Admit {
                 credential: "fa".repeat(32),
                 car: "Orbital".into()
             }
@@ -1359,7 +1359,7 @@ fn room_setup_binds_every_human_and_never_assigns_credentials_to_bots() {
     let member = |identity, token: &str| {
         (
             identity,
-            web::RosterMember {
+            management::RosterMember {
                 credential: token.repeat(32),
                 car: "Orbital".into(),
             },
@@ -1427,7 +1427,7 @@ fn room_start_with_one_human_and_bots_reaches_real_simulation() -> anyhow::Resul
     let token = "ab".repeat(32);
     game.configure_room(vec![(
         identity,
-        web::RosterMember {
+        management::RosterMember {
             credential: token.clone(),
             car: "Orbital".into(),
         },
@@ -1486,7 +1486,7 @@ fn tournament_preserves_membership_inspection_but_rejects_live_changes() {
 
     let inspected = room_change(
         &mut world,
-        web::RoomMembership::Inspect {
+        management::RoomMembership::Inspect {
             credential: credential.clone(),
         },
     )
@@ -1494,11 +1494,11 @@ fn tournament_preserves_membership_inspection_but_rejects_live_changes() {
     assert_eq!(inspected.identity, Some(identity));
     assert!(!inspected.pending);
     for change in [
-        web::RoomMembership::Admit {
+        management::RoomMembership::Admit {
             credential: "cd".repeat(32),
             car: "Orbital".into(),
         },
-        web::RoomMembership::Depart { credential },
+        management::RoomMembership::Depart { credential },
     ] {
         assert_eq!(
             room_change(&mut world, change).err(),
@@ -1590,7 +1590,7 @@ fn round_end_closes_ffa_admission_without_publishing_premature_results() {
 #[test]
 fn match_report_collects_connection_health_without_locking_http_or_health_state() {
     use super::super::{control::Admission, reporting};
-    use crate::web::MatchOutcome;
+    use crate::management::MatchOutcome;
     let mut world = World::new();
     let mut game = game();
     let link = world
@@ -1620,7 +1620,7 @@ fn match_report_collects_connection_health_without_locking_http_or_health_state(
 #[test]
 fn match_report_distinguishes_waiting_round_end_final_results_and_failures() {
     use super::super::reporting;
-    use crate::web::MatchOutcome;
+    use crate::management::MatchOutcome;
     for mode in [
         game_protocol::MatchMode::Ffa,
         game_protocol::MatchMode::Tournament,

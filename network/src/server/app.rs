@@ -3,7 +3,7 @@ use super::{
     control::{Admission, accept_native_inputs, bound_reliable_history, reap_closed_links},
     tick::update,
 };
-use crate::{simulator, web};
+use crate::{management, simulator};
 use aeronet_io::connection::LocalAddr;
 use bevy_app::{App, PostUpdate, PreUpdate, Update};
 use bevy_ecs::prelude::*;
@@ -30,10 +30,10 @@ pub(crate) fn run_match(
     selected_world: Option<String>,
     mode: game_protocol::MatchMode,
     limits: game_protocol::FfaLimits,
-    room_members: Vec<(ControllerIdentity, web::RosterMember)>,
+    room_members: Vec<(ControllerIdentity, management::RosterMember)>,
     addr: SocketAddr,
     simulator: simulator::Simulator,
-    launcher: Option<&web::Launcher>,
+    control: Option<&management::Control>,
 ) -> Result<(), Box<dyn Error>> {
     let count = participants.count();
     let capacity = participants.capacity();
@@ -98,7 +98,7 @@ pub(crate) fn run_match(
     let mut game = Match {
         participants,
         membership: Default::default(),
-        room_requests: launcher.map(|launcher| launcher.membership.clone()),
+        room_requests: control.map(|control| control.membership.clone()),
         controls: (0..capacity).map(|_| ControllerState::default()).collect(),
         authority_ready: false,
         compatibility: Some(compatibility),
@@ -122,13 +122,13 @@ pub(crate) fn run_match(
             .unwrap_or_else(|| PathBuf::from("build/network-journals")),
         journal: None,
         journal_sealed: false,
-        journal_export: launcher
-            .map(|launcher| launcher.journal.clone())
+        journal_export: control
+            .map(|control| control.journal.clone())
             .unwrap_or_default(),
         prediction: AcceptedTimeline::default(),
         next_resume: 0,
-        health: launcher
-            .map(|launcher| launcher.health.clone())
+        health: control
+            .map(|control| control.health.clone())
             .unwrap_or_default(),
         tick_schedule: None,
     };
@@ -166,21 +166,20 @@ pub(crate) fn run_match(
             .human_slots()
             .count()
     );
-    if let Some(launcher) = launcher {
-        launcher.listening();
+    if let Some(control) = control {
+        control.listening();
     }
     let mut next_status = Instant::now();
     loop {
-        if launcher
-            .is_some_and(|launcher| launcher.stopped.load(std::sync::atomic::Ordering::Relaxed))
+        if control.is_some_and(|control| control.stopped.load(std::sync::atomic::Ordering::Relaxed))
         {
             break;
         }
         app.update();
         if Instant::now() >= next_status {
             next_status = Instant::now() + Duration::from_millis(250);
-            if let Some(launcher) = launcher {
-                super::reporting::publish(app.world(), launcher);
+            if let Some(control) = control {
+                super::reporting::publish(app.world(), control);
             }
         }
         let game = app.world().resource::<Match>();

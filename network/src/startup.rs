@@ -1,5 +1,6 @@
 use crate::{
     journal,
+    management::SetupRequest,
     server::{ParticipantRoster, run_match},
     simulator, web,
 };
@@ -72,7 +73,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     let (count, selected_world, room_roster, mode, limits, bots, simulator) =
         if let Some(launcher) = &launcher {
             loop {
-                let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
+                let Some(SetupRequest::Prepare) = launcher.wait_for_setup() else {
                     return Ok(());
                 };
                 match simulator::Simulator::from_assets(
@@ -80,13 +81,12 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                     launcher.resource_directory(),
                 ) {
                     Ok(simulator) => {
-                        launcher.ready(
+                        launcher.control.ready(
                             simulator.catalog.worlds.clone(),
                             simulator.catalog.cars.clone(),
                             simulator.compatibility.clone(),
                         );
-                        let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup()
-                        else {
+                        let Some(SetupRequest::Start(setup)) = launcher.wait_for_setup() else {
                             return Ok(());
                         };
                         break (
@@ -99,9 +99,9 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                             simulator,
                         );
                     }
-                    Err(error) => {
-                        launcher.preparation_failed(&format!("Simulator setup failed: {error:#}"))
-                    }
+                    Err(error) => launcher
+                        .control
+                        .preparation_failed(&format!("Simulator setup failed: {error:#}")),
                 }
             }
         } else {
@@ -147,16 +147,24 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
         room_members,
         addr,
         simulator,
-        launcher.as_ref(),
+        launcher.as_ref().map(|launcher| &launcher.control),
     ) {
         if let Some(launcher) = &launcher {
-            if launcher.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            if launcher
+                .control
+                .stopped
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
                 return Err(error);
             }
-            launcher.close(&format!(
+            launcher.control.close(&format!(
                 "Match server failed: {error}. Restart the server to try again."
             ));
-            while !launcher.stopped.load(std::sync::atomic::Ordering::Relaxed) {
+            while !launcher
+                .control
+                .stopped
+                .load(std::sync::atomic::Ordering::Relaxed)
+            {
                 thread::sleep(Duration::from_millis(100));
             }
         } else {
