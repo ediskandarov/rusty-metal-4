@@ -69,47 +69,52 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     } else {
         None
     };
-    let (count, selected_world, room_roster, limits, bots, simulator) = if let Some(launcher) =
-        &launcher
-    {
-        loop {
-            let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
-                return Ok(());
-            };
-            match simulator::Simulator::from_assets(&launcher.wasm, launcher.resource_directory()) {
-                Ok(simulator) => {
-                    launcher.ready(
-                        simulator.catalog.worlds.clone(),
-                        simulator.catalog.cars.clone(),
-                        simulator.compatibility.clone(),
-                    );
-                    let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup() else {
-                        return Ok(());
-                    };
-                    break (
-                        setup.players,
-                        Some(setup.world),
-                        setup.roster,
-                        setup.limits,
-                        setup.bots,
-                        simulator,
-                    );
-                }
-                Err(error) => {
-                    launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
+    let (count, selected_world, room_roster, mode, limits, bots, simulator) =
+        if let Some(launcher) = &launcher {
+            loop {
+                let Some(web::SetupRequest::Prepare) = launcher.wait_for_setup() else {
+                    return Ok(());
+                };
+                match simulator::Simulator::from_assets(
+                    &launcher.wasm,
+                    launcher.resource_directory(),
+                ) {
+                    Ok(simulator) => {
+                        launcher.ready(
+                            simulator.catalog.worlds.clone(),
+                            simulator.catalog.cars.clone(),
+                            simulator.compatibility.clone(),
+                        );
+                        let Some(web::SetupRequest::Start(setup)) = launcher.wait_for_setup()
+                        else {
+                            return Ok(());
+                        };
+                        break (
+                            setup.players,
+                            Some(setup.world),
+                            setup.roster,
+                            setup.mode,
+                            setup.limits,
+                            setup.bots,
+                            simulator,
+                        );
+                    }
+                    Err(error) => {
+                        launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
+                    }
                 }
             }
-        }
-    } else {
-        (
-            count,
-            None,
-            Vec::new(),
-            Default::default(),
-            command_bots,
-            simulator::Simulator::from_environment()?,
-        )
-    };
+        } else {
+            (
+                count,
+                None,
+                Vec::new(),
+                tm4_network::protocol::MatchMode::Ffa,
+                Default::default(),
+                command_bots,
+                simulator::Simulator::from_environment()?,
+            )
+        };
     let initial_count = if room_roster.is_empty() {
         count
     } else {
@@ -137,6 +142,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
     if let Err(error) = run_match(
         participants,
         selected_world,
+        mode,
         limits,
         room_members,
         addr,

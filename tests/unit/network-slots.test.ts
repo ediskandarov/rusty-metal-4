@@ -243,6 +243,7 @@ test("mixed rosters keep explicit sorted bot slots and at least one human within
 
 test("administrator setup shares eight slots between explicit humans and bots", () => {
   const options = {
+    mode: "ffa" as const,
     players: 2,
     bots: ["Orbital", "Pizza Boy", "Orbital"],
     world: "Construction Yard",
@@ -258,4 +259,38 @@ test("administrator setup shares eight slots between explicit humans and bots", 
       roster: [{ credential: "a".repeat(64), car: "Orbital" }],
     }).success,
   ).toBe(true);
+});
+
+test("tournament dispatches original rules and rejects FFA policy and changing seats", () => {
+  const tournament = {
+    ...start,
+    mode: "tournament" as const,
+    slots: [0, 1],
+    participants: start.participants.slice(0, 2),
+    cars: start.cars.slice(0, 2),
+    modelPool: start.cars.slice(0, 2),
+    limits: { timeLimitTicks: 0, fragLimit: 0 },
+    respawnDelayTicks: 0,
+  };
+  expect(startSchema.parse(tournament)).toEqual(tournament);
+  for (const change of [
+    { slots: [0, 3] },
+    { bots: [1] },
+    { respawnDelayTicks: 90 },
+    { limits: start.limits },
+    { world: "Road Rage" },
+  ])
+    expect(startSchema.safeParse({ ...tournament, ...change }).success).toBe(false);
+  const request = {
+    mode: "tournament",
+    players: 2,
+    world: "Construction Yard",
+    sessionId: "00000000-0000-4000-8000-000000000000",
+    roster: [
+      { credential: "a".repeat(64), car: "Orbital" },
+      { credential: "b".repeat(64), car: "Pizza Boy" },
+    ],
+  };
+  expect(startOptionsSchema.safeParse(request).success).toBe(true);
+  expect(startOptionsSchema.safeParse({ ...request, limits: start.limits }).success).toBe(false);
 });

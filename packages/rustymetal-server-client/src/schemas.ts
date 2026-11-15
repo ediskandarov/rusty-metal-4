@@ -58,7 +58,8 @@ export const resourceManifestSchema = z.array(
 export type ResourceManifest = z.infer<typeof resourceManifestSchema>;
 export const startOptionsSchema = z
   .object({
-    limits: ffaLimitsSchema,
+    mode: z.enum(["ffa", "tournament"]),
+    limits: ffaLimitsSchema.optional(),
     bots: z.array(z.string().min(1).max(63)).max(7).optional(),
     players: count.min(1).max(8),
     world: z.string().min(1),
@@ -68,6 +69,12 @@ export const startOptionsSchema = z
   .strict()
   .refine(
     (value) =>
+      (value.mode === "ffa" ? !!value.limits : !value.limits) &&
+      (value.mode !== "tournament" ||
+        (value.players === 2 &&
+          value.roster?.length === 2 &&
+          !value.bots?.length &&
+          value.world === "Construction Yard")) &&
       value.players + (value.bots?.length ?? 0) <= 8 &&
       ((value.sessionId === undefined && value.roster === undefined) ||
         (value.sessionId !== undefined &&
@@ -160,7 +167,8 @@ export const authoritativeResultSchema = z
       new Set(rows.map((row) => row.credential).filter((value) => value !== null)).size ===
         rows.filter((row) => row.credential !== null).length &&
       (result.completion.winners & ~occupied) === 0 &&
-      result.completion.winners === winners
+      result.completion.winners ===
+        (result.completion.reasons === 4 ? occupied : result.completion.reasons === 8 ? 0 : winners)
     );
   }, "Invalid final participant identities or winners");
 export type AuthoritativeResult = z.infer<typeof authoritativeResultSchema>;

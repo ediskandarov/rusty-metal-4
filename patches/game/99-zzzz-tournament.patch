@@ -1,0 +1,44 @@
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -542,13 +542,13 @@
+     Tm4GameInfo* game = &GameInfo;
+     const s32 network = WebNetMatchActive();
+     if (network
+-        && (car->index < 0 || car->index >= game->player_car_count
+-            || !WebNetSlotOccupied(car->controller_index)
+-            || game->car_count >= game->player_car_count))
++        && (car->index < 0 || car->index >= game->entrant_count
++            || (!WebNetTournament() && !WebNetSlotOccupied(car->controller_index))
++            || game->car_count >= game->entrant_count))
+         return 0;
+     const s32 player_car = car->index < game->player_car_count;
+     Camera* camera = player_car ? game->players[car->controller_index].camera : NULL;
+-    if (network && (!player_car || !camera || game->players[car->controller_index].car))
++    if (network && player_car && (!camera || game->players[car->controller_index].car))
+         return 0;
+     if (camera) {
+         CameraSetObjectFunction* attach = OSSymbolGetAddressAssert(GAME_CAMERA_SET_OBJECT);
+@@ -568,6 +568,7 @@
+             game->players[car->controller_index].car = car;
+     } else
+         ++game->active_computer_count;
++    WebParticipantCarRegistered(car);
+     return 1;
+ }
+ #endif
+--- a/src/main/loadfiles.c
++++ b/src/main/loadfiles.c
+@@ -388,10 +388,10 @@
+             filename, LoadingRegistryExtension, NULL, LoadFilesProcessWorldRegistry);
+     LoadFilesAdd(LoadingGameRegistryFilename, NULL, LoadFilesProcessGameRegistry);
+     LoadFilesCarVramSlotCount = 0;
+-    const s32 model_count = WebNetMatchActive() ? WebNetModelCount() : GameInfo.entrant_count;
++    const s32 network_pool = WebNetMatchActive() && !WebNetTournament();
++    const s32 model_count = network_pool ? WebNetModelCount() : GameInfo.entrant_count;
+     for (player = 0; player < model_count; player++) {
+-        char* model
+-            = WebNetMatchActive() ? WebNetModelName(player) : GameInfo.character_names[player];
++        char* model = network_pool ? WebNetModelName(player) : GameInfo.character_names[player];
+         for (index = 0; index < LoadFilesCarVramSlotCount; index++) {
+             if (!strcmp(uniqueCars[index], model))
+                 break;

@@ -125,8 +125,15 @@ fn prepare_session(
             .slots()
             .map(|slot| game.participants.at_slot(slot).car.clone().unwrap())
             .collect();
-        let model_pool =
-            tm4_network::protocol::prepared_model_pool(&game.catalog.as_ref().unwrap().cars, &cars);
+        let tournament = game.mode == game_protocol::MatchMode::Tournament;
+        let model_pool = game_protocol::prepared_model_pool(
+            if tournament {
+                &[]
+            } else {
+                &game.catalog.as_ref().unwrap().cars
+            },
+            &cars,
+        );
         let start = SessionStart {
             bots: game
                 .participants
@@ -134,9 +141,20 @@ fn prepare_session(
                 .filter(|slot| !game.participants.human(*slot))
                 .map(|slot| slot as u8)
                 .collect(),
-            mode: tm4_network::protocol::MatchMode::Ffa,
-            limits: game.limits,
-            respawn_delay_ticks: tm4_network::protocol::ffa_respawn_delay_ticks(),
+            mode: game.mode,
+            limits: if tournament {
+                game_protocol::FfaLimits {
+                    time_limit_ticks: 0,
+                    frag_limit: 0,
+                }
+            } else {
+                game.limits
+            },
+            respawn_delay_ticks: if tournament {
+                0
+            } else {
+                game_protocol::ffa_respawn_delay_ticks()
+            },
             capacity: game.controls.len(),
             slots: game.participants.slots().map(|slot| slot as u8).collect(),
             participants: game

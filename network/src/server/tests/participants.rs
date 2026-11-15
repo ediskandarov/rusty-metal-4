@@ -31,6 +31,7 @@ fn game() -> Match {
             worlds: vec!["Construction Yard".into()],
         }),
         selected_world: None,
+        mode: game_protocol::MatchMode::Ffa,
         limits: Default::default(),
         room_only: false,
         retired_connections: HashSet::new(),

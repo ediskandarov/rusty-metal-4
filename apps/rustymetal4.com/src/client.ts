@@ -7,7 +7,7 @@ import {
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
 
-import { matchControls } from "./match-controls.ts";
+import { roomMatch } from "./room-match.ts";
 import { serverLocationLabel } from "./server-location.ts";
 import { createRoomStore, roomConnectionLabel } from "./state/room.ts";
 
@@ -273,7 +273,7 @@ async function room(): Promise<void> {
     }
   };
   store.subscribe(render);
-  matchControls(id, store);
+  roomMatch(id, store);
   render();
   const refresh = (): Promise<boolean> => {
     if (recovery) return recovery;

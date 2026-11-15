@@ -199,11 +199,15 @@ export async function joinMatch(
         (number) => state.completion.winners & (1 << (number - 1)),
       );
       const result =
-        winners.length === 1
-          ? "Player " + winners[0] + " wins"
-          : winners.length
-            ? "Tie: players " + winners.join(", ")
-            : "No remaining participants";
+        state.completion.reasons === 4
+          ? "Tournament battle won"
+          : state.completion.reasons === 8
+            ? "Tournament battle lost"
+            : winners.length === 1
+              ? "Player " + winners[0] + " wins"
+              : winners.length
+                ? "Tie: players " + winners.join(", ")
+                : "No remaining participants";
       cleanup("Match finished · " + result, "lobby");
       return;
     }
@@ -315,7 +319,10 @@ export async function joinMatch(
         case "resume_prepare":
         case "prediction_prepare": {
           lobby(null);
-          show("lobby", "Loading Free for all…");
+          show(
+            "lobby",
+            message.mode === "tournament" ? "Loading Tournament…" : "Loading Free for all…",
+          );
           if (session.phase !== "lobby" || session.slot >= message.capacity)
             throw new Error("Invalid live prediction setup");
           const slot = session.slot;

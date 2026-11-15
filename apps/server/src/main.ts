@@ -142,6 +142,7 @@ matchOptions.addEventListener("submit", (event) => {
 
 async function openMatch() {
   const options = {
+    mode: "ffa" as const,
     players: Number(playerCount.value),
     world: world.value,
     bots: Array.from(bot.selectedOptions, (option) => option.value),

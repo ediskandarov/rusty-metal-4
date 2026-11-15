@@ -28,6 +28,8 @@ add_library(tm4_core STATIC
     "${TM4_WEB}/memory.c"
     "${TM4_WEB}/participant.c"
     "${TM4_WEB}/ffa.c"
+    "${TM4_WEB}/match_mode.c"
+    "${TM4_WEB}/tournament.c"
     "${TM4_GAME_ROOT}/src/main/registry.c"
     "${TM4_GAME_ROOT}/src/main/image.c"
     "${TM4_GAME_ROOT}/src/main/font.c"
@@ -312,7 +314,7 @@ if(TM4_STANDALONE)
     list(FILTER options EXCLUDE REGEX "^-s(ASYNCIFY|ENVIRONMENT|PTHREAD|MODULARIZE|EXPORT_NAME|EXPORTED_RUNTIME_METHODS|EXPORTED_FUNCTIONS)")
     set_property(TARGET tm4_web PROPERTY LINK_OPTIONS "${options}")
     set(exports _malloc _free _HeadlessInitialize _HeadlessCapture _HeadlessCanonical
-        _HeadlessDigest _HeadlessTick _HeadlessParticipants _WebNetWorldIndex _WebNetStartFfa
+        _HeadlessDigest _HeadlessTick _HeadlessParticipants _WebNetWorldIndex _WebNetStartFfa _WebNetStartTournament
         _WebNetSlotMask _WebNetParticipantIdentityPart _WebNetAdmissionValid _WebNetAdmitParticipant _WebNetDepartParticipant _WebNetSetInput _WebNetQueueTick _WebNetCaptureLocalCheckpoint
         _WebNetRestoreLocalCheckpoint _WebNetFinishLocalReplay _WebNetCancelMatch
         _HeadlessState _HeadlessError _HeadlessWorldCount _HeadlessWorldName
@@ -321,7 +323,7 @@ if(TM4_STANDALONE)
     if(TM4_WEB_TEST_HOOKS)
         list(APPEND exports _WebNetStartMatch _WebTestFailSimulationAllocation _WebTestSimulationAllocationSize _WebTestCrusherRespawnAllocationBytes _WebTestCarResource _WebTestRestartNetworkReplay _WebTestSimulationFreeBytes _WebTestScheduleRespawn _WebTestCarHandle _WebTestRespawnState _WebTestCreateParticipantWaveTimer _WebTestFlameContact _WebTestBurnIdentity _WebTestBurnOwnContact _WebTestParticipantDamageContract
             _WebTestAiState _WebTestAiSearch _WebTestAiRecovery _WebTestAiAccumulateDamage _WebTestAiDamageHistory _WebTestAiApplyRetaliationDamage _WebTestCreateParticipantProjectile _WebTestSetParticipantResults _WebTestKillParticipant _WebTestSetDebrisMatrixPadding _WebTestCreatePaddingEffects _WebTestSetEffectPadding _WebTestSetSnapshotPadding _WebTestGtePadding _WebTestCreateRarePaddingEffect _WebTestRareEffectPadding
-            _WebTestHitParticipant _WebTestBindCaptureTarget _WebTestCaptureTarget _WebTestProjectileProvenance _WebTestAttributedWaves _WebTestTeleportCamera _WebTestDefeatOtherSlots _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
+            _WebTestHitParticipant _WebTestBindCaptureTarget _WebTestCaptureTarget _WebTestProjectileProvenance _WebTestAttributedWaves _WebTestTeleportCamera _WebTestDefeatOtherSlots _WebTestDefeatOpponents _WebTestNetworkSlotBindings _WebTestPlaceWeaponTarget _WebTestApproachCrane _HeadlessTestRequiredHost _WebGetPresentedFrames _WebTestUnsupportedCarCallback _WebTestPrepareNetworkDuel _WebTestLaunchAtHelicopter
             _WebTestApproachNeonObject _WebTestApproachPathObject _WebTestPlaceAugerTarget
             _WebTestAimAtWeakDestroyable _WebTestAimAtDestroyable _WebTestPlaceProjectileTarget
             _WebTestPlacePlayerTarget _WebTestPreparePlayerDuel _WebTestPlacePlayerProjectileTarget

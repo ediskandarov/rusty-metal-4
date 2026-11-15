@@ -1,4 +1,5 @@
 #include "carpart.h"
+#include "net_match.h"
 #include "snapshot_types.h"
 
 #include "snapshot_world.h"
@@ -21,7 +22,10 @@
 LightningClass* LightningFindClass(char* name);
 void WebAfcAdvanceFlareRotation(void* payload);
 
-static void* find_anim(char* key) { return AnimFindClass(key); }
+static void* find_anim(char* key)
+{
+    return AnimFindClass(key);
+}
 
 static const SnapshotKeyBinding anim_keys = { offsetof(AnimClass, name), find_anim };
 
@@ -201,7 +205,10 @@ static const SnapshotField light_fields[] = {
     { 0 },
 };
 
-static void* find_bomb(char* key) { return WeaponFindBombType(key); }
+static void* find_bomb(char* key)
+{
+    return WeaponFindBombType(key);
+}
 
 static const SnapshotKeyBinding bomb_keys = { offsetof(WeaponBombType, name), find_bomb };
 
@@ -215,7 +222,10 @@ static const SnapshotField bomb_fields[] = {
     { 0 },
 };
 
-static int bomb_valid(const void* payload) { return ((const WeaponBomb*)payload)->type != NULL; }
+static int bomb_valid(const void* payload)
+{
+    return ((const WeaponBomb*)payload)->type != NULL;
+}
 
 static const SnapshotField target_fields[] = {
     SNAP_DERIVED(WeaponTarget, geometry),
@@ -240,7 +250,10 @@ static int restore_target_geometry(
     return 1;
 }
 
-static void* find_ray(char* key) { return RayFindClass(key); }
+static void* find_ray(char* key)
+{
+    return RayFindClass(key);
+}
 
 static const SnapshotKeyBinding ray_keys = { offsetof(RayClass, name), find_ray };
 
@@ -288,7 +301,10 @@ static int restore_ray_animation(
     return 1;
 }
 
-static void* find_lightning(char* key) { return LightningFindClass(key); }
+static void* find_lightning(char* key)
+{
+    return LightningFindClass(key);
+}
 
 static const SnapshotKeyBinding lightning_keys = { offsetof(LightningClass, name), find_lightning };
 
@@ -316,7 +332,10 @@ static const SnapshotField lightning_point_fields[] = {
     { 0 },
 };
 static const SnapshotArray lightning_points = {
-    lightning_point_fields, sizeof(SVECTOR), NULL, ArrayCount(((Lightning*)0)->points),
+    lightning_point_fields,
+    sizeof(SVECTOR),
+    NULL,
+    ArrayCount(((Lightning*)0)->points),
 };
 
 static const SnapshotField lightning_fields[] = {
@@ -366,7 +385,10 @@ static void* flame_weapon_base(const void* payload)
         : NULL;
 }
 
-static u32 flame_weapon_count(const void* payload) { return CarWeaponCount; }
+static u32 flame_weapon_count(const void* payload)
+{
+    return CarWeaponCount;
+}
 
 static const SnapshotIndexBinding flame_weapons = {
     flame_weapon_base,
@@ -413,7 +435,10 @@ static int flame_valid(const void* payload)
         && emitter->weapon->count > 0 && (u32)emitter->launcher_index < (u32)emitter->weapon->count;
 }
 
-static void* find_wave(char* key) { return FindExplosionDefinition(key); }
+static void* find_wave(char* key)
+{
+    return FindExplosionDefinition(key);
+}
 
 static const SnapshotKeyBinding wave_keys = { offsetof(ExplosionDefinition, name), find_wave };
 
@@ -491,6 +516,7 @@ enum TimerKind {
     TimerImpactWave,
     TimerFunnyWave,
     TimerMovingExplosion,
+    TimerSpawnCar,
 };
 
 static const struct {
@@ -503,10 +529,11 @@ static const struct {
     [TimerImpactWave] = { (TimerCallback)WeaponSpawnImpactObject, 5 },
     [TimerFunnyWave] = { (TimerCallback)WeaponSpawnImpactEffects, 5 },
     [TimerMovingExplosion] = { (TimerCallback)WeaponSpawnMovingExplosion, 5 },
+    [TimerSpawnCar] = { (TimerCallback)GameSpawnCar, 8 },
 };
 
 typedef struct {
-    u32 kind, arguments[5];
+    u32 kind, arguments[8];
 } TimerBinding;
 
 static const SnapshotField timer_fields[] = {
@@ -538,9 +565,13 @@ static u32 capture_timer_binding(const void* payload, u8* output, u32 capacity)
         if (!binding.arguments[0] || binding.arguments[0] == UINT32_MAX)
             return 0;
     } else if (binding.kind == TimerContinueMatch) {
-        if (timer->arguments[0] != (uintptr_t)&GameInfo.deathmatch_accept_input)
+        if (timer->arguments[0] == (uintptr_t)&GameInfo.deathmatch_accept_input)
+            binding.arguments[0] = 0;
+        else if (WebNetTournament()
+            && timer->arguments[0] == (uintptr_t)&GameInfo.tournament_accept_input)
+            binding.arguments[0] = 1;
+        else
             return 0;
-        binding.arguments[0] = 0;
     }
     memcpy(output, &binding, sizeof(binding));
     return sizeof(binding);
@@ -569,9 +600,14 @@ static int restore_timer_binding(
             return 0;
         break;
     case TimerContinueMatch:
-        if (binding.arguments[0] || binding.arguments[1] > 1)
+        if (binding.arguments[0] > (u32)WebNetTournament() || binding.arguments[1] > 1)
             return 0;
-        binding.arguments[0] = (uintptr_t)&GameInfo.deathmatch_accept_input;
+        binding.arguments[0] = binding.arguments[0] ? (uintptr_t)&GameInfo.tournament_accept_input
+                                                    : (uintptr_t)&GameInfo.deathmatch_accept_input;
+        break;
+    case TimerSpawnCar:
+        if (!WebNetTournament() || binding.arguments[0] >= (u32)GameInfo.entrant_count)
+            return 0;
         break;
     case TimerMovingExplosion:
         if (!binding.arguments[3] || binding.arguments[3] > 4096 || binding.arguments[4] > 32767)

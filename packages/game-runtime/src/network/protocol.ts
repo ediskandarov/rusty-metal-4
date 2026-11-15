@@ -83,6 +83,22 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
     throw new Error("Invalid local gameplay slot");
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
   if (world < 0) throw new Error("Session map is missing locally");
+  if (start.mode === "tournament")
+    return engine.ccall(
+      "WebNetStartTournament",
+      "number",
+      ["number", "number", "number", "number", "number", "number", "string", "string"],
+      [
+        start.capacity,
+        3,
+        world,
+        start.seed,
+        view,
+        2 | (start.portable ? 1 : 0),
+        start.cars.join("\n"),
+        start.participants.join("\n"),
+      ],
+    );
   return engine.ccall(
     "WebNetStartFfa",
     "number",

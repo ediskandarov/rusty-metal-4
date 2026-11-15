@@ -85,11 +85,20 @@ test("reconnect retains identity and car but requires confirmation again", () =>
   expect(restored.car).toBe("Orbital");
   expect(restored.ready).toBe(false);
 });
-test("selection preview cannot allocate an FFA server or start an offline substitute", () => {
+test("tournament preparation preserves Done and start requires two compatible choices", () => {
   const state = room();
-  expect(() => beginPreparation(state, "host", 1000)).toThrow("not connected");
-  expect(() => freezeRoster(state, "host", 1000)).toThrow("not connected");
-  expect(state.match).toBeNull();
+  updatePlayer(state, "host", { car: "Orbital", compatibility, ready: true });
+  const match = beginPreparation(state, "host", 1000);
+  expect(state.members[0]!.ready).toBe(true);
+  match.stage = "ready";
+  match.compatibility = compatibility;
+  match.cars = ["Orbital", "Pizza Boy"];
+  expect(() => freezeRoster(state, "host", 1100)).toThrow("ready");
+  updatePlayer(state, "guest", { car: "Pizza Boy", compatibility, ready: true });
+  freezeRoster(state, "host", 1200);
+  expect(match.roster).toHaveLength(2);
+  match.stage = "playing";
+  expect(() => join(state, "newcomer", "Newcomer", 1300)).toThrow();
 });
 test("changing mode discards choices and never carries tournament readiness into FFA", () => {
   const state = room();

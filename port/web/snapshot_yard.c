@@ -44,8 +44,10 @@ static const SnapshotField death_point_fields[] = {
 };
 
 const SnapshotType WebSnapshotYardTypes[] = {
-    { "crane", sizeof(Crane), crane_fields, .needs_template = 1 },
-    { "craneControl", sizeof(CraneControl), crane_control_fields, .custom = &crane_control_class },
+    /* The original tournament destroys the crane and its control before spawning the boss. */
+    { "crane", sizeof(Crane), crane_fields, .needs_template = 1, .baseline_removable = 1 },
+    { "craneControl", sizeof(CraneControl), crane_control_fields, .custom = &crane_control_class,
+        .baseline_removable = 1 },
     { "deathPoint", sizeof(DeathPoint), death_point_fields },
     { 0 },
 };

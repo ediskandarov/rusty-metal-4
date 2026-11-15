@@ -6,7 +6,7 @@
 #include "tm4/main/main.h"
 #include "tm4/main/system.h"
 
-static WebFfaResult result;
+static WebMatchResult result;
 
 /* Model selection, timing and failure policy belong here; shared lifecycle code creates the
  * car and retains identity, results, selected model and attribution through each attempt. */
@@ -35,18 +35,18 @@ void WebFfaCarRemoved(int slot)
     /* Exhaustion remains terminal waiting until explicit leave or teardown. */
 }
 
-WebFfaResult WebFfaCapture(void)
+WebMatchResult WebFfaCapture(void)
 {
     return result;
 }
 
-void WebFfaRestore(WebFfaResult value)
+void WebFfaRestore(WebMatchResult value)
 {
     result = value;
 }
 
-int WebFfaResultValid(WebFfaResult value, u32 tick, u32 slots,
-    const WebParticipantState* participants)
+int WebFfaResultValid(
+    WebMatchResult value, u32 tick, u32 slots, const WebParticipantState* participants)
 {
     if (!WebFfaActive())
         return !value.tick && !value.reasons && !value.winners;
@@ -64,8 +64,8 @@ int WebFfaResultValid(WebFfaResult value, u32 tick, u32 slots,
             winners |= 1u << slot;
     }
     const u32 end = value.reasons ? value.tick : tick;
-    const u32 reasons = (end >= WebNetFfaTimeLimit() ? 1u : 0u)
-        | (best >= (s32)WebNetFfaFragLimit() ? 2u : 0u);
+    const u32 reasons
+        = (end >= WebNetFfaTimeLimit() ? 1u : 0u) | (best >= (s32)WebNetFfaFragLimit() ? 2u : 0u);
     if (!value.reasons)
         return !value.tick && !value.winners && !reasons;
     return value.tick && value.tick <= tick && value.reasons == reasons && value.winners == winners;
@@ -97,7 +97,7 @@ void WebFfaCompleteTick(void)
         return;
     /* Evaluate only after all deaths/scoring in the tick. A simultaneous threshold
      * records both causes; all highest scores tie, with no death-count tiebreak. */
-    result = (WebFfaResult) { MainFrameCount, reasons, winners };
+    result = (WebMatchResult) { MainFrameCount, reasons, winners };
     GameInfo.deathmatch_finished = 1;
     for (s32 slot = 0; slot < WebNetSlotCapacity(); ++slot)
         if (participants.respawns[slot].state == WebCarScheduled)

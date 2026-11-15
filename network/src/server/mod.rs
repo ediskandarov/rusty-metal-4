@@ -73,6 +73,7 @@ struct Match {
     compatibility: Option<Compatibility>,
     catalog: Option<Catalog>,
     selected_world: Option<String>,
+    mode: game_protocol::MatchMode,
     limits: game_protocol::FfaLimits,
     room_only: bool,
     // Unlink is deferred. These revoked links cannot readmit themselves meanwhile.

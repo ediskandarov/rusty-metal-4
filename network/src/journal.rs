@@ -358,7 +358,7 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
         let completion_tick = u32::from_le_bytes(data[118..122].try_into().unwrap());
         let reasons = u32::from_le_bytes(data[122..126].try_into().unwrap());
         let winners = u32::from_le_bytes(data[126..130].try_into().unwrap());
-        if reasons > 3
+        if ![0, 1, 2, 3, 4, 8].contains(&reasons)
             || winners > 255
             || (reasons == 0 && (completion_tick != 0 || winners != 0))
             || (reasons != 0 && completion_tick != summary.ticks + 1)

@@ -5,9 +5,9 @@
 #include "checkpoint_memory.h"
 #include "interpolation.h"
 #include "loading.h"
+#include "match_mode.h"
 #include "movie.h"
 #include "net_match.h"
-#include "ffa.h"
 #include "participant.h"
 #include "render_sync.h"
 #include "rollback_audio.h"
@@ -31,10 +31,10 @@
 #ifdef TM4_WEB_TEST_HOOKS
 #include "tm4/main/tournament.h"
 #endif
+#include "port/web/browser_report.h"
 #include "tm4/main/world.h"
 #include "tm4/modules/camera.h"
 #include <assert.h>
-#include "port/web/browser_report.h"
 #include <libetc.h>
 #include <libgpu.h>
 #include <stdio.h>
@@ -159,7 +159,7 @@ void WebLevelStart(void)
             i, GameInfo.mode == GAME_MODE_PLAY && GameInfo.players[i].vibration_enabled);
     frames = 0;
     network_frame_pending = 0;
-    motion = (WebRenderMotionSettings){ 0 };
+    motion = (WebRenderMotionSettings) { 0 };
     WebInterpolationReset();
     if (WebNetRenderedPrediction())
         WebRollbackAudioReset();
@@ -383,7 +383,7 @@ void WebLevelNetworkStep(void)
     if (rendered)
         WebScreenBeginPredictedTick((u32)MainFrameCount + 1);
     WebCheckpointArenaSelect(checkpoint_arena);
-    if (!WebFfaCapture().reasons) {
+    if (!WebMatchCapture().reasons) {
         process_level_step();
         GameProcessMode();
     }
@@ -392,7 +392,7 @@ void WebLevelNetworkStep(void)
         WebScreenFinishPredictedTick();
     network_frame_pending = 1;
     ++MainFrameCount;
-    WebFfaCompleteTick();
+    WebMatchCompleteTick();
     WEB_BROWSER_REPORT({ tm4Port.simulationTicks = $0; }, MainFrameCount);
     WebNetMatchPublishTick();
 }
@@ -417,8 +417,8 @@ void WebLevelFrame(void)
         return;
     const double step_ms = WEB_SIMULATION_STEP_MS;
     /* Three and four views use two successive render passes and reuse packet storage. */
-    WebRenderMotionSettings selected
-        = GameInfo.player_count <= 2 ? WebRenderGetMotionSettings() : (WebRenderMotionSettings){ 0 };
+    WebRenderMotionSettings selected = GameInfo.player_count <= 2 ? WebRenderGetMotionSettings()
+                                                                  : (WebRenderMotionSettings) { 0 };
     int capture = selected.enabled;
     if (motion.enabled != selected.enabled || motion.lead != selected.lead) {
         if (motion.enabled != selected.enabled)
@@ -488,9 +488,8 @@ void WebLevelFrame(void)
 #ifdef TM4_WEB_TEST_HOOKS
         WEB_BROWSER_REPORT(
             {
-                tm4Port.testMotionSimulation?.push([
-                    $0, $1, tm4Port.cars, tm4Port.weaponAmmo, tm4Port.carSelectedWeapon
-                ]);
+                tm4Port.testMotionSimulation
+                    ?.push([ $0, $1, tm4Port.cars, tm4Port.weaponAmmo, tm4Port.carSelectedWeapon ]);
             },
             MainFrameCount, randseed());
 #endif

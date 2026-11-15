@@ -9,7 +9,7 @@ export const ffaLimitsSchema = z.object({
   timeLimitTicks: z.number().int().min(1).max(0x7fffffff),
   fragLimit: z.number().int().min(1).max(0x7fffffff),
 });
-export const networkProtocolVersion = 18;
+export const networkProtocolVersion = 19;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -30,7 +30,11 @@ export type Input = z.infer<typeof inputSchema>;
 export const scoreSchema = z.object({ frags: i32, deaths: i32 });
 export type Score = z.infer<typeof scoreSchema>;
 export const matchCompletionSchema = z
-  .object({ tick: u32, reasons: u32.max(3), winners: byte })
+  .object({
+    tick: u32,
+    reasons: u32.refine((value) => [0, 1, 2, 3, 4, 8].includes(value)),
+    winners: byte,
+  })
   .refine(
     (result) => (result.reasons ? result.tick > 0 : result.tick === 0 && result.winners === 0),
     "Invalid match completion boundary",
@@ -68,10 +72,10 @@ export const participantIdSchema = z
   .refine((id) => id !== "0000000000000000");
 export const startSchema = slotConfigurationSchema
   .safeExtend({
-    mode: z.literal("ffa"),
+    mode: z.enum(["ffa", "tournament"]),
     bots: z.array(z.number().int().min(0).max(7)).max(7),
-    limits: ffaLimitsSchema,
-    respawnDelayTicks: z.number().int().min(1).max(3600),
+    limits: z.object({ timeLimitTicks: u32, fragLimit: u32 }),
+    respawnDelayTicks: z.number().int().min(0).max(3600),
     world: z
       .string()
       .min(1)
@@ -103,6 +107,14 @@ export const startSchema = slotConfigurationSchema
   })
   .refine(
     (start) =>
+      (start.mode === "ffa"
+        ? ffaLimitsSchema.safeParse(start.limits).success && start.respawnDelayTicks > 0
+        : start.slots.join(",") === "0,1" &&
+          start.bots.length === 0 &&
+          start.respawnDelayTicks === 0 &&
+          start.limits.timeLimitTicks === 0 &&
+          start.limits.fragLimit === 0 &&
+          start.world === "Construction Yard") &&
       start.capacity === 8 &&
       start.bots.length < start.slots.length &&
       start.bots.every(

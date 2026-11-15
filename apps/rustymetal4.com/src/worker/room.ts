@@ -28,6 +28,7 @@ import {
   retainResult,
   RoomError,
   type RoomState,
+  sameCompatibility,
   snapshot,
   summary,
   updatePlayer,
@@ -341,7 +342,9 @@ export class Room extends DurableObject<Env> {
         match.cars = status.cars;
         match.stage = "playing";
         match.message =
-          "Match in progress. New players can join with a prepared car; existing players can reconnect.";
+          state.settings.modeId === "tournament"
+            ? "Tournament battle in progress. The two participants can reconnect."
+            : "Match in progress. New players can join with a prepared car; existing players can reconnect.";
         await this.commit();
         return;
       }
@@ -354,8 +357,18 @@ export class Room extends DurableObject<Env> {
         match.cars = status.cars;
         match.stage = "ready";
         match.message =
-          "Server ready. Choose cars and ready every participant; the host can start with 1–8 players.";
-        invalidateReady(state);
+          state.settings.modeId === "tournament"
+            ? "Server ready. Both players must confirm their cars before the host starts."
+            : "Server ready. Choose cars and ready every participant; the host can start with 1–8 players.";
+        if (state.settings.modeId !== "tournament") invalidateReady(state);
+        else
+          for (const member of state.members)
+            if (
+              !sameCompatibility(member.compatibility, match.compatibility) ||
+              !member.car ||
+              !match.cars.includes(member.car)
+            )
+              member.ready = false;
         await this.commit();
         return;
       }
@@ -548,10 +561,11 @@ export class Room extends DurableObject<Env> {
           await this.commit();
           try {
             await this.api().start({
+              mode: state.settings.modeId,
               players: roomHumanLimit(state.settings),
               bots: state.settings.modeOptions?.ffa.bots ?? [],
               world: mapLabel(state.settings.mapId),
-              limits: ffaDefaultLimits,
+              limits: state.settings.modeId === "ffa" ? ffaDefaultLimits : undefined,
               sessionId: match.id,
               roster: match.roster.map(({ credential, car }) => ({ credential, car })),
             });
@@ -567,7 +581,9 @@ export class Room extends DurableObject<Env> {
           if (member) {
             const match = state.match;
             const lease = match?.roster.find((entry) => entry.id === member.id);
-            if (match?.stage === "playing" && lease) {
+            if (match?.roster.length && lease && state.settings.modeId === "tournament") {
+              await this.stopMatch("Tournament ended because a participant left the room.");
+            } else if (match?.stage === "playing" && lease) {
               await this.api().membership({
                 sessionId: match.id,
                 change: { kind: "depart", credential: lease.credential },

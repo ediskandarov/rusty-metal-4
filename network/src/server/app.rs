@@ -28,6 +28,7 @@ use tm4_network::{
 pub(crate) fn run_match(
     participants: ParticipantRoster,
     selected_world: Option<String>,
+    mode: game_protocol::MatchMode,
     limits: game_protocol::FfaLimits,
     room_members: Vec<(ControllerIdentity, web::RosterMember)>,
     addr: SocketAddr,
@@ -100,6 +101,7 @@ pub(crate) fn run_match(
         compatibility: Some(compatibility),
         catalog: Some(catalog),
         selected_world,
+        mode,
         limits,
         room_only: false,
         retired_connections: HashSet::new(),

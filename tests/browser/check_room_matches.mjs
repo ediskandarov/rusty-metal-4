@@ -167,6 +167,10 @@ try {
     assert.equal(waiting.state.remaining, 1);
     assert.equal(waiting.state.roundFinished, false);
     assert.equal(waiting.state.nextMode, 0);
+    let respawnModel;
+    const availableModels = await a
+      .locator("#room-car option")
+      .evaluateAll((options) => options.map((option) => option.value));
     for (const frame of frames) {
       await frame.waitForFunction(
         (due) => tm4Port.netConfirmedTick > due + 10 && Module._WebTestCarHandle(1) > 0,
@@ -188,7 +192,9 @@ try {
         { frags: 0, deaths: 1 },
       ]);
       assert(state.serial > oldCar, "same participant receives a new car lifetime");
-      assert.equal(state.model, "Quatro");
+      assert(availableModels.includes(state.model), "respawn uses an available FFA model");
+      respawnModel ??= state.model;
+      assert.equal(state.model, respawnModel, "both peers restore the same random model");
       assert(state.health > 1, "new car health is independent of the lethal fixture");
     }
     if (session === 0) {
@@ -205,7 +211,10 @@ try {
         button.click();
       });
       await frames[0].waitForFunction(
-        (tick) => tm4Port.netConfirmedTick > tick && tm4Port.netDiagnostics?.recoveredTick > 0,
+        (tick) =>
+          tm4Port.netConfirmedTick > tick &&
+          tm4Port.netDiagnostics?.recoveredTick > 0 &&
+          document.getElementById("status").dataset.matchState === "playing",
         hostTick,
         { timeout: 60000 },
       );
@@ -226,6 +235,10 @@ try {
         { timeout: 60000 },
       );
       assert.deepEqual(await identity(frames[1], 1), originalId);
+      assert.equal(
+        await frames[1].evaluate(() => tm4Port.cars.find((car) => car.player === 1)?.name),
+        respawnModel,
+      );
       assert.deepEqual(
         await frames[1].evaluate(() => tm4Port.netMatchServerState.scores.slice(0, 2)),
         [

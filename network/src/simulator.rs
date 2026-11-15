@@ -420,6 +420,21 @@ impl Simulator {
         let accepted = self.with_string(&pool, |simulator, pool_address| {
             simulator.with_string(&identities, |simulator, identities_address| {
                 simulator.with_string(&names, |simulator, address| {
+                    if session.mode == tm4_network::protocol::MatchMode::Tournament {
+                        return simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
+                            "WebNetStartTournament",
+                            (
+                                session.capacity as i32,
+                                u32::from(session.slot_mask()),
+                                world,
+                                session.seed,
+                                -1,
+                                u32::from(session.portable),
+                                address,
+                                identities_address,
+                            ),
+                        );
+                    }
                     simulator.call::<(
                         i32,
                         u32,
@@ -554,6 +569,10 @@ impl Simulator {
                     "Diagnostic action {} rejected at tick {tick}",
                     action.name
                 );
+                continue;
+            }
+            if action.name == "opponents" {
+                self.call::<(), ()>("WebTestDefeatOpponents", ())?;
                 continue;
             }
             if action.name == "kill" {

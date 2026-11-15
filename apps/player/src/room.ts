@@ -55,6 +55,12 @@ export async function roomPlayerReady(engine: GameModule, sources: DiscSources):
     async join(command, signal, status) {
       const endpoint = new URL(command.endpoint, location.origin);
       endpoint.protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      // Menu teardown is queued at a render boundary; never enter game loading
+      // while its Asyncify frame still owns menu resources.
+      while (port.menuReady) {
+        signal.throwIfAborted();
+        await new Promise((resolve) => setTimeout(resolve, 16));
+      }
       await joinMatch(engine, endpoint.href, status, () => {}, command.credential, signal);
     },
     upload: (sessionId, signal, progress) =>
@@ -111,7 +117,7 @@ if (inRoom) {
       }
       return;
     }
-    if (selection) {
+    if (selection && command.action !== "upload") {
       // Match-scoped messages do not own the tournament menu's lifetime.
       if (command.action === "status" || command.action === "stop") return;
       selection.stop();

@@ -3,12 +3,13 @@
 #include "net_match.h"
 #include "net_state_fields.h"
 #include "participant.h"
-#include "port/web/ffa.h"
+#include "port/web/match_mode.h"
 #include "src/modules/car/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
 #include "tm4/main/pad.h"
 #include "tm4/main/system.h"
+#include "tournament.h"
 
 enum { InitialHash = 2166136261u };
 
@@ -23,15 +24,15 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     };
     NetStateOutput output = { .checksum = &result.session, .bytes = bytes };
     NetStateOutput* hash = &output;
-    VALUE(18); /* State record schema. */
+    VALUE(19); /* State record schema. */
     VALUE(WebNetFfaRespawnDelay());
     VALUE(WebNetBotSlots());
     VALUE(WebNetFfaTimeLimit());
     VALUE(WebNetFfaFragLimit());
-    const WebFfaResult ffa = WebFfaCapture();
-    VALUE(ffa.tick);
-    VALUE(ffa.reasons);
-    VALUE(ffa.winners);
+    const WebMatchResult completion = WebMatchCapture();
+    VALUE(completion.tick);
+    VALUE(completion.reasons);
+    VALUE(completion.winners);
     VALUE(WebNetModelCount());
     for (u32 i = 0; i < WebNetModelCount(); ++i)
         key(hash, WebNetModelName(i));
@@ -49,6 +50,15 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
     VALUE(WebNetSlotCapacity());
     VALUE(WebNetSlotMask());
     VALUE(game->computer_count);
+    VALUE(game->entrant_count);
+    if (WebTournamentActive()) {
+        const WebTournamentState state = WebTournamentCapture();
+#define FIELD(name) VALUE(state.name);
+        WEB_TOURNAMENT_FIELDS(FIELD)
+#undef FIELD
+        for (s32 i = 0; i < game->entrant_count; ++i)
+            key(hash, game->character_names[i]);
+    }
     VALUE(game->mode);
     VALUE(game->next_mode);
     VALUE(game->car_count);

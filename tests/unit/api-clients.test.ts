@@ -102,17 +102,20 @@ test("server client parses status, applies admin headers, and forwards cancellat
   await expect(client.status()).rejects.toBeInstanceOf(ServerApiError);
   response = new Response(null, { status: 202 });
   await client.start({
+    mode: "ffa" as const,
     players: 2,
     limits: { timeLimitTicks: 27000, fragLimit: 20 },
     world: "Construction Yard",
   });
   expect(await requests.at(-1)!.json()).toEqual({
+    mode: "ffa" as const,
     players: 2,
     limits: { timeLimitTicks: 27000, fragLimit: 20 },
     world: "Construction Yard",
   });
   await expect(
     client.start({
+      mode: "ffa" as const,
       players: 2,
       limits: { timeLimitTicks: 27000, fragLimit: 20 },
       world: "Construction Yard",

@@ -11,6 +11,7 @@ fn sparse_match_browser_fixture() {
     run_match(
         roster,
         None,
+        tm4_network::protocol::MatchMode::Ffa,
         Default::default(),
         Vec::new(),
         env::var("TM4_MATCH_LISTEN").unwrap().parse().unwrap(),
@@ -43,6 +44,7 @@ fn sparse_room_match_browser_fixture() {
     run_match(
         roster,
         None,
+        tm4_network::protocol::MatchMode::Ffa,
         Default::default(),
         members,
         env::var("TM4_MATCH_LISTEN").unwrap().parse().unwrap(),

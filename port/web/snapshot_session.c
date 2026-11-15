@@ -1,7 +1,8 @@
-#include "port/web/ffa.h"
 #include "snapshot_session.h"
 #include "net_match.h"
 #include "participant.h"
+#include "port/web/ffa.h"
+#include "tournament.h"
 
 #include "interpolation.h"
 #include "src/main/object/private.h"
@@ -15,7 +16,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 12,
+    SessionVersion = 13,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -55,7 +56,8 @@ typedef struct {
     u8 gte[256];
     u32 respawn_delay_ticks, bot_slots;
     u32 time_limit_ticks, frag_limit;
-    WebFfaResult ffa;
+    WebMatchResult completion;
+    WebTournamentState tournament;
     char model_pool[8][64];
     WebParticipantState participants;
     WebParticipantId initial_participants[8];
@@ -74,11 +76,12 @@ void WebCheckpointSetRandomState(u32 random, u32 effects);
 static int supported_session(void)
 {
     const s32 count = GameInfo.player_car_count;
-    if (!GameInfo.active || GameInfo.mode != GAME_MODE_PLAY || GameInfo.next_mode
-        || GameInfo.pause_player || GameInfo.game_type != GAME_TYPE_DEATHMATCH || count < 0
-        || count > MaxPlayers || GameInfo.computer_count
-        || GameInfo.active_player_count != GameInfo.car_count || GameInfo.car_count < 0
-        || GameInfo.car_count > count || !WorldSquares)
+    if ((!GameInfo.active && !WebMatchCapture().reasons) || GameInfo.mode != GAME_MODE_PLAY
+        || GameInfo.next_mode || GameInfo.pause_player || count < 0 || count > MaxPlayers
+        || (!WebTournamentActive()
+            && (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count))
+        || GameInfo.active_player_count + GameInfo.active_computer_count != GameInfo.car_count
+        || GameInfo.car_count < 0 || GameInfo.car_count > GameInfo.entrant_count || !WorldSquares)
         return 0;
     for (s32 i = 0; i < count; ++i) {
         if (!GameInfo.players[WebNetParticipantSlot(i)].camera)
@@ -167,7 +170,8 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     record.bot_slots = WebNetBotSlots();
     record.time_limit_ticks = WebNetFfaTimeLimit();
     record.frag_limit = WebNetFfaFragLimit();
-    record.ffa = WebFfaCapture();
+    record.completion = WebMatchCapture();
+    record.tournament = WebTournamentCapture();
     WebNetModelPool(record.model_pool);
     record.participant_count = GameInfo.player_car_count;
     record.car_count = GameInfo.car_count;
@@ -317,12 +321,19 @@ int WebSnapshotSessionPrepare(const u8* input, u32 length)
     WebNetInitialParticipantIds((u32*)initial);
     char pool[8][64];
     WebNetModelPool(pool);
-    if (memcmp(pool, record.model_pool, sizeof(pool)) || record.bot_slots != WebNetBotSlots()
+    if (!WebTournamentStateValid(record.tournament) || memcmp(pool, record.model_pool, sizeof(pool))
+        || record.bot_slots != WebNetBotSlots()
         || record.respawn_delay_ticks != WebNetFfaRespawnDelay()
         || record.time_limit_ticks != WebNetFfaTimeLimit()
         || record.frag_limit != WebNetFfaFragLimit()
-        || !WebFfaResultValid(record.ffa, record.tick, record.slot_mask, &record.participants)
-        || (WebFfaActive() && !!record.ffa.reasons != !!record.deathmatch_finished)
+        || !WebMatchResultValid(
+            record.completion, record.tick, record.slot_mask, &record.participants)
+        || (WebTournamentActive()
+            && record.completion.reasons
+                != ((record.tournament.world_won || record.tournament.tournament_won) ? 4u
+                        : record.tournament.world_lost                                ? 8u
+                                                                                      : 0u))
+        || (WebFfaActive() && !!record.completion.reasons != !!record.deathmatch_finished)
         || memcmp(initial, record.initial_participants, sizeof(initial)))
         return 0;
     if (record.version != SessionVersion || record.capacity != WebNetSlotCapacity()
@@ -346,7 +357,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     if (record.version != SessionVersion || record.participant_count != GameInfo.player_car_count
         || record.capacity != WebNetSlotCapacity() || record.slot_mask != WebNetSlotMask()
         || !WebNetParticipantModelsValid(&record.participants, record.slot_mask)
-        || record.car_count > record.participant_count || record.participant_count > MaxPlayers
+        || record.car_count > (u32)GameInfo.entrant_count || record.participant_count > MaxPlayers
         || !record.serial || record.tick >= INT32_MAX || record.registry_depth > RegistryDepth
         || record.device_count > MaxDevices || record.health_count > ArrayCount(record.health)
         || !record.squares || record.squares != square_count()
@@ -398,10 +409,19 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
             if (cameras[slot] == cameras[WebNetParticipantSlot(j)])
                 return 0;
     }
-    for (u32 i = 0; i < record.car_count; ++i)
-        if (!WebNetSlotOccupied(cars[i]->controller_index)
+    u32 enemies = 0;
+    for (u32 i = 0; i < record.car_count; ++i) {
+        if (WebTournamentActive() && cars[i]->control_kind == CAR_CONTROL_ENEMY) {
+            if (cars[i]->index < GameInfo.player_car_count
+                || cars[i]->index >= GameInfo.entrant_count)
+                return 0;
+            ++enemies;
+        } else if (!WebNetSlotOccupied(cars[i]->controller_index)
             || player_cars[cars[i]->controller_index] != cars[i])
             return 0;
+    }
+    if (enemies != record.tournament.active_computer_count)
+        return 0;
     for (u32 i = 0; i < MaxPlayers; ++i) {
         const PlayerRecord empty = { 0 };
         if ((i >= record.car_count && record.car_order[i])
@@ -495,7 +515,8 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     }
     memset(PadJpad, 0, sizeof(PadJpad));
     GameInfo.car_count = record.car_count;
-    GameInfo.active_player_count = record.car_count;
+    WebTournamentRestore(record.tournament);
+    GameInfo.active_player_count = record.car_count - GameInfo.active_computer_count;
     for (u32 i = 0; i < record.participant_count; ++i) {
         const int slot = WebNetParticipantSlot(i);
         const PlayerRecord* player = &record.players[slot];
@@ -514,7 +535,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     GameInfo.games_completed = record.games_completed;
     GameInfo.deathmatch_winner = record.deathmatch_winner;
     GameInfo.deathmatch_finished = record.deathmatch_finished;
-    WebFfaRestore(record.ffa);
+    WebMatchRestore(record.completion);
     GameInfo.deathmatch_next_mode = record.deathmatch_next_mode;
     GameInfo.deathmatch_accept_input = record.deathmatch_accept_input;
     GameInfo.deathmatch_rounds = record.deathmatch_rounds;

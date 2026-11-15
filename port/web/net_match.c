@@ -2,9 +2,9 @@
 #include "cheats.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
-#include "ffa.h"
 #include "interpolation.h"
 #include "level.h"
+#include "match_mode.h"
 #include "net_state.h"
 #include "participant.h"
 #include "rollback_audio.h"
@@ -17,7 +17,9 @@
 #include "tm4/main/pad.h"
 #include "tm4/main/registry.h"
 #include "tm4/main/system.h"
+#include "tm4/main/tournament.h"
 #include "tm4/modules/car.h"
+#include "tournament.h"
 #include <stdlib.h>
 
 #include "port/web/browser_report.h"
@@ -37,6 +39,7 @@ typedef struct NetPadInput {
 
 typedef struct NetMatchSetup {
     s32 capacity;
+    s32 tournament;
     u32 slots;
     u32 bot_slots;
     char* cars[8];
@@ -148,7 +151,7 @@ u32 WebNetBotSlots(void)
 }
 const char* WebNetAiBlocker(void)
 {
-    if (!match.setup.bot_slots)
+    if (!match.setup.bot_slots && !WebNetTournament())
         return NULL;
     if (!aiWorldInfo.enabled || !aiWorldInfo.resource.node_count)
         return "the selected map has no original AI navigation";
@@ -159,8 +162,15 @@ const char* WebNetAiBlocker(void)
     return NULL;
 }
 
+int WebNetTournament(void)
+{
+    return match.setup.tournament;
+}
+
 int WebNetParticipantControlKind(int slot)
 {
+    if (WebNetTournament() && slot >= GameInfo.player_car_count)
+        return CAR_CONTROL_ENEMY;
     return slot >= 0 && slot < 8 && (match.setup.bot_slots & (1u << slot)) ? CAR_CONTROL_ENEMY
                                                                            : CAR_CONTROL_PLAYER;
 }
@@ -186,7 +196,7 @@ int WebNetSlotOccupied(int slot)
 /* The live car list is dense; player roots and controller indices are actual slots. */
 int WebNetParticipantSlot(int index)
 {
-    if (!WebNetMatchActive())
+    if (!WebNetMatchActive() || WebNetTournament())
         return index;
     for (int slot = 0; slot < match.setup.capacity; ++slot)
         if (WebNetSlotOccupied(slot) && index-- == 0)
@@ -254,6 +264,8 @@ void WebNetCarLeaving(Car* target)
 
 void WebNetRestoreParticipantConfiguration(void)
 {
+    if (WebNetTournament())
+        return;
     WebParticipantState participants;
     WebParticipantCapture(&participants);
     s32 entrant = 0;
@@ -273,8 +285,8 @@ void WebNetRestoreParticipantConfiguration(void)
 
 static int membership_boundary(u32 tick)
 {
-    return WebNetMatchActive() && WebLevelActive() && tick == match.tick && !match.stepping
-        && !match.tick_pending && !match.input_mask && GameInfo.active
+    return WebNetMatchActive() && !WebNetTournament() && WebLevelActive() && tick == match.tick
+        && !match.stepping && !match.tick_pending && !match.input_mask && GameInfo.active
         && GameInfo.mode == GAME_MODE_PLAY && !GameInfo.next_mode;
 }
 
@@ -394,7 +406,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u3
  * selection, failed request or cancelled match can contribute configuration. */
 static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot, u32 flags,
     const char* car_names, const char* participant_ids, u32 respawn_delay_ticks,
-    const char* pool_names, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots)
+    const char* pool_names, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots, int tournament)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8 || !slots
         || (slots & ~((1u << capacity) - 1)) || view_slot < -1 || view_slot >= capacity || world < 0
@@ -412,6 +424,7 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     if (!length || length >= 1024)
         return reject_start("Missing or oversized mode car roster");
     NetMatchSetup candidate = { .capacity = capacity,
+        .tournament = tournament,
         .slots = slots,
         .bot_slots = bot_slots,
         .world = GameGetWorldName(world),
@@ -504,7 +517,7 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     if (!session_resources_present(&candidate))
         return 0;
     match.setup = candidate;
-    WebFfaRestore((WebFfaResult) { 0 });
+    WebMatchRestore((WebMatchResult) { 0 });
     match.initial_participants = participants;
     WebParticipantRestore(&participants);
     match.tick = 0;
@@ -525,12 +538,21 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 
     u32 flags, const char* car_names, const char* participant_ids, u32 delay,
     const char* model_pool, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots)
 {
-    if (capacity != 8 || !delay || delay > 3600 || !model_pool
-        || !time_limit_ticks || time_limit_ticks > 0x7fffffffu
-        || !frag_limit || frag_limit > 0x7fffffffu)
+    if (capacity != 8 || !delay || delay > 3600 || !model_pool || !time_limit_ticks
+        || time_limit_ticks > 0x7fffffffu || !frag_limit || frag_limit > 0x7fffffffu)
         return reject_start("Invalid FFA respawn delay or gameplay capacity");
     return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
-        delay, model_pool, time_limit_ticks, frag_limit, bot_slots);
+        delay, model_pool, time_limit_ticks, frag_limit, bot_slots, 0);
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetStartTournament(s32 capacity, u32 slots, s32 world, u32 seed,
+    s32 view_slot, u32 flags, const char* cars, const char* identities)
+{
+    if (capacity != 8 || slots != 3 || world < 0 || world >= GameGetNumberOfWorlds()
+        || strcmp(GameGetWorldName(world), GameGetFirstTournamentWorldName()))
+        return reject_start("Tournament requires two fixed players on its first level");
+    return start_match(
+        capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0, 0, 0, 1);
 }
 
 int WebNetDeparting(void)
@@ -558,7 +580,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
     s32 view_slot, u32 flags, const char* car_names, const char* participant_ids)
 {
     return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
-        0, NULL, 0, 0, 0);
+        0, NULL, 0, 0, 0, 0);
 }
 #endif
 
@@ -576,7 +598,7 @@ static void start_session(void)
     GameInfo.pause_player = 0;
     GameInfo.intro_character = NULL;
     GameInfo.world_name = match.setup.world;
-    GameInfo.game_type = GAME_TYPE_DEATHMATCH;
+    GameInfo.game_type = WebNetTournament() ? GAME_TYPE_TOURNAMENT : GAME_TYPE_DEATHMATCH;
     GameInfo.deathmatch_world_selection = DEATHMATCH_WORLD_REPEAT;
     GameInfo.deathmatch_car_selection = DEATHMATCH_OPPONENTS_PLAYER_CHOSEN;
     GameInfo.deathmatch_limit_is_wins = 0;
@@ -618,7 +640,8 @@ static const char* checkpoint_resource_blocker(void)
     const char* ai = WebNetAiBlocker();
     if (ai)
         return ai;
-    if (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count != 0)
+    if (!WebNetTournament()
+        && (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count != 0))
         return "game mode state";
     return NULL;
 }
@@ -997,11 +1020,13 @@ void WebNetMatchPublishTick(void)
             });
         },
         match.tick, GameInfo.active_player_count, GameInfo.deathmatch_winner,
-        GameInfo.deathmatch_finished, GameInfo.deathmatch_accept_input, GameInfo.next_mode, digest,
-        state.session, state.cars, state.objects, state.world, state.sound, unsupported);
-    const WebFfaResult result = WebFfaCapture();
-    WEB_BROWSER_REPORT({ tm4Port.netMatch.completion = ({ tick : $0, reasons : $1, winners : $2 }); },
-        result.tick, result.reasons, result.winners);
+        GameInfo.deathmatch_finished || WebMatchCapture().reasons, GameInfo.deathmatch_accept_input,
+        GameInfo.next_mode, digest, state.session, state.cars, state.objects, state.world,
+        state.sound, unsupported);
+    const WebMatchResult result = WebMatchCapture();
+    WEB_BROWSER_REPORT(
+        { tm4Port.netMatch.completion = ({ tick : $0, reasons : $1, winners : $2 }); }, result.tick,
+        result.reasons, result.winners);
     WebParticipantState participants;
     WebParticipantCapture(&participants);
     if (match.setup.view_slot >= 0) {
@@ -1024,8 +1049,8 @@ void WebNetMatchPublishTick(void)
 
 void WebNetMatchEnd(void)
 {
+    WebMatchRestore((WebMatchResult) { 0 });
     memset(&match, 0, sizeof(match));
-    WebFfaRestore((WebFfaResult) { 0 });
     const WebParticipantState empty = { 0 };
     WebParticipantRestore(&empty);
     WEB_BROWSER_REPORT({

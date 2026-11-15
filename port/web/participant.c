@@ -56,6 +56,14 @@ void WebParticipantRecordDeath(const Car* victim, WebParticipantId source)
     }
 }
 
+void WebParticipantCarRegistered(const Car* car)
+{
+    if (WebNetMatchActive() && WebNetSlotOccupied(car->controller_index)
+        && equal(WebParticipantObjectIdentity(car), WebParticipantIdentity(car->controller_index)))
+        participants.respawns[car->controller_index]
+            = (WebParticipantRespawn) { .state = WebCarActive };
+}
+
 void WebParticipantCarRemoved(const Car* car)
 {
     if (WebNetMatchActive() && WebNetSlotOccupied(car->controller_index)

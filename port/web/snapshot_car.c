@@ -146,7 +146,10 @@ static u32 spring_count(const void* payload)
     return car->spring_end - car->springs;
 }
 
-static u32 weapon_count(const void* payload) { return CarWeaponCount; }
+static u32 weapon_count(const void* payload)
+{
+    return CarWeaponCount;
+}
 
 static const SnapshotField wheel_fields[] = {
     SNAP_LOCAL(CarWheel, response_particle),
@@ -395,7 +398,7 @@ static int restore_construction(void* payload, const void* input)
     Car* car = payload;
     const CarConstruction* record = input;
     if (!memchr(record->model, 0, sizeof(record->model)) || record->entrant < 0
-        || record->entrant >= GameInfo.player_car_count
+        || record->entrant >= GameInfo.entrant_count
         || record->control_kind != WebNetParticipantControlKind(record->slot)
         || WebNetParticipantSlot(record->entrant) != record->slot
         || strcmp(record->model, GameInfo.character_names[record->entrant]))
@@ -438,7 +441,9 @@ static const SnapshotField input_event_fields[] = {
     { 0 },
 };
 static const SnapshotArray input_history = {
-    input_event_fields, sizeof(CarInputEvent), NULL,
+    input_event_fields,
+    sizeof(CarInputEvent),
+    NULL,
     ArrayCount(((CarControls*)0)->input_history),
 };
 static const SnapshotField control_fields[] = {
@@ -483,7 +488,10 @@ static const SnapshotField light_contribution_fields[] = {
     { 0 },
 };
 static const SnapshotArray lights = {
-    light_contribution_fields, sizeof(CarLightContribution), NULL, ArrayCount(((Car*)0)->lights),
+    light_contribution_fields,
+    sizeof(CarLightContribution),
+    NULL,
+    ArrayCount(((Car*)0)->lights),
 };
 
 /* AI decisions are canonical simulation state on every predicting peer. */

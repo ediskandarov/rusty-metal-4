@@ -153,8 +153,16 @@ export function join(state: RoomState, key: string, name: unknown, now: number):
   if (state.closed) throw new RoomError(410, "This room has closed. Find another room.");
   const existing = memberFor(state, key);
   if (existing) return existing;
-  if (state.match?.roster.length && state.match.stage !== "playing")
-    throw new RoomError(409, "The match is still preparing. Wait for play to begin.");
+  if (
+    state.match?.roster.length &&
+    (state.match.stage !== "playing" || state.settings.modeId === "tournament")
+  )
+    throw new RoomError(
+      409,
+      state.settings.modeId === "tournament"
+        ? "Tournament participants are fixed until this battle ends."
+        : "The match is still preparing. Wait for play to begin.",
+    );
   if (state.members.length >= roomHumanLimit(state.settings))
     throw new RoomError(409, "This room is full.");
   const member: Member = {
@@ -377,14 +385,9 @@ export function updatePlayer(state: RoomState, key: string, value: unknown): voi
 }
 export function beginPreparation(state: RoomState, key: string, now: number): RoomMatch {
   const host = requireHost(state, key);
-  if (state.settings.modeId === "tournament")
-    throw new RoomError(
-      409,
-      "Tournament car selection is available; network battles are not connected yet.",
-    );
   if (state.match) throw new RoomError(409, "Preparation is already in progress.");
   if (!host.compatibility) throw new RoomError(409, "Load your disc before preparing the server.");
-  invalidateReady(state);
+  if (state.settings.modeId !== "tournament") invalidateReady(state);
   state.notice = "";
   return (state.match = {
     location: null,
@@ -404,8 +407,8 @@ export function beginPreparation(state: RoomState, key: string, now: number): Ro
 }
 export function freezeRoster(state: RoomState, key: string, now: number): RoomMatch {
   requireHost(state, key);
-  if (state.settings.modeId === "tournament")
-    throw new RoomError(409, "Tournament battles are not connected yet.");
+  if (state.settings.modeId === "tournament" && state.members.length !== 2)
+    throw new RoomError(409, "Tournament requires both players.");
   const match = state.match;
   if (!match || match.stage !== "ready")
     throw new RoomError(409, "Prepare server resources first.");

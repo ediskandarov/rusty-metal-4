@@ -29,6 +29,7 @@ typedef struct WebParticipantState {
 struct Car;
 WebParticipantId WebParticipantIdentity(s32 slot);
 WebParticipantId WebParticipantObjectIdentity(const void* object);
+void WebParticipantCarRegistered(const struct Car* car);
 void WebParticipantCarRemoved(const struct Car* car);
 /* Mode policies call this at deterministic tick boundaries, only after removal. */
 int WebParticipantScheduleRespawn(s32 slot, u32 due_tick, u32 retry_ticks, u32 attempts);

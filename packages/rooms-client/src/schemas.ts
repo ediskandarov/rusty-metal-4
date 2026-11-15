@@ -12,7 +12,7 @@ export type { Compatibility } from "@tm4/lightyear-client/schemas";
 export const ffaCapacity = 8;
 export const modes = [
   { id: "ffa", label: "Free for all" },
-  { id: "tournament", label: "Tournament (car selection preview)" },
+  { id: "tournament", label: "Tournament" },
 ] as const;
 export const roomModeCapacity = (mode: string) => (mode === "tournament" ? 2 : ffaCapacity);
 

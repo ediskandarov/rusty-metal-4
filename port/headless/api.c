@@ -1,4 +1,4 @@
-#include "port/web/ffa.h"
+#include "port/web/match_mode.h"
 #include "port/web/net_match.h"
 #include "port/web/net_state.h"
 #include "port/web/participant.h"
@@ -49,7 +49,7 @@ typedef struct {
     u32 digest, sections[5];
     s32 scores[8][2];
     const char* unsupported;
-    WebFfaResult completion;
+    WebMatchResult completion;
 } HeadlessRoundState;
 _Static_assert(sizeof(HeadlessRoundState) == 132, "headless round state ABI");
 static HeadlessRoundState round_state;
@@ -65,11 +65,11 @@ const HeadlessRoundState* HeadlessState(void)
     digest = WebNetCaptureDigest(1);
     round_state = (HeadlessRoundState) {
         .tick = MainFrameCount,
-        .completion = WebFfaCapture(),
+        .completion = WebMatchCapture(),
         .capacity = WebNetSlotCapacity(),
         .remaining = GameInfo.active_player_count,
         .winner = GameInfo.deathmatch_winner,
-        .round_finished = GameInfo.deathmatch_finished,
+        .round_finished = GameInfo.deathmatch_finished || WebMatchCapture().reasons,
         .accepts_continue = GameInfo.deathmatch_accept_input,
         .next_mode = GameInfo.next_mode,
         .sections = { digest.session, digest.cars, digest.objects, digest.world, digest.sound },

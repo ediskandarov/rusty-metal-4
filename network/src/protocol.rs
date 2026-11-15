@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 18;
+pub const PROTOCOL_VERSION: u16 = 19;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 130;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -309,10 +309,11 @@ pub struct RoundState {
     pub scores: Vec<Score>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MatchMode {
     Ffa,
+    Tournament,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -398,12 +399,20 @@ pub fn prepared_model_pool(catalog: &[String], cars: &[String]) -> Vec<String> {
 
 impl SessionStart {
     pub fn valid_slots(&self) -> bool {
-        self.limits.valid()
-            && self.bots.len() < self.slots.len()
+        (match self.mode {
+            MatchMode::Ffa => self.limits.valid() && (1..=3600).contains(&self.respawn_delay_ticks),
+            MatchMode::Tournament => {
+                self.slots == [0, 1]
+                    && self.bots.is_empty()
+                    && self.respawn_delay_ticks == 0
+                    && self.limits.time_limit_ticks == 0
+                    && self.limits.frag_limit == 0
+                    && self.world == "Construction Yard"
+            }
+        }) && self.bots.len() < self.slots.len()
             && self.bots.windows(2).all(|pair| pair[0] < pair[1])
             && self.bots.iter().all(|slot| self.slots.contains(slot))
             && self.capacity == MAX_PLAYERS
-            && (1..=3600).contains(&self.respawn_delay_ticks)
             && (1..=self.capacity).contains(&self.slots.len())
             && self.slots.len() == self.cars.len()
             && self.participants.len() == self.slots.len()
