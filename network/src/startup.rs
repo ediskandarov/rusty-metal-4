@@ -100,7 +100,7 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
                         );
                     }
                     Err(error) => {
-                        launcher.phase("failed", &format!("Simulator setup failed: {error:#}"))
+                        launcher.preparation_failed(&format!("Simulator setup failed: {error:#}"))
                     }
                 }
             }
@@ -153,10 +153,9 @@ pub(crate) fn run() -> Result<(), Box<dyn Error>> {
             if launcher.stopped.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(error);
             }
-            launcher.phase(
-                "closed",
-                &format!("Match server failed: {error}. Restart the server to try again."),
-            );
+            launcher.close(&format!(
+                "Match server failed: {error}. Restart the server to try again."
+            ));
             while !launcher.stopped.load(std::sync::atomic::Ordering::Relaxed) {
                 thread::sleep(Duration::from_millis(100));
             }

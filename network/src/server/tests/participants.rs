@@ -1586,3 +1586,116 @@ fn round_end_closes_ffa_admission_without_publishing_premature_results() {
     assert!(game.membership.pending.is_empty());
     assert!(!game.ended);
 }
+
+#[test]
+fn match_report_collects_connection_health_without_locking_http_or_health_state() {
+    use super::super::{control::Admission, reporting};
+    use crate::web::MatchOutcome;
+    let mut world = World::new();
+    let mut game = game();
+    let link = world
+        .spawn(Admission {
+            opened: Instant::now(),
+            window: Instant::now(),
+            messages: 1,
+            unacknowledged: [Default::default()].into(),
+        })
+        .id();
+    game.controls[1].connection = Some(link);
+    let health = game.health.clone();
+    world.insert_resource(game);
+    let _health_guard = health.lock().unwrap();
+    let report = reporting::collect(&world, Some("match"));
+    assert_eq!(report.update.connected, 1);
+    assert_eq!(report.update.tick, 100);
+    assert_eq!(report.update.cars.unwrap(), ["Orbital", "Pizza Boy"]);
+    assert_eq!(report.unacknowledged, [0, 1]);
+    assert!(matches!(report.update.outcome, MatchOutcome::Playing(_)));
+    world.resource_mut::<Match>().controls[1].connection = None;
+    let report = reporting::collect(&world, Some("match"));
+    assert_eq!(report.update.connected, 0);
+    assert_eq!(report.unacknowledged, [0, 0]);
+}
+
+#[test]
+fn match_report_distinguishes_waiting_round_end_final_results_and_failures() {
+    use super::super::reporting;
+    use crate::web::MatchOutcome;
+    for mode in [
+        game_protocol::MatchMode::Ffa,
+        game_protocol::MatchMode::Tournament,
+    ] {
+        let mut world = World::new();
+        let mut game = game();
+        game.mode = mode;
+        game.started = false;
+        game.tick = 0;
+        world.insert_resource(game);
+        assert!(matches!(
+            reporting::collect(&world, None).update.outcome,
+            MatchOutcome::Waiting
+        ));
+        {
+            let mut game = world.resource_mut::<Match>();
+            game.started = true;
+            game.tick = 100;
+        }
+        let report = reporting::collect(&world, Some("match"));
+        assert!(
+            matches!(report.update.outcome, MatchOutcome::Playing(message)
+            if message == mode.status_message(BattleProgress::Playing))
+        );
+        world
+            .resource_mut::<Match>()
+            .last_state
+            .as_mut()
+            .unwrap()
+            .round_finished = true;
+        let report = reporting::collect(&world, Some("match"));
+        assert!(
+            matches!(report.update.outcome, MatchOutcome::Playing(message)
+            if message == mode.status_message(BattleProgress::RoundOver))
+        );
+        {
+            let mut game = world.resource_mut::<Match>();
+            game.ended = true;
+            game.last_state.as_mut().unwrap().completion = game_protocol::MatchCompletion {
+                tick: 100,
+                reasons: 1,
+                winners: 1,
+            };
+        }
+        let MatchOutcome::Finished { result, message } =
+            reporting::collect(&world, Some("match")).update.outcome
+        else {
+            panic!("confirmed completion must publish a result");
+        };
+        assert_eq!(message, mode.status_message(BattleProgress::Completed));
+        assert_eq!(result.session_id, "match");
+        assert_eq!(result.completion.tick, 100);
+        assert_eq!(result.participants.len(), 2);
+        assert_eq!(result.participants[0].score.frags, 3);
+        assert_eq!(result.participants[1].score.deaths, 3);
+        world
+            .resource_mut::<Match>()
+            .last_state
+            .as_mut()
+            .unwrap()
+            .completion
+            .reasons = 0;
+        assert!(matches!(
+            reporting::collect(&world, None).update.outcome,
+            MatchOutcome::Stopped(_)
+        ));
+        world
+            .resource_mut::<Match>()
+            .last_state
+            .as_mut()
+            .unwrap()
+            .next_mode = 1;
+        assert!(
+            matches!(reporting::collect(&world, None).update.outcome, MatchOutcome::Stopped(message)
+            if message == tm4_network::modes::TRANSITION_MESSAGE)
+        );
+    }
+}

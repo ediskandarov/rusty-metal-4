@@ -1,4 +1,5 @@
 //! HTTP launcher. Simulation stays on the native game thread.
+mod state;
 use anyhow::{Context, Result, ensure};
 use axum::{
     Json, Router,
@@ -11,6 +12,8 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+pub use state::{MatchOutcome, MatchUpdate, Status};
+use state::{Phase, PublishedState, SharedState};
 use std::{
     collections::BTreeMap,
     env, fs,
@@ -131,24 +134,6 @@ impl ServerLocation {
     }
 }
 
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Status {
-    pub location: Option<ServerLocation>,
-    pub session_id: Option<String>,
-    pub cars: Vec<String>,
-    pub compatibility: Option<Compatibility>,
-    pub phase: String,
-    pub message: String,
-    pub players: usize,
-    pub worlds: Vec<String>,
-    pub world: Option<String>,
-    pub connected: usize,
-    pub tick: u32,
-    pub endpoint: String,
-    pub uploaded: usize,
-    pub required: usize,
-}
 #[derive(Clone, Deserialize, Serialize)]
 struct Resource {
     id: String,
@@ -180,15 +165,13 @@ pub struct ResultParticipant {
     pub credential: Option<String>,
     pub score: tm4_network::protocol::Score,
 }
-pub type SharedResult = Arc<Mutex<Option<MatchResult>>>;
 
 pub struct Launcher {
     pub wasm: Simulation,
     pub stopped: Arc<AtomicBool>,
-    pub status: Arc<Mutex<Status>>,
+    state: SharedState,
     pub health: crate::health::Shared,
     pub journal: crate::journal::SharedExport,
-    pub results: SharedResult,
     requests: Receiver<SetupRequest>,
     pub membership: MembershipQueue,
     _private: PrivateDirectory,
@@ -240,12 +223,12 @@ impl Launcher {
         #[cfg(not(unix))]
         fs::create_dir(&private)?;
         let private = PrivateDirectory(private);
-        let status = Arc::new(Mutex::new(Status {
+        let status = Status {
             location: ServerLocation::from_environment(|name| env::var(name).ok()),
             session_id: None,
             cars: Vec::new(),
             compatibility: None,
-            phase: "setup".into(),
+            phase: Phase::Setup,
             message: "Administrator: supply your disc resources to prepare a match.".into(),
             players,
             worlds: Vec::new(),
@@ -259,10 +242,10 @@ impl Launcher {
             },
             uploaded: 0,
             required: resources.len() + 1,
-        }));
+        };
         let health = crate::health::Shared::default();
         let journal = crate::journal::SharedExport::default();
-        let results = SharedResult::default();
+        let state = Arc::new(Mutex::new(PublishedState::new(status)));
         let (sender, requests) = mpsc::channel();
         let (membership_sender, membership_receiver) = mpsc::sync_channel(8);
         let membership = Arc::new(Mutex::new(membership_receiver));
@@ -270,23 +253,21 @@ impl Launcher {
             private: private.0.clone(),
             secret,
             resources,
-            status: status.clone(),
+            state: state.clone(),
             health: health.clone(),
             journal: journal.clone(),
-            results: results.clone(),
             sender,
             membership: membership_sender,
             mutation: Arc::new(AsyncMutex::new(())),
         });
-        let http = serve_http(listener, router(service), stopped.clone(), status.clone())?;
+        let http = serve_http(listener, router(service), stopped.clone(), state.clone())?;
         println!("Server launcher: http://{listen}/");
         Ok(Self {
             wasm,
             stopped,
-            status,
+            state,
             health,
             journal,
-            results,
             requests,
             membership,
             _private: private,
@@ -307,19 +288,25 @@ impl Launcher {
         &self._private.0
     }
     pub fn ready(&self, worlds: Vec<String>, cars: Vec<String>, compatibility: Compatibility) {
-        let mut status = self.status.lock().unwrap();
-        status.cars = cars;
-        status.compatibility = Some(compatibility);
-        status.world = worlds.first().cloned();
-        status.worlds = worlds;
-        status.phase = "ready".into();
-        status.message =
-            "Resources ready. Choose a map and player count, then open the match.".into();
+        self.state
+            .lock()
+            .unwrap()
+            .resources_ready(worlds, cars, compatibility);
     }
-    pub fn phase(&self, phase: &str, message: &str) {
-        let mut status = self.status.lock().unwrap();
-        status.phase = phase.into();
-        status.message = message.into();
+    pub fn preparation_failed(&self, message: &str) {
+        self.state.lock().unwrap().preparation_failed(message);
+    }
+    pub fn listening(&self) {
+        self.state.lock().unwrap().listening();
+    }
+    pub fn close(&self, message: &str) {
+        self.state.lock().unwrap().close(message);
+    }
+    pub fn session_id(&self) -> Option<String> {
+        self.state.lock().unwrap().status.session_id.clone()
+    }
+    pub fn publish_match(&self, update: MatchUpdate) {
+        self.state.lock().unwrap().publish_match(update);
     }
 }
 impl Drop for Launcher {
@@ -336,7 +323,7 @@ fn serve_http(
     listener: TcpListener,
     router: Router,
     stopped: Arc<AtomicBool>,
-    status: Arc<Mutex<Status>>,
+    state: SharedState,
 ) -> Result<thread::JoinHandle<()>> {
     listener.set_nonblocking(true)?;
     let runtime = Builder::new_multi_thread()
@@ -345,20 +332,24 @@ fn serve_http(
         .build()?;
     Ok(thread::spawn(move || {
         runtime.block_on(async {
-            let listener = tokio::net::TcpListener::from_std(listener).expect("prepared HTTP listener");
+            let listener =
+                tokio::net::TcpListener::from_std(listener).expect("prepared HTTP listener");
             let graceful = stopped.clone();
             let server = axum::serve(listener, router).with_graceful_shutdown(async move {
-                while !graceful.load(Ordering::Relaxed) { sleep(Duration::from_millis(100)).await; }
+                while !graceful.load(Ordering::Relaxed) {
+                    sleep(Duration::from_millis(100)).await;
+                }
             });
             // Bound shutdown even if an HTTP recipient stops reading.
             let shutdown_deadline = async {
-                while !stopped.load(Ordering::Relaxed) { sleep(Duration::from_millis(100)).await; }
+                while !stopped.load(Ordering::Relaxed) {
+                    sleep(Duration::from_millis(100)).await;
+                }
                 sleep(HTTP_TIMEOUT).await;
             };
             tokio::select! {
                 result = server => if result.is_err() {
-                    let mut status = status.lock().unwrap();
-                    status.phase = "closed".into(); status.message = "HTTP server stopped unexpectedly.".into();
+                    state.lock().unwrap().close("HTTP server stopped unexpectedly.");
                     stopped.store(true, Ordering::Relaxed);
                 },
                 _ = shutdown_deadline => (),
@@ -371,10 +362,9 @@ struct Service {
     private: PathBuf,
     secret: String,
     resources: BTreeMap<String, Resource>,
-    status: Arc<Mutex<Status>>,
+    state: SharedState,
     health: crate::health::Shared,
     journal: crate::journal::SharedExport,
-    results: SharedResult,
     sender: Sender<SetupRequest>,
     membership: mpsc::SyncSender<MembershipCommand>,
     mutation: Arc<AsyncMutex<()>>,
@@ -398,8 +388,9 @@ fn authorized(headers: &HeaderMap, secret: &str) -> bool {
             == 0
 }
 fn require_setup(service: &Service) -> std::result::Result<(), (StatusCode, String)> {
-    let status = service.status.lock().unwrap();
-    if status.phase == "setup" || status.phase == "failed" {
+    let published = service.state.lock().unwrap();
+    let status = &published.status;
+    if status.phase.permits_upload() {
         Ok(())
     } else {
         Err((
@@ -446,9 +437,10 @@ async fn system_metrics() -> ApiResult {
 
 async fn results(State(service): State<Arc<Service>>) -> ApiResult {
     let result = service
-        .results
+        .state
         .lock()
         .unwrap()
+        .result
         .clone()
         .ok_or((StatusCode::CONFLICT, "No completed match result".into()))?;
     Ok(Json(result).into_response())
@@ -516,16 +508,16 @@ async fn authenticate(
     next.run(request).await
 }
 async fn status(State(service): State<Arc<Service>>) -> Json<Status> {
-    Json(service.status.lock().unwrap().clone())
+    Json(service.state.lock().unwrap().status.clone())
 }
 async fn metrics(State(service): State<Arc<Service>>) -> Json<crate::health::Snapshot> {
-    let status = service.status.lock().unwrap().clone();
+    let status = service.state.lock().unwrap().status.clone();
     Json(
         service
             .health
             .lock()
             .unwrap()
-            .snapshot(&status.phase, status.connected),
+            .snapshot(status.phase.as_str(), status.connected),
     )
 }
 async fn manifest(State(service): State<Arc<Service>>) -> Json<Vec<Resource>> {
@@ -581,14 +573,12 @@ async fn prepare(State(service): State<Arc<Service>>, request: Request) -> ApiRe
     let _guard = service.mutation.lock().await;
     require_setup(&service)?;
     to_bytes(request.into_body(), 0).await.map_err(invalid)?;
-    {
-        let mut status = service.status.lock().unwrap();
-        if status.uploaded != service.resources.len() + 1 {
-            return Err(invalid("Upload all server resources before preparing"));
-        }
-        status.phase = "loading".into();
-        status.message = "Validating resources and preparing the native simulator…".into();
-    }
+    service
+        .state
+        .lock()
+        .unwrap()
+        .begin_prepare()
+        .map_err(invalid)?;
     service.send(SetupRequest::Prepare)?;
     Ok((StatusCode::ACCEPTED, "Preparing resources").into_response())
 }
@@ -621,8 +611,9 @@ async fn membership_status(State(service): State<Arc<Service>>, request: Request
 
 async fn membership_command(service: Arc<Service>, options: MembershipOptions) -> ApiResult {
     {
-        let status = service.status.lock().unwrap();
-        if status.phase != "match"
+        let published = service.state.lock().unwrap();
+        let status = &published.status;
+        if status.phase != Phase::Match
             || status.session_id.as_deref() != Some(options.session_id.as_str())
         {
             return Err((
@@ -668,7 +659,7 @@ async fn membership_command(service: Arc<Service>, options: MembershipOptions) -
 
 async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
     let _guard = service.mutation.lock().await;
-    if service.status.lock().unwrap().phase != "ready" {
+    if service.state.lock().unwrap().status.phase != Phase::Ready {
         return Err((
             StatusCode::CONFLICT,
             "Prepare resources before opening the match".into(),
@@ -690,7 +681,8 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
         return Err(invalid("Expected a player count from 1 to 8"));
     }
     {
-        let mut status = service.status.lock().unwrap();
+        let mut published = service.state.lock().unwrap();
+        let status = &published.status;
         if options.players + options.bots.len() > MAX_PLAYERS
             || options.bots.iter().any(|bot| !status.cars.contains(bot))
         {
@@ -721,11 +713,9 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
                 return Err(invalid("Invalid initial room roster"));
             }
         }
-        status.session_id = options.session_id;
-        status.players = options.players;
-        status.world = Some(options.world.clone());
-        status.phase = "starting".into();
-        status.message = "Opening match…".into();
+        published
+            .begin_start(options.session_id, options.players, options.world.clone())
+            .map_err(|message| (StatusCode::CONFLICT, message.into()))?;
     }
     service.send(SetupRequest::Start(MatchSetup {
         mode: options.mode,
@@ -740,11 +730,12 @@ async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResu
 impl Service {
     fn send(&self, request: SetupRequest) -> std::result::Result<(), (StatusCode, String)> {
         self.sender.send(request).map_err(|_| {
-            let mut status = self.status.lock().unwrap();
-            status.phase = "closed".into();
-            status.message =
-                "Native server is unavailable. Restart the server to try again.".into();
-            (StatusCode::SERVICE_UNAVAILABLE, status.message.clone())
+            let mut published = self.state.lock().unwrap();
+            published.close("Native server is unavailable. Restart the server to try again.");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                published.status.message.clone(),
+            )
         })
     }
     fn publish(&self, id: &str, data: &[u8]) -> Result<()> {
@@ -785,7 +776,7 @@ impl Service {
             .chain(std::iter::once("/DATA/files.tsv"))
             .filter(|id| self.private.join(id.trim_start_matches('/')).is_file())
             .count();
-        self.status.lock().unwrap().uploaded = uploaded;
+        self.state.lock().unwrap().status.uploaded = uploaded;
         Ok(())
     }
 }
@@ -875,12 +866,12 @@ mod tests {
                 size: STOCK.len(),
                 sha256: format!("{:x}", Sha256::digest(STOCK)),
             };
-            let status = Arc::new(Mutex::new(Status {
+            let status = Status {
                 location: None,
                 session_id: None,
                 cars: Vec::new(),
                 compatibility: None,
-                phase: "setup".into(),
+                phase: Phase::Setup,
                 message: String::new(),
                 players: 2,
                 worlds: Vec::new(),
@@ -890,17 +881,17 @@ mod tests {
                 endpoint: String::new(),
                 uploaded: 0,
                 required: 2,
-            }));
+            };
+            let state = Arc::new(Mutex::new(PublishedState::new(status)));
             let (sender, requests) = mpsc::channel();
             let (membership, _) = mpsc::sync_channel(8);
             let service = Arc::new(Service {
                 private,
                 secret: "test-secret".into(),
                 resources: [(resource.id.clone(), resource)].into(),
-                status,
+                state,
                 health: crate::health::Shared::default(),
                 journal: crate::journal::SharedExport::default(),
-                results: SharedResult::default(),
                 sender,
                 membership,
                 mutation: Arc::new(AsyncMutex::new(())),
@@ -1020,8 +1011,9 @@ mod tests {
     async fn tournament_start_requires_two_humans_and_original_rules() {
         let fixture = Fixture::new();
         {
-            let mut status = fixture.service.status.lock().unwrap();
-            status.phase = "ready".into();
+            let mut published = fixture.service.state.lock().unwrap();
+            let status = &mut published.status;
+            status.phase = Phase::Ready;
             status.worlds = vec!["Construction Yard".into()];
             status.cars = vec!["Orbital".into()];
         }
@@ -1073,8 +1065,9 @@ mod tests {
     async fn explicit_ai_roster_requires_capacity_and_supports_room_setup() {
         let fixture = Fixture::new();
         {
-            let mut status = fixture.service.status.lock().unwrap();
-            status.phase = "ready".into();
+            let mut published = fixture.service.state.lock().unwrap();
+            let status = &mut published.status;
+            status.phase = Phase::Ready;
             status.worlds = vec!["Construction Yard".into()];
             status.cars = vec!["Orbital".into(), "Pizza Boy".into()];
         }
@@ -1102,7 +1095,10 @@ mod tests {
                 StatusCode::BAD_REQUEST
             );
             assert!(fixture.requests.try_recv().is_err());
-            assert_eq!(fixture.service.status.lock().unwrap().phase, "ready");
+            assert_eq!(
+                fixture.service.state.lock().unwrap().status.phase,
+                Phase::Ready
+            );
         }
         assert_eq!(
             fixture
@@ -1140,10 +1136,11 @@ mod tests {
             StatusCode::CONFLICT
         );
         {
-            let mut status = fixture.service.status.lock().unwrap();
+            let mut published = fixture.service.state.lock().unwrap();
+            let status = &mut published.status;
             status.worlds = vec!["Construction Yard".into(), "The Oil Rig".into()];
             status.world = Some("Construction Yard".into());
-            status.phase = "ready".into();
+            status.phase = Phase::Ready;
         }
         for body in [
             r#"{"mode":"ffa", "limits":{"timeLimitTicks":27000,"fragLimit":20},"players":0,"world":"The Oil Rig"}"#,
@@ -1157,17 +1154,27 @@ mod tests {
                 fixture.request("POST", "/api/start", body).await.status(),
                 StatusCode::BAD_REQUEST
             );
-            assert_eq!(fixture.service.status.lock().unwrap().players, 2);
-            assert_eq!(fixture.service.status.lock().unwrap().phase, "ready");
+            assert_eq!(fixture.service.state.lock().unwrap().status.players, 2);
+            assert_eq!(
+                fixture.service.state.lock().unwrap().status.phase,
+                Phase::Ready
+            );
             assert!(fixture.requests.try_recv().is_err());
         }
         assert_eq!(
             fixture.request("POST", "/api/start", valid).await.status(),
             StatusCode::ACCEPTED
         );
-        assert_eq!(fixture.service.status.lock().unwrap().players, 1);
+        assert_eq!(fixture.service.state.lock().unwrap().status.players, 1);
         assert_eq!(
-            fixture.service.status.lock().unwrap().world.as_deref(),
+            fixture
+                .service
+                .state
+                .lock()
+                .unwrap()
+                .status
+                .world
+                .as_deref(),
             Some("The Oil Rig")
         );
         assert_eq!(
@@ -1217,8 +1224,11 @@ mod tests {
             StatusCode::BAD_REQUEST
         );
         assert!(!fixture.service.private.join("DATA/MAIN.MR").exists());
-        assert_eq!(fixture.service.status.lock().unwrap().uploaded, 0);
-        assert_eq!(fixture.service.status.lock().unwrap().phase, "setup");
+        assert_eq!(fixture.service.state.lock().unwrap().status.uploaded, 0);
+        assert_eq!(
+            fixture.service.state.lock().unwrap().status.phase,
+            Phase::Setup
+        );
         fixture.provision().await;
         assert_eq!(
             fixture
@@ -1243,7 +1253,7 @@ mod tests {
             .await;
         assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
         assert!(fixture.service.mutation.try_lock().is_ok());
-        assert_eq!(fixture.service.status.lock().unwrap().uploaded, 0);
+        assert_eq!(fixture.service.state.lock().unwrap().status.uploaded, 0);
         assert!(!fixture.service.private.join("DATA/MAIN.MR").exists());
     }
 
@@ -1251,8 +1261,9 @@ mod tests {
     async fn room_roster_is_capacity_bounded_validated_and_never_exposed_in_status() {
         let fixture = Fixture::new();
         {
-            let mut status = fixture.service.status.lock().unwrap();
-            status.phase = "ready".into();
+            let mut published = fixture.service.state.lock().unwrap();
+            let status = &mut published.status;
+            status.phase = Phase::Ready;
             status.worlds = vec!["Construction Yard".into()];
             status.cars = vec!["Orbital".into(), "Pizza Boy".into()];
         }
@@ -1286,7 +1297,7 @@ mod tests {
         };
         assert_eq!(setup.roster.len(), 2);
         assert_eq!(setup.roster[1].car, "Pizza Boy");
-        let public = serde_json::to_string(&*fixture.service.status.lock().unwrap()).unwrap();
+        let public = serde_json::to_string(&fixture.service.state.lock().unwrap().status).unwrap();
         assert!(!public.contains(&"a".repeat(64)));
         assert!(!public.contains("credential"));
     }
@@ -1345,7 +1356,10 @@ mod tests {
             StatusCode::CONFLICT
         );
         assert!(fixture.requests.try_recv().is_err());
-        assert_eq!(fixture.service.status.lock().unwrap().phase, "loading");
+        assert_eq!(
+            fixture.service.state.lock().unwrap().status.phase,
+            Phase::Loading
+        );
     }
 
     #[tokio::test]
@@ -1375,7 +1389,7 @@ mod tests {
                 StatusCode::BAD_REQUEST
             );
         }
-        assert_eq!(fixture.service.status.lock().unwrap().uploaded, 0);
+        assert_eq!(fixture.service.state.lock().unwrap().status.uploaded, 0);
     }
 
     #[tokio::test]
@@ -1455,7 +1469,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(unauthorized.status(), StatusCode::UNAUTHORIZED);
-        *fixture.service.results.lock().unwrap() = Some(MatchResult {
+        fixture.service.state.lock().unwrap().result = Some(MatchResult {
             session_id: "test-match".into(),
             completion: tm4_network::protocol::MatchCompletion {
                 tick: 1,
@@ -1478,22 +1492,21 @@ mod tests {
         fixture.service.publish("/DATA/MAIN.MR", STOCK).unwrap();
         let path = fixture.service.private.clone();
         let stopped = Arc::new(AtomicBool::new(false));
-        let status = fixture.service.status.clone();
+        let state = fixture.service.state.clone();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let http = serve_http(
             listener,
             router(fixture.service.clone()),
             stopped.clone(),
-            status.clone(),
+            state.clone(),
         )
         .unwrap();
         let launcher = Launcher {
             wasm: Simulation::File(PathBuf::new()),
             stopped,
-            status,
+            state,
             health: fixture.service.health.clone(),
             journal: fixture.service.journal.clone(),
-            results: fixture.service.results.clone(),
             requests: fixture.requests,
             membership: Arc::new(Mutex::new(mpsc::sync_channel(8).1)),
             _private: PrivateDirectory(path.clone()),

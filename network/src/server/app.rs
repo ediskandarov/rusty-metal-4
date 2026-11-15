@@ -167,10 +167,7 @@ pub(crate) fn run_match(
             .count()
     );
     if let Some(launcher) = launcher {
-        launcher.phase(
-            "lobby",
-            "Match ready. Players can open the player and select their own local disc.",
-        );
+        launcher.listening();
     }
     let mut next_status = Instant::now();
     loop {
@@ -183,63 +180,7 @@ pub(crate) fn run_match(
         if Instant::now() >= next_status {
             next_status = Instant::now() + Duration::from_millis(250);
             if let Some(launcher) = launcher {
-                let game = app.world().resource::<Match>();
-                let mut status = launcher.status.lock().unwrap();
-                status.connected = game
-                    .controls
-                    .iter()
-                    .filter(|player| player.connection.is_some())
-                    .count();
-                status.tick = game.tick;
-                if let Some(session) = &game.session {
-                    status.cars = session.model_pool.clone();
-                }
-                let mut health = game.health.lock().unwrap();
-                for (slot, player) in game.controls.iter().enumerate() {
-                    health.unacknowledged(
-                        slot,
-                        player
-                            .connection
-                            .and_then(|entity| app.world().get::<Admission>(entity))
-                            .map_or(0, |admission| admission.unacknowledged.len()),
-                    );
-                }
-                if game.ended {
-                    if game.result_state().is_some() {
-                        let mut result = launcher.results.lock().unwrap();
-                        if result.is_none() {
-                            *result = game.final_result(
-                                status
-                                    .session_id
-                                    .as_deref()
-                                    .expect("a started match has an identity"),
-                            );
-                        }
-                        status.phase = "results".into();
-                        status.message = game
-                            .mode
-                            .status_message(super::BattleProgress::Completed)
-                            .into();
-                    } else {
-                        status.phase = "closed".into();
-                        status.message = if game.battle_progress()
-                            == Some(super::BattleProgress::TransitionRequested)
-                        {
-                            tm4_network::modes::TRANSITION_MESSAGE.into()
-                        } else {
-                            "Match stopped. Restart the server to prepare a new match.".into()
-                        };
-                    }
-                } else if game.started && game.tick > 0 {
-                    status.phase = "match".into();
-                    status.message = game
-                        .mode
-                        .status_message(
-                            game.battle_progress()
-                                .unwrap_or(super::BattleProgress::Playing),
-                        )
-                        .into();
-                }
+                super::reporting::publish(app.world(), launcher);
             }
         }
         let game = app.world().resource::<Match>();

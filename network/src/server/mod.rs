@@ -4,6 +4,7 @@ mod membership;
 mod participant;
 mod prediction;
 mod recovery;
+mod reporting;
 mod requests;
 mod tick;
 
