@@ -19,10 +19,10 @@ use tm4_network::{
 use wasmtime::{
     Config, Engine, Instance, Linker, Memory, Module, Store, TypedFunc, WasmParams, WasmResults,
 };
-use wasmtime_wasi::{
-    DirPerms, FilePerms, WasiCtxBuilder,
-    p1::{self, WasiP1Ctx},
-};
+use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder, p1};
+
+mod dylink;
+use dylink::Host;
 
 const SNAPSHOT_MAX: usize = 256 * 1024;
 const EPOCH_INTERVAL: Duration = Duration::from_millis(50);
@@ -32,7 +32,7 @@ const CALL_DEADLINE_EPOCHS: u64 = 60; // Preserve the previous authority's three
 pub struct Simulator {
     capacity: usize,
     slots: Vec<u8>,
-    store: Store<WasiP1Ctx>,
+    store: Store<Host>,
     instance: Instance,
     memory: Memory,
     stop_clock: Arc<AtomicBool>,
@@ -191,6 +191,7 @@ impl Simulator {
             hash(&bytes) == build.authority_sha256,
             "Standalone simulation does not match its build manifest"
         );
+        let modules = wasm.modules(&build)?;
         let compatibility = Compatibility {
             protocol: PROTOCOL_VERSION,
             build: build.sha256,
@@ -198,7 +199,7 @@ impl Simulator {
         };
         let cache = env::var_os("TM4_SIMULATION_PRECOMPILED").map(PathBuf::from);
         let mut simulator =
-            Self::new_with_cache(&bytes, resources, compatibility, cache.as_deref())?;
+            Self::new_with_cache(&bytes, resources, compatibility, modules, cache.as_deref())?;
         #[cfg(feature = "rollback_probe")]
         {
             simulator.fixture_file = env::var_os("TM4_TEST_ACTIONS").map(PathBuf::from);
@@ -242,13 +243,20 @@ impl Simulator {
 
     #[cfg(test)]
     pub fn new(bytes: &[u8], resources: &Path, compatibility: Compatibility) -> Result<Self> {
-        Self::new_with_cache(bytes, resources, compatibility, None)
+        Self::new_with_cache(
+            bytes,
+            resources,
+            compatibility,
+            dylink::test_modules()?,
+            None,
+        )
     }
 
     fn new_with_cache(
         bytes: &[u8],
         resources: &Path,
         compatibility: Compatibility,
+        modules: crate::assets::ModuleFiles,
         cache: Option<&Path>,
     ) -> Result<Self> {
         let mut wasi = WasiCtxBuilder::new();
@@ -258,45 +266,56 @@ impl Simulator {
             DirPerms::READ,
             FilePerms::READ,
         )?;
-        Self::with_wasi_cached(bytes, compatibility, wasi, cache)
+        Self::with_wasi_cached(bytes, compatibility, wasi, modules, cache)
     }
 
     #[cfg(test)]
     fn with_wasi(bytes: &[u8], compatibility: Compatibility, wasi: WasiCtxBuilder) -> Result<Self> {
-        Self::with_wasi_cached(bytes, compatibility, wasi, None)
+        Self::with_wasi_cached(bytes, compatibility, wasi, dylink::test_modules()?, None)
     }
 
     fn with_wasi_cached(
         bytes: &[u8],
         compatibility: Compatibility,
         mut wasi: WasiCtxBuilder,
+        modules: crate::assets::ModuleFiles,
         cache: Option<&Path>,
     ) -> Result<Self> {
         let engine = engine()?;
         let module = load_module(&engine, bytes, cache)?;
         for import in module.imports() {
             ensure!(
-                import.module() == "wasi_snapshot_preview1"
-                    && matches!(
-                        import.name(),
-                        "fd_prestat_get"
-                            | "fd_prestat_dir_name"
-                            | "path_open"
-                            | "fd_close"
-                            | "proc_exit"
-                            | "fd_write"
-                            | "fd_read"
-                            | "fd_seek"
-                    ),
+                (import.module() == "env" && matches!(import.name(), "_dlopen_js" | "_dlsym_js"))
+                    || import.module() == "wasi_snapshot_preview1"
+                        && matches!(
+                            import.name(),
+                            "environ_get"
+                                | "environ_sizes_get"
+                                | "fd_prestat_get"
+                                | "fd_prestat_dir_name"
+                                | "path_open"
+                                | "fd_close"
+                                | "proc_exit"
+                                | "fd_write"
+                                | "fd_read"
+                                | "fd_seek"
+                        ),
                 "Unsupported simulation import: {}::{}",
                 import.module(),
                 import.name()
             );
         }
-        let mut store = Store::new(&engine, wasi.build_p1());
+        let mut store = Store::new(
+            &engine,
+            Host {
+                wasi: wasi.build_p1(),
+                dylink: None,
+            },
+        );
         store.set_epoch_deadline(LOADING_DEADLINE_EPOCHS);
         let mut linker = Linker::new(&engine);
-        p1::add_to_linker_sync(&mut linker, |context| context)?;
+        p1::add_to_linker_sync(&mut linker, |context: &mut Host| &mut context.wasi)?;
+        wasmtime_dylink::emscripten::add_to_linker(&mut linker, |context| &mut context.dylink)?;
         let instance = linker.instantiate(&mut store, &module)?;
         let memory = instance
             .get_memory(&mut store, "memory")
@@ -329,6 +348,7 @@ impl Simulator {
             loaded_actions: Vec::new(),
         };
         result.call::<(), ()>("_initialize", ())?;
+        dylink::attach(&mut result.store, instance, linker, modules)?;
         ensure!(
             result.call::<(), i32>("HeadlessInitialize", ())? == 1,
             "C simulation initialization failed"
@@ -353,11 +373,36 @@ impl Simulator {
     }
 
     fn call<P: WasmParams, R: WasmResults>(&mut self, name: &str, args: P) -> Result<R> {
+        ensure!(
+            !self
+                .store
+                .data()
+                .dylink
+                .as_ref()
+                .is_some_and(|adapter| adapter.loader().is_poisoned()),
+            "Resource-module loader is poisoned"
+        );
         let function: TypedFunc<P, R> = self.instance.get_typed_func(&mut self.store, name)?;
         self.store.set_epoch_deadline(self.deadline_epochs);
-        function
+        let result = function
             .call(&mut self.store, args)
-            .map_err(|error| anyhow::anyhow!("C simulation call {name}: {error:#}"))
+            .map_err(anyhow::Error::from)
+            .with_context(|| format!("C simulation call {name}"));
+        if self
+            .store
+            .data()
+            .dylink
+            .as_ref()
+            .is_some_and(|adapter| adapter.loader().is_poisoned())
+        {
+            return match result {
+                Err(error) => {
+                    Err(error.context(format!("Resource-module loader failed during {name}")))
+                }
+                Ok(_) => anyhow::bail!("Resource-module loader failed during {name}"),
+            };
+        }
+        result
     }
     fn string(&self, address: u32) -> Result<String> {
         ensure!(address != 0, "Missing C string");

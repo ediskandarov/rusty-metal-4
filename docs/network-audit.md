@@ -458,6 +458,13 @@ an operation and source location. Gameplay time remains `MainFrameCount`; Rust o
 host performance timing. A Wasmtime epoch deadline bounds initialization to the existing 45-second loading budget and live C calls to the
 previous three-second simulator deadline; the 250 ms timeline-overrun limit remains.
 
+Dynamic MR code loads through `wasmtime-dylink` on the same memory and function
+table as the authority. Module bytes are verified against the build manifest;
+unknown libraries are rejected. Loader failures that poison relocation state stop
+the simulator. The browser still uses Emscripten's loader. The module combat
+reference passes 1,177 exact browser/server comparisons with rollback and portable
+transfer; two Neon/Oil/Carnival rotations pass 1,638 exact state comparisons.
+
 The maintained checks use the production Rust adapter and Cargo.lock, with no Python
 or Node host dependency. A diagnostic browser reference remains only as an independent
 test oracle and is never connected as the server simulator:

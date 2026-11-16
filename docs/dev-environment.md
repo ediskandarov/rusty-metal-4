@@ -27,8 +27,13 @@ the loader handle and invalidates imported-address caches and snapshot metadata.
 Callback addresses come from the defining module's accessor, so loader-created
 import trampolines cannot change identity comparisons in snapshots.
 
-The browser dynamic loader is implemented. The native server still needs a dynamic
-loader integration; the previous monolithic WASI host cannot run these modules.
+The server uses `wasmtime-dylink`'s Emscripten adapter on the existing Wasmtime/WASI
+store. Both targets compile with Emscripten; the headless core and server modules
+omit Asyncify and threads. The browser retains its presentation runtime.
+Only modules listed in the verified build manifest are available to `dlopen`.
+The host reserves their data through guest `malloc` and a separate function-table
+range, sized from `dylink.0` metadata. Loaded images live until the store is dropped;
+MR teardown still clears gameplay state and invalidates imported addresses.
 
 The root commands
 (`build`, `build:dev`, `build:diagnostic`, `dev`, `match`, `test`, `fmt`, `lint`
@@ -89,20 +94,20 @@ build first. The same mode also selects the binary for `bun run test:server` thr
 `TM4_SERVER_MODE`.
 
 The Rust executable serves **only the API and match transport**, never a website.
-`build/<mode>/server` holds the simulation and compatibility manifest;
+`build/<mode>/server` holds the simulation, `modules/` and compatibility manifest;
 `build/<mode>/server-site` holds the launcher and player. The build verifies the
 manifest against both client Wasm files and the authority Wasm before separating them.
 `bun run server` runs Bun on port 8120 and the Rust API on 8121; Lightyear uses 8122.
 Bun serves files and proxies `/api/`. `TM4_HOST_PORT` changes the local website port.
 
 For a single-file API server, run `bun run build:server:standalone` after a full build.
-The optimized binary embeds only its own Wasm simulation and compatibility manifest;
+The optimized binary embeds its Wasm simulation, resource modules and compatibility manifest;
 archives under `build/server-release/` contain the executable and license.
 Run `rustymetal4-server --serve 4` with `TM4_ADMIN_SECRET` set. Serve the separate
 frontend with Bun (`bun run server:site --mode release --api http://127.0.0.1:8120 --port 8119`)
 or a static host with an API/WebSocket reverse proxy.
 
-Ordinary Cargo builds load `tm4_standalone.wasm` and `simulation-build.json` beside
+Ordinary Cargo builds load `tm4_standalone.wasm`, its adjacent `modules/` directory and `simulation-build.json` beside
 the binary, or via `TM4_SIMULATION_WASM` and `TM4_SIMULATION_BUILD`.
 Native HTTP defaults to `127.0.0.1:8120` and Lightyear to `127.0.0.1:8122`.
 Non-loopback listeners require `TM4_BEHIND_PROXY=1` behind an authenticated

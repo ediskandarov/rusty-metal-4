@@ -32,6 +32,7 @@ FROM scratch AS simulation
 COPY --from=build /server /compiler
 COPY build/release/server/tm4_standalone.wasm /simulation/tm4_standalone.wasm
 COPY build/release/server/simulation-build.json /simulation/simulation-build.json
+COPY build/release/server/modules /simulation/modules
 # Compile trusted game Wasm once when building the image; runtime Cranelift stays available for mods.
 RUN ["/compiler", "--precompile-simulation", "/simulation/tm4_standalone.wasm", "/simulation/tm4_standalone.cwasm"]
 

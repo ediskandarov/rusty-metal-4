@@ -314,7 +314,7 @@ if(TM4_STANDALONE)
     get_target_property(options tm4_web LINK_OPTIONS)
     list(FILTER options EXCLUDE REGEX "^-s(ASYNCIFY|ENVIRONMENT|PTHREAD|MODULARIZE|EXPORT_NAME|EXPORTED_RUNTIME_METHODS|EXPORTED_FUNCTIONS)")
     set_property(TARGET tm4_web PROPERTY LINK_OPTIONS "${options}")
-    set(exports _malloc _free _HeadlessInitialize _HeadlessCapture _HeadlessCanonical
+    set(exports _malloc _free ___dl_seterr _HeadlessInitialize _HeadlessCapture _HeadlessCanonical
         _HeadlessDigest _HeadlessTick _HeadlessParticipants _WebNetWorldIndex _WebNetStartFfa _WebNetStartTournament
         _WebNetSlotMask _WebNetParticipantIdentityPart _WebNetAdmissionValid _WebNetAdmitParticipant _WebNetDepartParticipant _WebNetSetInput _WebNetQueueTick _WebNetCaptureLocalCheckpoint
         _WebNetRestoreLocalCheckpoint _WebNetFinishLocalReplay _WebNetCancelMatch
@@ -331,6 +331,6 @@ if(TM4_STANDALONE)
             _WebTestSpawnMotionFireball _WebTestFireballCount _WebTestOffsetReplayHeap)
     endif()
     list(JOIN exports "," exports)
-    target_link_options(tm4_web PRIVATE --no-entry -sPURE_WASI=1 "-sEXPORTED_FUNCTIONS=${exports}")
+    target_link_options(tm4_web PRIVATE --no-entry -sPURE_WASI=1 -sALLOW_TABLE_GROWTH=1 "-sEXPORTED_FUNCTIONS=${exports}")
     set_target_properties(tm4_web PROPERTIES OUTPUT_NAME tm4_standalone SUFFIX ".wasm")
 endif()

@@ -16,3 +16,5 @@
 !build/release/server/simulation-build.json
 !network/examples/
 !network/examples/**
+!build/release/server/modules/
+!build/release/server/modules/**

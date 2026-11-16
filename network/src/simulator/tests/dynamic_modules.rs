@@ -206,3 +206,142 @@ fn measure_dynamic_module_rotation() -> Result<()> {
     }
     Ok(())
 }
+
+// Exercise the real host ABI and production arena sizing without game assets.
+fn loader_fixture(modules: crate::assets::ModuleFiles) -> Result<Simulator> {
+    let engine = Engine::default();
+    let mut store = Store::new(
+        &engine,
+        Host {
+            wasi: WasiCtxBuilder::new().build_p1(),
+            dylink: None,
+        },
+    );
+    let mut linker = Linker::new(&engine);
+    wasmtime_dylink::emscripten::add_to_linker(&mut linker, |host: &mut Host| &mut host.dylink)?;
+    linker.func_wrap("env", "fail_constructor", || -> wasmtime::Result<()> {
+        Err(wasmtime::Error::msg("fixture constructor root cause"))
+    })?;
+    let bytes = wat::parse_str(
+        r#"(module
+      (import "env" "_dlopen_js" (func $open (param i32) (result i32)))
+      (memory (export "memory") 4)
+      (table (export "__indirect_function_table") 1 funcref)
+      (global $heap (mut i32) (i32.const 8192))
+      (func (export "malloc") (param $size i32) (result i32) (local $p i32)
+        global.get $heap local.tee $p local.get $size i32.add
+        i32.const 15 i32.add i32.const -16 i32.and global.set $heap local.get $p)
+      (func (export "free") (param i32))
+      (func (export "__dl_seterr") (param i32 i32))
+      (func (export "open") (param i32) (result i32) local.get 0 call $open))"#,
+    )?;
+    let instance = linker.instantiate(&mut store, &Module::from_binary(&engine, &bytes)?)?;
+    let memory = instance.get_memory(&mut store, "memory").unwrap();
+    dylink::attach(&mut store, instance, linker, modules)?;
+    Ok(Simulator {
+        capacity: 0,
+        slots: vec![],
+        store,
+        instance,
+        memory,
+        stop_clock: Arc::new(AtomicBool::new(false)),
+        clock: None,
+        deadline_epochs: CALL_DEADLINE_EPOCHS,
+        compatibility: compatibility(),
+        catalog: Catalog {
+            cars: vec![],
+            worlds: vec![],
+        },
+        #[cfg(feature = "rollback_probe")]
+        fixture_file: None,
+        #[cfg(feature = "rollback_probe")]
+        loaded_actions: vec![],
+    })
+}
+
+fn module_descriptor(world: &mut Simulator, name: &str) -> Result<u32> {
+    let address = world.call::<u32, u32>("malloc", 36 + name.len() as u32 + 1)?;
+    let mut descriptor = vec![0; 36];
+    descriptor[4..8].copy_from_slice(&2u32.to_le_bytes()); // RTLD_NOW | RTLD_LOCAL
+    descriptor.extend_from_slice(name.as_bytes());
+    descriptor.push(0);
+    world
+        .memory
+        .write(&mut world.store, address as usize, &descriptor)?;
+    Ok(address)
+}
+
+fn load_all_entry_points(world: &mut Simulator, names: &[String]) -> Result<()> {
+    let mut linker = Linker::new(world.store.engine());
+    wasmtime_dylink::emscripten::add_to_linker(&mut linker, |host: &mut Host| &mut host.dylink)?;
+    let open = linker
+        .get(&mut world.store, "env", "_dlopen_js")
+        .unwrap()
+        .into_func()
+        .unwrap()
+        .typed::<u32, i32>(&world.store)?;
+    let sym = linker
+        .get(&mut world.store, "env", "_dlsym_js")
+        .unwrap()
+        .into_func()
+        .unwrap()
+        .typed::<(u32, u32, u32), u32>(&world.store)?;
+    let name = world.call::<u32, u32>("malloc", 32)?;
+    world
+        .memory
+        .write(&mut world.store, name as usize, b"Tm4ModuleExport\0")?;
+    for file in names {
+        let handle = module_descriptor(world, &format!("/modules/{file}"))?;
+        ensure!(open.call(&mut world.store, handle)? == 1, "opening {file}");
+        let pointer = sym.call(&mut world.store, (handle, name, name + 24))?;
+        ensure!(pointer != 0, "resolving {file}");
+        assert_eq!(
+            sym.call(&mut world.store, (handle, name, name + 24))?,
+            pointer
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn dynamic_module_failure_preserves_constructor_cause_and_blocks_reentry() -> Result<()> {
+    let bytes = wat::parse_str(
+        r#"(module
+      (@dylink.0 (mem-info))
+      (import "env" "fail_constructor" (func $fail))
+      (func (export "__wasm_call_ctors") call $fail))"#,
+    )?;
+    let mut world = loader_fixture(vec![("broken.wasm".into(), bytes.into())])?;
+    let handle = module_descriptor(&mut world, "/modules/broken.wasm")?;
+    let error = world.call::<u32, i32>("open", handle).unwrap_err();
+    let detail = format!("{error:#}");
+    assert!(
+        detail.contains("Resource-module loader failed during open"),
+        "{detail}"
+    );
+    assert!(detail.contains("broken.wasm"), "{detail}");
+    assert!(
+        detail.contains("fixture constructor root cause"),
+        "{detail}"
+    );
+    assert!(
+        world
+            .call::<u32, u32>("malloc", 4)
+            .unwrap_err()
+            .to_string()
+            .contains("loader is poisoned")
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires authority Wasm and private stock resources"]
+fn dynamic_module_arena_loads_entire_stock_inventory() -> Result<()> {
+    let (bytes, resources) = paths()?;
+    let names = dylink::test_modules()?
+        .into_iter()
+        .map(|(name, _)| name)
+        .collect::<Vec<_>>();
+    let mut world = Simulator::new(&bytes, &resources, compatibility())?;
+    load_all_entry_points(&mut world, &names)
+}
