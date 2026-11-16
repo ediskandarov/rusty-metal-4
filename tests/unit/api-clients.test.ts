@@ -1,7 +1,12 @@
 import { expect, test } from "bun:test";
 
 import { openDisc } from "@tm4/dev-server-client";
-import { diagnosticsSchema, messageSchema, requestSchema } from "@tm4/lightyear-client/schemas";
+import {
+  buildManifestSchema,
+  diagnosticsSchema,
+  messageSchema,
+  requestSchema,
+} from "@tm4/lightyear-client/schemas";
 import { createRoomsClient, RoomsApiError } from "@tm4/rooms-client";
 import { roomEventSchema } from "@tm4/rooms-client/schemas";
 import { createServerClient, ServerApiError } from "@tm4/rustymetal-server-client";
@@ -288,4 +293,11 @@ test("snapshot header limits are enforced at the Lightyear boundary", () => {
   expect(messageSchema.safeParse(header).success).toBe(true);
   for (const change of [{ tick: 0 }, { tick: 1.5 }, { total: 0 }, { total: 256 * 1024 + 1 }])
     expect(messageSchema.safeParse({ ...header, ...change }).success).toBe(false);
+});
+
+test("build manifest retains the authority digest used by build compatibility", () => {
+  const manifest = { sha256: "a".repeat(64), authoritySha256: "b".repeat(64) };
+  expect(buildManifestSchema.parse(manifest)).toEqual(manifest);
+  for (const authoritySha256 of [undefined, "", "bad-hash"])
+    expect(buildManifestSchema.safeParse({ ...manifest, authoritySha256 }).success).toBe(false);
 });

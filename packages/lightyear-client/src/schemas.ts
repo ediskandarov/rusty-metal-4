@@ -20,7 +20,10 @@ export const compatibilitySchema = z.object({
   content: sha256Schema,
 });
 export type Compatibility = z.infer<typeof compatibilitySchema>;
-export const buildManifestSchema = z.object({ sha256: sha256Schema });
+export const buildManifestSchema = z.object({
+  sha256: sha256Schema,
+  authoritySha256: sha256Schema,
+});
 export const inputSchema = z.object({
   buttons: z.number().int().min(0).max(65535),
   axes: u32,
