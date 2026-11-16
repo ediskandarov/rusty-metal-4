@@ -24,3 +24,12 @@ export function matchPreparationControls(state: RoomState) {
     },
   };
 }
+
+export function matchPreparationStatus(state: RoomState): string {
+  const match = state.room?.match;
+  const report = state.uploadReport;
+  if (match?.stage === "uploading" && report?.sessionId === match.id) return report.message;
+  return (
+    match?.message || state.room?.notice || "Load your disc, then the host can prepare the server."
+  );
+}

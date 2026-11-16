@@ -1,3 +1,4 @@
+import type { PlayerEvent } from "@tm4/room-player-protocol";
 import { type createRoomsClient, RoomsApiError } from "@tm4/rooms-client";
 import {
   type Compatibility,
@@ -40,6 +41,8 @@ export interface RoomState extends FfaSlice, TournamentSlice {
   disc: Disc | null;
   playerNeedsSync: boolean;
   playerStatus: string;
+  uploadReport: Extract<PlayerEvent, { event: "upload" }> | null;
+  uploadReported: (report: Extract<PlayerEvent, { event: "upload" }>) => void;
   returnedResult: string | null;
   returnToRoom: () => void;
   journal: { downloading: boolean; message: string };
@@ -102,6 +105,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     disc: null,
     playerNeedsSync: false,
     playerStatus: "",
+    uploadReport: null,
     returnedResult: null,
     returnToRoom() {
       set({ returnedResult: get().room?.result?.matchId ?? null });
@@ -135,6 +139,12 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       const canEdit = room.you !== null && room.you === room.hostId && !room.match && !room.closed;
       set({
         room,
+        uploadReport:
+          !reset &&
+          room.match?.id === state.uploadReport?.sessionId &&
+          room.match?.stage === "uploading"
+            ? state.uploadReport
+            : null,
         connection: !room.you ? "viewing" : state.connection === "live" ? "live" : "reconnecting",
         errors: reset
           ? { room: roomError, join: null, settings: null, player: null }
@@ -213,10 +223,22 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       if (!get().room?.you || get().room?.closed || get().departed) return;
       set({
         disc,
+        uploadReport: null,
         ...initialModeState(),
         playerNeedsSync: !get().room?.match?.endpoint,
       });
       void syncPlayer();
+    },
+    uploadReported(report) {
+      const state = get();
+      if (
+        state.departed ||
+        state.room?.closed ||
+        state.room?.match?.id !== report.sessionId ||
+        state.room.match.stage !== "uploading"
+      )
+        return;
+      set({ uploadReport: report.phase === "complete" ? null : report });
     },
     playerReported(playerStatus) {
       if (playerStatus !== get().playerStatus) set({ playerStatus });

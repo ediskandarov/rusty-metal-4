@@ -23,8 +23,6 @@ const join = {
 test("each room command has its own required fields", () => {
   for (const command of [
     { ...room, action: "stop", sessionId: null },
-    { ...room, action: "stop", sessionId: null, message: "Back in the room" },
-    { ...room, action: "status", sessionId: null, message: "Preparing" },
     { ...room, action: "upload", sessionId },
     join,
   ] satisfies RoomCommand[])
@@ -33,7 +31,7 @@ test("each room command has its own required fields", () => {
     null,
     [],
     {},
-    { ...room, action: "status" },
+    { ...room, action: "status", sessionId: null, message: "Server ready" },
     { ...room, action: "upload" },
     { ...room, action: "join", sessionId },
     { ...room, action: "unknown" },
@@ -65,7 +63,10 @@ test("a join command cannot redirect the player to another room, match, or origi
 test("loaded, unloaded and status events cannot be mixed or omit loaded resource metadata", () => {
   for (const event of [
     { ...player, event: "unloaded" },
-    { ...player, event: "status", sessionId: null, message: "Uploading" },
+    { ...player, event: "status", sessionId: null, message: "Disc loaded" },
+    { ...player, event: "upload", sessionId, phase: "progress", message: "Uploading" },
+    { ...player, event: "upload", sessionId, phase: "complete", message: "" },
+    { ...player, event: "upload", sessionId, phase: "error", message: "Upload failed" },
     { ...player, event: "loaded", compatibility, cars: ["Orbital", "Pizza Boy"] },
     { ...player, event: "loaded", compatibility, cars: [] },
   ] satisfies PlayerMessage[])
@@ -76,6 +77,8 @@ test("loaded, unloaded and status events cannot be mixed or omit loaded resource
     {},
     { ...player, loaded: true, compatibility, cars: [] },
     { ...player, event: "status" },
+    { ...player, event: "upload", sessionId, phase: "ready", message: "" },
+    { ...player, event: "upload", sessionId: null, phase: "progress", message: "" },
     { ...player, event: "loaded", cars: [] },
     { ...player, event: "loaded", compatibility },
     { ...player, event: "loaded", compatibility, cars: {} },

@@ -5,7 +5,7 @@ import type { RoomStore } from "../state/room.ts";
 export type RoomState = ReturnType<RoomStore["getState"]>;
 export type SendPlayerAction = (action: RoomAction) => void;
 export interface ModeControls {
-  sync(previous: RoomState): void;
+  sync?(previous: RoomState): void;
   render(): void;
   reset(previous: RoomState): void;
   selected?(requestId: string, car: string | null): void;

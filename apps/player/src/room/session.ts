@@ -1,11 +1,11 @@
 import type { MatchStatus } from "@tm4/game-runtime/network/match";
-import type { RoomAction } from "@tm4/room-player-protocol";
+import type { PlayerEvent, RoomAction } from "@tm4/room-player-protocol";
 
 type Join = Extract<RoomAction, { action: "join" }>;
 type Operation = { sessionId: string; abort: AbortController };
 type SessionState =
   | { phase: "idle" | "disposed" }
-  | { phase: "uploading"; operation: Operation; serverStatus?: string }
+  | { phase: "uploading"; operation: Operation }
   | { phase: "uploaded" | "failed"; sessionId: string }
   | { phase: "session"; operation: Operation };
 
@@ -13,6 +13,7 @@ export function createRoomSession({
   join,
   upload,
   show,
+  reportUpload,
 }: {
   join: (command: Join, signal: AbortSignal, status: MatchStatus) => Promise<void>;
   upload: (
@@ -20,6 +21,7 @@ export function createRoomSession({
     signal: AbortSignal,
     progress: (message: string) => void,
   ) => Promise<void>;
+  reportUpload: (report: Extract<PlayerEvent, { event: "upload" }>) => void;
   show: (phase: Parameters<MatchStatus>[0], message: string, sessionId: string | null) => void;
 }) {
   let state: SessionState = { phase: "idle" };
@@ -38,27 +40,28 @@ export function createRoomSession({
   const failed = (active: SessionState & { operation: Operation }, error: unknown) => {
     if (state !== active) return;
     replace({ phase: "failed", sessionId: active.operation.sessionId });
-    show(
-      "error",
-      error instanceof Error ? error.message : String(error),
-      active.operation.sessionId,
-    );
+    const message = error instanceof Error ? error.message : String(error);
+    if (active.phase === "uploading")
+      reportUpload({
+        event: "upload",
+        sessionId: active.operation.sessionId,
+        phase: "error",
+        message,
+      });
+    else show("error", message, active.operation.sessionId);
   };
 
   return {
     handle(command: RoomAction) {
       if (state.phase === "disposed") return;
       switch (command.action) {
-        case "status":
+        case "stop": {
           if (command.sessionId !== currentSessionId()) return;
-          if (state.phase === "uploading") state.serverStatus = command.message;
-          else if (state.phase !== "session") show("lobby", command.message, command.sessionId);
-          break;
-        case "stop":
-          if (command.sessionId !== currentSessionId()) return;
+          const wasPlaying = state.phase === "session";
           replace({ phase: "idle" });
-          show("lobby", command.message || "Back in the room. Ready when you are.", null);
+          if (wasPlaying) show("lobby", "Back in the room. Ready when you are.", null);
           break;
+        }
         case "join": {
           if (state.phase === "session" && state.operation.sessionId === command.sessionId) return;
           const active: SessionState & { phase: "session" } = {
@@ -84,16 +87,23 @@ export function createRoomSession({
           };
           replace(active);
           void upload(command.sessionId, active.operation.abort.signal, (message) => {
-            if (state === active) show("lobby", message, command.sessionId);
+            if (state === active)
+              reportUpload({
+                event: "upload",
+                sessionId: command.sessionId,
+                phase: "progress",
+                message,
+              });
           }).then(
             () => {
               if (state !== active) return;
               state = { phase: "uploaded", sessionId: command.sessionId };
-              show(
-                "lobby",
-                active.serverStatus ?? "Server upload complete. Waiting for validation…",
-                command.sessionId,
-              );
+              reportUpload({
+                event: "upload",
+                sessionId: command.sessionId,
+                phase: "complete",
+                message: "",
+              });
             },
             (error: unknown) => failed(active, error),
           );

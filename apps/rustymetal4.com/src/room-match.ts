@@ -5,6 +5,7 @@ import { matchPreparation } from "./match-preparation.ts";
 import { renderMatchResults } from "./match-results.ts";
 import { roomModes } from "./modes/index.ts";
 import type { ModeControls } from "./modes/types.ts";
+import { matchPreparationStatus } from "./state/match-preparation.ts";
 import { roomMember, type RoomStore } from "./state/room.ts";
 
 export function roomMatch(id: string, store: RoomStore) {
@@ -75,7 +76,7 @@ export function roomMatch(id: string, store: RoomStore) {
       delivered &&
       (delivered.sessionId !== match?.id || (delivered.action === "join" && !match.endpoint))
     ) {
-      send({ action: "stop", sessionId: delivered.sessionId, message: room.notice });
+      send({ action: "stop", sessionId: delivered.sessionId });
       delivered = null;
     }
     if (modeId !== room.modeId) {
@@ -83,8 +84,9 @@ export function roomMatch(id: string, store: RoomStore) {
       modeId = room.modeId;
       mode = roomModes[modeId].createControls(store, send);
     }
-    mode!.sync(previous);
+    mode!.sync?.(previous);
     mode!.render();
+    el("match-status").textContent = matchPreparationStatus(store.getState());
     prepare();
     journal.hidden = !(match || room.journal);
     journal.disabled = state.journal.downloading;
@@ -141,6 +143,9 @@ export function roomMatch(id: string, store: RoomStore) {
     switch (message.event) {
       case "car-selection":
         mode?.selected?.(message.requestId, message.car);
+        break;
+      case "upload":
+        store.getState().uploadReported(message);
         break;
       case "status":
         if (message.sessionId === (store.getState().room?.match?.id ?? null))

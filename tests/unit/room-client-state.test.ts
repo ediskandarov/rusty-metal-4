@@ -535,17 +535,13 @@ test("mode changes atomically reset both slices and discard a pending old-mode r
     return { ...next, version: 5 };
   };
   const selecting = store.getState().selectCar("Quatro");
-  store.getState().ffaStatusSent("Old FFA status");
   const observed: unknown[] = [];
   const unsubscribe = store.subscribe((state) => {
     if (state.room?.modeId === "tournament") observed.push(state.ffa);
   });
   store.getState().receive(next);
   expect(
-    observed.every(
-      (value) =>
-        JSON.stringify(value) === JSON.stringify({ carDraft: undefined, sentStatus: null }),
-    ),
+    observed.every((value) => JSON.stringify(value) === JSON.stringify({ carDraft: undefined })),
   ).toBe(true);
   // Even a later-version response belongs to the obsolete mode, not the new selection.
   response.resolve({
@@ -628,7 +624,7 @@ test("room expiry clears a native menu and its pending choice without waiting fo
     selectionId: null,
     sentStatus: null,
   });
-  expect(store.getState().ffa).toEqual({ carDraft: undefined, sentStatus: null });
+  expect(store.getState().ffa).toEqual({ carDraft: undefined });
 });
 
 test("FFA controls derive readiness, operation locks and late admission from the room", async () => {
@@ -673,7 +669,6 @@ test("FFA controls derive readiness, operation locks and late admission from the
   expect(ffaControls(store.getState())).toMatchObject({
     carDisabled: true,
     readyDisabled: true,
-    playerStatus: null,
   });
   store.setState({ room: { ...snapshot(6), modeId: "tournament", capacity: 2 } });
   expect(ffaControls(store.getState())).toBeNull();
@@ -799,4 +794,45 @@ test("settings drafts retain invalid in-progress quotas and validate the shared 
   expect(saves).toBe(1);
   expect(store.getState().settingsDraft).toBeNull();
   expect(store.getState().room?.modeOptions).toEqual({ ffa: { bots: ["Quatro"], humanLimit: 7 } });
+});
+
+test("upload reports belong to the current preparation and cannot replace server validation", async () => {
+  const { matchPreparationStatus } =
+    await import("../../apps/rustymetal4.com/src/state/match-preparation.ts");
+  const { store } = setup();
+  const receive = (version: number, stage: MatchSnapshot["stage"], message: string) =>
+    store.getState().receive({ ...snapshot(version), match: { ...match, stage, message } });
+  const report = (
+    phase: "progress" | "error" | "complete",
+    message: string,
+    sessionId = match.id,
+  ) => store.getState().uploadReported({ event: "upload", sessionId, phase, message });
+  receive(2, "uploading", "Waiting for resources");
+  report("progress", "Uploading 1/154");
+  expect(matchPreparationStatus(store.getState())).toBe("Uploading 1/154");
+  report("error", "Connection lost");
+  expect(matchPreparationStatus(store.getState())).toBe("Connection lost");
+  report("progress", "Uploading 2/154");
+  report("complete", "");
+  expect(matchPreparationStatus(store.getState())).toBe("Waiting for resources");
+  report("progress", "Uploading 154/154");
+  receive(3, "validating", "Validating resources");
+  expect(store.getState().uploadReport).toBeNull();
+  for (const phase of ["progress", "error", "complete"] as const) report(phase, "Late report");
+  expect(matchPreparationStatus(store.getState())).toBe("Validating resources");
+  receive(4, "ready", "Server ready");
+  expect(matchPreparationStatus(store.getState())).toBe("Server ready");
+  store
+    .getState()
+    .receive({
+      ...snapshot(5),
+      match: { ...match, id: "new-match", stage: "uploading", message: "New preparation" },
+    });
+  report("error", "Old upload failed");
+  expect(matchPreparationStatus(store.getState())).toBe("New preparation");
+  report("progress", "New upload", "new-match");
+  store.getState().receive(snapshot(6));
+  expect(store.getState().uploadReport).toBeNull();
+  report("error", "Cancelled upload failed", "new-match");
+  expect(store.getState().uploadReport).toBeNull();
 });

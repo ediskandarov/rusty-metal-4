@@ -113,6 +113,20 @@ try {
   assert(await host.locator("#room-ready").isHidden());
   assert(await host.locator("#start-match").isHidden());
   for (const frame of frames) assert.equal(await frame.evaluate(() => tm4Port.menuMode), 0);
+  // Preparing the server must not leave a stale upload overlay on native selection.
+  await host.bringToFront();
+  await host.locator("#prepare-match").click();
+  await eventually(view, (room) => room.match?.stage === "ready", 30000);
+  await host.locator("#match-status").filter({ hasText: "Server ready" }).waitFor();
+  assert(!(await frames[0].locator("#status").textContent()).includes("Server"));
+  assert(await frames[0].locator("#status").isHidden());
+  assert(await frames[0].locator("#tournament-status").isVisible());
+  assert(await frames[0].evaluate(() => tm4Port.menuReady));
+  await host.locator("#cancel-preparation").click();
+  await eventually(view, (room) => room.match === null);
+  assert(await frames[0].locator("#status").isHidden());
+  assert(await frames[0].evaluate(() => tm4Port.menuReady));
+  console.log("PASS preparation completes and cancels without obscuring native car selection");
   // A delayed stop for the old match must not cancel the separate menu request.
   await host.bringToFront();
   await host.evaluate((roomId) => {

@@ -24,12 +24,6 @@ export const roomCommandSchema = z.discriminatedUnion("action", [
   roomEnvelope.extend({
     action: z.literal("stop"),
     sessionId: matchIdSchema.nullable(),
-    message: z.string().optional(),
-  }),
-  roomEnvelope.extend({
-    action: z.literal("status"),
-    sessionId: matchIdSchema.nullable(),
-    message: z.string(),
   }),
   roomEnvelope.extend({ action: z.literal("upload"), sessionId: matchIdSchema }),
   roomEnvelope
@@ -56,6 +50,12 @@ export const playerMessageSchema = z.discriminatedUnion("event", [
   playerEnvelope.extend({
     event: z.literal("status"),
     sessionId: matchIdSchema.nullable(),
+    message: z.string(),
+  }),
+  playerEnvelope.extend({
+    event: z.literal("upload"),
+    sessionId: matchIdSchema,
+    phase: z.enum(["progress", "complete", "error"]),
     message: z.string(),
   }),
   playerEnvelope.extend({ event: z.literal("unloaded") }),

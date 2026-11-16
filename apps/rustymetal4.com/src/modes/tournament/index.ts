@@ -50,7 +50,6 @@ export const tournament: RoomMode = {
         document.getElementById("room-ready")!.hidden = true;
         document.getElementById("match-help")!.textContent =
           "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts once both players have confirmed.";
-        document.getElementById("match-status")!.textContent = view.matchStatus;
         if (view.selectionStatus) {
           const status = view.selectionStatus;
           document.getElementById("player-status")!.textContent =

@@ -4,13 +4,11 @@ import { roomCarChoices, roomMember, type RoomState } from "../../state/room.ts"
 
 export const initialFfaState = () => ({
   carDraft: undefined as string | undefined,
-  sentStatus: null as string | null,
 });
 export interface FfaSlice {
   ffa: ReturnType<typeof initialFfaState>;
   selectCar(car: string): Promise<void>;
   toggleReady(): Promise<void>;
-  ffaStatusSent(status: string | null): void;
 }
 export function createFfaSlice(
   syncPlayer: (ready?: boolean) => Promise<void>,
@@ -32,9 +30,6 @@ export function createFfaSlice(
     async toggleReady() {
       if (get().room?.modeId !== "ffa") return;
       await syncPlayer(!roomMember(get())?.ready);
-    },
-    ffaStatusSent(sentStatus) {
-      if (get().ffa.sentStatus !== sentStatus) set({ ffa: { ...get().ffa, sentStatus } });
     },
   });
 }

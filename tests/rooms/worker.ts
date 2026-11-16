@@ -7,6 +7,7 @@ import type { RoomState } from "../../apps/rustymetal4.com/src/room-state.ts";
 import { RoomDirectory as ProductionDirectory } from "../../apps/rustymetal4.com/src/worker/directory.ts";
 import { ServerJournal } from "../../apps/rustymetal4.com/src/worker/journal.ts";
 import { Room as ProductionRoom } from "../../apps/rustymetal4.com/src/worker/room.ts";
+import stockResources from "../../config/resources.json";
 
 export { default } from "../../apps/rustymetal4.com/src/worker/index.ts";
 
@@ -187,7 +188,7 @@ export class TestServer extends DurableObject<{ NATIVE_URL?: string }> {
     }
     if (path === "/api/resources") {
       this.starts++;
-      return Response.json([{ id: "/DATA/MAIN.MR" }]);
+      return Response.json(stockResources.files.filter((file) => file.id === "/DATA/MAIN.MR"));
     }
     if (path.startsWith("/api/resources/")) {
       await request.arrayBuffer();

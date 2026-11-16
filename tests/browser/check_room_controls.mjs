@@ -47,10 +47,6 @@ try {
           window.commands = [];
           addEventListener('message', ({data}) => {
             window.commands.push(data);
-            if (data.action === 'status') parent.postMessage({
-              type: 'rm4-player', roomId: data.roomId, event: 'status',
-              sessionId: data.sessionId, message: data.message
-            }, location.origin);
           });
         </script>`,
       }),
@@ -220,8 +216,8 @@ try {
     await hostPlayer.evaluate(
       () => window.commands.filter((command) => command.action === "status").length,
     ),
-    1,
-    "echoed player status must not cause a postMessage feedback loop",
+    0,
+    "server preparation status must stay in the room",
   );
   await host.locator("#room-car").selectOption("Orbital");
   await eventually(view, (room) => room.participants[0]?.car === "Orbital");

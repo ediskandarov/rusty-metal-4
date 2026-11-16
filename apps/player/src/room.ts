@@ -41,6 +41,8 @@ export async function roomPlayerReady(engine: GameModule, sources: DiscSources):
     sessionId: string | null = null,
   ) => {
     view(state, message);
+    // Native selection owns its prompt; connection errors must remain visible.
+    document.getElementById("status")!.hidden = !!selection && state !== "error";
     notify({ event: "status", message, sessionId });
   };
   const resources = createRoomsClient({ baseURL: new URL("/api/", location.href) });
@@ -52,6 +54,7 @@ export async function roomPlayerReady(engine: GameModule, sources: DiscSources):
   session?.dispose();
   session = createRoomSession({
     show,
+    reportUpload: notify,
     async join(command, signal, status) {
       const endpoint = new URL(command.endpoint, location.origin);
       endpoint.protocol = location.protocol === "https:" ? "wss:" : "ws:";
@@ -117,14 +120,11 @@ if (inRoom) {
       }
       return;
     }
-    if (selection && command.action !== "upload") {
-      // Match-scoped messages do not own the tournament menu's lifetime.
-      if (command.action === "status" || command.action === "stop") return;
+    if (selection && command.action === "join") {
       selection.stop();
       selection = null;
       document.getElementById("tournament-status")!.hidden = true;
     }
-    document.getElementById("status")!.hidden = false;
     session?.handle(command);
   });
   window.addEventListener("pagehide", (event) => {

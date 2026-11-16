@@ -16,11 +16,5 @@ export function ffaControls(state: RoomState) {
     readyDisabled:
       operation !== null || !disc || (match?.stage !== "ready" && !joining) || !self.car,
     readyLabel: joining ? "Join match" : self.ready ? "Not ready" : "Ready",
-    matchStatus:
-      match?.message || room.notice || "Load your disc, then the host can prepare the server.",
-    playerStatus:
-      disc && !match?.endpoint
-        ? match?.message || room.notice || "Disc loaded. Choose your car in the room."
-        : null,
   };
 }
