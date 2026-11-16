@@ -1988,7 +1988,11 @@ mod tests {
     fn additional_stock_sessions_step_and_capture() -> Result<()> {
         let (bytes, resources) = paths()?;
         let mut world = Simulator::new(&bytes, &resources, compatibility())?;
+        let mut previous = std::collections::HashMap::new();
         for (map, first, second) in [
+            ("Construction Yard", "Gen. Warthog", "Minion"),
+            ("Neon City", "Orbital", "Pizza Boy"),
+            ("The Oil Rig", "Microblast", "Pizza Boy"),
             ("Construction Yard", "Gen. Warthog", "Minion"),
             ("Neon City", "Orbital", "Pizza Boy"),
             ("The Oil Rig", "Microblast", "Pizza Boy"),
@@ -2004,18 +2008,13 @@ mod tests {
                 portable,
                 "Portable startup unavailable for {map}/{first}/{second}"
             );
+            let mut states = Vec::new();
             for tick in 0..90 {
-                let state = world.step(
-                    tick,
-                    &[
-                        Input {
-                            buttons: if tick < 60 { 0x40 | 0x8000 } else { 0x2 },
-                            axes: 0,
-                            analog: false,
-                        },
-                        Input::default(),
-                    ],
-                )?;
+                let mut inputs = vec![Input::default(); setup.capacity as usize];
+                inputs[setup.slots[0] as usize].buttons =
+                    if tick < 60 { 0x40 | 0x8000 } else { 0x2 };
+                let state = world.step(tick, &inputs)?;
+                states.push(state.digest);
                 ensure!(
                     state.unsupported.is_none(),
                     "Unsupported stock state at {map}/{first}/{tick}: {:?}",
@@ -2026,6 +2025,12 @@ mod tests {
                 !world.snapshot()?.is_empty(),
                 "Stock portable capture failed"
             );
+            if let Some(first_run) = previous.insert(map, states.clone()) {
+                ensure!(
+                    states == first_run,
+                    "Reloaded {map} retained previous match state"
+                );
+            }
             world.finish()?;
         }
         Ok(())
