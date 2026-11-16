@@ -785,6 +785,7 @@ impl Drop for Simulator {
 
 #[cfg(test)]
 mod tests {
+    mod dynamic_modules;
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use wasmtime_wasi::p2::pipe::MemoryOutputPipe;

@@ -12,6 +12,24 @@ is compiling. CMake outputs remain local; Docker retains its BuildKit cache.
 CI uses a single checkout per job and overrides the intermediate directory to the
 existing platform-specific target directory retained by the Rust cache action.
 
+Resource modules share the main instance's memory. Browser modules use
+`SIDE_MODULE=2`. Cars, maps and simulation modules use `ASYNCIFY=0`; only the
+menu and main browser module retain Asyncify for presentation waits.
+
+The MR type-6 handler selects `modules/<original-image-name>.wasm`, loads it
+with the platform's `dlopen`, and resolves exports through the original symbol
+registry. The 37 game modules are no longer linked into `tm4_core`. Their hashes
+participate in build compatibility. Disc data stays unchanged; original MIPS code
+is not executed. `port/web/movie.c` retains browser-owned movie playback.
+
+Module ownership follows MR registrations. Removing the last registration closes
+the loader handle and invalidates imported-address caches and snapshot metadata.
+Callback addresses come from the defining module's accessor, so loader-created
+import trampolines cannot change identity comparisons in snapshots.
+
+The browser dynamic loader is implemented. The native server still needs a dynamic
+loader integration; the previous monolithic WASI host cannot run these modules.
+
 The root commands
 (`build`, `build:dev`, `build:diagnostic`, `dev`, `match`, `test`, `fmt`, `lint`
 and `typecheck`) cover the workspaces together.
@@ -115,6 +133,21 @@ your existing disc folder to also exercise the administrator upload UI and two
 players reaching native match ticks without uploading player files. Rust unit
 tests cover atomic upload publication, index validation, private storage and
 the setup/start lock. `bun run test:pages` remains the separate Pages smoke.
+
+The dynamic-module browser check runs 300 combat ticks with Orbital and Microblast
+and records canonical states for the existing Rust parity/rollback test. It starts
+and stops its own local HTTP server and Chrome. With both diagnostic builds ready:
+
+```sh
+export TM4_RESOURCE_DIR="$PWD/build/resources"
+export TM4_WASM_SITE="$PWD/build/diagnostic/site"
+export TM4_SIMULATION_WASM="$PWD/build/diagnostic/authority/site/tm4_standalone.wasm"
+export TM4_MODULE_DIR="$PWD/build/diagnostic/authority/site/modules"
+export TM4_TEST_RECORD="$PWD/build/checks/simulation-modules.json"
+bun run test:simulation:modules
+(cd network && cargo test --locked --features rollback_probe --bin tm4-deathmatch-server \
+  simulator::tests::browser_parity_local_replay_and_distinct_instance_transfer -- --ignored)
+```
 
 For original-AI FFA, choose the human count and explicit **Original AI opponents**
 in native administrator setup. Humans and selected opponents share eight places; selecting

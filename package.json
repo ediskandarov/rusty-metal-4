@@ -38,7 +38,8 @@
     "test:rooms:browser": "bun run build:rustymetal4.com && bun tests/browser/check_rooms.mjs && bun tests/browser/check_room_recovery.mjs && bun tests/browser/check_room_controls.mjs",
     "setup:cache": "bun tools/cache/setup.ts",
     "postinstall": "bun run setup:cache",
-    "test:cache": "bun tests/cache/shared-cargo.ts"
+    "test:cache": "bun tests/cache/shared-cargo.ts",
+    "test:simulation:modules": "bun tests/browser/check_simulation_modules.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",

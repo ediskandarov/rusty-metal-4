@@ -17,7 +17,7 @@ authority.
 Both browser and server run Lightyear 0.30.1 / Bevy 0.19. The browser Rust/Wasm module
 is separate from Emscripten. wasm-bindgen copies owned strings at the JS boundary;
 Emscripten receives scalar controls and temporary `ccall` strings that C resolves to
-its own registry names. No pointer or linear memory is shared between Wasm modules.
+its own registry names. The network transport does not share pointers or linear memory with the C runtime. Dynamically loaded C resource modules share the game runtime’s memory and function table.
 The wire uses typed binary Lightyear messages, not JSON WebSocket payloads.
 
 Controller ownership is replicated through Lightyear entities. Its native input
