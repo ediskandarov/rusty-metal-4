@@ -46,13 +46,15 @@ await runCli(async () => {
     join(directory, "authority/site/tm4_standalone.wasm"),
   ).arrayBuffer();
   const wasm = await Bun.file(join(site, "tm4_web.wasm")).arrayBuffer();
+  const authoritySha256 = new Bun.CryptoHasher("sha256").update(authority).digest("hex");
   await Bun.write(
     join(site, "simulation-build.json"),
     JSON.stringify({
-      authoritySha256: new Bun.CryptoHasher("sha256").update(authority).digest("hex"),
+      authoritySha256,
       sha256: new Bun.CryptoHasher("sha256")
         .update(wasm)
         .update(await Bun.file(join(site, "network/tm4_network_bg.wasm")).arrayBuffer())
+        .update(authoritySha256)
         .digest("hex"),
     }),
   );

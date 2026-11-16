@@ -26,6 +26,7 @@ export async function buildServer(mode: PlayerMode) {
   const browserHash = new Bun.CryptoHasher("sha256")
     .update(await Bun.file(join(source, "tm4_web.wasm")).arrayBuffer())
     .update(await Bun.file(join(source, "network/tm4_network_bg.wasm")).arrayBuffer())
+    .update(authorityHash)
     .digest("hex");
   if (
     !manifest ||

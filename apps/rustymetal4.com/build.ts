@@ -20,6 +20,7 @@ if (await Bun.file(join(runtime, "simulation-build.json")).exists()) {
   const digest = new Bun.CryptoHasher("sha256")
     .update(await Bun.file(join(runtime, "tm4_web.wasm")).arrayBuffer())
     .update(await Bun.file(join(runtime, "network/tm4_network_bg.wasm")).arrayBuffer())
+    .update(manifest.authoritySha256)
     .digest("hex");
   if (digest !== manifest.sha256)
     throw new Error("Player runtime does not match its compatibility manifest");
