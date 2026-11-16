@@ -1,4 +1,4 @@
-use super::{MatchResult, ServerLocation};
+use super::{MatchResult, MatchSetup, ServerLocation, StartError, StartOptions};
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
 use tm4_network::protocol::Compatibility;
@@ -132,20 +132,21 @@ impl PublishedState {
         }
     }
 
-    pub fn begin_start(
-        &mut self,
-        session_id: Option<String>,
-        players: usize,
-        world: String,
-    ) -> Result<(), &'static str> {
+    pub fn ensure_startable(&self) -> Result<(), StartError> {
         if self.status.phase != Phase::Ready {
-            return Err("Prepare resources before opening the match");
+            return Err(StartError::NotReady);
         }
-        self.status.session_id = session_id;
-        self.status.players = players;
-        self.status.world = Some(world);
-        self.transition(Phase::Starting, "Opening match…");
         Ok(())
+    }
+
+    pub fn start(&mut self, options: StartOptions) -> Result<MatchSetup, StartError> {
+        self.ensure_startable()?;
+        let validated = options.validate(&self.status)?;
+        self.status.session_id = validated.session_id;
+        self.status.players = validated.setup.players;
+        self.status.world = Some(validated.setup.world.clone());
+        self.transition(Phase::Starting, "Opening match…");
+        Ok(validated.setup)
     }
 
     pub fn listening(&mut self) {
@@ -214,6 +215,66 @@ mod tests {
         })
     }
 
+    fn start_request() -> serde_json::Value {
+        serde_json::json!({
+            "mode": "ffa", "players": 2, "world": "Construction Yard",
+            "limits": {"timeLimitTicks": 27000, "fragLimit": 20},
+            "sessionId": "00000000-0000-4000-8000-000000000000",
+            "roster": [{"credential": "a".repeat(64), "car": "Orbital"}]
+        })
+    }
+
+    fn start_options(players: usize, world: &str) -> StartOptions {
+        let mut request = start_request();
+        request["players"] = players.into();
+        request["world"] = world.into();
+        serde_json::from_value(request).unwrap()
+    }
+
+    #[test]
+    fn invalid_start_options_never_mutate_prepared_state() {
+        let mut state = state();
+        state.status.uploaded = state.status.required;
+        state.begin_prepare().unwrap();
+        resources_ready(&mut state);
+        let before = serde_json::to_value(&state.status).unwrap();
+        let request = start_request();
+        for changes in [
+            serde_json::json!({"players": 0}),
+            serde_json::json!({"players": 9}),
+            serde_json::json!({"world": "Missing map"}),
+            serde_json::json!({"bots": ["Missing car"]}),
+            serde_json::json!({"players": 8, "bots": ["Orbital"]}),
+            serde_json::json!({"limits": null}),
+            serde_json::json!({"mode": "tournament"}),
+            serde_json::json!({"sessionId": null}),
+            serde_json::json!({"roster": [request["roster"][0].clone(), request["roster"][0].clone()]}),
+            serde_json::json!({"roster": [{"credential": "x".repeat(64), "car": "Orbital"}]}),
+            serde_json::json!({"roster": [{"credential": "a".repeat(64), "car": "Missing car"}]}),
+        ] {
+            let mut invalid = request.clone();
+            invalid
+                .as_object_mut()
+                .unwrap()
+                .extend(changes.as_object().unwrap().clone());
+            assert!(matches!(
+                state.start(serde_json::from_value(invalid).unwrap()),
+                Err(StartError::Invalid(_))
+            ));
+            assert_eq!(serde_json::to_value(&state.status).unwrap(), before);
+        }
+        let setup = state
+            .start(serde_json::from_value(request).unwrap())
+            .unwrap();
+        assert_eq!(setup.players, 2);
+        assert_eq!(setup.roster.len(), 1);
+        assert_eq!(state.status.phase, Phase::Starting);
+        assert_eq!(
+            state.start(start_options(2, "Construction Yard")),
+            Err(StartError::NotReady)
+        );
+    }
+
     fn resources_ready(state: &mut PublishedState) {
         state.resources_ready(
             vec!["Construction Yard".into()],
@@ -276,11 +337,7 @@ mod tests {
         state.begin_prepare().unwrap();
         assert_eq!(state.status.phase, Phase::Loading);
         assert!(state.begin_prepare().is_err());
-        assert!(
-            state
-                .begin_start(None, 2, "Construction Yard".into())
-                .is_err()
-        );
+        assert!(state.start(start_options(2, "Construction Yard")).is_err());
         state.preparation_failed("Invalid resources");
         assert_eq!(state.status.phase, Phase::Failed);
         assert!(state.status.phase.permits_upload());
@@ -289,12 +346,13 @@ mod tests {
         assert_eq!(state.status.phase, Phase::Ready);
         assert_eq!(state.status.world.as_deref(), Some("Construction Yard"));
         assert!(!state.status.phase.permits_upload());
-        state
-            .begin_start(Some("match".into()), 2, "Construction Yard".into())
-            .unwrap();
+        state.start(start_options(2, "Construction Yard")).unwrap();
         assert_eq!(state.status.phase, Phase::Starting);
-        assert!(state.begin_start(None, 1, "The Oil Rig".into()).is_err());
-        assert_eq!(state.status.session_id.as_deref(), Some("match"));
+        assert!(state.start(start_options(1, "The Oil Rig")).is_err());
+        assert_eq!(
+            state.status.session_id.as_deref(),
+            Some("00000000-0000-4000-8000-000000000000")
+        );
         state.listening();
         assert_eq!(state.status.phase, Phase::Lobby);
         state.publish_match(update(MatchOutcome::Waiting));
@@ -329,11 +387,7 @@ mod tests {
             assert_eq!(state.status.message, "HTTP server stopped");
             assert!(state.result.is_none());
             assert!(state.begin_prepare().is_err());
-            assert!(
-                state
-                    .begin_start(None, 2, "Construction Yard".into())
-                    .is_err()
-            );
+            assert!(state.start(start_options(2, "Construction Yard")).is_err());
         }
     }
 

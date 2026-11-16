@@ -1,6 +1,8 @@
 //! Commands and shared state between HTTP management and the game thread.
+mod start;
 mod state;
 use serde::{Deserialize, Serialize};
+pub use start::{StartError, StartOptions};
 pub use state::{MatchOutcome, MatchUpdate, Status};
 pub(crate) use state::{Phase, PublishedState, SharedState};
 use std::sync::{Arc, Mutex, atomic::AtomicBool, mpsc::Receiver};

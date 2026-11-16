@@ -1,7 +1,7 @@
 //! HTTP launcher. Simulation stays on the native game thread.
 use crate::management::{
-    Control, MatchSetup, MembershipCommand, Phase, PublishedState, RoomMembership, RosterMember,
-    ServerLocation, SetupRequest, SharedState, Status,
+    Control, MembershipCommand, Phase, PublishedState, RoomMembership, ServerLocation,
+    SetupRequest, SharedState, StartError, StartOptions, Status,
 };
 use crate::resources::{Resource, ResourceStore};
 use anyhow::{Context, Result, ensure};
@@ -36,21 +36,6 @@ use tokio::{
 use tower::limit::ConcurrencyLimitLayer;
 
 use crate::assets::Simulation;
-use tm4_network::protocol::MAX_PLAYERS;
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct StartOptions {
-    mode: tm4_network::protocol::MatchMode,
-    #[serde(default)]
-    bots: Vec<String>,
-    limits: Option<tm4_network::protocol::FfaLimits>,
-    #[serde(default)]
-    session_id: Option<String>,
-    #[serde(default)]
-    roster: Vec<RosterMember>,
-    players: usize,
-    world: String,
-}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MembershipOptions {
@@ -501,76 +486,34 @@ async fn membership_command(service: Arc<Service>, options: MembershipOptions) -
     }
 }
 
+fn start_error(error: StartError) -> (StatusCode, String) {
+    let code = match error {
+        StartError::NotReady => StatusCode::CONFLICT,
+        StartError::Invalid(_) => StatusCode::BAD_REQUEST,
+    };
+    (code, error.to_string())
+}
+
 async fn start(State(service): State<Arc<Service>>, request: Request) -> ApiResult {
     let _guard = service.mutation.lock().await;
-    if service.state.lock().unwrap().status.phase != Phase::Ready {
-        return Err((
-            StatusCode::CONFLICT,
-            "Prepare resources before opening the match".into(),
-        ));
-    }
+    service
+        .state
+        .lock()
+        .unwrap()
+        .ensure_startable()
+        .map_err(start_error)?;
     let bytes = to_bytes(request.into_body(), 8192).await.map_err(invalid)?;
     let options: StartOptions = serde_json::from_slice(&bytes).map_err(invalid)?;
-    let limits = options
-        .mode
-        .validate_start(&tm4_network::modes::StartSettings {
-            human_capacity: options.players,
-            selected_humans: options.roster.len(),
-            bots: options.bots.len(),
-            world: &options.world,
-            limits: options.limits,
-        })
-        .map_err(invalid)?;
-    if !(1..=MAX_PLAYERS).contains(&options.players) {
-        return Err(invalid("Expected a player count from 1 to 8"));
-    }
-    {
-        let mut published = service.state.lock().unwrap();
-        let status = &published.status;
-        if options.players + options.bots.len() > MAX_PLAYERS
-            || options.bots.iter().any(|bot| !status.cars.contains(bot))
-        {
-            return Err(invalid(
-                "Choose available AI models within eight human and AI places.",
-            ));
-        }
-        if !status.worlds.contains(&options.world) {
-            return Err(invalid("Choose a map from the server catalog"));
-        }
-        if options.session_id.is_some() || !options.roster.is_empty() {
-            if options.session_id.as_ref().is_none_or(|id| id.len() != 36)
-                || !(1..=options.players).contains(&options.roster.len())
-                || options.roster.iter().any(|member| {
-                    member.credential.len() != 64
-                        || !member
-                            .credential
-                            .bytes()
-                            .all(|byte| byte.is_ascii_hexdigit())
-                        || !status.cars.contains(&member.car)
-                })
-                || options.roster.iter().enumerate().any(|(index, member)| {
-                    options.roster[..index]
-                        .iter()
-                        .any(|other| other.credential == member.credential)
-                })
-            {
-                return Err(invalid("Invalid initial room roster"));
-            }
-        }
-        published
-            .begin_start(options.session_id, options.players, options.world.clone())
-            .map_err(|message| (StatusCode::CONFLICT, message.into()))?;
-    }
-    service.send(SetupRequest::Start(MatchSetup {
-        mode: options.mode,
-        bots: options.bots,
-        roster: options.roster,
-        limits,
-        players: options.players,
-        world: options.world,
-    }))?;
+    let setup = service
+        .state
+        .lock()
+        .unwrap()
+        .start(options)
+        .map_err(start_error)?;
+    service.send(SetupRequest::Start(setup))?;
     Ok((StatusCode::ACCEPTED, "Opening match").into_response())
 }
+
 impl Service {
     fn send(&self, request: SetupRequest) -> std::result::Result<(), (StatusCode, String)> {
         self.sender.send(request).map_err(|_| {
@@ -592,7 +535,7 @@ impl Service {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::management::MatchResult;
+    use crate::management::{MatchResult, MatchSetup};
     use axum::body::Bytes;
     use futures_util::stream;
     use sha2::{Digest, Sha256};
