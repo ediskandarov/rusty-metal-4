@@ -1,7 +1,8 @@
-#include "src/modules/afc/private.h"
 #include "../overlays.h"
-#include "tm4/gpu.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/afc/private.h"
+#include "tm4/gpu.h"
 #include <string.h>
 void AfcClassConstructor(RegistryDirectory*);
 s32 AfcConstructor(Afc*, va_list);

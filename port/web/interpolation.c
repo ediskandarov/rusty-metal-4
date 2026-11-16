@@ -1,5 +1,5 @@
-#include <LIBGTE.H>
 #include "interpolation.h"
+#include "overlays.h"
 #include "src/modules/afc/private.h"
 #include "src/modules/anim/private.h"
 #include "src/modules/carprt/private.h"
@@ -23,6 +23,7 @@
 #include "tm4/modules/car.h"
 #include "tm4/modules/ray.h"
 #include "tm4/modules/tele.h"
+#include <LIBGTE.H>
 #include <emscripten.h>
 #include <limits.h>
 #include <math.h>
@@ -127,11 +128,6 @@ static int test_capture_motion;
 static const Car* car_identity;
 static const Car* car_pose;
 
-MATRIX* CarCrusherDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
-MATRIX* CarSlamDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
-MATRIX* CarToyDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
-MATRIX* CarTrashDisplaySpecialGroupDisplay(Car*, s32, CarRenderGroup*, MATRIX*, void*);
-
 EMSCRIPTEN_KEEPALIVE void WebSetRenderSmoothing(int enabled)
 {
     motion_settings.enabled = !!enabled;
@@ -145,18 +141,12 @@ EMSCRIPTEN_KEEPALIVE void WebSetRenderSmoothingDelay(double milliseconds)
 
 WebRenderMotionSettings WebRenderGetMotionSettings(void)
 {
-    return motion_settings.enabled ? motion_settings : (WebRenderMotionSettings){ 0 };
+    return motion_settings.enabled ? motion_settings : (WebRenderMotionSettings) { 0 };
 }
 
-static int has_sample(void)
-{
-    return drawing && completed && fraction != 1;
-}
+static int has_sample(void) { return drawing && completed && fraction != 1; }
 
-static int predicting(void)
-{
-    return fraction > 1;
-}
+static int predicting(void) { return fraction > 1; }
 
 static u32 serial(const void* object)
 {
@@ -177,7 +167,7 @@ static SVECTOR fireball_position(const WeaponFireball* fireball)
     const SVECTOR* previous = &fireball->previous;
     const Tm4ShortVectorXYZ* current = &fireball->position.fields.xyz;
     /* This is the collision grid's display midpoint, also valid before the first tick. */
-    return (SVECTOR){ (previous->vx + current->vx) / 2, (previous->vy + current->vy) / 2,
+    return (SVECTOR) { (previous->vx + current->vx) / 2, (previous->vy + current->vy) / 2,
         (previous->vz + current->vz) / 2 };
 }
 
@@ -194,7 +184,7 @@ static int trail_tip(const WeaponProjectile* projectile, SVECTOR tip[4])
         return 0;
     for (s32 i = 0; i < 4; ++i) {
         const WeaponTrailPoint* point = &projectile->trail_world[i][index];
-        tip[i] = (SVECTOR){ point->vx, point->vy, point->vz };
+        tip[i] = (SVECTOR) { point->vx, point->vy, point->vz };
     }
     return 1;
 }
@@ -217,12 +207,12 @@ static ObjectPose* append_object(const Tm4ObjectHeader* header)
     ObjectPose* pose = &objects[object_count++];
     pose->address = (uintptr_t)header;
     pose->serial = header->serial;
-    pose->position = (SVECTOR){ header->position.vx, header->position.vy, header->position.vz };
+    pose->position = (SVECTOR) { header->position.vx, header->position.vy, header->position.vz };
     return pose;
 }
 
-static void capture_model(const Tm4ObjectHeader* header, const MATRIX* transform,
-    s32 top_angle, s32 tail_angle, s32 ground)
+static void capture_model(const Tm4ObjectHeader* header, const MATRIX* transform, s32 top_angle,
+    s32 tail_angle, s32 ground)
 {
     ObjectPose* pose = append_object(header);
     if (!pose)
@@ -423,16 +413,22 @@ static void capture_accessory(const Car* car, CarPose* pose)
     const void* context = car->callback_context;
     if (!context)
         return;
-    if (car->render_callback == CarAugerDisplaySpecialGroupDisplay) {
+    if ((OSWord)car->render_callback
+        == WebNativeModuleExport("cars/auger", "CarAugerDisplaySpecialGroupDisplay")) {
         const AugerDrill* drill = context;
         pose->accessory_angles[0] = drill->angle;
-    } else if (car->render_callback == CarToyDisplaySpecialGroupDisplay) {
+    } else if ((OSWord)car->render_callback
+        == WebNativeModuleExport("cars/c_toy", "CarToyDisplaySpecialGroupDisplay")) {
         const ToyWindup* windup = context;
         pose->accessory_angles[0] = windup->angle;
-    } else if (car->render_callback == CarSlamDisplaySpecialGroupDisplay || car->render_callback == CarTrashDisplaySpecialGroupDisplay) {
+    } else if ((OSWord)car->render_callback
+            == WebNativeModuleExport("cars/c_slam", "CarSlamDisplaySpecialGroupDisplay")
+        || (OSWord)car->render_callback
+            == WebNativeModuleExport("cars/c_trash", "CarTrashDisplaySpecialGroupDisplay")) {
         const CarShovelState* shovel = context;
         pose->accessory_angles[0] = shovel->angle;
-    } else if (car->render_callback == CarCrusherDisplaySpecialGroupDisplay) {
+    } else if ((OSWord)car->render_callback
+        == WebNativeModuleExport("cars/c_crush", "CarCrusherDisplaySpecialGroupDisplay")) {
         const CrusherPinchers* pinchers = context;
         pose->accessory_angles[0] = pinchers->upper_angle;
         pose->accessory_angles[1] = pinchers->lower_angle;
@@ -518,9 +514,13 @@ void WebInterpolationBeginDraw(WebRenderMotionSettings motion, double phase)
 #ifdef TM4_WEB_TEST_HOOKS
     EM_ASM(
         {
-            tm4Port.testMotionPhases?.push({
-                tick : tm4Port.simulationTicks, lead : $0, phase : $1, fraction : $2,
-                history : !!$3, smoothing : !!$4
+            tm4Port.testMotionPhases ?.push({
+                tick : tm4Port.simulationTicks,
+                lead : $0,
+                phase : $1,
+                fraction : $2,
+                history : !!$3,
+                smoothing : !!$4
             });
         },
         motion.lead, draw_phase, fraction, have_history, motion.enabled);
@@ -534,15 +534,9 @@ void WebInterpolationEndDraw(void)
     drawing = 0;
 }
 
-static s32 sample_value(s32 a, s32 b, double at)
-{
-    return lround(a + at * ((double)b - a));
-}
+static s32 sample_value(s32 a, s32 b, double at) { return lround(a + at * ((double)b - a)); }
 
-static s32 lerp(s32 a, s32 b)
-{
-    return sample_value(a, b, fraction);
-}
+static s32 lerp(s32 a, s32 b) { return sample_value(a, b, fraction); }
 
 static s16 sample_angle(s32 a, s32 b, double at)
 {
@@ -551,10 +545,7 @@ static s16 sample_angle(s32 a, s32 b, double at)
     return (a + lround(at * delta)) & angle_mask;
 }
 
-static s16 lerp_angle(s32 a, s32 b)
-{
-    return sample_angle(a, b, fraction);
-}
+static s16 lerp_angle(s32 a, s32 b) { return sample_angle(a, b, fraction); }
 
 static int normalize(double v[3])
 {
@@ -742,8 +733,8 @@ void WebInterpolationFinishStep(double lead)
             CarPose* pose = find_car_pose(car);
             if (!pose)
                 continue;
-            finish_forecast(&pose->forecast, &pose->transform, &car->transform,
-                lead, car_prediction_blocked(car));
+            finish_forecast(&pose->forecast, &pose->transform, &car->transform, lead,
+                car_prediction_blocked(car));
             if (!pose->forecast.ready)
                 continue;
             for (s32 wheel = 0; wheel < ArrayCount(car->wheels); ++wheel) {
@@ -755,15 +746,15 @@ void WebInterpolationFinishStep(double lead)
             const Camera* camera = GameInfo.players[i].camera;
             CameraPose* pose = find_camera_pose(camera);
             if (pose)
-                finish_forecast(&pose->forecast, &pose->transform, &camera->camera_to_world,
-                    lead, camera_prediction_blocked(camera));
+                finish_forecast(&pose->forecast, &pose->transform, &camera->camera_to_world, lead,
+                    camera_prediction_blocked(camera));
         }
     }
     completed = 1;
 }
 
-static int sample_pose(const MATRIX* before, const MATRIX* live, const PoseForecast* forecast,
-    MATRIX* sample)
+static int sample_pose(
+    const MATRIX* before, const MATRIX* live, const PoseForecast* forecast, MATRIX* sample)
 {
     if (!draw_forecast)
         return interpolate_matrix(before, live, sample, 1024);
@@ -780,10 +771,7 @@ static int sample_pose(const MATRIX* before, const MATRIX* live, const PoseForec
     return 1;
 }
 
-static int can_sample_pose(void)
-{
-    return drawing && (draw_forecast || has_sample());
-}
+static int can_sample_pose(void) { return drawing && (draw_forecast || has_sample()); }
 
 static Camera* sample_camera(Camera* camera, Camera* pose)
 {
@@ -812,15 +800,18 @@ static void trace_transform(const void* object, const char* name, const MATRIX* 
 {
     if (!test_capture_motion)
         return;
-    trace_motion(object, name, live->t[0], live->t[1], live->t[2], heading(live),
-        render->t[0], render->t[1], render->t[2], heading(render), live != render);
+    trace_motion(object, name, live->t[0], live->t[1], live->t[2], heading(live), render->t[0],
+        render->t[1], render->t[2], heading(render), live != render);
     if (draw_forecast && forecast && forecast->ready && live != render) {
         EM_ASM(
             {
-                const sample = tm4Port.motionSamples?.at(-1);
+                const sample = tm4Port.motionSamples ?.at(-1);
                 if (sample)
                     sample.bridge = ({
-                        from : [ $0, $1, $2, $3 ], to : [ $4, $5, $6, $7 ], lead : $8, phase : $9
+                        from : [ $0, $1, $2, $3 ],
+                        to : [ $4, $5, $6, $7 ],
+                        lead : $8,
+                        phase : $9
                     });
             },
             forecast->from.t[0], forecast->from.t[1], forecast->from.t[2], heading(&forecast->from),
@@ -848,13 +839,13 @@ static Car* sample_car(Car* car, Car* pose)
     const CarPose* previous = can_sample_pose() ? find_car_pose(car) : NULL;
     if (previous) {
         *pose = *car;
-        if (!sample_pose(&previous->transform, &car->transform, &previous->forecast,
-                &pose->transform))
+        if (!sample_pose(
+                &previous->transform, &car->transform, &previous->forecast, &pose->transform))
             return car;
         for (s32 wheel = 0; wheel < ArrayCount(car->wheels); ++wheel) {
             pose->wheels[wheel].rotation = draw_forecast
                 ? sample_angle(previous->wheels[wheel].from_rotation,
-                    previous->wheels[wheel].to_rotation, draw_phase)
+                      previous->wheels[wheel].to_rotation, draw_phase)
                 : lerp_angle(previous->wheels[wheel].rotation, car->wheels[wheel].rotation);
             /* Steering and suspension stay at the latest values in the predictive part. */
             if (!predicting()) {
@@ -887,8 +878,8 @@ Car* WebInterpolationCar(Car* car, Car* pose)
 
 static int short_position(SVECTOR* result, s32 x, s32 y, s32 z)
 {
-    if (x < SHRT_MIN || x > SHRT_MAX || y < SHRT_MIN || y > SHRT_MAX
-        || z < SHRT_MIN || z > SHRT_MAX)
+    if (x < SHRT_MIN || x > SHRT_MAX || y < SHRT_MIN || y > SHRT_MAX || z < SHRT_MIN
+        || z > SHRT_MAX)
         return 0;
     result->vx = x;
     result->vy = y;
@@ -896,15 +887,15 @@ static int short_position(SVECTOR* result, s32 x, s32 y, s32 z)
     return 1;
 }
 
-static int translate_position(const SVECTOR* point, const MATRIX* live, const MATRIX* sample,
-    SVECTOR* result)
+static int translate_position(
+    const SVECTOR* point, const MATRIX* live, const MATRIX* sample, SVECTOR* result)
 {
     return short_position(result, point->vx + (sample->t[0] - live->t[0]),
         point->vy + (sample->t[1] - live->t[1]), point->vz + (sample->t[2] - live->t[2]));
 }
 
-static int interpolate_position(const SVECTOR* before, const SVECTOR* after, SVECTOR* result,
-    s32 maximum_delta)
+static int interpolate_position(
+    const SVECTOR* before, const SVECTOR* after, SVECTOR* result, s32 maximum_delta)
 {
     if (abs(after->vx - before->vx) > maximum_delta || abs(after->vy - before->vy) > maximum_delta
         || abs(after->vz - before->vz) > maximum_delta)
@@ -914,10 +905,7 @@ static int interpolate_position(const SVECTOR* before, const SVECTOR* after, SVE
 }
 
 #ifdef TM4_WEB_TEST_HOOKS
-EMSCRIPTEN_KEEPALIVE void WebTestCaptureMotion(int capture)
-{
-    test_capture_motion = capture;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestCaptureMotion(int capture) { test_capture_motion = capture; }
 
 static void trace_motion(const void* object, const char* name, s32 x, s32 y, s32 z, s32 angle,
     s32 render_x, s32 render_y, s32 render_z, s32 render_angle, int flags)
@@ -926,7 +914,7 @@ static void trace_motion(const void* object, const char* name, s32 x, s32 y, s32
         return;
     EM_ASM(
         {
-            tm4Port.motionSamples?.push({
+            tm4Port.motionSamples ?.push({
                 frame : tm4Port.levelFrames,
                 tick : tm4Port.simulationTicks,
                 id : $0,
@@ -958,13 +946,13 @@ void WebInterpolationPickup(const PowerupState* power, SVECTOR* position, s32* a
         *angle = lerp_angle(previous->pickup.angle, *angle);
 #ifdef TM4_WEB_TEST_HOOKS
     trace_motion(power, power->name, power->position.vector.vx, power->position.vector.vy,
-        power->position.vector.vz, power->angle, position->vx, position->vy, position->vz,
-        *angle, sampled | 4);
+        power->position.vector.vz, power->angle, position->vx, position->vy, position->vz, *angle,
+        sampled | 4);
 #endif
 }
 
-void WebInterpolationProjectile(const WeaponProjectile* projectile, MATRIX* model, SVECTOR* shadow,
-    s32 spin_step, s32* angle)
+void WebInterpolationProjectile(
+    const WeaponProjectile* projectile, MATRIX* model, SVECTOR* shadow, s32 spin_step, s32* angle)
 {
     *model = projectile->model_to_world;
     *shadow = projectile->bullet.current_world;
@@ -975,8 +963,8 @@ void WebInterpolationProjectile(const WeaponProjectile* projectile, MATRIX* mode
     /* A signed 16-bit flight velocity can travel more than 1024 units in one tick.
      * Impact/expiry state owns visibility and uses the live impact pose. */
     int sampled = previous && in_flight
-        && interpolate_matrix(&previous->projectile.transform, &projectile->model_to_world,
-            model, 2048);
+        && interpolate_matrix(
+            &previous->projectile.transform, &projectile->model_to_world, model, 2048);
     if (sampled) {
         interpolate_position(&previous->projectile.shadow, shadow, shadow, 2048);
         s32 previous_angle = (previous->projectile.age * spin_step) & (ANGLE_FULL_TURN - 1);
@@ -986,9 +974,8 @@ void WebInterpolationProjectile(const WeaponProjectile* projectile, MATRIX* mode
         *angle = render_angle;
 #ifdef TM4_WEB_TEST_HOOKS
     const MATRIX* live = &projectile->model_to_world;
-    trace_motion(projectile, projectile->type->name, live->t[0], live->t[1], live->t[2],
-        live_angle, model->t[0], model->t[1], model->t[2], render_angle,
-        sampled | (!in_flight << 1));
+    trace_motion(projectile, projectile->type->name, live->t[0], live->t[1], live->t[2], live_angle,
+        model->t[0], model->t[1], model->t[2], render_angle, sampled | (!in_flight << 1));
 #endif
 }
 
@@ -1046,7 +1033,7 @@ int WebInterpolationTrailTip(const WeaponProjectile* projectile, SVECTOR tip[4])
 
 void WebInterpolationFireball(const WeaponFireball* fireball, SVECTOR* position)
 {
-    *position = (SVECTOR){ 0 };
+    *position = (SVECTOR) { 0 };
     ObjectCopyPosition(position, fireball);
     const ObjectPose* previous = previous_object(fireball);
     int sampled = previous && interpolate_position(&previous->fireball, position, position, 2048);
@@ -1105,8 +1092,8 @@ s32 WebInterpolationCarAccessory(const Car* car, s32 slot, s32 angle)
         && previous->accessory == car->callback_context;
     s32 render = sampled ? lerp_angle(previous->accessory_angles[slot], angle) : angle;
 #ifdef TM4_WEB_TEST_HOOKS
-    trace_motion(identity, slot ? "car accessory lower" : "car accessory", 0, 0, 0, angle,
-        0, 0, 0, render, sampled);
+    trace_motion(identity, slot ? "car accessory lower" : "car accessory", 0, 0, 0, angle, 0, 0, 0,
+        render, sampled);
 #endif
     return render;
 }
@@ -1114,7 +1101,8 @@ s32 WebInterpolationCarAccessory(const Car* car, s32 slot, s32 angle)
 MATRIX* WebInterpolationCarTransform(const Car* car, MATRIX* sample)
 {
     const CarPose* previous = can_sample_pose() ? find_car_pose(car) : NULL;
-    if (!previous || !sample_pose(&previous->transform, &car->transform, &previous->forecast, sample))
+    if (!previous
+        || !sample_pose(&previous->transform, &car->transform, &previous->forecast, sample))
         *sample = car->transform;
     return sample;
 }
@@ -1140,8 +1128,8 @@ MATRIX* WebInterpolationRay(const RayBeam* ray, MATRIX* live, MATRIX* sample, s3
         *length = lerp(previous->ray.length, live_length);
     MATRIX* result = sampled ? sample : live;
 #ifdef TM4_WEB_TEST_HOOKS
-    trace_motion(ray, header->name, live->t[0], live->t[1], live->t[2], live_length,
-        result->t[0], result->t[1], result->t[2], *length, sampled);
+    trace_motion(ray, header->name, live->t[0], live->t[1], live->t[2], live_length, result->t[0],
+        result->t[1], result->t[2], *length, sampled);
 #endif
     return result;
 }
@@ -1187,15 +1175,15 @@ int WebInterpolationLightning(const Lightning* bolt, MATRIX* transform, SVECTOR*
         points[i].vy = lround(points[i].vy * length / live_length);
     }
 #ifdef TM4_WEB_TEST_HOOKS
-    trace_motion(bolt, "lightning endpoint", bolt->end.vx, bolt->end.vy, bolt->end.vz, 0,
-        end.vx, end.vy, end.vz, 0, 1);
+    trace_motion(bolt, "lightning endpoint", bolt->end.vx, bolt->end.vy, bolt->end.vz, 0, end.vx,
+        end.vy, end.vz, 0, 1);
 #endif
     return 1;
 }
 
 void WebInterpolationObjectPosition(const void* object, SVECTOR* position)
 {
-    *position = (SVECTOR){ 0 };
+    *position = (SVECTOR) { 0 };
     ObjectCopyPosition(position, object);
     const ObjectPose* previous = previous_object(object);
     /* Generic effect anchors can follow changing targets or collision geometry. */
@@ -1242,10 +1230,7 @@ void WebInterpolationWave(const ExplosionWave* wave, s32* outer, s32* inner, s32
     }
 }
 
-void WebInterpolationEndCarDraw(void)
-{
-    car_identity = car_pose = NULL;
-}
+void WebInterpolationEndCarDraw(void) { car_identity = car_pose = NULL; }
 
 const Car* WebInterpolationCarIdentity(const Car* car)
 {

@@ -1,7 +1,8 @@
-#include "src/modules/expl/private.h"
 #include "../overlays.h"
-#include "tm4/gpu.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/expl/private.h"
+#include "tm4/gpu.h"
 #include <string.h>
 void ExplosionShockWaveClassConstructor(RegistryDirectory*);
 void ExplosionShockWaveClassDestructor(RegistryDirectory* directory);

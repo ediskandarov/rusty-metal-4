@@ -1,5 +1,6 @@
 #include "../hooks.h"
 #include "port/web/checkpoint_memory.h"
+#include "port/web/module_import.h"
 #include "port/web/net_match.h"
 #include "port/web/overlays.h"
 #include "src/modules/car/private.h"
@@ -27,14 +28,15 @@ EMSCRIPTEN_KEEPALIVE int WebTestTeleportCamera(s32 slot, s32 hyperspace)
         CarAiInputCallback input = player->car->ai_input_callback;
         player->car->ai_input_callback = NULL;
         player->car->controls.action = CarActionHyperspace;
-        CarProcess(player->car);
+        WEB_MODULE("car", CarProcess)(player->car);
         player->car->ai_input_callback = input;
     } else {
         Teleporter portal = { 0 };
         portal.destination_world = player->car->position;
         portal.destination_world.vx += 1024;
         portal.destination_forward_world.vz = ONE;
-        void (*interact)(void*, void*) = (void*)WebInteractExport("InteractCarWithTeleporter");
+        void (*interact)(void*, void*)
+            = (void*)WebNativeModuleExport("interact", "InteractCarWithTeleporter");
         interact(player->car, &portal);
     }
     return state->snap;
@@ -120,7 +122,7 @@ void WebTestMotionInput(void)
         Car* car = GameInfo.players[0].car;
         MATRIX target = car->transform;
         target.t[1] -= 128;
-        CarOrientWithMatrix(car, &target);
+        WEB_MODULE("car", CarOrientWithMatrix)(car, &target);
     }
 }
 
@@ -157,24 +159,21 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadCarModel(void)
 
 static int test_preview_angle = -1;
 
-EMSCRIPTEN_KEEPALIVE void WebTestSetPreviewAngle(int angle)
-{
-    test_preview_angle = angle;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestSetPreviewAngle(int angle) { test_preview_angle = angle; }
 
 void WebTestDrawMenu(MenuGraphics* graphics)
 {
-    s32 original_angle = MenuPreviewRotationAngle;
+    s32 original_angle = WEB_MODULE("menu", MenuPreviewRotationAngle);
     int preview_angle = test_preview_angle;
     if (preview_angle >= 0)
-        MenuPreviewRotationAngle = preview_angle;
-    MenuDrawScreen(graphics);
+        WEB_MODULE("menu", MenuPreviewRotationAngle) = preview_angle;
+    WEB_MODULE("menu", MenuDrawScreen)(graphics);
     if (preview_angle >= 0)
-        MenuPreviewRotationAngle = original_angle;
+        WEB_MODULE("menu", MenuPreviewRotationAngle) = original_angle;
     EM_ASM(
         {
             tm4Port.testPreviewAngle = $0;
             tm4Port.previewRotationAngle = $1;
         },
-        preview_angle, MenuPreviewRotationAngle);
+        preview_angle, WEB_MODULE("menu", MenuPreviewRotationAngle));
 }

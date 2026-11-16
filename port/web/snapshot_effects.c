@@ -1,6 +1,9 @@
 #include "carpart.h"
 #include "net_match.h"
+#include "overlays.h"
+#include "port/web/module_import.h"
 #include "snapshot_types.h"
+#include <stdio.h>
 
 #include "snapshot_world.h"
 
@@ -22,10 +25,7 @@
 LightningClass* LightningFindClass(char* name);
 void WebAfcAdvanceFlareRotation(void* payload);
 
-static void* find_anim(char* key)
-{
-    return AnimFindClass(key);
-}
+static void* find_anim(char* key) { return WEB_MODULE("anim", AnimFindClass)(key); }
 
 static const SnapshotKeyBinding anim_keys = { offsetof(AnimClass, name), find_anim };
 
@@ -146,8 +146,8 @@ static const SnapshotField fire_ring_fields[] = {
 static int fire_ring_valid(const void* payload)
 {
     const FireRing* ring = payload;
-    if (!ring->animation_name || !AnimFindClass(ring->animation_name) || !ring->particles
-        || ring->particle_count <= 0 || ring->particle_count > UINT16_MAX
+    if (!ring->animation_name || !WEB_MODULE("anim", AnimFindClass)(ring->animation_name)
+        || !ring->particles || ring->particle_count <= 0 || ring->particle_count > UINT16_MAX
         || ring->angular_divisions < ring->particle_count)
         return 0;
     for (s32 i = 0; i < ring->particle_count; ++i) {
@@ -182,7 +182,7 @@ static int restore_flare_quad(
 {
     if (length || !flare_valid(payload))
         return 0;
-    AfcSetQuadSize(payload);
+    WEB_MODULE("afc", AfcSetQuadSize)(payload);
     return 1;
 }
 
@@ -205,10 +205,7 @@ static const SnapshotField light_fields[] = {
     { 0 },
 };
 
-static void* find_bomb(char* key)
-{
-    return WeaponFindBombType(key);
-}
+static void* find_bomb(char* key) { return WEB_MODULE("weap", WeaponFindBombType)(key); }
 
 static const SnapshotKeyBinding bomb_keys = { offsetof(WeaponBombType, name), find_bomb };
 
@@ -222,10 +219,7 @@ static const SnapshotField bomb_fields[] = {
     { 0 },
 };
 
-static int bomb_valid(const void* payload)
-{
-    return ((const WeaponBomb*)payload)->type != NULL;
-}
+static int bomb_valid(const void* payload) { return ((const WeaponBomb*)payload)->type != NULL; }
 
 static const SnapshotField target_fields[] = {
     SNAP_DERIVED(WeaponTarget, geometry),
@@ -238,7 +232,7 @@ static const SnapshotField target_fields[] = {
 static int target_valid(const void* payload)
 {
     const WeaponTarget* target = payload;
-    return target->geometry && target->geometry == WeapTargetGeometry;
+    return target->geometry && target->geometry == WEB_MODULE("weap", WeapTargetGeometry);
 }
 
 static int restore_target_geometry(
@@ -246,14 +240,11 @@ static int restore_target_geometry(
 {
     if (length)
         return 0;
-    ((WeaponTarget*)payload)->geometry = WeapTargetGeometry;
+    ((WeaponTarget*)payload)->geometry = WEB_MODULE("weap", WeapTargetGeometry);
     return 1;
 }
 
-static void* find_ray(char* key)
-{
-    return RayFindClass(key);
-}
+static void* find_ray(char* key) { return WEB_MODULE("ray", RayFindClass)(key); }
 
 static const SnapshotKeyBinding ray_keys = { offsetof(RayClass, name), find_ray };
 
@@ -296,15 +287,12 @@ static int restore_ray_animation(
     if (length || !ray->type)
         return 0;
     ray->animation = ray->has_animation && ray->type->animation_name
-        ? GetAnimInfo(ray->type->animation_name)
+        ? WEB_MODULE("anim", GetAnimInfo)(ray->type->animation_name)
         : NULL;
     return 1;
 }
 
-static void* find_lightning(char* key)
-{
-    return LightningFindClass(key);
-}
+static void* find_lightning(char* key) { return WEB_MODULE("lightn", LightningFindClass)(key); }
 
 static const SnapshotKeyBinding lightning_keys = { offsetof(LightningClass, name), find_lightning };
 
@@ -367,8 +355,8 @@ static int lightning_valid(const void* payload)
 
 static void* find_flame_animation(char* key)
 {
-    for (s32 i = 0; i < FlameClassCount; ++i) {
-        char* name = FlameClasses[i].animation_name;
+    for (s32 i = 0; i < WEB_MODULE("fire", FlameClassCount); ++i) {
+        char* name = WEB_MODULE("fire", FlameClasses)[i].animation_name;
         if (name && !strcmp(name, key))
             return name;
     }
@@ -385,10 +373,7 @@ static void* flame_weapon_base(const void* payload)
         : NULL;
 }
 
-static u32 flame_weapon_count(const void* payload)
-{
-    return CarWeaponCount;
-}
+static u32 flame_weapon_count(const void* payload) { return WEB_MODULE("car", CarWeaponCount); }
 
 static const SnapshotIndexBinding flame_weapons = {
     flame_weapon_base,
@@ -431,14 +416,12 @@ static int flame_valid(const void* payload)
     const void* base = flame_weapon_base(payload);
     const uintptr_t offset = (uintptr_t)emitter->weapon - (uintptr_t)base;
     return base && !(offset % sizeof(CarWeaponInstance))
-        && offset / sizeof(CarWeaponInstance) < (u32)CarWeaponCount && emitter->weapon->launchers
-        && emitter->weapon->count > 0 && (u32)emitter->launcher_index < (u32)emitter->weapon->count;
+        && offset / sizeof(CarWeaponInstance) < (u32)WEB_MODULE("car", CarWeaponCount)
+        && emitter->weapon->launchers && emitter->weapon->count > 0
+        && (u32)emitter->launcher_index < (u32)emitter->weapon->count;
 }
 
-static void* find_wave(char* key)
-{
-    return FindExplosionDefinition(key);
-}
+static void* find_wave(char* key) { return WEB_MODULE("expl", FindExplosionDefinition)(key); }
 
 static const SnapshotKeyBinding wave_keys = { offsetof(ExplosionDefinition, name), find_wave };
 
@@ -522,15 +505,23 @@ enum TimerKind {
 static const struct {
     TimerCallback function;
     u32 count;
+    const char* symbol;
 } timer_bindings[] = {
     [TimerDestroyObject] = { (TimerCallback)ObjectDestroy, 1 },
     [TimerNextMode] = { (TimerCallback)GameSetNextMode, 1 },
     [TimerContinueMatch] = { (TimerCallback)GameSetDeferredValue, 2 },
-    [TimerImpactWave] = { (TimerCallback)WeaponSpawnImpactObject, 5 },
-    [TimerFunnyWave] = { (TimerCallback)WeaponSpawnImpactEffects, 5 },
-    [TimerMovingExplosion] = { (TimerCallback)WeaponSpawnMovingExplosion, 5 },
+    [TimerImpactWave] = { NULL, 5, "WeaponSpawnImpactObject" },
+    [TimerFunnyWave] = { NULL, 5, "WeaponSpawnImpactEffects" },
+    [TimerMovingExplosion] = { NULL, 5, "WeaponSpawnMovingExplosion" },
     [TimerSpawnCar] = { (TimerCallback)GameSpawnCar, 8 },
 };
+
+static TimerCallback timer_callback(u32 kind)
+{
+    return timer_bindings[kind].symbol
+        ? (TimerCallback)WebNativeModuleExport("weap", timer_bindings[kind].symbol)
+        : timer_bindings[kind].function;
+}
 
 typedef struct {
     u32 kind, arguments[8];
@@ -551,13 +542,14 @@ static u32 capture_timer_binding(const void* payload, u8* output, u32 capacity)
     if (capacity < sizeof(binding))
         return 0;
     while (binding.kind < ArrayCount(timer_bindings)) {
-        if (timer_bindings[binding.kind].function == timer->callback
+        if (timer_callback(binding.kind) == timer->callback
             && timer_bindings[binding.kind].count == (u32)timer->argument_count)
             break;
         ++binding.kind;
     }
-    if (binding.kind == ArrayCount(timer_bindings))
+    if (binding.kind == ArrayCount(timer_bindings)) {
         return 0;
+    }
 
     memcpy(binding.arguments, timer->arguments, timer->argument_count * sizeof(u32));
     if (binding.kind == TimerDestroyObject) {
@@ -614,7 +606,7 @@ static int restore_timer_binding(
             return 0;
         break;
     }
-    timer->callback = timer_bindings[binding.kind].function;
+    timer->callback = timer_callback(binding.kind);
     timer->argument_count = timer_bindings[binding.kind].count;
     memcpy(timer->arguments, binding.arguments, timer->argument_count * sizeof(u32));
     return 1;
@@ -675,7 +667,7 @@ static int carpart_valid(const void* payload)
 static int restore_carpart(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
 {
     WebCarpart* debris = payload;
-    WebCarpartPrepareResources();
+    WEB_MODULE("carprt", WebCarpartPrepareResources)();
     if (length)
         return 0;
     RegistryDirectory* models = RegGetDirectoryPtrS("/objects/car/characters");
@@ -686,13 +678,15 @@ static int restore_carpart(void* payload, const u8* input, u32 length, WebSnapsh
     return debris->part.local_vertices != NULL;
 }
 
+static Tm4ObjectCallback afc_process(void) { return WEB_MODULE("afc", WebAfcAdvanceFlareRotation); }
+
 const SnapshotType WebSnapshotEffectTypes[] = {
     { "carpart", sizeof(WebCarpart), carpart_fields, carpart_valid, NULL, restore_carpart,
         .hash_fields = 1 },
     { "fireRing", sizeof(FireRing), fire_ring_fields, fire_ring_valid, .hash_fields = 1 },
     { "anim", sizeof(Anim), anim_fields, anim_valid, capture_anim_sound, restore_anim_sound },
     { "afc", sizeof(Afc), flare_fields, flare_valid, NULL, restore_flare_quad,
-        .baseline_removable = 1, .alternate_process = WebAfcAdvanceFlareRotation },
+        .baseline_removable = 1, .alternate_process = afc_process },
     { "lightEmitter", sizeof(LightEmitter), light_fields, .baseline_removable = 1 },
     { "weaponBomb", sizeof(WeaponBomb), bomb_fields, bomb_valid, .baseline_removable = 1 },
     { "weaponTarget", sizeof(WeaponTarget), target_fields, target_valid, NULL,

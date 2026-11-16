@@ -1,10 +1,12 @@
 #include "car.h"
-#include "net_match.h"
-#include "src/main/object/private.h"
-#include "src/modules/car/private.h"
 #include "interpolation.h"
 #include "level.h"
+#include "net_match.h"
 #include "overlays.h"
+#include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/main/object/private.h"
+#include "src/modules/car/private.h"
 #include "tm4/gpu.h"
 #include "tm4/main/game.h"
 #include "tm4/main/image.h"
@@ -19,7 +21,6 @@
 #include "tm4/modules/sound.h"
 #include "tm4/vector.h"
 #include <assert.h>
-#include "port/web/browser_report.h"
 #include <libetc.h>
 #include <math.h>
 #include <stdarg.h>
@@ -32,7 +33,7 @@ static unsigned int simulation_ticks;
 
 static s32 construct_car(void* object, va_list args)
 {
-    return CarConstructor(object, args);
+    return WEB_MODULE("car", CarConstructor)(object, args);
 }
 
 static void display_car(void* object, Tm4OrderingTag* ordering, u8** cursor, u8* end, MATRIX* view)
@@ -40,17 +41,17 @@ static void display_car(void* object, Tm4OrderingTag* ordering, u8** cursor, u8*
     u8* start = *cursor;
     Car pose;
     Car* render_car = WebInterpolationCar(object, &pose);
-    CarDisplay(render_car, ordering, cursor, end, view);
+    WEB_MODULE("car", CarDisplay)(render_car, ordering, cursor, end, view);
     WebInterpolationEndCarDraw();
     WEB_BROWSER_REPORT({ globalThis.tm4Port.carPacketBytes = $0; }, *cursor - start);
 }
 
-/* PS1 reloads these counters with o_car; constructors only replace the world data. */
+/* dlclose may keep code/data resident; each new world needs a fresh search epoch. */
 void WebCarResetSearchState(void)
 {
-    CarPathSearchGeneration = 0;
-    CarRandomSearchGeneration[0] = 0;
-    CarHealthSearchGeneration = 0;
+    WEB_MODULE("car", CarPathSearchGeneration) = 0;
+    WEB_MODULE("car", CarRandomSearchGeneration)[0] = 0;
+    WEB_MODULE("car", CarHealthSearchGeneration) = 0;
 }
 
 void WebCarEnable(void)
@@ -61,24 +62,25 @@ void WebCarEnable(void)
             tm4Port.carSearchGenerationsAtLoad = tm4Port.carSearchGenerationsAtLoad || [];
             tm4Port.carSearchGenerationsAtLoad.push([ $0, $1, $2 ]);
         },
-        CarPathSearchGeneration, CarRandomSearchGeneration[0], CarHealthSearchGeneration);
+        WEB_MODULE("car", CarPathSearchGeneration), WEB_MODULE("car", CarRandomSearchGeneration)[0],
+        WEB_MODULE("car", CarHealthSearchGeneration));
 #endif
-    OSRegisterSoundEmitter();
-    OSRegisterAnimInfo();
-    OSRegisterExplosion();
-    OSRegisterAiSoundEmitter();
-    OSRegisterAiPowerup();
-    OSRegisterWeaponSoundEmitter();
-    OSRegisterWeaponAnimInfo();
-    OSRegisterWeaponExplosion();
-    OSRegisterWeaponBullet();
-    OSRegisterPhysicsSoundEmitter();
-    OSRegisterPhysicsAnimInfo();
-    OSRegisterPhysicsExplosion();
-    OSRegisterDisplaySoundEmitter();
-    OSRegisterCameraSoundEmitter();
-    OSRegisterWorldSoundEmitter();
-    OSRegisterWorldPowerup();
+    WEB_MODULE("car", OSRegisterSoundEmitter)();
+    WEB_MODULE("car", OSRegisterAnimInfo)();
+    WEB_MODULE("car", OSRegisterExplosion)();
+    WEB_MODULE("car", OSRegisterAiSoundEmitter)();
+    WEB_MODULE("car", OSRegisterAiPowerup)();
+    WEB_MODULE("car", OSRegisterWeaponSoundEmitter)();
+    WEB_MODULE("car", OSRegisterWeaponAnimInfo)();
+    WEB_MODULE("car", OSRegisterWeaponExplosion)();
+    WEB_MODULE("car", OSRegisterWeaponBullet)();
+    WEB_MODULE("car", OSRegisterPhysicsSoundEmitter)();
+    WEB_MODULE("car", OSRegisterPhysicsAnimInfo)();
+    WEB_MODULE("car", OSRegisterPhysicsExplosion)();
+    WEB_MODULE("car", OSRegisterDisplaySoundEmitter)();
+    WEB_MODULE("car", OSRegisterCameraSoundEmitter)();
+    WEB_MODULE("car", OSRegisterWorldSoundEmitter)();
+    WEB_MODULE("car", OSRegisterWorldPowerup)();
 }
 
 void CarClassDestructor(RegistryDirectory*);
@@ -91,15 +93,15 @@ OSWord WebCarObjectExport(const char* name)
 #define EXPORT(key, value)                                                                         \
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(value)
-    EXPORT("CarSizeof", &CarSizeof);
-    EXPORT("CarClassConstructor", CarClassConstructor);
-    EXPORT("CarClassDestructor", CarClassDestructor);
+    EXPORT("CarSizeof", &WEB_MODULE("car", CarSizeof));
+    EXPORT("CarClassConstructor", WEB_MODULE("car", CarClassConstructor));
+    EXPORT("CarClassDestructor", WEB_MODULE("car", CarClassDestructor));
     EXPORT("CarConstructor", construct_car);
-    EXPORT("CarProcess", CarProcess);
+    EXPORT("CarProcess", WEB_MODULE("car", CarProcess));
     EXPORT("CarDisplay", display_car);
-    EXPORT("CarDestructor", CarDestructor);
-    EXPORT("InteractCarWithCar", InteractCarWithCar);
-    EXPORT("InteractCarWithBullet", InteractCarWithBullet);
+    EXPORT("CarDestructor", WEB_MODULE("car", CarDestructor));
+    EXPORT("InteractCarWithCar", WEB_MODULE("car", InteractCarWithCar));
+    EXPORT("InteractCarWithBullet", WEB_MODULE("interact", InteractCarWithBullet));
 #undef EXPORT
     return 0;
 }
@@ -121,14 +123,15 @@ void WebCarStep(void)
     simulation_ticks++;
     WEB_BROWSER_REPORT(
         { tm4Port.controlBindings = Array.from(HEAPU16.subarray($0 >> 1, ($0 >> 1) + $1)); },
-        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].bindings[0].actions, GameControlCount);
+        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].bindings[0].actions,
+        GameControlCount);
     WEB_BROWSER_REPORT(
         {
             tm4Port.cars = [];
             tm4Port.opponents = $0;
             tm4Port.aiEnabled = $1;
         },
-        GameInfo.active_computer_count, aiWorldInfo.enabled);
+        GameInfo.active_computer_count, WEB_MODULE("car", aiWorldInfo).enabled);
     for (s32 i = 0; i < GameInfo.car_count; ++i) {
         Car* other = GameInfo.cars[i];
         WEB_BROWSER_REPORT(
@@ -181,7 +184,9 @@ void WebCarStep(void)
         car->engine_sound ? car->engine_sound->voices[0].pitch : 0,
         car->engine_sound ? car->engine_sound->voices[0].voice_id : -1, car->engine_sound_name,
         car->controls.gear, car->controls.brake_input, car->controls.ebrake_active,
-        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].bindings[0].actions[GameControlGas]);
+        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0]
+            .bindings[0]
+            .actions[GameControlGas]);
     CarWeaponInstance* selected = &car->weapons[car->controls.selected_weapon];
     WEB_BROWSER_REPORT(
         {
@@ -199,5 +204,7 @@ void WebCarStep(void)
             });
         },
         car->health, car->weapons ? 20 : 0, car->controls.selected_weapon,
-        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].camera->object == car && GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].camera->process != NULL);
+        GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].camera->object == car
+            && GameInfo.players[WebNetMatchActive() ? WebNetParticipantSlot(0) : 0].camera->process
+                != NULL);
 }

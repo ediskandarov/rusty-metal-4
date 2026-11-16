@@ -1,4 +1,5 @@
 #include "snapshot_world.h"
+#include "port/web/module_import.h"
 #include "src/main/object/private.h"
 #include "tm4/main/registry.h"
 #include "tm4/modules/car_ai.h"
@@ -117,8 +118,10 @@ static int remember_world(void)
         || !WorldCollisionPolygons || *vertices <= 0 || *faces <= 0 || polygons <= 0
         || *vertices > MaxWorldFields / 3 || *faces > MaxWorldFields
         || polygons > MaxWorldFields / 26
-        || aiWorldInfo.resource.area_count > ArrayCount(aiWorldInfo.areas)
-        || (aiWorldInfo.resource.node_count && !aiWorldInfo.resource.nodes))
+        || WEB_MODULE("car", aiWorldInfo).resource.area_count
+            > ArrayCount(WEB_MODULE("car", aiWorldInfo).areas)
+        || (WEB_MODULE("car", aiWorldInfo).resource.node_count
+            && !WEB_MODULE("car", aiWorldInfo).resource.nodes))
         return 0;
     if (!remember_faces(*faces))
         return 0;
@@ -136,8 +139,9 @@ static int remember_world(void)
                 || !remember_vector(&polygon->edge_directions[corner]))
                 return 0;
     }
-    for (s32 area_index = 0; area_index < aiWorldInfo.resource.area_count; ++area_index) {
-        CarAiArea* area = &aiWorldInfo.areas[area_index];
+    for (s32 area_index = 0; area_index < WEB_MODULE("car", aiWorldInfo).resource.area_count;
+         ++area_index) {
+        CarAiArea* area = &WEB_MODULE("car", aiWorldInfo).areas[area_index];
         if (area->edge_count && !area->edges)
             return 0;
         for (s32 edge = 0; edge < area->edge_count; ++edge)
@@ -146,8 +150,8 @@ static int remember_world(void)
     }
     /* Searches share mutable resource nodes. Their generations alone are not enough
      * to rewind a future search, especially at generation wraparound. */
-    for (s32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
-        CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+    for (s32 i = 0; i < WEB_MODULE("car", aiWorldInfo).resource.node_count; ++i) {
+        CarAiNavigationNode* node = &WEB_MODULE("car", aiWorldInfo).resource.nodes[i];
         if (!remember(&node->enabled, WorldByte) || !remember(&node->cost, WorldShort)
             || !remember(&node->search_generation, WorldShort)
             || !remember(&node->path_depth, WorldByte) || !remember(&node->search_state, WorldByte)

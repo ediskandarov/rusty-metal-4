@@ -1,7 +1,8 @@
-#include "src/modules/lightn/private.h"
 #include "../overlays.h"
-#include "tm4/main/screen.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/lightn/private.h"
+#include "tm4/main/screen.h"
 #include <string.h>
 
 void WeaponLightningEmitterClassConstructor(RegistryDirectory*);

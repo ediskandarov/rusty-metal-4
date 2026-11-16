@@ -1,4 +1,3 @@
-#include <libgte.h>
 #include "car.h"
 #include "cheats.h"
 #include "loading.h"
@@ -6,9 +5,11 @@
 #include "music.h"
 #include "net_match.h"
 #include "overlays.h"
+#include "port/web/module_import.h"
 #include "render_sync.h"
 #include "subpixel.h"
 #include "tournament_menu.h"
+#include <libgte.h>
 #ifdef TM4_WEB_TEST_HOOKS
 #include "tests/native/hooks.h"
 #endif
@@ -58,15 +59,9 @@ EMSCRIPTEN_KEEPALIVE int WebSetTournamentSelection(int enabled)
     tournament_menu_request = enabled ? 1 : -1;
     return 1;
 }
-int WebSimulationOnly(void)
-{
-    return simulation_only;
-}
+int WebSimulationOnly(void) { return simulation_only; }
 
-int WebDirectStartup(void)
-{
-    return direct_startup;
-}
+int WebDirectStartup(void) { return direct_startup; }
 static struct {
     unsigned int scale;
     PsyzDitherMode dithering;
@@ -148,8 +143,8 @@ static void apply_render_settings(void)
             tm4Port.drawDistance = $3;
             tm4Port.renderLimit = tm4Port.networkSynchronous ? 30 : $4;
         },
-        Psyz_VideoGetInternalResolution(), Psyz_VideoGetDitheringMode(),
-        WebCarLodDistanceScale, WebDrawDistanceScale, render_settings.limit);
+        Psyz_VideoGetInternalResolution(), Psyz_VideoGetDitheringMode(), WebCarLodDistanceScale,
+        WebDrawDistanceScale, render_settings.limit);
 }
 
 static unsigned int presented_frames;
@@ -182,10 +177,7 @@ EMSCRIPTEN_KEEPALIVE int WebCaptureFrame(void)
 }
 #endif
 
-EMSCRIPTEN_KEEPALIVE unsigned int WebGetPresentedFrames(void)
-{
-    return presented_frames;
-}
+EMSCRIPTEN_KEEPALIVE unsigned int WebGetPresentedFrames(void) { return presented_frames; }
 
 static void count_registry(RegistryDirectory* directory)
 {
@@ -245,7 +237,6 @@ static void load_registry(void)
     WebNativeModulesInitialize();
     RegistrySetTypeHandler(REG_FILE_TYPE_TEXTURE, load_texture);
     RegistrySetTypeHandler(REG_FILE_TYPE_SOUND_VAB, SystemForwardType16);
-    SoundResolveEmitterSymbols();
     CDInitialize();
     WebLoadArchive("/DATA/MAIN.MR", "MAIN");
     count_registry(RegGetCurrentDirectoryPtr());
@@ -273,10 +264,10 @@ static void initialize_menu(void)
     LoadingInitializeDisplay();
     WebMenuBindImports();
     menu_directory_saved = CDPushDirectory();
-    MenuInitialize(1);
+    WEB_MODULE("menu", MenuInitialize)(1);
     menu_initialized = 1;
     set_menu_mask(1);
-    MenuTicks = 0;
+    WEB_MODULE("menu", MenuTicks) = 0;
     SetDispMask(1);
     WEB_BROWSER_REPORT({ globalThis.tm4Port.screen = 'main'; });
 }
@@ -290,13 +281,15 @@ void WebReturnToMenu(void)
     LoadingInitializeDisplay();
     LoadBitmap(resource("/menu/menu.bit"));
     LoadBitmap(resource("/menu/menu.clt"));
-    MenuCurrentScreen = GameInfo.save_menu ? &MenuScreenSaveTournament : &MenuScreenMain;
+    WEB_MODULE("menu", MenuCurrentScreen) = GameInfo.save_menu
+        ? &WEB_MODULE("menu", MenuScreenSaveTournament)
+        : &WEB_MODULE("menu", MenuScreenMain);
     GameInfo.save_menu = 0;
     menu_directory_saved = CDPushDirectory();
-    MenuInitialize(0);
+    WEB_MODULE("menu", MenuInitialize)(0);
     menu_initialized = 1;
     set_menu_mask(1);
-    MenuTicks = 0;
+    WEB_MODULE("menu", MenuTicks) = 0;
     SetDispMask(1);
 }
 
@@ -307,7 +300,7 @@ void WebLeaveMenu(void)
     if (!menu_initialized)
         return;
     WebTournamentMenuClose();
-    MenuShutdown();
+    WEB_MODULE("menu", MenuShutdown)();
     menu_initialized = 0;
     if (menu_directory_saved)
         CDPopDirectory();
@@ -320,11 +313,11 @@ void WebLeaveMenu(void)
 
 static void draw_menu(void)
 {
-    MenuGraphicsBuffer = MenuGraphicsBuffer->next;
-    MenuGraphics* graphics = MenuGraphicsBuffer;
+    WEB_MODULE("menu", MenuGraphicsBuffer) = WEB_MODULE("menu", MenuGraphicsBuffer)->next;
+    MenuGraphics* graphics = WEB_MODULE("menu", MenuGraphicsBuffer);
     PadGetPad(4);
     FontPrimsReset(&graphics->font_prims);
-    MenuResetQuadPool(&graphics->quad_pool);
+    WEB_MODULE("menu", MenuResetQuadPool)(&graphics->quad_pool);
     ClearOTagR(graphics->ordering_table, 3);
     ObjectProcess();
     SoundProcess();
@@ -333,7 +326,7 @@ static void draw_menu(void)
 #ifdef TM4_WEB_TEST_HOOKS
     WebTestDrawMenu(graphics);
 #else
-    MenuDrawScreen(graphics);
+    WEB_MODULE("menu", MenuDrawScreen)(graphics);
 #endif
     WebSubpixelSelect(WEB_SUBPIXEL_NONE);
     addPrim(&graphics->ordering_table[2], &graphics->draw);
@@ -341,9 +334,9 @@ static void draw_menu(void)
     VSync(0);
     PutDispEnv(&graphics->display);
     WebSubpixelDraw(WEB_SUBPIXEL_MENU, &graphics->ordering_table[2]);
-    MenuProcessScreenInput();
+    WEB_MODULE("menu", MenuProcessScreenInput)();
     WebCardFlush();
-    ++MenuTicks;
+    ++WEB_MODULE("menu", MenuTicks);
     ++frame_count;
     WEB_BROWSER_REPORT(
         {
@@ -362,22 +355,24 @@ static void draw_menu(void)
             globalThis.tm4Port.playerCount = $13;
             globalThis.tm4Port.menuPlayer = $14;
         },
-        frame_count, MenuCurrentScreen->selected, MenuCurrentScreen->text, GameInfo.next_mode,
-        MenuGameState.world_name, MenuGameState.character_names[0], MenuInputSuppressed,
-        MenuTransitionActive, MenuGameState.game_type,
-        MenuCurrentMessage ? MenuCurrentMessage->text : "", MenuGameState.sound_volume,
-        MenuGameState.players[0].bindings[0].actions[GameControlGas], MenuSelectedControlAction,
-        MenuGameState.player_count, MenuCurrentPlayer);
+        frame_count, WEB_MODULE("menu", MenuCurrentScreen)->selected,
+        WEB_MODULE("menu", MenuCurrentScreen)->text, GameInfo.next_mode,
+        WEB_MODULE("menu", MenuGameState).world_name,
+        WEB_MODULE("menu", MenuGameState).character_names[0],
+        WEB_MODULE("menu", MenuInputSuppressed), WEB_MODULE("menu", MenuTransitionActive),
+        WEB_MODULE("menu", MenuGameState).game_type,
+        WEB_MODULE("menu", MenuCurrentMessage) ? WEB_MODULE("menu", MenuCurrentMessage)->text : "",
+        WEB_MODULE("menu", MenuGameState).sound_volume,
+        WEB_MODULE("menu", MenuGameState).players[0].bindings[0].actions[GameControlGas],
+        WEB_MODULE("menu", MenuSelectedControlAction),
+        WEB_MODULE("menu", MenuGameState).player_count, WEB_MODULE("menu", MenuCurrentPlayer));
     if (GameInfo.next_mode) {
         WebLeaveMenu();
         WebLevelStart();
     }
 }
 
-static void startup_intro(void)
-{
-    WebMovieStart("INTRO", 1, initialize_menu);
-}
+static void startup_intro(void) { WebMovieStart("INTRO", 1, initialize_menu); }
 
 static void initialize_platform(void)
 {

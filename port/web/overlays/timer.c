@@ -1,6 +1,7 @@
 #include "tm4/modules/timer.h"
 #include "../overlays.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
 #include <string.h>
 
 static s32 construct(void* object, va_list args)

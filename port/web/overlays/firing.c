@@ -1,6 +1,7 @@
-#include "src/modules/firing/private.h"
 #include "../overlays.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/firing/private.h"
 #include <string.h>
 
 extern u32 FireRingSizeof;

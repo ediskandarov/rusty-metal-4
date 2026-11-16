@@ -1,6 +1,7 @@
 #include "tm4/modules/jumppad.h"
 #include "../overlays.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
 #include <string.h>
 
 static s32 construct(void* object, va_list arguments)
@@ -14,10 +15,7 @@ static s32 instance(void* object, RegistryDirectory* directory)
         WEB_BROWSER_REPORT({ tm4Port.jumppadInstances = (tm4Port.jumppadInstances || 0) + 1; });
     return result;
 }
-static void process(void* object)
-{
-    JumppadProcess(object);
-}
+static void process(void* object) { JumppadProcess(object); }
 static void destroy(void* object)
 {
     JumppadDestructor(object);

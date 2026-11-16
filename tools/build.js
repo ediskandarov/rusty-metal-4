@@ -6,6 +6,7 @@ import { $ } from "bun";
 
 import { buildPlayer } from "../apps/player/build.ts";
 import { buildServer } from "../apps/server/build.ts";
+import { buildIdentity } from "./build-identity.ts";
 import { runCli, UsageError } from "./cli.js";
 import { root } from "./common.js";
 await runCli(async () => {
@@ -42,21 +43,9 @@ await runCli(async () => {
 
   await $`bun tools/network/build.ts --mode ${mode}`.cwd(root);
   await $`bun tools/headless/build.ts --mode ${mode}`.cwd(root);
-  const authority = await Bun.file(
-    join(directory, "authority/site/tm4_standalone.wasm"),
-  ).arrayBuffer();
-  const wasm = await Bun.file(join(site, "tm4_web.wasm")).arrayBuffer();
-  const authoritySha256 = new Bun.CryptoHasher("sha256").update(authority).digest("hex");
   await Bun.write(
     join(site, "simulation-build.json"),
-    JSON.stringify({
-      authoritySha256,
-      sha256: new Bun.CryptoHasher("sha256")
-        .update(wasm)
-        .update(await Bun.file(join(site, "network/tm4_network_bg.wasm")).arrayBuffer())
-        .update(authoritySha256)
-        .digest("hex"),
-    }),
+    JSON.stringify(await buildIdentity(directory)),
   );
   await buildServer(mode);
 });

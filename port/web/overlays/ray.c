@@ -1,6 +1,7 @@
-#include "src/modules/ray/private.h"
 #include "../overlays.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/ray/private.h"
 #include <string.h>
 
 void WeaponRayBeamClassConstructor(RegistryDirectory*);

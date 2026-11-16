@@ -18,29 +18,15 @@ ${lookups.join("\n")}
 `;
 }
 
-function lookup(condition, unit) {
-  return `    if (${condition}) {
-        result = ${unit.id}(name);
-        if (result)
-            return result;
-    }`;
-}
-
-export function renderRegistry(manifest, { activeUnits, collisions }) {
-  const declarations = [];
+export function renderRegistry(manifest, { collisions }) {
   const moduleLookups = [];
   const loadedLookups = [];
-  for (const unit of activeUnits) {
-    declarations.push(`OSWord ${unit.id}(const char* name);`);
-    const matchesModule = unit.modules.map(
-      (module) => `!strcasecmp(module, ${JSON.stringify(module)})`,
-    );
-    const moduleLoaded = unit.modules.map((module) => {
-      const imageName = manifest.modules[module].image_name;
-      return `WebNativeModuleLoaded(${JSON.stringify(imageName)})`;
-    });
-    moduleLookups.push(lookup(matchesModule.join(" || "), unit));
-    loadedLookups.push(lookup(moduleLoaded.join(" || "), unit));
+  for (const module of Object.keys(manifest.modules)) {
+    const image = JSON.stringify(manifest.modules[module].image_name);
+    moduleLookups.push(`    if (!strcasecmp(module, ${JSON.stringify(module)}))
+        return WebDynamicModuleExport(${image}, name);`);
+    loadedLookups.push(`    result = WebDynamicModuleExport(${image}, name);
+    if (result) return result;`);
   }
 
   const collisionLookups = [];
@@ -63,11 +49,10 @@ export function renderRegistry(manifest, { activeUnits, collisions }) {
 #include <strings.h>
 
 int WebNativeModuleLoaded(const char* image_name);
-${declarations.join("\n")}
+OSWord WebDynamicModuleExport(const char* image_name, const char* name);
 
 OSWord WebNativeModuleExport(const char* module, const char* name)
 {
-    OSWord result;
 ${moduleLookups.join("\n")}
     return 0;
 }
@@ -77,6 +62,54 @@ OSWord WebNativeExport(const char* name)
     OSWord result;
 ${collisionLookups.join("\n")}
 ${loadedLookups.join("\n")}
+    return 0;
+}
+`;
+}
+
+export function renderModule(manifest, module, { activeUnits }) {
+  const units = activeUnits.filter((unit) => unit.modules.includes(module));
+  const adapter = {
+    weap: "WebWeaponExport",
+    interact: "WebInteractExport",
+    carprt: "WebCarpartExport",
+    afc: "WebAfcExport",
+    power: "WebPowerExport",
+    timer: "WebTimerExport",
+    bullet: "WebBulletExport",
+    ray: "WebRayExport",
+    fire: "WebFireExport",
+    firing: "WebFireRingExport",
+    destry: "WebDestroyableExport",
+    frag: "WebFragmentExport",
+    tele: "WebTeleporterExport",
+    jumppad: "WebJumppadExport",
+    light: "WebLightExport",
+    lightn: "WebLightningExport",
+    anim: "WebAnimExport",
+    expl: "WebExplExport",
+    "cars/auger": "WebAugerExport",
+    "cars/c_pirate": "WebPirateExport",
+    "levels/w_yard": "WebYardExport",
+    "levels/w_neon": "WebNeonExport",
+    "levels/w_carni": "WebCarnivalExport",
+    "levels/w_oil": "WebOilExport",
+  }[module];
+  const snapshot = module.startsWith("levels/");
+  return `#include "tm4/main/os.h"
+${snapshot ? '#include "port/web/snapshot_types.h"\n#include <string.h>\nextern const SnapshotType Tm4ModuleSnapshotTypes[];' : ""}
+${adapter ? `OSWord ${adapter}(const char*);` : ""}
+${units.map((unit) => `OSWord ${unit.id}(const char* name);`).join("\n")}
+OSWord Tm4ModuleExport(const char* name) {
+    OSWord result;
+${snapshot ? '    if (!strcmp(name, "__rm4_snapshot_types")) return (OSWord)Tm4ModuleSnapshotTypes;' : ""}
+${adapter ? `    result = ${adapter}(name); if (result) return result;` : ""}
+${units
+  .map(
+    (unit) => `    result = ${unit.id}(name);
+    if (result) return result;`,
+  )
+  .join("\n")}
     return 0;
 }
 `;

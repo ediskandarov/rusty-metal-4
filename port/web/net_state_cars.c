@@ -1,5 +1,6 @@
 #include "net_match.h"
 #include "net_state_fields.h"
+#include "port/web/module_import.h"
 #include "snapshot_types.h"
 #include "src/modules/car/private.h"
 #include "tm4/main/game.h"
@@ -131,7 +132,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(WebSnapshotCarAiStateId(car->ai_saved_state_callback));
     VALUE(car->ai_throttle_input);
     VALUE(car->ai_brake_input);
-    VALUE(car->ai.area ? car->ai.area - aiWorldInfo.areas + 1 : 0);
+    VALUE(car->ai.area ? car->ai.area - WEB_MODULE("car", aiWorldInfo).areas + 1 : 0);
     VALUE(
         car->ai.spatial_node && car->ai.area ? car->ai.spatial_node - car->ai.area->nodes + 1 : 0);
     u8 ai_bytes[2048];
@@ -144,7 +145,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
                 ? car->ai.nearby_records[i].next - car->ai.nearby_records + 1
                 : 0);
     controls(hash, &car->controls);
-    for (s32 i = 0; i < CarWeaponCount; ++i) {
+    for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         const CarWeaponInstance* weapon = &car->weapons[i];
         key(hash, weapon->descriptor->name);
         VALUE(weapon->amount);
@@ -167,7 +168,7 @@ static const Car* detonation_weapon_owner(const CarWeaponInstance* weapon, s32* 
         const Car* car = GameInfo.cars[car_index];
         if (!car || !car->weapons)
             continue;
-        for (s32 slot = 0; slot < CarWeaponCount; ++slot) {
+        for (s32 slot = 0; slot < WEB_MODULE("car", CarWeaponCount); ++slot) {
             if (&car->weapons[slot] == weapon) {
                 *index = slot;
                 return car;
@@ -201,7 +202,8 @@ const char* WebNetWriteCars(NetStateOutput* hash)
         for (u32 offset = 0; offset < length; ++offset)
             state_byte(hash, state[offset]);
     }
-    for (const CarDetonationNode* node = CarDetonationDevices; node; node = node->next) {
+    for (const CarDetonationNode* node = WEB_MODULE("car", CarDetonationDevices); node;
+         node = node->next) {
         s32 slot = -1;
         const Car* owner = detonation_weapon_owner(node->weapon, &slot);
         u32 device = handle(node->object);

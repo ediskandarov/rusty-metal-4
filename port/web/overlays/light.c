@@ -1,9 +1,10 @@
 #include "tm4/modules/light.h"
 #include "../overlays.h"
+#include "port/web/browser_report.h"
+#include "port/web/module_import.h"
 #include "tm4/main/registry.h"
 #include "tm4/modules/car.h"
 #include <STDARG.H>
-#include "port/web/browser_report.h"
 #include <string.h>
 
 extern u32 LightEmitterSizeof;
@@ -28,7 +29,7 @@ static void interact(void* car, void* light)
     u32 distances[3];
     for (s32 i = 0; i < 3; ++i)
         distances[i] = target->lights[i].distance_squared;
-    InteractCarWithLightEmitter(target, light);
+    WEB_MODULE("car", InteractCarWithLightEmitter)(target, light);
     for (s32 i = 0; i < 3; ++i)
         if (distances[i] != target->lights[i].distance_squared) {
             WEB_BROWSER_REPORT({ tm4Port.lightCarUpdates = (tm4Port.lightCarUpdates || 0) + 1; });

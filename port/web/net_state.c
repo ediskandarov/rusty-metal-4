@@ -4,6 +4,7 @@
 #include "net_state_fields.h"
 #include "participant.h"
 #include "port/web/match_mode.h"
+#include "port/web/module_import.h"
 #include "src/modules/car/private.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
@@ -136,12 +137,12 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
         VALUE(CollisionPolygonEnabled(polygon));
         VALUE(handle(polygon->owner));
     }
-    VALUE(CarPathSearchGeneration);
-    VALUE(CarRandomSearchGeneration[0]);
-    VALUE(CarHealthSearchGeneration);
-    VALUE(aiWorldInfo.resource.node_count);
-    for (u32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
-        const CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+    VALUE(WEB_MODULE("car", CarPathSearchGeneration));
+    VALUE(WEB_MODULE("car", CarRandomSearchGeneration)[0]);
+    VALUE(WEB_MODULE("car", CarHealthSearchGeneration));
+    VALUE(WEB_MODULE("car", aiWorldInfo).resource.node_count);
+    for (u32 i = 0; i < WEB_MODULE("car", aiWorldInfo).resource.node_count; ++i) {
+        const CarAiNavigationNode* node = &WEB_MODULE("car", aiWorldInfo).resource.nodes[i];
         VALUE(node->enabled);
         VALUE(node->cost);
         VALUE(node->search_generation);
@@ -151,9 +152,9 @@ static WebNetStateDigest capture(StateBytes* bytes, int inspect_payloads)
         VALUE(node->previous);
         VALUE(node->next);
     }
-    for (u32 i = 0; i < aiWorldInfo.resource.area_count; ++i)
-        for (u32 edge = 0; edge < aiWorldInfo.areas[i].edge_count; ++edge)
-            VALUE(aiWorldInfo.areas[i].edges[edge].enabled);
+    for (u32 i = 0; i < WEB_MODULE("car", aiWorldInfo).resource.area_count; ++i)
+        for (u32 edge = 0; edge < WEB_MODULE("car", aiWorldInfo).areas[i].edge_count; ++edge)
+            VALUE(WEB_MODULE("car", aiWorldInfo).areas[i].edges[edge].enabled);
     return result;
 }
 

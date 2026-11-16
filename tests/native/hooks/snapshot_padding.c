@@ -1,4 +1,5 @@
 #include "port/web/checkpoint_memory.h"
+#include "port/web/module_import.h"
 #include "src/main/object/private.h"
 #include "src/modules/car/private.h"
 #include "src/modules/levels/w_yard/private.h"
@@ -95,14 +96,14 @@ EMSCRIPTEN_KEEPALIVE unsigned WebTestCreateRarePaddingEffect(unsigned kind)
             = ObjectCreate("weaponBomb", OBJECT_DESTROY_WITH_OWNER, car, "remote", &car->position);
         break;
     case 1:
-        if (RayClassCount)
+        if (WEB_MODULE("ray", RayClassCount))
             effect = ObjectCreate("weaponRayBeam", OBJECT_DESTROY_WITH_OWNER, car, &car->transform,
-                RayClasses[0].name, 0, 1);
+                WEB_MODULE("ray", RayClasses)[0].name, 0, 1);
         break;
     case 2:
-        if (LightnClassCount)
+        if (WEB_MODULE("lightn", LightnClassCount))
             effect = ObjectCreate("weaponLightningEmitter", OBJECT_DESTROY_WITH_OWNER, car,
-                LightnClasses[0].name, &car->position);
+                WEB_MODULE("lightn", LightnClasses)[0].name, &car->position);
         break;
     case 3:
         effect = ObjectCreate("lightEmitter", OBJECT_DESTROY_WITH_OWNER, car,
@@ -110,7 +111,7 @@ EMSCRIPTEN_KEEPALIVE unsigned WebTestCreateRarePaddingEffect(unsigned kind)
             64, 2048, ONE, car->position.vx, car->position.vy, car->position.vz, 0, -ONE, 0);
         break;
     case 4:
-        effect = CarDisplayJumpConstructor(car);
+        effect = WEB_MODULE("car", CarDisplayJumpConstructor)(car);
         break;
     }
     WebCheckpointArenaSelect(0);

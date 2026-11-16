@@ -4,6 +4,7 @@
 #include "net_state.h"
 #include "participant.h"
 #include "port/web/match_mode.h"
+#include "port/web/module_import.h"
 #include "src/main/object/private.h"
 #include "src/modules/car/private.h"
 #include "tm4/main/game.h"
@@ -151,7 +152,7 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
         return 0;
 
     const u32 roots_length = sizeof(SimulationRoots) + count * sizeof(CellLinks)
-        + aiWorldInfo.resource.node_count * sizeof(NavigationSearch);
+        + WEB_MODULE("car", aiWorldInfo).resource.node_count * sizeof(NavigationSearch);
     const u32 arena_length = WebCheckpointArenaCapture(NULL, 0);
     const u32 snapshot_bytes = roots_length + arena_length;
     const u32 retained_bytes = retain_history
@@ -173,16 +174,16 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
         .directory = RegGetCurrentDirectoryPtr(),
         .active_cells = ObjectActiveInteractionCells,
         .squares = WorldSquares,
-        .detonation = CarDetonationDevices,
-        .ai = aiWorldInfo,
-        .health_pickup_count = CarHealthPickupCount,
+        .detonation = WEB_MODULE("car", CarDetonationDevices),
+        .ai = WEB_MODULE("car", aiWorldInfo),
+        .health_pickup_count = WEB_MODULE("car", CarHealthPickupCount),
         .frame = MainFrameCount,
         .serial = ObjectNextSerial,
         .random = randseed(),
         .effect_random = WebRenderEffectRandomState(),
-        .path_generation = CarPathSearchGeneration,
-        .random_generation = CarRandomSearchGeneration[0],
-        .health_generation = CarHealthSearchGeneration,
+        .path_generation = WEB_MODULE("car", CarPathSearchGeneration),
+        .random_generation = WEB_MODULE("car", CarRandomSearchGeneration)[0],
+        .health_generation = WEB_MODULE("car", CarHealthSearchGeneration),
         .square_count = count,
     };
     if (!WebCheckpointGteCapture(roots->gte, sizeof(roots->gte))) {
@@ -192,7 +193,8 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
     }
     WebParticipantCapture(&roots->participants);
     memcpy(roots->pads, PadJpad, sizeof(PadJpad));
-    memcpy(roots->health_pickups, CarHealthPickups, sizeof(CarHealthPickups));
+    memcpy(roots->health_pickups, WEB_MODULE("car", CarHealthPickups),
+        sizeof(WEB_MODULE("car", CarHealthPickups)));
     for (unsigned i = 0; i < OBJECT_LIST_COUNT; ++i)
         roots->lists[i] = ObjectLists[i].first;
     for (s32 i = 0; i < count; ++i) {
@@ -204,8 +206,8 @@ u32 WebCheckpointCapture(u32 tick, int retain_history)
         };
     }
     NavigationSearch* searches = (NavigationSearch*)&roots->cells[count];
-    for (u32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
-        const CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+    for (u32 i = 0; i < WEB_MODULE("car", aiWorldInfo).resource.node_count; ++i) {
+        const CarAiNavigationNode* node = &WEB_MODULE("car", aiWorldInfo).resource.nodes[i];
         searches[i] = (NavigationSearch) { node->cost, node->search_generation, node->path_depth,
             node->search_state, node->predecessor, node->previous, node->next };
     }
@@ -299,11 +301,11 @@ const char* WebCheckpointRestore(u32 tick)
     }
     ObjectActiveInteractionCells = roots->active_cells;
     ObjectNextSerial = roots->serial;
-    CarDetonationDevices = roots->detonation;
-    aiWorldInfo = roots->ai;
+    WEB_MODULE("car", CarDetonationDevices) = roots->detonation;
+    WEB_MODULE("car", aiWorldInfo) = roots->ai;
     const NavigationSearch* searches = (const NavigationSearch*)&roots->cells[roots->square_count];
-    for (u32 i = 0; i < aiWorldInfo.resource.node_count; ++i) {
-        CarAiNavigationNode* node = &aiWorldInfo.resource.nodes[i];
+    for (u32 i = 0; i < WEB_MODULE("car", aiWorldInfo).resource.node_count; ++i) {
+        CarAiNavigationNode* node = &WEB_MODULE("car", aiWorldInfo).resource.nodes[i];
         const NavigationSearch* search = &searches[i];
         node->cost = search->cost;
         node->search_generation = search->generation;
@@ -313,11 +315,12 @@ const char* WebCheckpointRestore(u32 tick)
         node->previous = search->previous;
         node->next = search->next;
     }
-    memcpy(CarHealthPickups, roots->health_pickups, sizeof(CarHealthPickups));
-    CarHealthPickupCount = roots->health_pickup_count;
-    CarPathSearchGeneration = roots->path_generation;
-    CarRandomSearchGeneration[0] = roots->random_generation;
-    CarHealthSearchGeneration = roots->health_generation;
+    memcpy(WEB_MODULE("car", CarHealthPickups), roots->health_pickups,
+        sizeof(WEB_MODULE("car", CarHealthPickups)));
+    WEB_MODULE("car", CarHealthPickupCount) = roots->health_pickup_count;
+    WEB_MODULE("car", CarPathSearchGeneration) = roots->path_generation;
+    WEB_MODULE("car", CarRandomSearchGeneration)[0] = roots->random_generation;
+    WEB_MODULE("car", CarHealthSearchGeneration) = roots->health_generation;
     MainFrameCount = roots->frame;
     WebCheckpointSetRandomState(roots->random, roots->effect_random);
     return NULL;

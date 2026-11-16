@@ -1,5 +1,6 @@
 #include "snapshot_types.h"
 #include "net_match.h"
+#include "overlays.h"
 
 #include "src/main/object/private.h"
 #include "src/modules/car/private.h"
@@ -12,8 +13,6 @@ const SnapshotType* WebSnapshotTypeByName(const char* name)
 {
     const SnapshotType* groups[] = {
         WebSnapshotSceneTypes,
-        WebSnapshotYardTypes,
-        WebSnapshotMovingWorldTypes,
         WebSnapshotEffectTypes,
         WebSnapshotProjectileTypes,
         WebSnapshotCarTypes,
@@ -23,7 +22,17 @@ const SnapshotType* WebSnapshotTypeByName(const char* name)
         for (const SnapshotType* type = groups[group]; type->name; ++type)
             if (!strcmp(type->name, name))
                 return type;
-    return NULL;
+    return WebNativeSnapshotType(name);
+}
+
+void WebSnapshotUnregisterTypes(const SnapshotType* types)
+{
+    if (!types)
+        return;
+    for (const SnapshotType* type = types; type->name; ++type)
+        for (u32 i = 0; i < ArrayCount(registered); ++i)
+            if (registered[i] == type)
+                registered[i] = NULL;
 }
 
 void WebSnapshotRegisterClass(s32 index, const char* name, size_t size)
@@ -73,8 +82,8 @@ void WebSnapshotEndDestruction(WebObjectDestruction* scope)
             WebSnapshotForgetWeakReferences(WebSnapshotObjectType(header), object, scope->object);
             if (!strcmp(header->name, "car")) {
                 Car* car = object;
-                WebSnapshotForgetWeakReferences(WebSnapshotCarCallbackType(car),
-                    car->callback_context, scope->object);
+                WebSnapshotForgetWeakReferences(
+                    WebSnapshotCarCallbackType(car), car->callback_context, scope->object);
             }
         }
     }

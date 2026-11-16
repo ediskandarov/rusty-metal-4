@@ -2,6 +2,10 @@
 #define TM4_WEB_OVERLAYS_H
 #include "tm4/main/os.h"
 void WebNativeModulesInitialize(void);
+void WebNativeModulesSweep(void);
+struct SnapshotType;
+const struct SnapshotType* WebNativeSnapshotType(const char* name);
+OSWord WebDynamicModuleExport(const char* image_name, const char* name);
 int WebNativeModuleLoaded(const char* image_name);
 OSWord WebNativeExport(const char* name);
 OSWord WebNativeModuleExport(const char* module, const char* name);
@@ -27,9 +31,9 @@ OSWord WebPirateExport(const char* name);
 OSWord WebAugerExport(const char* name);
 void WebInteractCarWithPowerup(void* car, void* powerup);
 OSWord WebYardExport(const char* name);
-#endif
-
 OSWord WebNeonExport(const char* name);
 
 OSWord WebCarnivalExport(const char* name);
 OSWord WebOilExport(const char* name);
+
+#endif

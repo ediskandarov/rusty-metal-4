@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 
 import { buildManifestSchema } from "@tm4/lightyear-client/schemas";
 
+import { playerBuildDigest } from "../../tools/build-identity.ts";
 import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer } from "../player/build.ts";
 
@@ -17,11 +18,7 @@ if (await Bun.file(join(runtime, "simulation-build.json")).exists()) {
   const manifest = buildManifestSchema.parse(
     await Bun.file(join(runtime, "simulation-build.json")).json(),
   );
-  const digest = new Bun.CryptoHasher("sha256")
-    .update(await Bun.file(join(runtime, "tm4_web.wasm")).arrayBuffer())
-    .update(await Bun.file(join(runtime, "network/tm4_network_bg.wasm")).arrayBuffer())
-    .update(manifest.authoritySha256)
-    .digest("hex");
+  const digest = await playerBuildDigest(runtime, manifest);
   if (digest !== manifest.sha256)
     throw new Error("Player runtime does not match its compatibility manifest");
   const player = join(site, "play");
@@ -34,6 +31,7 @@ if (await Bun.file(join(runtime, "simulation-build.json")).exists()) {
     "network/tm4_network_bg.wasm",
   ])
     await cp(join(runtime, name), join(player, name));
+  await cp(join(runtime, "modules"), join(player, "modules"), { recursive: true });
   await buildPlayer({ mode: "release", site: player });
 } else
   console.log(

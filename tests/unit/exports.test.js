@@ -78,10 +78,10 @@ test("shared definitions satisfy both images; empty units are omitted", () => {
   ]);
   manifest.units[0].modules = ["neon", "oil"];
   const registry = renderRegistry(manifest, validateExports(manifest, results));
-  expect(registry).toContain('!strcasecmp(module, "neon") || !strcasecmp(module, "oil")');
-  expect(registry).toContain(
-    'WebNativeModuleLoaded("neon.sym") || WebNativeModuleLoaded("oil.sym")',
-  );
+  expect(registry).toContain('if (!strcasecmp(module, "neon"))');
+  expect(registry).toContain('WebDynamicModuleExport("neon.sym", name)');
+  expect(registry).toContain('WebDynamicModuleExport("oil.sym", name)');
+  expect(registry).not.toContain("Unit0");
   expect(registry).not.toContain("Unit1");
 });
 

@@ -7,7 +7,16 @@ set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${TM4_ROOT}/tools/prepare/game.js" ${TM4_GAME_PATCHES})
 execute_process(COMMAND "${BUN_EXECUTABLE}" "${TM4_ROOT}/tools/prepare/game.js"
     --output "${TM4_GAME_ROOT}" COMMAND_ERROR_IS_FATAL ANY)
-add_subdirectory("${TM4_ROOT}/external/psyz/psyz" psyz EXCLUDE_FROM_ALL)
+set(TM4_PSYZ_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/psyz-project")
+set(TM4_PSYZ_RUNTIME "${TM4_PSYZ_PROJECT}/src")
+file(GLOB TM4_PSYZ_PATCHES CONFIGURE_DEPENDS "${TM4_ROOT}/port/psyz/patches/*.patch")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${TM4_ROOT}/tools/prepare/psyz.js" "${TM4_ROOT}/tools/prepare/psyz-project.js"
+    "${TM4_ROOT}/port/psyz/headless-cmake.patch" ${TM4_PSYZ_PATCHES})
+execute_process(COMMAND "${BUN_EXECUTABLE}" "${TM4_ROOT}/tools/prepare/psyz-project.js"
+    --output "${TM4_PSYZ_PROJECT}" COMMAND_ERROR_IS_FATAL ANY)
+set(PSYZ_HEADLESS ${TM4_STANDALONE} CACHE BOOL "Headless PsyZ" FORCE)
+add_subdirectory("${TM4_PSYZ_PROJECT}" psyz EXCLUDE_FROM_ALL)
 
 function(tm4_web_configure_target target)
     psyz_web_configure_target(${target} ${ARGN})
@@ -78,19 +87,13 @@ set(TM4_GAME_INCLUDE_DIRECTORIES
     "${TM4_ROOT}/platform/web"
     "${TM4_ROOT}/platform/psyz")
 target_include_directories(tm4_core PUBLIC ${TM4_GAME_INCLUDE_DIRECTORIES})
-# Keep the pinned dependency untouched; local backend fixes are reviewable patches.
-set(TM4_PSYZ_RUNTIME "${CMAKE_CURRENT_BINARY_DIR}/psyz-runtime")
-file(GLOB TM4_PSYZ_PATCHES CONFIGURE_DEPENDS "${TM4_ROOT}/port/psyz/patches/*.patch")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${TM4_ROOT}/tools/prepare/psyz.js" ${TM4_PSYZ_PATCHES})
-execute_process(COMMAND "${BUN_EXECUTABLE}" "${TM4_ROOT}/tools/prepare/psyz.js"
-    --source "${TM4_ROOT}/external/psyz/psyz/src" --output "${TM4_PSYZ_RUNTIME}"
-    COMMAND_ERROR_IS_FATAL ANY)
 get_target_property(TM4_PSYZ_SOURCES psyz SOURCES)
 list(REMOVE_ITEM TM4_PSYZ_SOURCES src/platform/sdl3_gl.c src/psyz/libgpu.c src/psyz/libapi.c src/psyz/libgte.c)
 set_property(TARGET psyz PROPERTY SOURCES "${TM4_PSYZ_SOURCES}")
-target_sources(psyz PRIVATE "${TM4_PSYZ_RUNTIME}/platform/sdl3_gl.c"
-    "${TM4_PSYZ_RUNTIME}/psyz/libgpu.c"
+if(NOT TM4_STANDALONE)
+    target_sources(psyz PRIVATE "${TM4_PSYZ_RUNTIME}/platform/sdl3_gl.c")
+endif()
+target_sources(psyz PRIVATE "${TM4_PSYZ_RUNTIME}/psyz/libgpu.c"
     "${TM4_PSYZ_RUNTIME}/psyz/libapi.c" "${TM4_PSYZ_RUNTIME}/psyz/libgte.c")
 target_include_directories(psyz PRIVATE "${TM4_ROOT}/port/psyz")
 set(TM4_SDK_ALIASES "${CMAKE_CURRENT_BINARY_DIR}/sdk-includes")
@@ -209,8 +212,6 @@ add_executable(tm4_web
     "${TM4_WEB}/snapshot_session.c"
     "${TM4_WEB}/snapshot_effects.c"
     "${TM4_WEB}/snapshot_scene.c"
-    "${TM4_WEB}/snapshot_yard.c"
-    "${TM4_WEB}/snapshot_moving_world.c"
     "${TM4_WEB}/snapshot_pathing.c"
     "${TM4_WEB}/snapshot_world.c"
     "${TM4_WEB}/snapshot_projectile.c"

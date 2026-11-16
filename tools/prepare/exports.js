@@ -1,4 +1,4 @@
-import { utimes } from "node:fs/promises";
+import { mkdir, rm, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -7,7 +7,7 @@ import { $ } from "bun";
 import { runCli, UsageError } from "../cli.js";
 import { json, root, write } from "../common.js";
 import { findDefinitions, planExports, selectExports, validateExports } from "../exports/model.js";
-import { renderAccessor, renderRegistry } from "../exports/templates.js";
+import { renderAccessor, renderModule, renderRegistry } from "../exports/templates.js";
 
 async function writeJSON(path, value) {
   await write(path, JSON.stringify(value, null, 2) + "\n");
@@ -25,11 +25,33 @@ async function plan({ gameRoot, sourcesFile, output }) {
   const contracts = await json(join(root, "config/exports.json"));
   const manifest = planExports(gameRoot, sources, modules, contracts);
   const rules = manifest.units.map(
-    (unit) => `tm4_export_source(${JSON.stringify(unit.source)} "${unit.id}")`,
+    (unit) =>
+      `tm4_export_source(${JSON.stringify(unit.source)} "${unit.id}" "${unit.modules.join(";")}")`,
   );
 
   await writeJSON(join(output, "manifest.json"), manifest);
-  await write(join(output, "sources.cmake"), rules.join("\n") + "\n");
+  const moduleDirectory = join(output, "../site/modules");
+  const expected = new Set(
+    Object.keys(manifest.modules).map((module) =>
+      manifest.modules[module].image_name.replace(/\.sym$/, ".wasm"),
+    ),
+  );
+  await mkdir(moduleDirectory, { recursive: true });
+  for await (const name of new Bun.Glob("*.wasm").scan({
+    cwd: moduleDirectory,
+    throwErrorOnBrokenSymlink: true,
+  }))
+    if (!expected.has(name)) await rm(join(moduleDirectory, name));
+  const dynamic = Object.keys(manifest.modules).map(
+    (module) => `tm4_dynamic_module("${module}" "${manifest.modules[module].image_name}")`,
+  );
+  await write(join(output, "sources.cmake"), rules.join("\n") + "\n" + dynamic.join("\n") + "\n");
+  await write(
+    join(output, "modules.inc"),
+    Object.keys(manifest.modules)
+      .map((module) => `{ "${manifest.modules[module].image_name}" },`)
+      .join("\n") + "\n",
+  );
 }
 
 async function generate({ manifestFile, unitId, output, compiler }) {
@@ -39,7 +61,7 @@ async function generate({ manifestFile, unitId, output, compiler }) {
   if (!compiler.length) throw new Error("Supply the compiler command after --");
 
   const astText =
-    await $`${compiler} -fsyntax-only -Xclang -ast-dump=json -MMD -MF ${output + ".d"} -MT ${output} ${unit.source} 2> ${Bun.stderr}`
+    await $`${compiler} -c -fsyntax-only -Xclang -ast-dump=json -MMD -MF ${output + ".d"} -MT ${output} ${unit.source} 2> ${Bun.stderr}`
       .cwd(root)
       .text();
   const definitions = findDefinitions(JSON.parse(astText));
@@ -66,6 +88,12 @@ async function check({ manifestFile, stamp }) {
   );
   const result = validateExports(manifest, new Map(entries));
   await write(join(directory, "registry.c"), renderRegistry(manifest, result));
+  for (const module of Object.keys(manifest.modules)) {
+    await write(
+      join(directory, module.replaceAll("/", "_") + ".c"),
+      renderModule(manifest, module, result),
+    );
+  }
   await write(stamp, "All required overlay exports have native definitions.\n");
   console.log(`Checked native exports for ${Object.keys(manifest.modules).length} modules`);
 }

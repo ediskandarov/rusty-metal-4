@@ -1,0 +1,120 @@
+--- a/src/modules/weap/bomb.c
++++ b/src/modules/weap/bomb.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4/gpu.h"
+@@ -185,7 +186,7 @@
+         && WeapBombType->ignite_terrain
+         && WorldTrackData[WeapWorldHit.surface.fields.material].flammable) {
+         CopyVectorToShortVectorRoundedQ12(&WeapHitPosition, &WeapWorldHit.position);
+-        WebIgniteTerrain(
++        WEB_MODULE("interact", WebIgniteTerrain)(
+             WeapWorldHit.polygon, &WeapHitPosition, WebParticipantObjectIdentity(bomb));
+     }
+     if (WeapBombType->explosion && strlen(WeapBombType->explosion) > 0)
+--- a/src/modules/weap/effects.c
++++ b/src/modules/weap/effects.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
+@@ -93,7 +94,7 @@
+             if (projectile->type->freeze)
+                 WeapImports.car_freeze_car(projectile->bullet.hit_object);
+             if (projectile->type->fire)
+-                WebCarIgniteFromParticipant(
++                WEB_MODULE("interact", WebCarIgniteFromParticipant)(
+                     projectile->bullet.hit_object, NULL, WebParticipantObjectIdentity(projectile));
+             header = ObjectGetHeader(projectile->bullet.hit_object);
+             {
+@@ -130,7 +131,7 @@
+         }
+     } else if (projectile->bullet.motion.fields.world_impact && projectile->type->fire) {
+         if (WorldTrackData[projectile->bullet.collision.surface.fields.material].flammable) {
+-            WebIgniteTerrain(projectile->bullet.collision.polygon,
++            WEB_MODULE("interact", WebIgniteTerrain)(projectile->bullet.collision.polygon,
+                 &projectile->bullet.current_world, WebParticipantObjectIdentity(projectile));
+         } else {
+             SVECTOR rotation;
+--- a/src/modules/car/audio.c
++++ b/src/modules/car/audio.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ #include "tm4/fixed.h"
+ #include "tm4/modules/car.h"
+ #include "tm4/modules/sound.h"
+@@ -8,6 +9,6 @@
+         s32 pitch = car->force_sum * 2;
+         if (pitch > ONE)
+             pitch = ONE;
+-        SoundEmitterSetPitchScale(car->engine_sound, pitch);
++        WEB_MODULE("sound", SoundEmitterSetPitchScale)(car->engine_sound, pitch);
+     }
+ }
+--- a/src/modules/ray/collision.c
++++ b/src/modules/ray/collision.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4_scalar.h"
+@@ -25,7 +26,7 @@
+     const Tm4ShortVectorXYZ* car_position = &ObjectGetHeader(car)->position;
+     SetShortVectorXYZ(position_pointer, car_position->vx, car_position->vy, car_position->vz);
+     Import_SpawnExplosion(position_pointer, TextSmoke, 0, 0, &velocity, -2);
+-    WebCarIgniteFromParticipant(car, NULL, WebParticipantObjectIdentity(beam));
++    WEB_MODULE("interact", WebCarIgniteFromParticipant)(car, NULL, WebParticipantObjectIdentity(beam));
+     parent = ObjectGetHeader(beam)->owner;
+     if (parent && !strcmp(ObjectGetHeader(parent)->name, TextCar))
+         Import_CarApplyParticipantDamage(car, parent, WebParticipantObjectIdentity(beam),
+--- a/src/modules/ray/ray.c
++++ b/src/modules/ray/ray.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
+@@ -199,7 +200,7 @@
+                 SVECTOR terrain_contact;
+                 SVECTOR* position_pointer = &terrain_contact;
+                 CopyVectorToShortVectorRoundedQ12(position_pointer, &hit.position);
+-                WebIgniteTerrain(hit.polygon, position_pointer, WebParticipantObjectIdentity(beam));
++                WEB_MODULE("interact", WebIgniteTerrain)(hit.polygon, position_pointer, WebParticipantObjectIdentity(beam));
+             }
+         }
+     } else if (nearest && !beam->type->penetrate)
+--- a/src/modules/power/power.c
++++ b/src/modules/power/power.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
+@@ -22,7 +23,7 @@
+     color.b = 135;
+     object = ObjectCreate(PowerAfcClassName, 0, &position, &color, 192, 256, 0);
+     if (object)
+-        ObjectCreate(PowerTimerClassName, 0, 12, ObjectDestroy, 1, object);
++        ObjectCreate(PowerTimerClassName, 0, 12, WEB_MODULE("main", ObjectDestroy), 1, object);
+ }
+ 
+ void PowerupProcess(PowerupState* power)
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4_scalar.h"
+@@ -395,7 +396,7 @@
+                 LIGHT_EMITTER_INTENSITY | LIGHT_EMITTER_POSITION, 255, 255, 255, 0, ONE,
+                 temp.firing.position.vx, temp.firing.position.vy, temp.firing.position.vz);
+             if (light)
+-                ObjectCreate("timer", 0, 1, ObjectDestroy, 1, light);
++                ObjectCreate("timer", 0, 1, WEB_MODULE("main", ObjectDestroy), 1, light);
+             if (car->control_kind == CAR_CONTROL_PLAYER)
+                 GamePadVibrateS(car->controller_index, "machineGun");
+             if (++car->muzzle_index >= car->muzzle_count)

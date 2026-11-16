@@ -1,11 +1,14 @@
-#include "snapshot_types.h"
+#include "port/web/snapshot_types.h"
 
 #include "src/modules/levels/w_yard/private.h"
 
-static const SnapshotCustomClass crane_control_class = {
-    .destructor = (Tm4ObjectCallback)CraneControlDestructor,
-    .interact = (Tm4ObjectInteractionCallback)InteractCraneControlWithOtherObject,
-};
+static SnapshotCustomClass crane_control_class(void)
+{
+    return (SnapshotCustomClass) {
+        .destructor = (Tm4ObjectCallback)CraneControlDestructor,
+        .interact = (Tm4ObjectInteractionCallback)InteractCraneControlWithOtherObject,
+    };
+}
 
 static const SnapshotField crane_fields[] = {
     SNAP_POD(Crane, transform.m),
@@ -43,10 +46,10 @@ static const SnapshotField death_point_fields[] = {
     { 0 },
 };
 
-const SnapshotType WebSnapshotYardTypes[] = {
+const SnapshotType Tm4ModuleSnapshotTypes[] = {
     /* The original tournament destroys the crane and its control before spawning the boss. */
     { "crane", sizeof(Crane), crane_fields, .needs_template = 1, .baseline_removable = 1 },
-    { "craneControl", sizeof(CraneControl), crane_control_fields, .custom = &crane_control_class,
+    { "craneControl", sizeof(CraneControl), crane_control_fields, .custom = crane_control_class,
         .baseline_removable = 1 },
     { "deathPoint", sizeof(DeathPoint), death_point_fields },
     { 0 },

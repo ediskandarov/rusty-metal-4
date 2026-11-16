@@ -1,5 +1,6 @@
 #include "port/web/checkpoint.h"
 #include "port/web/checkpoint_memory.h"
+#include "port/web/module_import.h"
 #include "port/web/net_match.h"
 #include "port/web/net_state.h"
 #include "port/web/snapshot_session.h"
@@ -18,10 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-EMSCRIPTEN_KEEPALIVE int WebTestOffsetReplayHeap(void)
-{
-    return MemAlloc(384) != NULL;
-}
+EMSCRIPTEN_KEEPALIVE int WebTestOffsetReplayHeap(void) { return MemAlloc(384) != NULL; }
 
 EMSCRIPTEN_KEEPALIVE uintptr_t WebTestReplayCarAddress(void)
 {
@@ -72,10 +70,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestPerturbNetworkCar(s32 slot)
     return 1;
 }
 
-static s32 test_unknown_car_process(Car* car, void* context)
-{
-    return 1;
-}
+static s32 test_unknown_car_process(Car* car, void* context) { return 1; }
 
 EMSCRIPTEN_KEEPALIVE int WebTestUnsupportedCarCallback(void)
 {
@@ -94,7 +89,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestDetonationCheckpointIdentity(void)
     if (!first || !second)
         return 0;
 
-    for (s32 i = 0; i < CarWeaponCount; ++i) {
+    for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         CarWeaponInstance* weapon = &first->weapons[i];
         CarWeaponInstance* alternate = &second->weapons[i];
         if (!weapon->descriptor->detonate || !weapon->descriptor->name
@@ -106,8 +101,8 @@ EMSCRIPTEN_KEEPALIVE int WebTestDetonationCheckpointIdentity(void)
             "weaponBomb", OBJECT_DESTROY_WITH_OWNER, first, "remote", &first->position);
         if (!device)
             return 0;
-        CarTrackDetonationDevice(weapon, first, device);
-        CarDetonationNode* node = CarDetonationDevices;
+        WEB_MODULE("car", CarTrackDetonationDevice)(weapon, first, device);
+        CarDetonationNode* node = WEB_MODULE("car", CarDetonationDevices);
         if (!node || node->object != device) {
             ObjectDestroy(device);
             return 0;
@@ -127,10 +122,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestDetonationCheckpointIdentity(void)
     return 0;
 }
 
-static void test_projectile_destructor(WeaponProjectile* projectile)
-{
-    (void)projectile;
-}
+static void test_projectile_destructor(WeaponProjectile* projectile) { (void)projectile; }
 
 EMSCRIPTEN_KEEPALIVE int WebTestProjectileCheckpointCallbacks(void)
 {

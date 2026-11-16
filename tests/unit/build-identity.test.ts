@@ -3,6 +3,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { buildManifestSchema } from "@tm4/lightyear-client/schemas";
+
 import { buildIdentity, playerBuildDigest } from "../../tools/build-identity.ts";
 
 test("module bytes on either platform change compatibility and mixed browser files are rejected", async () => {
@@ -17,7 +19,7 @@ test("module bytes on either platform change compatibility and mixed browser fil
       "authority/site/modules/c_toy.wasm": "authority-toy",
     }))
       await Bun.write(join(root, path), data);
-    const first = await buildIdentity(root);
+    const first = buildManifestSchema.parse(await buildIdentity(root));
     expect(await playerBuildDigest(site, first)).toBe(first.sha256);
     await Bun.write(join(root, "authority/site/modules/c_toy.wasm"), "changed authority toy");
     const next = await buildIdentity(root);

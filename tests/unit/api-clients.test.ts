@@ -296,7 +296,11 @@ test("snapshot header limits are enforced at the Lightyear boundary", () => {
 });
 
 test("build manifest retains the authority digest used by build compatibility", () => {
-  const manifest = { sha256: "a".repeat(64), authoritySha256: "b".repeat(64) };
+  const manifest = {
+    sha256: "a".repeat(64),
+    authoritySha256: "b".repeat(64),
+    modules: [{ name: "o_car.wasm", sha256: "c".repeat(64), authoritySha256: "d".repeat(64) }],
+  };
   expect(buildManifestSchema.parse(manifest)).toEqual(manifest);
   for (const authoritySha256 of [undefined, "", "bad-hash"])
     expect(buildManifestSchema.safeParse({ ...manifest, authoritySha256 }).success).toBe(false);

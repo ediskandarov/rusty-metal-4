@@ -25,7 +25,19 @@ try {
   for (const context of contexts) {
     context.on("page", (page) => page.on("pageerror", (error) => errors.push(error.message)));
     await context.route("**/play/simulation-build.json", (route) =>
-      route.fulfill({ json: { sha256: "a".repeat(64), authoritySha256: "c".repeat(64) } }),
+      route.fulfill({
+        json: {
+          sha256: compatibility.build,
+          authoritySha256: "c".repeat(64),
+          modules: [
+            {
+              name: "o_car.wasm",
+              sha256: "d".repeat(64),
+              authoritySha256: "e".repeat(64),
+            },
+          ],
+        },
+      }),
     );
     await context.route("**/play/?room=*", (route) =>
       route.fulfill({

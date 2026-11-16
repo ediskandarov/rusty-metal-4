@@ -1,6 +1,7 @@
 #include "pending.h"
 #include "port/web/carpart.h"
 #include "port/web/checkpoint_memory.h"
+#include "port/web/module_import.h"
 #include "port/web/net_match.h"
 #include "port/web/snapshot_types.h"
 #include "src/main/object/private.h"
@@ -47,8 +48,9 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestCreateParticipantProjectile(s32 slot)
     launch.t[1] -= 512;
     SVECTOR velocity = { 0 };
     WebCheckpointArenaSelect(1);
-    WeaponProjectile* projectile = ObjectCreate(CarTextWeaponProjectile,
-        OBJECT_HAS_OWNER | OBJECT_SURVIVE_OWNER, car, CarTextPower, NULL, &launch, &velocity);
+    WeaponProjectile* projectile = ObjectCreate(WEB_MODULE("car", CarTextWeaponProjectile),
+        OBJECT_HAS_OWNER | OBJECT_SURVIVE_OWNER, car, WEB_MODULE("car", CarTextPower), NULL,
+        &launch, &velocity);
     if (projectile) {
         setVector(&projectile->bullet.motion.fields.world_velocity, 0, 0, 0);
         projectile->damage = 0xffff;
@@ -152,9 +154,9 @@ EMSCRIPTEN_KEEPALIVE int WebTestParticipantDamageContract(s32 slot)
         return -4;
     const s32 first_serial = ObjectNextSerial;
     WebCheckpointArenaSelect(1);
-    LightningEmitter* created = LightnClassCount > 0
+    LightningEmitter* created = WEB_MODULE("lightn", LightnClassCount) > 0
         ? ObjectCreateWithParticipant("weaponLightningEmitter", 0, WebParticipantIdentity(slot),
-              LightnClasses[0].name, &car->position)
+              WEB_MODULE("lightn", LightnClasses)[0].name, &car->position)
         : NULL;
     s32 result = created != NULL;
     WebCheckpointArenaSelect(0);
@@ -189,10 +191,11 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestCreateParticipantWaveTimer(s32 slot)
         return 0;
     WebParticipantId source = WebParticipantIdentity(slot);
     WebCheckpointArenaSelect(1);
-    void* timer = ObjectCreateWithParticipant("timer", 0, source, 1, WeaponSpawnImpactObject, 5,
-        -16000, -10000, -16000, source.low, source.high);
-    void* cosmetic = ObjectCreateWithParticipant(
-        "timer", 0, source, 1, WeaponSpawnMovingExplosion, 5, -16000, -10000, -16000, 2048, 0);
+    void* timer = ObjectCreateWithParticipant("timer", 0, source, 1,
+        WEB_MODULE("weap", WeaponSpawnImpactObject), 5, -16000, -10000, -16000, source.low,
+        source.high);
+    void* cosmetic = ObjectCreateWithParticipant("timer", 0, source, 1,
+        WEB_MODULE("weap", WeaponSpawnMovingExplosion), 5, -16000, -10000, -16000, 2048, 0);
     if (!cosmetic && timer) {
         ObjectDestroy(timer);
         timer = NULL;
@@ -242,14 +245,15 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestSetDebrisMatrixPadding(u8 value)
 EMSCRIPTEN_KEEPALIVE int WebTestCreatePaddingEffects(void)
 {
     Car* car = GameInfo.players[0].car;
-    if (!car || !FlameClassCount)
+    if (!car || !WEB_MODULE("fire", FlameClassCount))
         return 0;
     FlamePlacement placement
         = { .world_position = car->position, .world_direction = { 0, -ONE, 0, 0 } };
     SVECTOR axis = { 0, ONE, 0, 0 };
     WebCheckpointArenaSelect(1);
     void* ring = ObjectCreate("fireRing", 0, "fire", &car->position, 1536, 192, NULL, &axis, 4096);
-    void* flame = ObjectCreate("flameEmitter", 0, FlameClasses[0].name, NULL, &placement);
+    void* flame = ObjectCreate(
+        "flameEmitter", 0, WEB_MODULE("fire", FlameClasses)[0].name, NULL, &placement);
     WebCheckpointArenaSelect(0);
     return ring && flame;
 }
@@ -362,7 +366,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestCrusherRespawnAllocationBytes(s32 index)
     case 1:
         return strlen(car->filename) + 1;
     case 2:
-        return ArrayCount(CarWeaponDescriptors) * sizeof(CarWeaponInstance);
+        return ArrayCount(WEB_MODULE("car", CarWeaponDescriptors)) * sizeof(CarWeaponInstance);
     case 3:
         return sizeof(*car->weapons[0].descriptor);
     case 4:
@@ -481,8 +485,8 @@ void WebTestApplyParticipantActions(void)
             continue;
         Car* car = GameInfo.players[slot].car;
         if (car)
-            CarApplyParticipantDamage(car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff,
-                NULL, "PARTICIPANT TEST");
+            WEB_MODULE("car", CarApplyParticipantDamage)
+            (car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff, NULL, "PARTICIPANT TEST");
     }
     for (s32 hit = 0; hit < 8; ++hit) {
         WeaponProjectile* projectile = hits[hit] ? WebSnapshotFindLiveObject(hits[hit]) : NULL;
@@ -522,7 +526,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiState(s32 slot, s32 field)
     case 8:
         return car->health;
     case 9:
-        return aiWorldInfo.enabled && car->ai_config.enabled;
+        return WEB_MODULE("car", aiWorldInfo).enabled && car->ai_config.enabled;
     case 10:
         return car->ai.update_slot;
     case 11:
@@ -532,11 +536,11 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiState(s32 slot, s32 field)
     case 13:
         return car->ai.target_entry != NULL;
     case 14:
-        return CarPathSearchGeneration;
+        return WEB_MODULE("car", CarPathSearchGeneration);
     case 15:
-        return CarRandomSearchGeneration[0];
+        return WEB_MODULE("car", CarRandomSearchGeneration)[0];
     case 16:
-        return CarHealthSearchGeneration;
+        return WEB_MODULE("car", CarHealthSearchGeneration);
     case 18:
         return car->ai.fire_ticks;
     case 19:
@@ -562,7 +566,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiState(s32 slot, s32 field)
     }
     case 17: {
         s32 latest = 0;
-        for (s32 weapon = 0; weapon < CarWeaponCount; ++weapon)
+        for (s32 weapon = 0; weapon < WEB_MODULE("car", CarWeaponCount); ++weapon)
             if (car->weapons[weapon].next_time > latest)
                 latest = car->weapons[weapon].next_time;
         return latest;
@@ -575,15 +579,16 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiState(s32 slot, s32 field)
 EMSCRIPTEN_KEEPALIVE s32 WebTestAiSearch(s32 kind, s16 start, s16 end)
 {
     s16 path[CAR_AI_PATH_CAPACITY], selected;
-    if (!aiWorldInfo.enabled || start < 0 || start >= aiWorldInfo.resource.node_count || end < 0
-        || end >= aiWorldInfo.resource.node_count)
+    if (!WEB_MODULE("car", aiWorldInfo).enabled || start < 0
+        || start >= WEB_MODULE("car", aiWorldInfo).resource.node_count || end < 0
+        || end >= WEB_MODULE("car", aiWorldInfo).resource.node_count)
         return -1;
     if (kind == 0)
-        return CarAiFindShortestPath(path, start, end);
+        return WEB_MODULE("car", CarAiFindShortestPath)(path, start, end);
     if (kind == 1)
-        return CarAiFindRandomPath(path, start, 15);
-    if (kind == 2 && CarHealthPickupCount)
-        return CarAiFindHealthPickup(path, &selected, start);
+        return WEB_MODULE("car", CarAiFindRandomPath)(path, start, 15);
+    if (kind == 2 && WEB_MODULE("car", CarHealthPickupCount))
+        return WEB_MODULE("car", CarAiFindHealthPickup)(path, &selected, start);
     return -1;
 }
 
@@ -598,9 +603,9 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiRecovery(s32 slot)
     car->freeze_ticks = 0;
     car->ai.probe_length = 0;
     car->ai.recovery_delay = 0;
-    if (!CarAiCheckRecovery(car))
+    if (!WEB_MODULE("car", CarAiCheckRecovery)(car))
         return 0;
-    car->ai_state_callback = CarAiRecoverFromObstacle;
+    car->ai_state_callback = WEB_MODULE("car", CarAiRecoverFromObstacle);
     return car->ai_saved_state_callback != NULL;
 }
 
@@ -611,12 +616,12 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiAccumulateDamage(s32 victim_slot, s32 attacker
     Car* attacker = WebNetSlotOccupied(attacker_slot) ? GameInfo.players[attacker_slot].car : NULL;
     if (!victim || !attacker || victim == attacker || victim->control_kind != CAR_CONTROL_ENEMY)
         return 0;
-    CarAiSetTarget(victim, NULL, NULL);
+    WEB_MODULE("car", CarAiSetTarget)(victim, NULL, NULL);
     const CarAiStateCallback state = victim->ai_state_callback;
     const u8 targeting = attacker->ai.targeting_count;
-    victim->ai_state_callback = CarAiPatrol;
+    victim->ai_state_callback = WEB_MODULE("car", CarAiPatrol);
     attacker->ai.targeting_count = attacker->ai.targeting_limit;
-    CarAiReactToDamage(victim, attacker, damage);
+    WEB_MODULE("car", CarAiReactToDamage)(victim, attacker, damage);
     victim->ai_state_callback = state;
     attacker->ai.targeting_count = targeting;
     return 1;
@@ -644,14 +649,14 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAiApplyRetaliationDamage(
         damage = victim->ai_config.retaliation_damage_threshold + 1;
     if (damage <= 0 || damage >= victim->maximum_health)
         return 0;
-    CarAiSetTarget(victim, NULL, NULL);
-    victim->ai_state_callback = CarAiPatrol;
+    WEB_MODULE("car", CarAiSetTarget)(victim, NULL, NULL);
+    victim->ai_state_callback = WEB_MODULE("car", CarAiPatrol);
     /* A shared valid node keeps route availability from masking retaliation. */
     victim->ai.selected_node = attacker->ai.selected_node;
     victim->shield_ticks = 0;
     victim->health = victim->maximum_health;
     const s32 before = victim->health;
-    return CarApplyParticipantDamage(
+    return WEB_MODULE("car", CarApplyParticipantDamage)(
                victim, attacker, WebParticipantObjectIdentity(attacker), damage, NULL, NULL)
                 == 1
             && victim->health == before - damage

@@ -1,3 +1,5 @@
+#include "overlays.h"
+#include "port/web/module_import.h"
 #include "snapshot_types.h"
 
 #include "net_match.h"
@@ -12,25 +14,6 @@
 
 #include <stdint.h>
 #include <string.h>
-
-s32 CarToyProcess(Car* car, void* state);
-s32 CarPirateProcess(Car* car, void* state);
-s32 CarTankProcess(Car* car, void* state);
-void CarTankDestructor(Car* car, void* state);
-s32 CarMinionProcess(Car* car, void* state);
-void CarMinionDestructor(Car* car, void* state);
-s32 CarTrashProcess(Car* car, void* state);
-u32 InteractCarTrashWithCar(Car* car, void* state, Car* other);
-s32 CarSlamProcess(Car* car, void* state);
-u32 InteractCarSlamWithCar(Car* car, void* state, Car* other);
-s32 CarCrusherProcess(Car* car, void* state);
-void CarCrusherDestructor(Car* car, void* state);
-u32 InteractCarCrusherWithCar(Car* car, void* state, Car* other);
-void Web_cars_c_crush_TreadPolysProcess(Car* car);
-s32 CarTankConstructor(Car*, void*);
-s32 CarMinionConstructor(Car*, void*);
-s32 CarCrusherConstructor(Car*, void*);
-s32 WebAugerProcess(Car* car, void* state);
 
 static const SnapshotField windup_fields[] = {
     SNAP_POD(ToyWindup, angle),
@@ -81,7 +64,10 @@ static const SnapshotType no_callbacks = { "none" };
 
 static s32 refresh_crusher_treads(Car* car, void* state)
 {
-    Web_cars_c_crush_TreadPolysProcess(car);
+    void (*process)(Car*) = (void*)WebNativeModuleExport("cars/c_crush", "TreadPolysProcess");
+    if (!process)
+        return 0;
+    process(car);
     return 1;
 }
 
@@ -94,38 +80,66 @@ typedef struct {
     s32 (*resources)(Car*, void*);
 } CarCallbackBinding;
 
-static const CarCallbackBinding callback_types[] = {
+typedef struct {
+    const SnapshotType* type;
+    const char* module;
+    const char* process;
+    const char* collision;
+    const char* destroy;
+    const char* resources;
+    int refresh;
+} CarCallbackSpec;
+
+static const CarCallbackSpec callback_types[] = {
     { &no_callbacks },
-    { &windup, CarToyProcess },
-    { &pirate, CarPirateProcess },
-    { &treads, CarTankProcess, .destroy = CarTankDestructor, .refresh = CarTankProcess,
-        .resources = CarTankConstructor },
-    { &treads, CarMinionProcess, .destroy = CarMinionDestructor, .refresh = CarMinionProcess,
-        .resources = CarMinionConstructor },
-    { &shovel, CarTrashProcess, InteractCarTrashWithCar },
-    { &shovel, CarSlamProcess, InteractCarSlamWithCar },
-    { &pinchers, CarCrusherProcess, InteractCarCrusherWithCar, CarCrusherDestructor,
-        refresh_crusher_treads, CarCrusherConstructor },
-    { &drill, WebAugerProcess, InteractCarAugerWithCar },
+    { &windup, "cars/c_toy", "CarToyProcess" },
+    { &pirate, "cars/c_pirate", "CarPirateProcess" },
+    { &treads, "cars/c_tank", "CarTankProcess", .destroy = "CarTankDestructor",
+        .resources = "CarTankConstructor", .refresh = 1 },
+    { &treads, "cars/c_minion", "CarMinionProcess", .destroy = "CarMinionDestructor",
+        .resources = "CarMinionConstructor", .refresh = 1 },
+    { &shovel, "cars/c_trash", "CarTrashProcess", "InteractCarTrashWithCar" },
+    { &shovel, "cars/c_slam", "CarSlamProcess", "InteractCarSlamWithCar" },
+    { &pinchers, "cars/c_crush", "CarCrusherProcess", "InteractCarCrusherWithCar",
+        "CarCrusherDestructor", "CarCrusherConstructor", 2 },
+    { &drill, "cars/auger", "CarAugerProcess", "InteractCarAugerWithCar" },
 };
 
-static const CarCallbackBinding* find_callbacks(const Car* car)
+static OSWord callback_address(const CarCallbackSpec* spec, const char* name)
+{
+    return name ? WebNativeModuleExport(spec->module, name) : 0;
+}
+
+static int find_callbacks(const Car* car, CarCallbackBinding* output)
 {
     for (u32 i = 0; i < ArrayCount(callback_types); ++i) {
-        const CarCallbackBinding* binding = &callback_types[i];
-        if (car->process_callback == binding->process
-            && car->collision_callback == binding->collision
-            && car->destructor_callback == binding->destroy
-            && (car->callback_context != NULL) == (binding->type->size != 0))
-            return binding;
+        const CarCallbackSpec* spec = &callback_types[i];
+        const CarCallbackBinding binding = {
+            .type = spec->type,
+            .process = (void*)callback_address(spec, spec->process),
+            .collision = (void*)callback_address(spec, spec->collision),
+            .destroy = (void*)callback_address(spec, spec->destroy),
+            .resources = (void*)callback_address(spec, spec->resources),
+            .refresh = spec->refresh == 2 ? refresh_crusher_treads
+                : spec->refresh == 1      ? (void*)callback_address(spec, spec->process)
+                                          : NULL,
+        };
+        if (spec->process && !binding.process)
+            continue;
+        if (car->process_callback == binding.process && car->collision_callback == binding.collision
+            && car->destructor_callback == binding.destroy
+            && (car->callback_context != NULL) == (binding.type->size != 0)) {
+            *output = binding;
+            return 1;
+        }
     }
-    return NULL;
+    return 0;
 }
 
 const SnapshotType* WebSnapshotCarCallbackType(const Car* car)
 {
-    const CarCallbackBinding* binding = find_callbacks(car);
-    return binding ? binding->type : NULL;
+    CarCallbackBinding binding;
+    return find_callbacks(car, &binding) ? binding.type : NULL;
 }
 
 static u32 wheel_count(const void* payload)
@@ -146,10 +160,7 @@ static u32 spring_count(const void* payload)
     return car->spring_end - car->springs;
 }
 
-static u32 weapon_count(const void* payload)
-{
-    return CarWeaponCount;
-}
+static u32 weapon_count(const void* payload) { return WEB_MODULE("car", CarWeaponCount); }
 
 static const SnapshotField wheel_fields[] = {
     SNAP_LOCAL(CarWheel, response_particle),
@@ -264,22 +275,33 @@ CarAiStateTransition CarAiFlee(Car* car);
 CarAiStateTransition CarAiDriveOffRoute(Car* car);
 CarAiStateTransition CarAiRetreatFromTarget(Car* car);
 CarAiStateTransition CarAiRecoverFromObstacle(Car* car);
-static const CarAiStateCallback ai_states[] = { NULL, CarAiApproachTarget, CarAiSeekHealth,
-    CarAiPatrol, CarAiPursueTarget, CarAiFollowTargetRoute, CarAiFlee, CarAiDriveOffRoute,
-    CarAiRetreatFromTarget, CarAiRecoverFromObstacle };
+static WebModuleImport ai_states[] = {
+    { 0 },
+    { "car", "CarAiApproachTarget", 0, 0 },
+    { "car", "CarAiSeekHealth", 0, 0 },
+    { "car", "CarAiPatrol", 0, 0 },
+    { "car", "CarAiPursueTarget", 0, 0 },
+    { "car", "CarAiFollowTargetRoute", 0, 0 },
+    { "car", "CarAiFlee", 0, 0 },
+    { "car", "CarAiDriveOffRoute", 0, 0 },
+    { "car", "CarAiRetreatFromTarget", 0, 0 },
+    { "car", "CarAiRecoverFromObstacle", 0, 0 },
+};
+
+static CarAiStateCallback ai_state(u32 index)
+{
+    return index ? (CarAiStateCallback)WebResolveModuleImport(&ai_states[index]) : NULL;
+}
 
 u32 WebSnapshotCarAiStateId(CarAiStateCallback callback)
 {
     for (u32 i = 0; i < ArrayCount(ai_states); ++i)
-        if (ai_states[i] == callback)
+        if (ai_state(i) == callback)
             return i;
     return UINT32_MAX;
 }
 
-static u32 ai_capacity(const void* payload)
-{
-    return WebNetSlotCapacity();
-}
+static u32 ai_capacity(const void* payload) { return WebNetSlotCapacity(); }
 static void* nearby_base(const void* payload)
 {
     return ((const CarAiRuntime*)payload)->nearby_records;
@@ -408,13 +430,13 @@ static int restore_construction(void* payload, const void* input)
             && car->control_kind == record->control_kind
             && !strcmp(car->character_name, record->model);
     SVECTOR position = { 0 }, heading = { .vz = ONE };
-    if (!CarPrepareResources(car, (char*)record->model, record->entrant, record->slot,
-            record->control_kind, &position, &heading))
+    if (!WEB_MODULE("car", CarPrepareResources)(car, (char*)record->model, record->entrant,
+            record->slot, record->control_kind, &position, &heading))
         return 0;
-    const CarCallbackBinding* callbacks = find_callbacks(car);
-    if (!callbacks)
+    CarCallbackBinding callbacks;
+    if (!find_callbacks(car, &callbacks))
         return 0;
-    if (callbacks->resources && !callbacks->resources(car, car->callback_context)) {
+    if (callbacks.resources && !callbacks.resources(car, car->callback_context)) {
         car->destructor_callback = NULL;
         return 0;
     }
@@ -429,9 +451,9 @@ static const SnapshotConstructionBinding construction
 static void release_car(void* payload)
 {
     Car* car = payload;
-    for (s32 i = 0; car->weapons && i < CarWeaponCount; ++i)
+    for (s32 i = 0; car->weapons && i < WEB_MODULE("car", CarWeaponCount); ++i)
         car->weapons[i].active = 0;
-    CarReleaseResources(car);
+    WEB_MODULE("car", CarReleaseResources)(car);
 }
 
 static const SnapshotField input_event_fields[] = {
@@ -666,9 +688,11 @@ static int turbo_resources_valid(const Car* car)
 {
     if (!car->turbo_emitter_count)
         return !car->turbo_emitters;
-    RegistryDirectory* models = RegGetDirectoryPtrPS(CarClassDirectory, CarTextCharacters);
+    RegistryDirectory* models = RegGetDirectoryPtrPS(
+        WEB_MODULE("car", CarClassDirectory), WEB_MODULE("car", CarTextCharacters));
     RegistryDirectory* model = RegGetDirectoryPtrPS(models, car->character_name);
-    RegistryDirectory* emitters = RegGetDirectoryPtrPS(model, CarDisplayTurboName);
+    RegistryDirectory* emitters
+        = RegGetDirectoryPtrPS(model, WEB_MODULE("car", CarDisplayTurboName));
     return emitters && car->turbo_emitters
         && car->turbo_emitter_count == RegGetNumberOfDirectoriesP(emitters);
 }
@@ -676,11 +700,12 @@ static int turbo_resources_valid(const Car* car)
 static int car_valid(const void* payload)
 {
     const Car* car = payload;
-    const CarAiInputCallback driver
-        = car->control_kind == CAR_CONTROL_PLAYER ? CarPlayerInput : CarAiUpdateControls;
+    const CarAiInputCallback driver = car->control_kind == CAR_CONTROL_PLAYER
+        ? WEB_MODULE("car", CarPlayerInput)
+        : WEB_MODULE("car", CarAiUpdateControls);
     if ((car->control_kind != CAR_CONTROL_PLAYER && car->control_kind != CAR_CONTROL_ENEMY)
-        || !CarPhysicsResourcesValid(car) || !car->weapons || !car->character_name
-        || !turbo_resources_valid(car)
+        || !WEB_MODULE("car", CarPhysicsResourcesValid)(car) || !car->weapons
+        || !car->character_name || !turbo_resources_valid(car)
         || !((car->ai_input_callback == driver && !car->ai_saved_input_callback)
             || (!car->ai_input_callback && car->ai_saved_input_callback == driver))
         || !car->ai_state_callback || WebSnapshotCarAiStateId(car->ai_state_callback) == UINT32_MAX
@@ -692,10 +717,12 @@ static int car_valid(const void* payload)
         || car->health > car->maximum_health || car->controls.gear < CAR_GEAR_REVERSE
         || car->controls.gear > CAR_GEAR_FOURTH || car->controls.action < CarActionNone
         || car->controls.action >= CarActionCount || car->controls.selected_weapon < 0
-        || car->controls.selected_weapon >= CarWeaponCount || car->controls.selected_weapon_slot < 0
-        || car->controls.selected_weapon_slot >= CarWeaponCount
+        || car->controls.selected_weapon >= WEB_MODULE("car", CarWeaponCount)
+        || car->controls.selected_weapon_slot < 0
+        || car->controls.selected_weapon_slot >= WEB_MODULE("car", CarWeaponCount)
         || (car->frame != CAR_RENDER_FRAME_INTACT && car->frame != CAR_RENDER_FRAME_DAMAGED)
-        || CarWeaponCount <= 0 || (u32)CarWeaponCount > weapons.limit || !wheel_count(car)
+        || WEB_MODULE("car", CarWeaponCount) <= 0
+        || (u32)WEB_MODULE("car", CarWeaponCount) > weapons.limit || !wheel_count(car)
         || wheel_count(car) > wheels.limit || particle_count(car) > particles.limit
         || spring_count(car) > springs.limit)
         return 0;
@@ -707,7 +734,7 @@ static int car_valid(const void* payload)
             return 0;
     if (car->particles[4].response_wheel)
         return 0;
-    for (s32 i = 0; i < CarWeaponCount; ++i) {
+    for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         const CarWeaponInstance* weapon = &car->weapons[i];
         if (!weapon->descriptor || weapon->index < 0 || weapon->index > weapon->count
             || weapon->active < 0 || weapon->active > 1)
@@ -747,8 +774,8 @@ static u32 capture_driver(const void* payload, u8* output, u32 capacity)
     }
     binding.copied_faces = car->original_faces != NULL;
     binding.copied_colors = car->original_colors != NULL;
-    for (u32 i = 0; i < ArrayCount(aiWorldInfo.areas); ++i)
-        if (car->ai.area == &aiWorldInfo.areas[i])
+    for (u32 i = 0; i < ArrayCount(WEB_MODULE("car", aiWorldInfo).areas); ++i)
+        if (car->ai.area == &WEB_MODULE("car", aiWorldInfo).areas[i])
             binding.area = i + 1;
     if (!binding.area)
         return 0;
@@ -785,23 +812,26 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
     if (length <= sizeof(binding))
         return 0;
     memcpy(&binding, input, sizeof(binding));
-    if (!binding.area || binding.area > ArrayCount(aiWorldInfo.areas) || binding.suspended > 1
-        || binding.copied_faces > 1 || binding.copied_colors > 1 || !binding.state
-        || binding.state >= ArrayCount(ai_states) || binding.saved_state >= ArrayCount(ai_states))
+    if (!binding.area || binding.area > ArrayCount(WEB_MODULE("car", aiWorldInfo).areas)
+        || binding.suspended > 1 || binding.copied_faces > 1 || binding.copied_colors > 1
+        || !binding.state || binding.state >= ArrayCount(ai_states)
+        || binding.saved_state >= ArrayCount(ai_states))
         return 0;
-    CarAiArea* area = &aiWorldInfo.areas[binding.area - 1];
+    CarAiArea* area = &WEB_MODULE("car", aiWorldInfo).areas[binding.area - 1];
     if (binding.node > area->node_count || (binding.node && !area->nodes)
-        || (aiWorldInfo.enabled
-            && (!binding.node || binding.area > aiWorldInfo.resource.area_count)))
+        || (WEB_MODULE("car", aiWorldInfo).enabled
+            && (!binding.node
+                || binding.area > WEB_MODULE("car", aiWorldInfo).resource.area_count)))
         return 0;
     car->ai.area = area;
     car->ai.spatial_node = binding.node ? &area->nodes[binding.node - 1] : NULL;
-    const CarAiInputCallback driver
-        = car->control_kind == CAR_CONTROL_PLAYER ? CarPlayerInput : CarAiUpdateControls;
+    const CarAiInputCallback driver = car->control_kind == CAR_CONTROL_PLAYER
+        ? WEB_MODULE("car", CarPlayerInput)
+        : WEB_MODULE("car", CarAiUpdateControls);
     car->ai_input_callback = binding.suspended ? NULL : driver;
     car->ai_saved_input_callback = binding.suspended ? driver : NULL;
-    car->ai_state_callback = ai_states[binding.state];
-    car->ai_saved_state_callback = ai_states[binding.saved_state];
+    car->ai_state_callback = ai_state(binding.state);
+    car->ai_saved_state_callback = ai_state(binding.saved_state);
     for (u32 i = 0; i < ai_capacity(&car->ai); ++i) {
         const u32 next = binding.nearby_next[i];
         if (next > ai_capacity(&car->ai))
@@ -817,18 +847,18 @@ static int restore_driver(void* payload, const u8* input, u32 length, WebSnapsho
     const u32 prefix = sizeof(binding) + faces + colors_bytes;
     if (prefix >= length)
         return 0;
-    const CarCallbackBinding* callbacks = find_callbacks(car);
-    if (!callbacks
+    CarCallbackBinding callbacks;
+    if (!find_callbacks(car, &callbacks)
         || !WebSnapshotFieldsRestore(
-            callbacks->type, car->callback_context, input + prefix, length - prefix, find)
-        || (callbacks->refresh && !callbacks->refresh(car, car->callback_context)))
+            callbacks.type, car->callback_context, input + prefix, length - prefix, find)
+        || (callbacks.refresh && !callbacks.refresh(car, car->callback_context)))
         return 0;
 
     /* Rebuild private display buffers without spawning a second fade object. */
-    CarRestoreOriginalColors(car);
-    CarRestoreOriginalFaces(car);
-    if ((binding.copied_faces && !CarCopyDisplayFaces(car, 0))
-        || (binding.copied_colors && !CarCopyDisplayColors(car)))
+    WEB_MODULE("car", CarRestoreOriginalColors)(car);
+    WEB_MODULE("car", CarRestoreOriginalFaces)(car);
+    if ((binding.copied_faces && !WEB_MODULE("car", CarCopyDisplayFaces)(car, 0))
+        || (binding.copied_colors && !WEB_MODULE("car", CarCopyDisplayColors)(car)))
         return 0;
     for (u32 i = 0; i < faces; ++i)
         car->faces[i].reflection = input[sizeof(binding) + i];
@@ -841,9 +871,12 @@ typedef struct {
     Car* car;
 } InvisibilityFade;
 
-static const SnapshotCustomClass invisibility_class = {
-    .process = (Tm4ObjectCallback)CarInvisibilityConstructorProcess,
-};
+static SnapshotCustomClass invisibility_class(void)
+{
+    return (SnapshotCustomClass) {
+        .process = (Tm4ObjectCallback)WEB_MODULE("car", CarInvisibilityConstructorProcess),
+    };
+}
 static const SnapshotField invisibility_fields[] = {
     SNAP_REQUIRED(InvisibilityFade, car, "car"),
     { 0 },
@@ -851,7 +884,7 @@ static const SnapshotField invisibility_fields[] = {
 
 const SnapshotType WebSnapshotCarTypes[] = {
     { "carInvisibilityConstructor", sizeof(InvisibilityFade), invisibility_fields,
-        .baseline_removable = 1, .hash_fields = 1, .custom = &invisibility_class },
+        .baseline_removable = 1, .hash_fields = 1, .custom = invisibility_class },
     { "car", sizeof(Car), car_fields, car_valid, capture_driver, restore_driver,
         .baseline_removable = 1, .release = release_car },
     { 0 },

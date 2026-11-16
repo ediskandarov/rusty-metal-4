@@ -1,8 +1,9 @@
-#include "src/modules/weap/private.h"
 #include "../overlays.h"
+#include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/weap/private.h"
 #include "tm4/gpu.h"
 #include "tm4/main/game.h"
-#include "port/web/browser_report.h"
 #include <string.h>
 #include <strings.h>
 void WeaponBombClassConstructor(RegistryDirectory* directory);

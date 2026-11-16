@@ -1,3 +1,4 @@
+#include "port/web/module_import.h"
 #include "snapshot_types.h"
 
 #include "checkpoint.h"
@@ -51,7 +52,8 @@ static int bullet_motion_valid(const Bullet* bullet)
 static int bullet_valid(const void* payload)
 {
     const Bullet* bullet = payload;
-    return bullet->weapon_name == BulletWeaponName && bullet_motion_valid(bullet);
+    return bullet->weapon_name == WEB_MODULE("bullet", BulletWeaponName)
+        && bullet_motion_valid(bullet);
 }
 
 static int restore_bullet_type(
@@ -59,14 +61,14 @@ static int restore_bullet_type(
 {
     if (length)
         return 0;
-    ((Bullet*)payload)->weapon_name = BulletWeaponName;
+    ((Bullet*)payload)->weapon_name = WEB_MODULE("bullet", BulletWeaponName);
     return 1;
 }
 
 static void* find_projectile(char* key)
 {
-    const s32 index = WeaponFindProjectileType(key);
-    return index < 0 ? NULL : &WeapTypes[index];
+    const s32 index = WEB_MODULE("weap", WeaponFindProjectileType)(key);
+    return index < 0 ? NULL : &WEB_MODULE("weap", WeapTypes)[index];
 }
 
 static const SnapshotKeyBinding projectile_keys = {
@@ -127,8 +129,8 @@ static int projectile_valid(const void* payload)
     const WeaponProjectile* projectile = payload;
     const WeaponProjectileType* type = projectile->type;
     int registered = 0;
-    for (s32 i = 0; i < WeapTypeCount; ++i)
-        if (type == &WeapTypes[i])
+    for (s32 i = 0; i < WEB_MODULE("weap", WeapTypeCount); ++i)
+        if (type == &WEB_MODULE("weap", WeapTypes)[i])
             registered = 1;
     return registered && projectile->physics == type->physics
         && projectile->on_destroy == type->on_destroy && projectile->display == type->display
@@ -184,9 +186,9 @@ static const SnapshotField fireball_fields[] = {
 static int fireball_valid(const void* payload)
 {
     const WeaponFireball* fireball = payload;
-    return fireball->color == WeapFireballType.color
-        && fireball->texture == WeapFireballType.texture
-        && fireball->explosion == WeapFireballType.explosion;
+    return fireball->color == WEB_MODULE("weap", WeapFireballType).color
+        && fireball->texture == WEB_MODULE("weap", WeapFireballType).texture
+        && fireball->explosion == WEB_MODULE("weap", WeapFireballType).explosion;
 }
 
 static int restore_fireball_type(
@@ -195,9 +197,9 @@ static int restore_fireball_type(
     if (length)
         return 0;
     WeaponFireball* fireball = payload;
-    fireball->color = WeapFireballType.color;
-    fireball->texture = WeapFireballType.texture;
-    fireball->explosion = WeapFireballType.explosion;
+    fireball->color = WEB_MODULE("weap", WeapFireballType).color;
+    fireball->texture = WEB_MODULE("weap", WeapFireballType).texture;
+    fireball->explosion = WEB_MODULE("weap", WeapFireballType).explosion;
     return 1;
 }
 

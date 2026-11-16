@@ -7,6 +7,7 @@
 #include "match_mode.h"
 #include "net_state.h"
 #include "participant.h"
+#include "port/web/module_import.h"
 #include "rollback_audio.h"
 #include "snapshot.h"
 #include "snapshot_world.h"
@@ -130,10 +131,7 @@ static int session_resources_present(const NetMatchSetup* setup)
     return 1;
 }
 
-u32 WebNetModelCount(void)
-{
-    return match.setup.model_count;
-}
+u32 WebNetModelCount(void) { return match.setup.model_count; }
 char* WebNetModelName(u32 index)
 {
     return index < match.setup.model_count ? match.setup.model_pool[index] : NULL;
@@ -145,15 +143,13 @@ void WebNetModelPool(char output[8][64])
         strcpy(output[i], match.setup.model_pool[i]);
 }
 
-u32 WebNetBotSlots(void)
-{
-    return match.setup.bot_slots;
-}
+u32 WebNetBotSlots(void) { return match.setup.bot_slots; }
 const char* WebNetAiBlocker(void)
 {
     if (!match.setup.bot_slots && !WebNetTournament())
         return NULL;
-    if (!aiWorldInfo.enabled || !aiWorldInfo.resource.node_count)
+    if (!WEB_MODULE("car", aiWorldInfo).enabled
+        || !WEB_MODULE("car", aiWorldInfo).resource.node_count)
         return "the selected map has no original AI navigation";
     for (s32 slot = 0; slot < match.setup.capacity; ++slot)
         if ((match.setup.bot_slots & (1u << slot)) && GameInfo.players[slot].car
@@ -162,10 +158,7 @@ const char* WebNetAiBlocker(void)
     return NULL;
 }
 
-int WebNetTournament(void)
-{
-    return match.setup.tournament;
-}
+int WebNetTournament(void) { return match.setup.tournament; }
 
 int WebNetParticipantControlKind(int slot)
 {
@@ -175,10 +168,7 @@ int WebNetParticipantControlKind(int slot)
                                                                            : CAR_CONTROL_PLAYER;
 }
 
-int WebNetSlotCapacity(void)
-{
-    return match.setup.capacity;
-}
+int WebNetSlotCapacity(void) { return match.setup.capacity; }
 EMSCRIPTEN_KEEPALIVE int WebNetSlotMask(void)
 {
     WebParticipantState participants;
@@ -241,7 +231,7 @@ void WebNetCarLeaving(Car* target)
             if (car->control_kind == CAR_CONTROL_PLAYER)
                 car->ai.target = NULL;
             else
-                CarAiSetTarget(car, NULL, NULL);
+                WEB_MODULE("car", CarAiSetTarget)(car, NULL, NULL);
         }
         CarAiNearbyCar** link = &car->ai.nearby_list;
         for (s32 visited = 0; *link && visited < WebNetSlotCapacity(); ++visited) {
@@ -555,25 +545,13 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartTournament(s32 capacity, u32 slots, s32 worl
         capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0, 0, 0, 1);
 }
 
-int WebNetDeparting(void)
-{
-    return match.departing;
-}
+int WebNetDeparting(void) { return match.departing; }
 
-u32 WebNetFfaTimeLimit(void)
-{
-    return match.setup.time_limit_ticks;
-}
+u32 WebNetFfaTimeLimit(void) { return match.setup.time_limit_ticks; }
 
-u32 WebNetFfaFragLimit(void)
-{
-    return match.setup.frag_limit;
-}
+u32 WebNetFfaFragLimit(void) { return match.setup.frag_limit; }
 
-u32 WebNetFfaRespawnDelay(void)
-{
-    return match.setup.respawn_delay_ticks;
-}
+u32 WebNetFfaRespawnDelay(void) { return match.setup.respawn_delay_ticks; }
 
 #ifdef TM4_WEB_TEST_HOOKS
 EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u32 seed,
@@ -650,10 +628,7 @@ int WebNetRenderedPrediction(void)
 {
     return WebNetMatchActive() && (match.setup.flags & 2) && match.setup.view_slot >= 0;
 }
-int WebNetPortableCheckpointEnabled(void)
-{
-    return WebNetMatchActive() && (match.setup.flags & 1);
-}
+int WebNetPortableCheckpointEnabled(void) { return WebNetMatchActive() && (match.setup.flags & 1); }
 
 int WebNetLocalCheckpointSupported(void)
 {
@@ -710,10 +685,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebNetLocalCheckpointStorageBytes(void)
     return WebCheckpointStorageBytes();
 }
 
-EMSCRIPTEN_KEEPALIVE u32 WebNetLocalRollbackDepth(void)
-{
-    return WebCheckpointHistoryTicks;
-}
+EMSCRIPTEN_KEEPALIVE u32 WebNetLocalRollbackDepth(void) { return WebCheckpointHistoryTicks; }
 
 EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalTick(u32 tick)
 {
@@ -833,10 +805,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetBeginPortableReplay(void)
     return blocker == NULL;
 }
 
-int WebNetReplaying(void)
-{
-    return match.replaying || match.local_replaying;
-}
+int WebNetReplaying(void) { return match.replaying || match.local_replaying; }
 
 #ifdef TM4_WEB_TEST_HOOKS
 EMSCRIPTEN_KEEPALIVE int WebTestRestartNetworkReplay(void)
@@ -866,10 +835,7 @@ EMSCRIPTEN_KEEPALIVE void WebNetEndReplay(void)
     match.replaying = 0;
 }
 
-int WebNetMatchActive(void)
-{
-    return match.setup.capacity != 0;
-}
+int WebNetMatchActive(void) { return match.setup.capacity != 0; }
 
 EMSCRIPTEN_KEEPALIVE void WebNetCancelMatch(void)
 {
@@ -887,20 +853,14 @@ int WebNetLocalViewCount(void)
         : GameInfo.player_count;
 }
 
-int WebNetGameplaySlot(int view)
-{
-    return WebNetMatchActive() ? match.setup.view_slot : view;
-}
+int WebNetGameplaySlot(int view) { return WebNetMatchActive() ? match.setup.view_slot : view; }
 
 int WebNetLocalView(int slot)
 {
     return WebNetMatchActive() ? (slot == match.setup.view_slot ? 0 : -1) : slot;
 }
 
-int WebNetMatchViewSlot(void)
-{
-    return match.setup.view_slot;
-}
+int WebNetMatchViewSlot(void) { return match.setup.view_slot; }
 
 void WebNetMatchPollInput(void)
 {

@@ -2,6 +2,7 @@
 #include "net_match.h"
 #include "participant.h"
 #include "port/web/ffa.h"
+#include "port/web/module_import.h"
 #include "tournament.h"
 
 #include "interpolation.h"
@@ -135,7 +136,7 @@ static u32 object_handle(const Tm4ObjectHeader* object)
 static int device_weapon(DeviceRecord* record, const CarWeaponInstance* weapon)
 {
     for (s32 i = 0; i < GameInfo.car_count; ++i) {
-        for (s32 j = 0; j < CarWeaponCount; ++j) {
+        for (s32 j = 0; j < WEB_MODULE("car", CarWeaponCount); ++j) {
             if (weapon == &GameInfo.cars[i]->weapons[j]) {
                 record->car_index = i;
                 record->weapon_index = j;
@@ -148,7 +149,8 @@ static int device_weapon(DeviceRecord* record, const CarWeaponInstance* weapon)
 
 static int save_devices(SessionRecord* record)
 {
-    for (const CarDetonationNode* node = CarDetonationDevices; node; node = node->next) {
+    for (const CarDetonationNode* node = WEB_MODULE("car", CarDetonationDevices); node;
+         node = node->next) {
         if (record->device_count == MaxDevices)
             return 0;
         DeviceRecord* device = &record->devices[record->device_count++];
@@ -181,8 +183,9 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     WebNetInitialParticipantIds((u32*)record.initial_participants);
     record.squares = square_count();
     const u32 length = sizeof(record) + record.squares * sizeof(SquareRecord);
-    if (!record.squares || length > capacity || !save_devices(&record) || CarHealthPickupCount < 0
-        || CarHealthPickupCount > ArrayCount(record.health))
+    if (!record.squares || length > capacity || !save_devices(&record)
+        || WEB_MODULE("car", CarHealthPickupCount) < 0
+        || WEB_MODULE("car", CarHealthPickupCount) > ArrayCount(record.health))
         return 0;
     int depth = registry_path(
         RegGetDirectoryPtrS("/"), RegGetCurrentDirectoryPtr(), record.registry_path, 0);
@@ -194,9 +197,9 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     record.serial = ObjectNextSerial;
     record.random = randseed();
     record.effect_random = WebRenderEffectRandomState();
-    record.path_generation = CarPathSearchGeneration;
-    record.random_generation = CarRandomSearchGeneration[0];
-    record.health_generation = CarHealthSearchGeneration;
+    record.path_generation = WEB_MODULE("car", CarPathSearchGeneration);
+    record.random_generation = WEB_MODULE("car", CarRandomSearchGeneration)[0];
+    record.health_generation = WEB_MODULE("car", CarHealthSearchGeneration);
     record.games_completed = GameInfo.games_completed;
     record.deathmatch_winner = GameInfo.deathmatch_winner;
     record.deathmatch_finished = GameInfo.deathmatch_finished;
@@ -223,9 +226,9 @@ u32 WebSnapshotSessionCapture(u8* output, u32 capacity)
     }
     for (unsigned i = 0; i < OBJECT_LIST_COUNT; ++i)
         record.lists[i] = object_handle(ObjectLists[i].first);
-    record.health_count = CarHealthPickupCount;
+    record.health_count = WEB_MODULE("car", CarHealthPickupCount);
     for (u32 i = 0; i < record.health_count; ++i) {
-        const CarAiHealthEntry* health = &CarHealthPickups[i];
+        const CarAiHealthEntry* health = &WEB_MODULE("car", CarHealthPickups)[i];
         record.health[i] = (HealthRecord) { WebSnapshotLiveHandle(health->object), health->node,
             health->unknown06 };
     }
@@ -472,7 +475,8 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         const DeviceRecord* saved = &record.devices[i];
         void* object = saved->object ? find_object(saved->object) : NULL;
         if (!object || saved->car_index < 0 || saved->car_index >= record.car_count
-            || saved->weapon_index < 0 || saved->weapon_index >= CarWeaponCount) {
+            || saved->weapon_index < 0
+            || saved->weapon_index >= WEB_MODULE("car", CarWeaponCount)) {
             free_devices(devices);
             return 0;
         }
@@ -487,13 +491,13 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         tail = &node->next;
     }
 
-    free_devices(CarDetonationDevices);
-    CarDetonationDevices = devices;
-    CarHealthPickupCount = record.health_count;
-    memcpy(CarHealthPickups, health, sizeof(health));
-    CarPathSearchGeneration = record.path_generation;
-    CarRandomSearchGeneration[0] = record.random_generation;
-    CarHealthSearchGeneration = record.health_generation;
+    free_devices(WEB_MODULE("car", CarDetonationDevices));
+    WEB_MODULE("car", CarDetonationDevices) = devices;
+    WEB_MODULE("car", CarHealthPickupCount) = record.health_count;
+    memcpy(WEB_MODULE("car", CarHealthPickups), health, sizeof(health));
+    WEB_MODULE("car", CarPathSearchGeneration) = record.path_generation;
+    WEB_MODULE("car", CarRandomSearchGeneration)[0] = record.random_generation;
+    WEB_MODULE("car", CarHealthSearchGeneration) = record.health_generation;
     for (u32 i = 0; i < OBJECT_LIST_COUNT; ++i)
         ObjectLists[i].first = lists[i];
     for (u32 i = 0; i < record.squares; ++i) {

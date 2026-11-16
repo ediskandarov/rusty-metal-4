@@ -53,15 +53,16 @@ static int bind_class(char* name, u8 flags, LocalClass* type)
     if (!description || ((flags & OBJECT_CUSTOM_CLASS) != 0) != (description->custom != NULL))
         return 0;
     if (description->custom) {
-        const SnapshotCustomClass* custom = description->custom;
+        const SnapshotCustomClass custom = description->custom();
         *type = (LocalClass) {
             .name = (char*)description->name,
             .size = description->size,
-            .process = custom->process,
-            .display = custom->display,
-            .destructor = custom->destructor,
-            .interact = custom->interact,
-            .alternate_process = description->alternate_process,
+            .process = custom.process,
+            .display = custom.display,
+            .destructor = custom.destructor,
+            .interact = custom.interact,
+            .alternate_process
+            = description->alternate_process ? description->alternate_process() : NULL,
             .index = -1,
         };
         return 1;
@@ -76,7 +77,8 @@ static int bind_class(char* name, u8 flags, LocalClass* type)
         .name = descriptor->name,
         .size = descriptor->payload_size,
         .process = descriptor->process,
-        .alternate_process = description->alternate_process,
+        .alternate_process
+        = description->alternate_process ? description->alternate_process() : NULL,
         .display = descriptor->display,
         .destructor = descriptor->destructor,
         .index = index,

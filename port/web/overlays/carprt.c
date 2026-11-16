@@ -1,6 +1,7 @@
 #include "../carpart.h"
 #include "../overlays.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
 #include "tm4/gpu.h"
 #include "tm4/main/memory.h"
 #include <string.h>
@@ -47,10 +48,7 @@ static s32 construct(void* object, va_list args)
     WEB_BROWSER_REPORT({ tm4Port.debrisSpawns = (tm4Port.debrisSpawns || 0) + 1; });
     return 1;
 }
-static void process(void* object)
-{
-    CarpartProcess(object);
-}
+static void process(void* object) { CarpartProcess(object); }
 static void destroy(void* object)
 {
     WebCarpart* debris = object;
@@ -76,6 +74,8 @@ static void display(void* object, Tm4OrderingTag* ot, u8** output, u8* end, MATR
 }
 OSWord WebCarpartExport(const char* name)
 {
+    if (!strcmp(name, "WebCarpartPrepareResources"))
+        return (OSWord)WebCarpartPrepareResources;
 #define EXPORT(key, value)                                                                         \
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(value)

@@ -1,7 +1,8 @@
-#include "src/modules/power/private.h"
 #include "../overlays.h"
-#include "tm4/gpu.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/power/private.h"
+#include "tm4/gpu.h"
 #include <string.h>
 
 void PowerupClassConstructor(RegistryDirectory*);
@@ -18,10 +19,7 @@ static void construct_class(RegistryDirectory* directory)
     OSRegisterCarPhysics();
     PowerupClassConstructor(directory);
 }
-static s32 construct(void* object, va_list args)
-{
-    return PowerupConstructor(object, args);
-}
+static s32 construct(void* object, va_list args) { return PowerupConstructor(object, args); }
 static s32 instance(void* object, RegistryDirectory* directory)
 {
     s32 result = PowerupInstanceConstructor(object, directory);
@@ -44,10 +42,7 @@ static void display(void* object, Tm4OrderingTag* ot, u8** out, u8* end, MATRIX*
     if (*out != start)
         WEB_BROWSER_REPORT({ tm4Port.pickupDraws = (tm4Port.pickupDraws || 0) + 1; });
 }
-static void destroy_class(RegistryDirectory* directory)
-{
-    PowerupClassDestructor(directory);
-}
+static void destroy_class(RegistryDirectory* directory) { PowerupClassDestructor(directory); }
 
 OSWord WebPowerExport(const char* name)
 {
@@ -60,7 +55,7 @@ OSWord WebPowerExport(const char* name)
     EXPORT("PowerupInstanceConstructor", instance);
     EXPORT("PowerupProcess", process);
     EXPORT("PowerupDisplay", display);
-    EXPORT("InteractCarWithPowerup", WebInteractCarWithPowerup);
+    EXPORT("InteractCarWithPowerup", WEB_MODULE("interact", WebInteractCarWithPowerup));
 #undef EXPORT
     return 0;
 }

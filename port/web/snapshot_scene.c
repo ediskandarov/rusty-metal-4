@@ -1,3 +1,4 @@
+#include "port/web/module_import.h"
 #include "snapshot_types.h"
 
 #include "src/main/object/private.h"
@@ -17,10 +18,13 @@
 void ObjectInteractionExtenderProcess(Tm4InteractionExtender* object);
 void ObjectInteractionExtenderDestructor(Tm4InteractionExtender* object);
 
-static const SnapshotCustomClass extender_class = {
-    .process = (Tm4ObjectCallback)ObjectInteractionExtenderProcess,
-    .destructor = (Tm4ObjectCallback)ObjectInteractionExtenderDestructor,
-};
+static SnapshotCustomClass extender_class(void)
+{
+    return (SnapshotCustomClass) {
+        .process = (Tm4ObjectCallback)ObjectInteractionExtenderProcess,
+        .destructor = (Tm4ObjectCallback)ObjectInteractionExtenderDestructor,
+    };
+}
 
 static const SnapshotField interaction_fields[] = {
     SNAP_REQUIRED(Tm4InteractionNode, payload, NULL),
@@ -53,8 +57,9 @@ RegistryDirectory* WebPowerupBindType(PowerupState* power, char* type);
 
 static void* find_powerup_name(char* key)
 {
-    RegistryDirectory* directory
-        = PowerDirectory ? RegGetDirectoryPtrPS(PowerDirectory, key) : NULL;
+    RegistryDirectory* directory = WEB_MODULE("power", PowerDirectory)
+        ? RegGetDirectoryPtrPS(WEB_MODULE("power", PowerDirectory), key)
+        : NULL;
     return directory ? RegGetDirectoryNameP(directory) : NULL;
 }
 
@@ -86,7 +91,8 @@ static int restore_powerup_type(
     void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
 {
     PowerupState* powerup = payload;
-    return !length && powerup->name && WebPowerupBindType(powerup, powerup->name);
+    return !length && powerup->name
+        && WEB_MODULE("power", WebPowerupBindType)(powerup, powerup->name);
 }
 
 static const SnapshotField teleporter_fields[] = {
@@ -146,7 +152,7 @@ static void release_camera(void* payload)
     /* Removed baseline targets may already be released. Only the camera-owned
      * runtime storage survives here; gameplay callbacks must not run. */
     camera->object = NULL;
-    CameraSetObject(camera, NULL);
+    WEB_MODULE("camera", CameraSetObject)(camera, NULL);
 }
 
 static int restore_camera(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find)
@@ -162,7 +168,7 @@ static int restore_camera(void* payload, const u8* input, u32 length, WebSnapsho
             || (strcmp(ObjectGetHeader(target)->name, "car")
                 && strcmp(ObjectGetHeader(target)->name, "crane"))))
         return 0;
-    if ((u32)binding.distance_preset >= 3 || !CameraSetObject(camera, target))
+    if ((u32)binding.distance_preset >= 3 || !WEB_MODULE("camera", CameraSetObject)(camera, target))
         return 0;
     if (camera->data) {
         CarCameraState* state = camera->data;
@@ -177,10 +183,13 @@ void CarJumpProcess(CarJump* jump);
 void CarJumpDisplay(
     CarJump* jump, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* world_to_camera);
 
-static const SnapshotCustomClass car_jump_class = {
-    .process = (Tm4ObjectCallback)CarJumpProcess,
-    .display = (Tm4ObjectDisplayCallback)CarJumpDisplay,
-};
+static SnapshotCustomClass car_jump_class(void)
+{
+    return (SnapshotCustomClass) {
+        .process = (Tm4ObjectCallback)WEB_MODULE("car", CarJumpProcess),
+        .display = (Tm4ObjectDisplayCallback)WEB_MODULE("car", CarJumpDisplay),
+    };
+}
 
 static const SnapshotField car_jump_fields[] = {
     SNAP_REQUIRED(CarJump, car, "car"),
@@ -250,9 +259,9 @@ const SnapshotType WebSnapshotSceneTypes[] = {
     { "teleporter", sizeof(Teleporter), teleporter_fields, .needs_template = 1 },
     { "camera", sizeof(Camera), camera_fields, NULL, capture_camera, restore_camera,
         .baseline_removable = 1, .release = release_camera },
-    { "carJump", sizeof(CarJump), car_jump_fields, .custom = &car_jump_class },
+    { "carJump", sizeof(CarJump), car_jump_fields, .custom = car_jump_class },
     { OBJECT_INTERACTION_EXTENDER_NAME, sizeof(Tm4InteractionExtender), extender_fields,
-        .baseline_removable = 1, .custom = &extender_class },
+        .baseline_removable = 1, .custom = extender_class },
     { "destroyable", sizeof(Destroyable), destroyable_fields, destroyable_valid,
         .needs_template = 1, .baseline_removable = 1 },
     { "jumppad", sizeof(Jumppad), jumppad_fields, .needs_template = 1 },

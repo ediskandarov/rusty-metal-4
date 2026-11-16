@@ -1,4 +1,5 @@
 #include "net_state_fields.h"
+#include "port/web/module_import.h"
 #include "snapshot.h"
 #include "snapshot_types.h"
 #include "src/modules/anim/private.h"
@@ -14,8 +15,8 @@
 
 static const WeaponProjectileType* stock_projectile_type(const WeaponProjectile* projectile)
 {
-    for (s32 i = 0; i < WeapTypeCount; ++i) {
-        const WeaponProjectileType* type = &WeapTypes[i];
+    for (s32 i = 0; i < WEB_MODULE("weap", WeapTypeCount); ++i) {
+        const WeaponProjectileType* type = &WEB_MODULE("weap", WeapTypes)[i];
         if (projectile->type == type && projectile->physics == type->physics
             && projectile->on_destroy == type->on_destroy)
             return type;

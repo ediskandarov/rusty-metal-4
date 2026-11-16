@@ -17,8 +17,7 @@ const SnapshotType* WebSnapshotObjectType(const Tm4ObjectHeader* object);
 const SnapshotType* WebSnapshotTypeByName(const char* name);
 
 extern const SnapshotType WebSnapshotSceneTypes[];
-extern const SnapshotType WebSnapshotYardTypes[];
-extern const SnapshotType WebSnapshotMovingWorldTypes[];
+void WebSnapshotUnregisterTypes(const SnapshotType* types);
 extern const SnapshotType WebSnapshotEffectTypes[];
 extern const SnapshotType WebSnapshotProjectileTypes[];
 struct Car;

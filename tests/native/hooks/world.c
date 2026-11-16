@@ -1,5 +1,6 @@
 #include "pending.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
 #include "src/modules/car/private.h"
 #include "src/modules/levels/w_carni/private.h"
 #include "src/modules/levels/w_neon/private.h"
@@ -38,7 +39,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachLevelTrigger(s32 jump, s32 enter)
             location.t[0] = header->position.vx;
             location.t[1] = header->position.vy;
             location.t[2] = header->position.vz - (enter ? 0 : 1200);
-            CarOrientWithMatrix(car, &location);
+            WEB_MODULE("car", CarOrientWithMatrix)(car, &location);
             if (jump && enter) {
                 Jumppad* pad = ObjectGetPayload(header);
                 s32 speed = enter < 0 ? -512 : 512;
@@ -117,10 +118,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestDestroyablePresent(void)
 
 static int test_destroy_map_pending;
 
-EMSCRIPTEN_KEEPALIVE void WebTestDestroyMapScenery(void)
-{
-    test_destroy_map_pending = 1;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestDestroyMapScenery(void) { test_destroy_map_pending = 1; }
 
 static int test_destroy_map_scenery(void)
 {
@@ -141,7 +139,7 @@ static int test_destroy_map_scenery(void)
                 }
             SVECTOR position;
             ObjectCopyPosition(&position, object);
-            return !DestroyableApplyDamage(
+            return !WEB_MODULE("destry", DestroyableApplyDamage)(
                        object, object->hit_points, position.vx, position.vy, position.vz)
                 && !WebTestDestroyablePresent();
         }
@@ -167,7 +165,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAimAtDestroyable(void)
         return 0;
     for (s32 i = 0; i < GameInfo.car_count; ++i)
         if (GameInfo.cars[i] != car) {
-            CarAiProcessFunctionDisable(GameInfo.cars[i]);
+            WEB_MODULE("car", CarAiProcessFunctionDisable)(GameInfo.cars[i]);
             memset(&GameInfo.cars[i]->controls, 0, sizeof(GameInfo.cars[i]->controls));
         }
     for (s32 i = 0; i < *count; ++i) {
@@ -209,7 +207,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestAimAtDestroyable(void)
         placement.t[0] = start.vx;
         placement.t[1] = start.vy - car->muzzle_records[0].position.vy;
         placement.t[2] = start.vz;
-        CarOrientWithMatrix(car, &placement);
+        WEB_MODULE("car", CarOrientWithMatrix)(car, &placement);
         Camera* camera = GameInfo.players[0].camera;
         if (camera && camera->object == car)
             ((CarCameraState*)camera->data)->snap = 1;
@@ -250,7 +248,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachCrane(s32 place_target)
             Crane* crane = ObjectGetPayload(header);
             for (s32 i = 0; i < GameInfo.car_count; ++i)
                 if (GameInfo.cars[i] != player) {
-                    CarAiProcessFunctionDisable(GameInfo.cars[i]);
+                    WEB_MODULE("car", CarAiProcessFunctionDisable)(GameInfo.cars[i]);
                     memset(&GameInfo.cars[i]->controls, 0, sizeof(GameInfo.cars[i]->controls));
                 }
             MATRIX placement;
@@ -260,7 +258,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachCrane(s32 place_target)
                 placement.t[0] = position->vx;
                 placement.t[1] = position->vy;
                 placement.t[2] = position->vz;
-                CarOrientWithMatrix(player, &placement);
+                WEB_MODULE("car", CarOrientWithMatrix)(player, &placement);
             } else {
                 Car* target = NULL;
                 for (s32 i = 0; i < GameInfo.car_count; ++i)
@@ -273,7 +271,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachCrane(s32 place_target)
                 placement.t[0] = crane->magnet_position.vx;
                 placement.t[1] = crane->ground_y - 250;
                 placement.t[2] = crane->magnet_position.vz;
-                CarOrientWithMatrix(target, &placement);
+                WEB_MODULE("car", CarOrientWithMatrix)(target, &placement);
                 EM_ASM({ tm4Port.testCraneTargetY = $0; }, target->position.vy);
             }
             return 1;
@@ -296,7 +294,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestEnterHopper(void)
             placement.t[0] = header->position.vx;
             placement.t[1] = header->position.vy;
             placement.t[2] = header->position.vz;
-            CarOrientWithMatrix(car, &placement);
+            WEB_MODULE("car", CarOrientWithMatrix)(car, &placement);
             return 1;
         }
     }
@@ -333,10 +331,10 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachNeonObject(s32 ufo_pickup)
                     location.t[axis] += train->path.local_to_world.m[axis][2] * 1600 / ONE;
             }
             car->shield_ticks = 0;
-            CarOrientWithMatrix(car, &location);
+            WEB_MODULE("car", CarOrientWithMatrix)(car, &location);
             for (s32 i = 0; i < GameInfo.car_count; ++i)
                 if (GameInfo.cars[i] != car) {
-                    CarAiProcessFunctionDisable(GameInfo.cars[i]);
+                    WEB_MODULE("car", CarAiProcessFunctionDisable)(GameInfo.cars[i]);
                     memset(&GameInfo.cars[i]->controls, 0, sizeof(GameInfo.cars[i]->controls));
                 }
             Camera* camera = GameInfo.players[0].camera;
@@ -375,11 +373,11 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachPathObject(s32 helicopter_kind)
                     location.t[axis] += path->local_to_world.m[axis][2] * 600 / ONE;
             }
             car->shield_ticks = 0;
-            CarOrientWithMatrix(car, &location);
+            WEB_MODULE("car", CarOrientWithMatrix)(car, &location);
             for (s32 i = 0; i < GameInfo.car_count; ++i)
                 if (GameInfo.cars[i] != car
                     && GameInfo.cars[i]->control_kind == CAR_CONTROL_ENEMY) {
-                    CarAiProcessFunctionDisable(GameInfo.cars[i]);
+                    WEB_MODULE("car", CarAiProcessFunctionDisable)(GameInfo.cars[i]);
                     memset(&GameInfo.cars[i]->controls, 0, sizeof(GameInfo.cars[i]->controls));
                 }
             Camera* camera = GameInfo.players[0].camera;
@@ -427,8 +425,8 @@ void WebTestApplyHelicopterShot(void)
     launch.t[1] = world_start.vy;
     launch.t[2] = world_start.vz;
     SVECTOR velocity = { 0 };
-    ObjectCreate(CarTextWeaponProjectile, OBJECT_DESTROY_WITH_OWNER, car, CarTextPower, NULL,
-        &launch, &velocity);
+    ObjectCreate(WEB_MODULE("car", CarTextWeaponProjectile), OBJECT_DESTROY_WITH_OWNER, car,
+        WEB_MODULE("car", CarTextPower), NULL, &launch, &velocity);
 }
 /* Read-only inspection of original scenery, with placement queued for the next tick. */
 static s32 scenery_approach_pending;
@@ -508,10 +506,7 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadScenery(void)
         }
 }
 
-EMSCRIPTEN_KEEPALIVE void WebTestApproachScenery(s32 kind)
-{
-    scenery_approach_pending = kind;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestApproachScenery(s32 kind) { scenery_approach_pending = kind; }
 
 static void test_approach_scenery(void)
 {
@@ -554,7 +549,7 @@ static void test_approach_scenery(void)
                 }
     }
     if (found) {
-        CarOrientWithMatrix(car, &placement);
+        WEB_MODULE("car", CarOrientWithMatrix)(car, &placement);
         Camera* camera = GameInfo.players[0].camera;
         if (camera && camera->object == car) {
             ((CarCameraState*)camera->data)->snap = 1;

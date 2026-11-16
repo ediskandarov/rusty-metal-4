@@ -28,6 +28,17 @@ export async function startGame(
   const content = await digest(new TextEncoder().encode(fingerprints.join("\n")));
   const build = await getBuildManifest(new URL("simulation-build.json", document.baseURI));
 
+  const modules = await Promise.all(
+    build.modules.map(async (entry) => {
+      const response = await fetch(new URL(`modules/${entry.name}`, document.baseURI));
+      if (!response.ok)
+        throw new Error(`Could not load resource module ${entry.name}: ${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      if ((await digest(bytes)) !== entry.sha256)
+        throw new Error(`Resource module belongs to a different build: ${entry.name}`);
+      return { name: entry.name, bytes };
+    }),
+  );
   const parameters = new URLSearchParams(location.search);
   return new Promise((resolve, reject) => {
     globalThis.tm4Assets = assets;
@@ -49,6 +60,10 @@ export async function startGame(
             module.FS.writeFile(path, bytes, { canOwn: true });
           }
           assets.files.clear();
+          module.FS.mkdirTree("/modules");
+          for (const { name, bytes } of modules)
+            module.FS.writeFile(`/modules/${name}`, bytes, { canOwn: true });
+          modules.length = 0;
           for (const track of assets.tracks) {
             module._WebMusicConfigureTrack(track.number, track.start, track.end, track.toc);
           }

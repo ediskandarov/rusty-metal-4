@@ -1,7 +1,8 @@
-#include "src/modules/anim/private.h"
 #include "../overlays.h"
-#include "tm4/gpu.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/anim/private.h"
+#include "tm4/gpu.h"
 #include <string.h>
 void AnimClassConstructor(RegistryDirectory*);
 void InteractCarWithAnim_goggle(Car*, Anim*);
@@ -18,30 +19,8 @@ static s32 construct(void* object, va_list args)
         WEB_BROWSER_REPORT({ tm4Port.animSpawns = (tm4Port.animSpawns || 0) + 1; });
     return result;
 }
-static void process(void* object)
-{
-    AnimProcess(object);
-}
-static void destroy(void* object)
-{
-    AnimDestructor(object);
-}
-static void construct_class(RegistryDirectory* directory)
-{
-    /* Native overlays stay resident; PS1 reloads restore their initial data. */
-    AnimInfoCount = 0;
-    AnimClassConstructor(directory);
-}
-static void destroy_class(RegistryDirectory* directory)
-{
-    AnimClassDestructor(directory);
-    AnimInfos = NULL;
-    AnimInfoCount = 0;
-    AnimClasses = NULL;
-    AnimClassCount = 0;
-    AnimAliases = NULL;
-    AnimAliasCount = 0;
-}
+static void process(void* object) { AnimProcess(object); }
+static void destroy(void* object) { AnimDestructor(object); }
 static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* view)
 {
     u8* start = *output;
@@ -54,7 +33,8 @@ static void goggle_contact(Car* car, Anim* animation)
     s32 health = car->health;
     InteractCarWithAnim_goggle(car, animation);
     if (car->health < health)
-        WEB_BROWSER_REPORT({ tm4Port.flameDamage = (tm4Port.flameDamage || 0) + $0; }, health - car->health);
+        WEB_BROWSER_REPORT(
+            { tm4Port.flameDamage = (tm4Port.flameDamage || 0) + $0; }, health - car->health);
 }
 
 OSWord WebAnimExport(const char* name)
@@ -62,14 +42,14 @@ OSWord WebAnimExport(const char* name)
 #define EXPORT(key, value)                                                                         \
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(value)
-    EXPORT("AnimClassConstructor", construct_class);
-    EXPORT("AnimClassDestructor", destroy_class);
+    EXPORT("AnimClassConstructor", AnimClassConstructor);
+    EXPORT("AnimClassDestructor", AnimClassDestructor);
     EXPORT("AnimConstructor", construct);
     EXPORT("AnimProcess", process);
     EXPORT("AnimDestructor", destroy);
     EXPORT("AnimDisplay", display);
     if (!strcmp(name, "InteractCarWithAnim_goggle")) {
-        Import_CarApplyParticipantDamage = CarApplyParticipantDamage;
+        Import_CarApplyParticipantDamage = WEB_MODULE("car", CarApplyParticipantDamage);
         Import_InteractCarWithAnim_fire = OSSymbolGetAddressAssert("InteractCarWithAnim_fire");
         return (OSWord)goggle_contact;
     }

@@ -5,7 +5,8 @@ import { join, resolve } from "node:path";
 
 import { launchBrowser } from "./helpers/browser.mjs";
 
-const site = resolve("build/release/site");
+const site = resolve(process.env.TM4_PAGES_SITE ?? "build/release/site");
+const moduleManifest = await Bun.file(join(site, "simulation-build.json")).json();
 const allowed = new Set([
   "index.html",
   "tm4_web.js",
@@ -17,6 +18,7 @@ const allowed = new Set([
   "network/tm4_network_bg.wasm",
   "network/tm4_network.d.ts",
   "network/tm4_network_bg.wasm.d.ts",
+  ...moduleManifest.modules.map(({ name }) => "modules/" + name),
 ]);
 for (const path of readdirSync(site, { recursive: true })) {
   const stat = lstatSync(join(site, path));
@@ -98,7 +100,7 @@ try {
     performance.getEntriesByType("resource").some((entry) => entry.name.endsWith("tm4_web.wasm")),
   );
   const fingerprint = await (await fetch(new URL("simulation-build.json", url))).json();
-  assert.deepEqual(Object.keys(fingerprint).sort(), ["authoritySha256", "sha256"]);
+  assert.deepEqual(Object.keys(fingerprint).sort(), ["authoritySha256", "modules", "sha256"]);
   assert.match(fingerprint.sha256, /^[0-9a-f]{64}$/);
   assert.match(fingerprint.authoritySha256, /^[0-9a-f]{64}$/);
   assert(await page.evaluate(() => !("tm4Network" in globalThis)));

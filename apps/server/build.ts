@@ -3,6 +3,7 @@ import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 
+import { buildIdentity } from "../../tools/build-identity.ts";
 import { runCli, UsageError } from "../../tools/cli.js";
 import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer, type PlayerMode } from "../player/build.ts";
@@ -19,23 +20,7 @@ export async function buildServer(mode: PlayerMode) {
   await rm(output, { recursive: true, force: true });
   await mkdir(output, { recursive: true });
   const manifest: unknown = await Bun.file(join(source, "simulation-build.json")).json();
-  const simulation = await Bun.file(
-    join(directory, "authority/site/tm4_standalone.wasm"),
-  ).arrayBuffer();
-  const authorityHash = new Bun.CryptoHasher("sha256").update(simulation).digest("hex");
-  const browserHash = new Bun.CryptoHasher("sha256")
-    .update(await Bun.file(join(source, "tm4_web.wasm")).arrayBuffer())
-    .update(await Bun.file(join(source, "network/tm4_network_bg.wasm")).arrayBuffer())
-    .update(authorityHash)
-    .digest("hex");
-  if (
-    !manifest ||
-    typeof manifest !== "object" ||
-    !("authoritySha256" in manifest) ||
-    manifest.authoritySha256 !== authorityHash ||
-    !("sha256" in manifest) ||
-    manifest.sha256 !== browserHash
-  )
+  if (JSON.stringify(manifest) !== JSON.stringify(await buildIdentity(directory)))
     throw new Error("Server/client build manifest is stale");
   await cp(join(source, "simulation-build.json"), join(output, "simulation-build.json"));
   await mkdir(join(player, "network"), { recursive: true });
@@ -53,6 +38,8 @@ export async function buildServer(mode: PlayerMode) {
     join(directory, "authority/site/tm4_standalone.wasm"),
     join(output, "tm4_standalone.wasm"),
   );
+  await cp(join(source, "modules"), join(player, "modules"), { recursive: true });
+  await cp(join(directory, "authority/site/modules"), join(output, "modules"), { recursive: true });
   // The hosted player always uses the local folder picker, including development builds.
   await buildPlayer({ mode: "release", site: player });
   await buildSite("server", mode, site);

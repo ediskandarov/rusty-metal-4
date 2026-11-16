@@ -1,5 +1,6 @@
 #include "tm4/main/pad.h"
 #include "pad_vibration.h"
+#include "port/web/module_import.h"
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_keyboard.h>
 #include <libetc.h>
@@ -49,10 +50,7 @@ EMSCRIPTEN_KEEPALIVE void WebMapGamepadButton(u32 port, u32 target, u32 source)
         gamepad_map[port][target] = source + 1;
 }
 
-EMSCRIPTEN_KEEPALIVE u32 WebGetInputDevice(u32 port)
-{
-    return port < 4 ? player_devices[port] : 0;
-}
+EMSCRIPTEN_KEEPALIVE u32 WebGetInputDevice(u32 port) { return port < 4 ? player_devices[port] : 0; }
 
 EMSCRIPTEN_KEEPALIVE u32 WebGetPhysicalButtons(u32 port)
 {
@@ -64,8 +62,8 @@ EMSCRIPTEN_KEEPALIVE u32 WebGetControlAction(u32 player, u32 action)
     if (player >= 4 || action >= GameControlCount)
         return 0;
     const Tm4GameInfo* game = &GameInfo;
-    if (GameInfo.mode == GAME_MODE_MENU && MenuGameState.player_count)
-        game = &MenuGameState;
+    if (GameInfo.mode == GAME_MODE_MENU && WEB_MODULE("menu", MenuGameState).player_count)
+        game = &WEB_MODULE("menu", MenuGameState);
     return game->players[player].bindings[!!player_devices[player]].actions[action];
 }
 
@@ -114,7 +112,6 @@ static u16 map_gamepad_buttons(s32 port, u16 pressed, char* axes)
 }
 #endif
 
-
 static void clear_pad(PadCache* pad)
 {
     u32 absent_ticks = pad->absent_ticks;
@@ -135,10 +132,7 @@ void PadInitPad(void)
         clear_pad(&PadJpad[i]);
 }
 
-void PadStopPad(void)
-{
-    PadResetVibration();
-}
+void PadStopPad(void) { PadResetVibration(); }
 
 /* Use the same standard-device mapping as PsyZ, with stable slots for four players. */
 static void read_gamepad(s32 port, char* packet)

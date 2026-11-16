@@ -1,6 +1,7 @@
-#include "src/modules/fire/private.h"
 #include "../overlays.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/fire/private.h"
 #include <string.h>
 
 void FlameEmitterClassConstructor(RegistryDirectory*);
@@ -22,10 +23,7 @@ static s32 construct(void* object, va_list arguments)
         WEB_BROWSER_REPORT({ tm4Port.flameSpawns = (tm4Port.flameSpawns || 0) + 1; });
     return result;
 }
-static void process(void* object)
-{
-    FlameEmitterProcess(object);
-}
+static void process(void* object) { FlameEmitterProcess(object); }
 OSWord WebFireExport(const char* name)
 {
 #define EXPORT(key, value)                                                                         \

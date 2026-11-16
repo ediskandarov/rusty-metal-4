@@ -1,7 +1,8 @@
-#include "src/modules/bullet/private.h"
 #include "../overlays.h"
-#include "tm4/gpu.h"
 #include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "src/modules/bullet/private.h"
+#include "tm4/gpu.h"
 #include <string.h>
 void BulletClassConstructor(RegistryDirectory*);
 s32 BulletConstructor(Bullet*, va_list);
@@ -11,8 +12,8 @@ extern u32 BulletSizeof;
 
 static void construct_class(RegistryDirectory* directory)
 {
-    Import_CarApplyParticipantDamage = CarApplyParticipantDamage;
-    Import_SpawnExplosion = SpawnExplosion;
+    Import_CarApplyParticipantDamage = WEB_MODULE("car", CarApplyParticipantDamage);
+    Import_SpawnExplosion = WEB_MODULE("expl", SpawnExplosion);
     BulletClassConstructor(directory);
 }
 static s32 construct(void* object, va_list args)
@@ -29,10 +30,7 @@ static void process(void* object)
         WEB_BROWSER_REPORT({ tm4Port.bulletImpacts = (tm4Port.bulletImpacts || 0) + 1; });
     BulletProcess(bullet);
 }
-static void destroy(void* object)
-{
-    BulletDestructor(object);
-}
+static void destroy(void* object) { BulletDestructor(object); }
 static void display(void* object, Tm4OrderingTag* ordering, u8** output, u8* end, MATRIX* view)
 {
     u8* start = *output;

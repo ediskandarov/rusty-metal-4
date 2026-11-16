@@ -19,13 +19,13 @@ static const SnapshotField path_sample_fields[] = {
     { 0 },
 };
 
-static u32 sample_count(const void* payload)
-{
-    return ((const PathingInfo*)payload)->sample_count;
-}
+static u32 sample_count(const void* payload) { return ((const PathingInfo*)payload)->sample_count; }
 
 static const SnapshotArray samples = {
-    path_sample_fields, sizeof(SVECTOR), sample_count, PathSamples,
+    path_sample_fields,
+    sizeof(SVECTOR),
+    sample_count,
+    PathSamples,
 };
 
 static const SnapshotField path_fields[] = {
@@ -64,30 +64,31 @@ static RegistryDirectory* class_directory(const void* object)
 static int path_type_valid(s32 type)
 {
     return type == PATHING_LOCATION_3D_ARRAY || type == PATHING_LOCATION_DIR_3D_ARRAY
-        || type == PATHING_LOCATION_ORIENT_3D_ARRAY || type == PATHING_LOCATION_ORIENT_SPEED_3D_ARRAY
-        || type == PATHING_LOCATION_SPEED_3D_ARRAY || type == PATHING_LOCATION_DIR_SPEED_3D_ARRAY;
+        || type == PATHING_LOCATION_ORIENT_3D_ARRAY
+        || type == PATHING_LOCATION_ORIENT_SPEED_3D_ARRAY || type == PATHING_LOCATION_SPEED_3D_ARRAY
+        || type == PATHING_LOCATION_DIR_SPEED_3D_ARRAY;
 }
 
 int WebSnapshotPathValid(const PathingInfo* path)
 {
-    return path->points.data && path_type_valid(path->resource_type)
-        && path->point_count >= 2 && path->segment_start_index >= 0
-        && path->segment_start_index < path->point_count && path->segment_end_index >= 0
-        && path->segment_end_index < path->point_count && path->sample_count >= 2
-        && path->sample_count <= PathSamples && path->world_samples && path->sample_index >= 0
-        && path->sample_index < path->sample_count - 1 && path->speed_per_frame >= 0
-        && path->speed_per_frame <= INT16_MAX
+    return path->points.data && path_type_valid(path->resource_type) && path->point_count >= 2
+        && path->segment_start_index >= 0 && path->segment_start_index < path->point_count
+        && path->segment_end_index >= 0 && path->segment_end_index < path->point_count
+        && path->sample_count >= 2 && path->sample_count <= PathSamples && path->world_samples
+        && path->sample_index >= 0 && path->sample_index < path->sample_count - 1
+        && path->speed_per_frame >= 0 && path->speed_per_frame <= INT16_MAX
         && path->speed_per_frame_squared == path->speed_per_frame * path->speed_per_frame
         && path->sample_progress_squared >= 0
-        && path->sample_progress_squared < path->sample_length_squared
-        && (u32)path->wrapped <= 1;
+        && path->sample_progress_squared < path->sample_length_squared && (u32)path->wrapped <= 1;
 }
 
 static RegistryFile* path_file(RegistryDirectory* directory, const PathingInfo* path)
 {
-    RegistryFile* file = RegGetFilePtrPS(directory, PathingPathKey);
+    RegistryFile* file = RegGetFilePtrPS(directory, "pathPoints");
     return file && RegGetFileArraySizeP(file) == path->point_count
-            && RegGetFileTypeP(file) == path->resource_type ? file : NULL;
+            && RegGetFileTypeP(file) == path->resource_type
+        ? file
+        : NULL;
 }
 
 static int find_resource(
@@ -135,14 +136,14 @@ RegistryDirectory* WebSnapshotPathRestore(
     RegistryDirectory* directory = class_directory(object);
     for (u16 i = 0; directory && i < binding.depth; ++i)
         directory = binding.indices[i] < RegGetNumberOfDirectoriesP(directory)
-            ? RegGetDirectoryPtrPN(directory, binding.indices[i]) : NULL;
+            ? RegGetDirectoryPtrPN(directory, binding.indices[i])
+            : NULL;
     RegistryFile* file = directory ? path_file(directory, path) : NULL;
     if (!file)
         return NULL;
     path->points.data = RegGetFileDataP(file);
     return WebSnapshotPathValid(path) ? directory : NULL;
 }
-
 
 int WebSnapshotPathBoxRestore(Box* box, Tm4WorldInfoBundle* world)
 {

@@ -1,12 +1,13 @@
-#include "src/modules/interact/private.h"
 #include "../overlays.h"
+#include "port/web/browser_report.h"
+#include "port/web/module_import.h"
+#include "port/web/net_match.h"
+#include "src/modules/interact/private.h"
 #include "tm4/main/game.h"
 #include "tm4/modules/bullet.h"
 #include "tm4/modules/camera.h"
 #include "tm4/modules/car.h"
 #include "tm4/modules/ray.h"
-#include "port/web/browser_report.h"
-#include "port/web/net_match.h"
 #include <string.h>
 void InteractCarWithAnim(Car*, Anim*);
 void InteractWeaponRayBeamWithWeaponBomb(RayBeam*, WeaponBomb*);
@@ -15,7 +16,7 @@ void WebInteractCarWithPowerup(void* car, void* object)
 {
     PowerupState* power = object;
     int was_active = power->position.fields.active;
-    Import_PowerupSparkleConstructor = PowerupSparkleConstructor;
+    Import_PowerupSparkleConstructor = WEB_MODULE("power", PowerupSparkleConstructor);
     InteractCarWithPowerup(car, power);
     if (was_active && !power->position.fields.active)
         WEB_BROWSER_REPORT({ tm4Port.pickupCollections = (tm4Port.pickupCollections || 0) + 1; });
@@ -36,7 +37,7 @@ static void car_teleporter(void* object, void* portal)
     Teleporter* teleporter = portal;
     InteractCarWithTeleporter(car, teleporter);
     Camera* camera = (WebNetMatchActive() ? WebNetSlotOccupied(car->controller_index)
-                                        : car->controller_index < GameInfo.player_count)
+                                          : car->controller_index < GameInfo.player_count)
         ? GameInfo.players[car->controller_index].camera
         : NULL;
     WEB_BROWSER_REPORT(
@@ -75,7 +76,8 @@ static void car_jumppad(void* object, void* pad)
     Tm4VectorXYZ* after = &car->particles[0].external_force;
     if (before.vx != after->vx || before.vy != after->vy || before.vz != after->vz) {
         if (car == GameInfo.players[0].car)
-            WEB_BROWSER_REPORT({ tm4Port.playerJumppadLaunches = (tm4Port.playerJumppadLaunches || 0) + 1; });
+            WEB_BROWSER_REPORT(
+                { tm4Port.playerJumppadLaunches = (tm4Port.playerJumppadLaunches || 0) + 1; });
         WEB_BROWSER_REPORT(
             {
                 tm4Port.jumppadLaunches = (tm4Port.jumppadLaunches || 0) + 1;
@@ -86,15 +88,19 @@ static void car_jumppad(void* object, void* pad)
 }
 OSWord WebInteractExport(const char* name)
 {
+    if (!strcmp(name, "WebInteractCarWithPowerup"))
+        return (OSWord)WebInteractCarWithPowerup;
     if (strstr(name, "WithDestroyable")) {
         OSRegisterDestroyable();
 #define INTERACTION(key, callback)                                                                 \
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(callback)
         INTERACTION("InteractBulletWithDestroyable", InteractBulletWithDestroyable);
-        INTERACTION("InteractWeaponProjectileWithDestroyable", InteractWeaponProjectileWithDestroyable);
+        INTERACTION(
+            "InteractWeaponProjectileWithDestroyable", InteractWeaponProjectileWithDestroyable);
         INTERACTION("InteractCarWithDestroyable", InteractCarWithDestroyable);
-        INTERACTION("InteractExplosionShockWaveWithDestroyable", InteractExplosionShockWaveWithDestroyable);
+        INTERACTION(
+            "InteractExplosionShockWaveWithDestroyable", InteractExplosionShockWaveWithDestroyable);
         INTERACTION("InteractWeaponRayBeamWithDestroyable", InteractWeaponRayBeamWithDestroyable);
 #undef INTERACTION
     }
@@ -108,7 +114,7 @@ OSWord WebInteractExport(const char* name)
     if (!strcmp(name, "InteractCarWithWeaponProjectile"))
         return (OSWord)InteractCarWithWeaponProjectile;
     if (!strcmp(name, "InteractCarWithAnim_fire")) {
-        Import_CarAiInteractedWithFire = CarAiInteractedWithFire;
+        Import_CarAiInteractedWithFire = WEB_MODULE("car", CarAiInteractedWithFire);
         return (OSWord)InteractCarWithAnim_fire;
     }
     if (!strcmp(name, "InteractWithFlammableTerrainPoly"))

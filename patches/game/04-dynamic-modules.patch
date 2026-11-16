@@ -1,0 +1,41 @@
+diff --git a/src/main/registry.c b/src/main/registry.c
+--- a/src/main/registry.c
++++ b/src/main/registry.c
+@@ -1124,6 +1124,7 @@
+ 
+ void RegRemoveReg(char* name)
+ {
++    extern void WebNativeModulesSweep(void);
+     s32 registration;
+     if (name != NULL) {
+         registration = RegistryFindRegistration(name);
+@@ -1137,6 +1138,7 @@
+         RegistryClearDirectory(RegistryRoot, -1);
+         RegistryFreeAllRegistrationNames();
+     }
++    WebNativeModulesSweep();
+ }
+ #endif
+ 
+--- a/src/modules/anim/resources.c
++++ b/src/modules/anim/resources.c
+@@ -90,6 +90,7 @@
+     AnimClassCount = 0;
+     AnimAliases = NULL;
+     AnimAliasCount = 0;
++    AnimInfoCount = 0;
+     names = AnimCollectUniqueNames(context, TextTex, NULL, &AnimInfoCount);
+     AnimInfos = MemAlloc(sizeof(*AnimInfos) * AnimInfoCount);
+     if (!AnimInfos)
+@@ -217,4 +218,10 @@
+         MemFree(AnimClasses);
+     if (AnimAliases)
+         MemFree(AnimAliases);
+-}
++    AnimInfos = NULL;
++    AnimInfoCount = 0;
++    AnimClasses = NULL;
++    AnimClassCount = 0;
++    AnimAliases = NULL;
++    AnimAliasCount = 0;
++}

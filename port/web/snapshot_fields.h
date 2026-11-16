@@ -85,7 +85,7 @@ typedef struct {
     int (*restore)(void* object, const void* record);
 } SnapshotConstructionBinding;
 
-typedef struct {
+typedef struct SnapshotType {
     const char* name;
     size_t size;
     const SnapshotField* fields;
@@ -93,8 +93,8 @@ typedef struct {
     u32 (*capture)(const void* payload, u8* output, u32 capacity);
     int (*restore)(void* payload, const u8* input, u32 length, WebSnapshotFindObject* find);
     u8 needs_template, baseline_removable, hash_fields;
-    const SnapshotCustomClass* custom;
-    Tm4ObjectCallback alternate_process;
+    SnapshotCustomClass (*custom)(void);
+    Tm4ObjectCallback (*alternate_process)(void);
     void (*release)(void* object);
 } SnapshotType;
 
@@ -102,13 +102,13 @@ typedef struct {
     { kind, offsetof(type, field), sizeof(((type*)0)->field), binding }
 #define SNAP_POD(type, field) SNAP_FIELD(SnapshotPod, type, field, NULL)
 #define SNAP_REF(type, field, class_name) SNAP_FIELD(SnapshotObjectRef, type, field, class_name)
-#define SNAP_WEAK_REF(type, field, class_name) \
+#define SNAP_WEAK_REF(type, field, class_name)                                                     \
     SNAP_FIELD(SnapshotWeakObjectRef, type, field, class_name)
 #define SNAP_REQUIRED(type, field, class_name)                                                     \
     SNAP_FIELD(SnapshotRequiredRef, type, field, class_name)
 #define SNAP_HEADER(type, field) SNAP_FIELD(SnapshotHeaderRef, type, field, NULL)
 #define SNAP_KEY(type, field, keys) SNAP_FIELD(SnapshotKey, type, field, keys)
-#define SNAP_RESOURCE_STRING(type, field, keys) \
+#define SNAP_RESOURCE_STRING(type, field, keys)                                                    \
     SNAP_FIELD(SnapshotResourceString, type, field, keys)
 #define SNAP_LOCAL_KEY(type, field) SNAP_FIELD(SnapshotTemplateKey, type, field, NULL)
 #define SNAP_NUMERIC_KEY(type, field, keys) SNAP_FIELD(SnapshotNumericKey, type, field, keys)

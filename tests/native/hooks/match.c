@@ -1,4 +1,5 @@
 #include "pending.h"
+#include "port/web/module_import.h"
 #include "port/web/net_match.h"
 #include "src/modules/car/private.h"
 #include "tm4/main/game.h"
@@ -11,10 +12,7 @@
 
 static int defeat_player_pending;
 
-EMSCRIPTEN_KEEPALIVE void WebTestDamagePlayer(void)
-{
-    defeat_player_pending = 1;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestDamagePlayer(void) { defeat_player_pending = 1; }
 
 static int defeat_opponents_pending;
 static int sparse_winner_pending;
@@ -29,10 +27,7 @@ EMSCRIPTEN_KEEPALIVE void WebTestDeathmatchRules(s32 wins, s32 limit, s32 advanc
     deathmatch_rules_pending = 1;
 }
 
-EMSCRIPTEN_KEEPALIVE void WebTestLoseDeathmatchRound(void)
-{
-    defeat_player_pending = 1;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestLoseDeathmatchRound(void) { defeat_player_pending = 1; }
 
 EMSCRIPTEN_KEEPALIVE int WebTestDefeatOtherSlots(s32 winner)
 {
@@ -42,10 +37,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestDefeatOtherSlots(s32 winner)
     return 1;
 }
 
-EMSCRIPTEN_KEEPALIVE void WebTestDefeatOpponents(void)
-{
-    defeat_opponents_pending = 1;
-}
+EMSCRIPTEN_KEEPALIVE void WebTestDefeatOpponents(void) { defeat_opponents_pending = 1; }
 
 static s32 test_hud_slot;
 static s32 test_hud_count;
@@ -76,8 +68,8 @@ void WebTestApplyMatchActions(void)
         Car* player = GameInfo.players[0].car;
         if (player) {
             player->shield_ticks = 0;
-            CarApplyParticipantDamage(player, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff,
-                NULL, "DEATHMATCH TEST");
+            WEB_MODULE("car", CarApplyParticipantDamage)
+            (player, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff, NULL, "DEATHMATCH TEST");
         }
     }
     if (sparse_winner_pending) {
@@ -88,8 +80,9 @@ void WebTestApplyMatchActions(void)
             if (car == winner || car->health <= 0)
                 continue;
             car->shield_ticks = 0;
-            CarApplyParticipantDamage(car, winner, WebParticipantObjectIdentity(winner), 0x7fffffff,
-                NULL, "SPARSE SLOT TEST");
+            WEB_MODULE("car", CarApplyParticipantDamage)
+            (car, winner, WebParticipantObjectIdentity(winner), 0x7fffffff, NULL,
+                "SPARSE SLOT TEST");
         }
     }
     if (!defeat_opponents_pending)
@@ -101,8 +94,8 @@ void WebTestApplyMatchActions(void)
         if (car->control_kind != CAR_CONTROL_ENEMY || car->health <= 0)
             continue;
         car->shield_ticks = 0;
-        CarApplyParticipantDamage(car, player, WebParticipantObjectIdentity(player), 0x7fffffff,
-            NULL, "PROGRESSION TEST");
+        WEB_MODULE("car", CarApplyParticipantDamage)
+        (car, player, WebParticipantObjectIdentity(player), 0x7fffffff, NULL, "PROGRESSION TEST");
     }
 }
 
@@ -184,7 +177,7 @@ void WebTestApplyCoopActions(void)
         for (s32 i = 0; i < GameInfo.car_count; ++i) {
             Car* car = GameInfo.cars[i];
             if (car->control_kind == CAR_CONTROL_ENEMY) {
-                CarAiProcessFunctionDisable(car);
+                WEB_MODULE("car", CarAiProcessFunctionDisable)(car);
                 memset(&car->controls, 0, sizeof(car->controls));
             }
         }
@@ -194,8 +187,8 @@ void WebTestApplyCoopActions(void)
         coop_damage_pending = -1;
         if (car) {
             car->shield_ticks = 0;
-            CarApplyParticipantDamage(
-                car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff, NULL, "COOP TEST");
+            WEB_MODULE("car", CarApplyParticipantDamage)
+            (car, NULL, WebParticipantObjectIdentity(NULL), 0x7fffffff, NULL, "COOP TEST");
         }
     }
 }

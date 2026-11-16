@@ -1,4 +1,5 @@
 #include "port/web/checkpoint_memory.h"
+#include "port/web/module_import.h"
 #include "port/web/net_match.h"
 #include "src/main/object/private.h"
 #include "src/modules/car/private.h"
@@ -49,7 +50,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestApproachPickup(void)
                 target.t[0] = power->position.fields.xyz.vx;
                 target.t[1] = power->position.fields.xyz.vy;
                 target.t[2] = power->position.fields.xyz.vz;
-                CarOrientWithMatrix(car, &target);
+                WEB_MODULE("car", CarOrientWithMatrix)(car, &target);
                 EM_ASM(
                     {
                         tm4Port.testPickup = ({
@@ -84,16 +85,16 @@ EMSCRIPTEN_KEEPALIVE void WebTestLeavePickup(void)
 {
     Car* car = GameInfo.players[0].car;
     if (car)
-        CarOrientWithMatrix(car, &test_car_transform);
+        WEB_MODULE("car", CarOrientWithMatrix)(car, &test_car_transform);
 }
 
 EMSCRIPTEN_KEEPALIVE s32 WebTestSupplyWeapon(s32 index)
 {
     Car* car = GameInfo.players[0].car;
-    if (!car || index < 0 || index >= CarWeaponCount)
+    if (!car || index < 0 || index >= WEB_MODULE("car", CarWeaponCount))
         return 0;
     CarWeaponInstance* weapon = &car->weapons[index];
-    AddInventoryToCar(car, weapon->descriptor->name, 2);
+    WEB_MODULE("car", AddInventoryToCar)(car, weapon->descriptor->name, 2);
     return weapon->amount;
 }
 
@@ -102,7 +103,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestSupplyProximity(void)
     Car* car = GameInfo.players[0].car;
     if (!car)
         return 0;
-    AddInventoryToCar(car, "Proximity", 2);
+    WEB_MODULE("car", AddInventoryToCar)(car, "Proximity", 2);
     for (s32 i = 0; i < 20; ++i) {
         CarWeaponInstance* weapon = &car->weapons[i];
         if (weapon->descriptor->name && !strcasecmp(weapon->descriptor->name, "Proximity"))
@@ -123,7 +124,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceWeaponTarget(s32 distance)
         Car* car = GameInfo.cars[i];
         if (car == player)
             continue;
-        CarAiProcessFunctionDisable(car);
+        WEB_MODULE("car", CarAiProcessFunctionDisable)(car);
         memset(&car->controls, 0, sizeof(car->controls));
         if (!test_weapon_target)
             test_weapon_target = car;
@@ -133,7 +134,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceWeaponTarget(s32 distance)
     MATRIX target = player->transform;
     for (s32 i = 0; i < 3; ++i)
         target.t[i] += (player->transform.m[i][2] * distance) >> 12;
-    CarOrientWithMatrix(test_weapon_target, &target);
+    WEB_MODULE("car", CarOrientWithMatrix)(test_weapon_target, &target);
     test_weapon_target->shield_ticks = 0;
     return test_weapon_target->health;
 }
@@ -171,7 +172,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerProjectileTarget(
             placement.t[0] = bullet->current_world.vx - target->collision_box.center.vx;
             placement.t[1] = bullet->current_world.vy - target->collision_box.center.vy;
             placement.t[2] = bullet->current_world.vz - target->collision_box.center.vz;
-            CarOrientWithMatrix(target, &placement);
+            WEB_MODULE("car", CarOrientWithMatrix)(target, &placement);
             ObjectSetPosition(
                 target, target->position.vx, target->position.vy, target->position.vz);
             return 1;
@@ -209,7 +210,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestPlacePlayerTarget(
                                  + shooter->transform.m[axis][1] * offset[1]
                                  + shooter->transform.m[axis][2] * offset[2])
             >> 12;
-    CarOrientWithMatrix(target, &placement);
+    WEB_MODULE("car", CarOrientWithMatrix)(target, &placement);
     ObjectSetPosition(target, target->position.vx, target->position.vy, target->position.vz);
     target->shield_ticks = 0;
     return 1;
@@ -321,7 +322,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceRadialWeaponTarget(s32 distance)
         MATRIX placement = player->transform;
         placement.t[0] += dx;
         placement.t[2] += dz;
-        CarOrientWithMatrix(test_weapon_target, &placement);
+        WEB_MODULE("car", CarOrientWithMatrix)(test_weapon_target, &placement);
         return health;
     }
     return -1;
@@ -341,8 +342,8 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceEnergyTarget(s32 rear)
         direction.vx = -direction.vx;
         direction.vz = -direction.vz;
     }
-    BuildMatrix(&placement, &direction);
-    CarOrientWithMatrix(player, &placement);
+    WEB_MODULE("car", BuildMatrix)(&placement, &direction);
+    WEB_MODULE("car", CarOrientWithMatrix)(player, &placement);
     return health;
 }
 
@@ -369,7 +370,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestIgniteGround(void)
         return 0;
     SVECTOR point;
     CopyVectorToShortVectorRoundedQ12(&point, &hit.position);
-    InteractWithFlammableTerrainPoly(hit.polygon, &point);
+    WEB_MODULE("interact", InteractWithFlammableTerrainPoly)(hit.polygon, &point);
     return 1;
 }
 
@@ -459,9 +460,9 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPrepareLevelLightning(void)
         return -2;
     for (s32 i = 0; i < 20; ++i) {
         CarWeaponInstance* weapon = &player->weapons[i];
-        if (weapon->descriptor->launch != CarLaunchLightning)
+        if (weapon->descriptor->launch != WEB_MODULE("car", CarLaunchLightning))
             continue;
-        AddInventoryToCar(player, weapon->descriptor->name, 2);
+        WEB_MODULE("car", AddInventoryToCar)(player, weapon->descriptor->name, 2);
         if (!WebTestPlaceWeaponTarget(500))
             return -4;
         MATRIX location = test_weapon_target->transform;
@@ -480,7 +481,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPrepareLevelLightning(void)
                     location.t[0] = x;
                     location.t[1] = y;
                     location.t[2] = z;
-                    CarOrientWithMatrix(test_weapon_target, &location);
+                    WEB_MODULE("car", CarOrientWithMatrix)(test_weapon_target, &location);
                     EM_ASM({ tm4Port.testLightningTarget = ([ $0, $1, $2 ]); }, x, y, z);
                     return i;
                 }
@@ -510,7 +511,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceAugerTarget(void)
             += (player->transform.m[axis][0] * offset[0] + player->transform.m[axis][1] * offset[1]
                    + player->transform.m[axis][2] * offset[2])
             >> 12;
-    CarOrientWithMatrix(target, &placement);
+    WEB_MODULE("car", CarOrientWithMatrix)(target, &placement);
     return health;
 }
 
@@ -631,7 +632,7 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadRicochet(void)
     EM_ASM({ tm4Port.ricochet = null; });
     for (s32 list = 0; list < OBJECT_LIST_COUNT; ++list) {
         for (Tm4ObjectHeader* header = ObjectLists[list].first; header; header = header->next) {
-            if (strcmp(header->name, CarTextWeaponProjectile))
+            if (strcmp(header->name, WEB_MODULE("car", CarTextWeaponProjectile)))
                 continue;
             WeaponProjectile* projectile = ObjectGetPayload(header);
             if (projectile->owner != GameInfo.players[0].car
