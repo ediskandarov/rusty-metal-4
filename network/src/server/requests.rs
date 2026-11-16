@@ -257,12 +257,14 @@ impl Match {
                     send(links, entity, &Message::PredictionPrepare(prepared));
                     return;
                 }
+                // A committed clock can still be ahead of tick zero. Reconnect
+                // through snapshot recovery without restarting the shared timeline.
                 let session = self.session.as_ref().filter(|session| {
                     session.portable
                         && session.compatibility == compatibility
                         && self.started
                         && !self.ended
-                        && self.tick > 0
+                        && self.prediction.anchor.is_some()
                 });
                 if let (Some(slot), Some(session)) = (requested, session) {
                     if self.controls[slot].connection.is_some() {

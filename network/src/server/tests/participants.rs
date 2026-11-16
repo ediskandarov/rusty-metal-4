@@ -1890,6 +1890,58 @@ fn tournament_reconnect_during_loading_keeps_tick_zero_and_campaign() {
 }
 
 #[test]
+fn tournament_reconnect_after_clock_commit_accepts_both_players_before_first_tick() {
+    let mut world = World::new();
+    let old = [connection(&mut world, 1), connection(&mut world, 2)];
+    let resumed = [connection(&mut world, 3), connection(&mut world, 4)];
+    let mut game = game();
+    game.mode = game_protocol::MatchMode::Tournament;
+    game.session.as_mut().unwrap().mode = game_protocol::MatchMode::Tournament;
+    game.room_only = true;
+    game.tick = 0;
+    game.last_state = None;
+    let anchor = Tick(200);
+    game.prediction.anchor = Some(anchor);
+    game.participants.freeze();
+    let tokens = ["ab".repeat(32), "cd".repeat(32)];
+    game.participants.at_slot_mut(0).credential = Some(tokens[0].clone());
+    game.participants.at_slot_mut(1).room_credential = Some(tokens[1].clone());
+    let identities = [game.participants.binding(0), game.participants.binding(1)];
+    let compatibility = game.compatibility.clone().unwrap();
+    for (slot, &entity) in old.iter().enumerate() {
+        game.controls[slot].connection = Some(entity);
+        game.controls[slot].ready = true;
+        game.controls[slot].initial_digest = game.initial_digest;
+    }
+    world.insert_resource(game);
+    world
+        .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
+            for (slot, entity) in old.into_iter().enumerate() {
+                detach_connection(&mut game, slot, entity, &mut commands);
+            }
+        })
+        .unwrap();
+    for (slot, &entity) in resumed.iter().enumerate() {
+        request(
+            &mut world,
+            entity,
+            Request::Resume {
+                token: tokens[slot].clone(),
+                compatibility: compatibility.clone(),
+            },
+        );
+        let game = world.resource::<Match>();
+        assert_eq!(game.controls[slot].connection, Some(entity));
+        assert!(game.controls[slot].resume.is_some());
+        assert_eq!(game.participants.binding(slot), identities[slot]);
+        assert_eq!(game.controls[slot].initial_digest, game.initial_digest);
+        assert_eq!(game.prediction.anchor, Some(anchor));
+        assert_eq!(game.tick, 0);
+        assert!(!game.ended);
+    }
+}
+
+#[test]
 fn tournament_transport_leave_does_not_schedule_membership_change() {
     let mut world = World::new();
     let owner = connection(&mut world, 1);
