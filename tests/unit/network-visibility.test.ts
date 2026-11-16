@@ -840,7 +840,7 @@ test("cross-join async startup cannot erase the replacement match", async () => 
   });
   loadingConnection.onmessage({ type: "welcome", slot: 0 });
   loadingConnection.onmessage({ type: "prediction_prepare", ...start });
-  stop();
+  stop!();
   stop = undefined;
   pending = false;
   stop = await joinMatch(
@@ -849,7 +849,7 @@ test("cross-join async startup cannot erase the replacement match", async () => 
     () => {},
     () => {},
   );
-  const replacement = connections.at(-1);
+  const replacement = connections.at(-1)!;
   replacement.onopen();
   replacement.onmessage({ type: "welcome", slot: 0 });
   replacement.onmessage({ type: "prediction_prepare", ...start });
@@ -881,7 +881,7 @@ test("reconnect while prior async load drains keeps snapshot messages behind new
   loadingConnection.onmessage({ type: "resume_prepare", ...start });
   loadingConnection.onerror(new NetworkConnectionError("load-time disconnect"));
   await Bun.sleep(1100);
-  const replacement = connections.at(-1);
+  const replacement = connections.at(-1)!;
   expect(replacement).not.toBe(loadingConnection);
   replacement.onopen();
   beginSnapshot(replacement)();
