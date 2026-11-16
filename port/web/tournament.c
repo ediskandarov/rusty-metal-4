@@ -3,8 +3,10 @@
 #include "participant.h"
 #include "tm4/main/game.h"
 #include "tm4/main/main.h"
+#include "tm4/main/pad.h"
 #include "tm4/main/tournament.h"
 #include <emscripten.h>
+#include <libetc.h>
 #include <string.h>
 
 void TournamentAdvanceWorld(Tm4GameInfo* game);
@@ -78,17 +80,30 @@ int WebTournamentResultValid(WebMatchResult value, u32 tick, u32 slots)
             || (value.reasons == 8 && !value.winners));
 }
 
+void WebTournamentProcessMode(void)
+{
+    /* Original timers and presentation run before the authority owns teardown. */
+    if (!GameInfo.world_won && !GameInfo.tournament_won && !GameInfo.world_lost)
+        GameProcessMode();
+}
+
 void WebTournamentCompleteTick(void)
 {
     if (result.reasons)
         return;
-    /* Original TournamentProcess decides the outcome. Stop at that boundary before
-     * its offline menu/world transition; campaign continuation belongs to the server. */
-    if (GameInfo.world_won || GameInfo.tournament_won)
-        result = (WebMatchResult) { MainFrameCount, GameInfo.tournament_won ? 4 : 16,
-            WebNetSlotMask() };
-    else if (GameInfo.world_lost)
+    if (!GameInfo.tournament_accept_input)
+        return;
+    if (GameInfo.world_lost) {
         result = (WebMatchResult) { MainFrameCount, 8, 0 };
+        return;
+    }
+    if (GameInfo.world_won || GameInfo.tournament_won)
+        for (s32 player = 0; player < GameInfo.player_car_count; ++player)
+            if (PadJpad[player].pressed_buttons & PADRdown) {
+                result = (WebMatchResult) { MainFrameCount, GameInfo.tournament_won ? 4 : 16,
+                    WebNetSlotMask() };
+                return;
+            }
 }
 
 EMSCRIPTEN_KEEPALIVE const WebTournamentCarry* WebTournamentNextStage(void)

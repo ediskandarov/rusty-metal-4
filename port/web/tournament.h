@@ -41,5 +41,6 @@ void WebTournamentRestore(WebTournamentState state);
 WebMatchResult WebTournamentResult(void);
 void WebTournamentRestoreResult(WebMatchResult result);
 int WebTournamentResultValid(WebMatchResult result, u32 tick, u32 slots);
+void WebTournamentProcessMode(void);
 void WebTournamentCompleteTick(void);
 #endif

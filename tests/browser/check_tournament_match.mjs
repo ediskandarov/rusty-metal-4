@@ -77,7 +77,11 @@ try {
     await frame.evaluate((waves) => {
       const step = Module._WebNetQueueTick;
       Module._WebNetQueueTick = (tick) => {
-        if (waves.includes(tick)) Module._WebTestDefeatOpponents();
+        if (globalThis.tournamentSecondCampaign) {
+          if ([120, 360, 600, 840, 1080].includes(tick))
+            for (let slot = 0; slot < 2; ++slot)
+              if (Module._WebTestCarHandle(slot)) Module._WebTestKillParticipant(slot);
+        } else if (waves.includes(tick)) Module._WebTestDefeatOpponents();
         return step(tick);
       };
     }, waves);
@@ -151,42 +155,210 @@ try {
   assert.deepEqual(errors, []);
   await host.screenshot({ path: "build/checks/tournament-match.png", fullPage: true });
   console.log("PASS tournament reconnect restores the same participant without car selection");
-  for (const frame of [frames[0], recovered])
+  frames[1] = recovered;
+  const worlds = [
+    "Construction Yard",
+    "Neon City",
+    "Road Rage",
+    "The Bedroom",
+    "Amazonia 3000 B.C.",
+    "The Oil Rig",
+    "Minion's Maze",
+    "The Carnival",
+  ];
+  const markers = await Promise.all(
+    frames.map((frame) =>
+      frame.evaluate(() => {
+        globalThis.tournamentMarker = crypto.randomUUID();
+        globalThis.tournamentModule = Module;
+        return globalThis.tournamentMarker;
+      }),
+    ),
+  );
+  const initialMatch = (await view()).match.id;
+  for (const [stage, world] of worlds.entries()) {
+    for (const frame of frames)
+      await frame.waitForFunction(
+        (world) => {
+          Module._WebTestReadMatchState();
+          return tm4Port.match.world === world && tm4Port.netConfirmedTick > 60;
+        },
+        world,
+        { timeout: 120000 },
+      );
+    const playing = await view();
+    assert.equal(playing.match.stage, "playing");
+    assert.equal(playing.result, null);
+    assert.equal(playing.match.id, initialMatch);
+    assert.deepEqual(
+      playing.participants.map(({ id, car }) => ({ id, car })),
+      participants,
+    );
+    if (stage > 0) {
+      await frames[0].waitForFunction(
+        () => {
+          Module._WebTestReadMatchState();
+          return !!tm4Port.match.bossesSpawned;
+        },
+        null,
+        { timeout: 60000 },
+      );
+      await frames[0]
+        .locator("canvas")
+        .screenshot({ path: "build/checks/tournament-boss-" + (stage + 1) + ".png" });
+    }
+    for (const frame of frames)
+      await frame.waitForFunction(
+        () => {
+          Module._WebTestReadMatchState();
+          return tm4Port.match.acceptsInput && (tm4Port.match.won || tm4Port.match.tournamentWon);
+        },
+        null,
+        { timeout: 120000 },
+      );
+    assert.equal(
+      await frames[0].evaluate(() => !!tm4Port.match.tournamentWon),
+      stage === worlds.length - 1,
+    );
+    assert.equal(
+      await frames[0].evaluate(() => tm4Port.netMatch.completion.reasons),
+      0,
+      "original victory presentation waits for Continue",
+    );
+    await frames[0].waitForFunction(() => tm4Port.netMatch.tick % 30 < 10);
+    await frames[0].locator("canvas").screenshot({
+      path: "build/checks/tournament-stage-" + (stage + 1) + ".png",
+    });
+    console.log("PASS original tournament stage", stage + 1, world);
+    // Pause an actual side-module instantiation while replacing the transport.
+    if (stage === 0)
+      await frames[1].evaluate(() => {
+        const instantiate = WebAssembly.instantiate;
+        WebAssembly.instantiate = (...args) => {
+          WebAssembly.instantiate = instantiate;
+          globalThis.tournamentOverlayLoadStarted = true;
+          return Promise.resolve(instantiate(...args)).then(async (instance) => {
+            await new Promise((resolve) => setTimeout(resolve, 2500));
+            return instance;
+          });
+        };
+      });
+    await host.bringToFront();
+    await frames[0].locator("canvas").focus();
+    await host.keyboard.press("KeyX", { delay: 150 });
+    if (stage === 0) {
+      await frames[1].waitForFunction(() => globalThis.tournamentOverlayLoadStarted, null, {
+        timeout: 15000,
+      });
+      await guest.locator("#reconnect-match").click();
+      console.log("Reconnecting during Neon City overlay instantiation");
+    }
+  }
+  const finished = await eventually(
+    view,
+    (room) => room.match === null && room.result?.completion.reasons === 4,
+    60000,
+  );
+  assert.equal(finished.result.modeId, "tournament");
+  assert.equal(finished.result.completion.winners, 3);
+  assert(finished.result.participants.every((p) => p.winner));
+  assert.equal(native.starts, 1);
+  assert.equal(native.stops, 1);
+  assert.equal(native.active, 0);
+  assert.deepEqual(
+    finished.participants.map(({ id, car }) => ({ id, car })),
+    participants,
+  );
+  for (const [index, page] of pages.entries()) {
+    await page.locator("#results-panel").waitFor({ state: "visible" });
+    assert.match(await page.locator("#results-reason").innerText(), /Tournament won/);
+    assert.equal(await frames[index].evaluate(() => globalThis.tournamentMarker), markers[index]);
+    assert(await frames[index].evaluate(() => globalThis.tournamentModule === Module));
+    assert.equal(
+      await frames[index].evaluate(() => !!tm4Port.movie?.active),
+      false,
+      "original two-player victory does not play single-player ending movies",
+    );
+    await page.locator("#return-to-room").click();
+  }
+  console.log(
+    "PASS all eight maps, bosses, original co-op victory, room result and retained runtimes",
+  );
+  // A second tournament must require fresh native confirmation in the same pages.
+  assert((await view()).participants.every((p) => !p.ready));
+  await Bun.write(
+    fixture,
+    JSON.stringify({
+      actions: [120, 360, 600, 840, 1080].flatMap((tick) =>
+        [0, 1].map((slot) => ({ tick, name: "kill", args: [slot] })),
+      ),
+    }),
+  );
+  for (const frame of frames)
+    await frame.evaluate(() => {
+      globalThis.tournamentSecondCampaign = true;
+    });
+  for (const [index, page] of pages.entries()) {
+    const frame = frames[index];
+    await page.bringToFront();
+    await frame.waitForFunction(() => tm4Port.screen === "carsel" && tm4Port.menuReady);
+    assert.equal(
+      await frame.evaluate(() => Module.ccall("WebTournamentSelectedCar", "string", [], [])),
+      "",
+    );
+    await frame.locator("canvas").focus();
+    await page.keyboard.press("KeyX", { delay: 150 });
+  }
+  await eventually(view, (room) => room.participants.every((p) => p.ready));
+  await host.locator("#prepare-match").click();
+  await host.waitForFunction(() => !document.getElementById("start-match").disabled, null, {
+    timeout: 120000,
+  });
+  await host.locator("#start-match").click();
+  for (const frame of frames)
     await frame.waitForFunction(
       () => {
         Module._WebTestReadMatchState();
-        return tm4Port.match.world === "Neon City" && tm4Port.netConfirmedTick > 120;
+        return tm4Port.match.world === "Construction Yard" && tm4Port.netConfirmedTick > 60;
       },
       null,
       { timeout: 120000 },
     );
-  const continuing = await view();
-  assert.equal(continuing.match.stage, "playing");
-  assert.equal(continuing.result, null);
-  assert.deepEqual(
-    continuing.participants.map(({ id, car }) => ({ id, car })),
-    participants,
-  );
-  assert.equal(continuing.match.world, "Neon City");
-  assert.equal(native.starts, 1, "Next map reuses the prepared server");
-  for (const frame of [frames[0], recovered]) {
-    assert.equal(await frame.evaluate(() => tm4Port.menuReady), false);
+  const second = await view();
+  assert.notEqual(second.match.id, initialMatch);
+  assert.equal(second.result, null);
+  for (const [index, frame] of frames.entries()) {
+    assert.equal(await frame.evaluate(() => globalThis.tournamentMarker), markers[index]);
+    assert.equal(await frame.evaluate(() => tm4Port.match.progress), 0);
+    assert.equal(await frame.evaluate(() => tm4Port.match.lives), 4);
     assert.equal(await frame.evaluate(() => tm4Port.netMatch.unsupported), null);
   }
-  await guest.reload();
-  const nextMapRecovery = await load(guest);
-  await nextMapRecovery.waitForFunction(
-    () => {
-      Module._WebTestReadMatchState();
-      return tm4Port.match.world === "Neon City" && tm4Port.netConfirmedTick > 160;
-    },
-    null,
-    { timeout: 120000 },
+  assert.equal(native.starts, 2);
+  for (const frame of frames)
+    await frame.waitForFunction(
+      () => {
+        Module._WebTestReadMatchState();
+        return tm4Port.match.lost && !tm4Port.netMatch.completion.reasons;
+      },
+      null,
+      { timeout: 60000 },
+    );
+  const defeated = await eventually(
+    view,
+    (room) => room.match === null && room.result?.completion.reasons === 8,
+    30000,
   );
-  assert.equal(await nextMapRecovery.evaluate(() => tm4Port.netViewSlot), 1);
+  assert.equal(defeated.result.completion.winners, 0);
+  assert(defeated.result.participants.every((p) => !p.winner && p.score.deaths >= 5));
+  assert.equal(native.stops, 2);
+  assert.equal(native.active, 0);
+  for (const page of pages) {
+    await page.locator("#results-panel").waitFor({ state: "visible" });
+    assert.match(await page.locator("#results-reason").innerText(), /Tournament lost/);
+  }
   assert.deepEqual(errors, []);
   console.log(
-    "PASS victory advances both players to Neon City without menu, reupload or server restart; reconnect restores the next map",
+    "PASS another tournament starts without reloading pages, disc, cars or campaign state",
   );
 } catch (error) {
   console.error("FAIL", error, native.log);

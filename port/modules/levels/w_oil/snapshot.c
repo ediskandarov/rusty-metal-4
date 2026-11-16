@@ -45,7 +45,14 @@ static int restore_helicopter(
         && WebSnapshotPathBoxRestore(&helicopter->box, HelicopterWorldInfo);
 }
 
+/* OilAiProcess reads GameInfo only; it removes itself when bosses become active. */
+static const SnapshotField oil_ai_fields[] = {
+    { SnapshotTransientField, 0, sizeof(s32), NULL },
+    { 0 },
+};
+
 const SnapshotType Tm4ModuleSnapshotTypes[] = {
+    { "oilAi", sizeof(s32), oil_ai_fields, .baseline_removable = 1, .hash_fields = 1 },
     { "helicopter", sizeof(Helicopter), helicopter_fields, helicopter_valid, capture_helicopter,
         restore_helicopter, .baseline_removable = 1, .hash_fields = 1,
         .release = release_helicopter },

@@ -134,12 +134,16 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadMatchState(void)
                 losses : $2,
                 limit : $3,
                 limitIsWins : $4,
-                worldSelection : $5
+                worldSelection : $5,
+                bossesSpawned : $6,
+                bossesActive : $7,
+                bossCount : $8
             });
         },
         GameInfo.deathmatch_accept_input, GameInfo.deathmatch_next_mode, GameInfo.players[0].losses,
         GameInfo.deathmatch_limit, GameInfo.deathmatch_limit_is_wins,
-        GameInfo.deathmatch_world_selection);
+        GameInfo.deathmatch_world_selection, GameInfo.bosses_spawned, GameInfo.bosses_active,
+        GameInfo.boss_count);
     EM_ASM(
         { Object.assign(tm4Port.match, { winner : $0, players : [] }); },
         GameInfo.deathmatch_winner);
@@ -155,7 +159,7 @@ static s32 coop_damage_pending = -1;
 
 EMSCRIPTEN_KEEPALIVE s32 WebTestCoopSetup(s32 shared)
 {
-    if (GameInfo.player_count != 2)
+    if (GameInfo.player_count != 2 && !(WebNetTournament() && GameInfo.player_car_count == 2))
         return 0;
     coop_rules_pending = !!shared;
     return 1;
@@ -214,4 +218,20 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadCoop(void)
             car != NULL, GameInfo.players[i].lives, GameInfo.players[i].eliminated, camera != NULL,
             car && camera && camera->object == car);
     }
+}
+
+/* Read-only rules probe; tests keep original damage, timers and mode logic. */
+EMSCRIPTEN_KEEPALIVE const s32* WebTestTournamentState(void)
+{
+    static s32 state[21];
+    const s32 values[] = { GameInfo.computer_count, GameInfo.initial_computer_count,
+        GameInfo.reinforcement_threshold, GameInfo.boss_count, GameInfo.reinforcements_spawned,
+        GameInfo.bosses_spawned, GameInfo.bosses_active, GameInfo.active_computer_count,
+        GameInfo.tournament_progress, GameInfo.games_completed, GameInfo.shared_lives,
+        GameInfo.players[0].lives, GameInfo.players[1].lives, GameInfo.players[0].eliminated,
+        GameInfo.players[1].eliminated, GameInfo.active_player_count,
+        GameInfo.intro_character != NULL, GameInfo.world_won, GameInfo.tournament_won,
+        GameInfo.world_lost, GameInfo.tournament_accept_input };
+    memcpy(state, values, sizeof(state));
+    return state;
 }

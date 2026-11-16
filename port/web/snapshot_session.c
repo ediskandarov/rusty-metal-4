@@ -77,7 +77,8 @@ void WebCheckpointSetRandomState(u32 random, u32 effects);
 static int supported_session(void)
 {
     const s32 count = GameInfo.player_car_count;
-    if ((!GameInfo.active && !WebMatchCapture().reasons) || GameInfo.mode != GAME_MODE_PLAY
+    if ((!GameInfo.active && !WebMatchCapture().reasons
+            && !(WebTournamentActive() && GameInfo.world_lost)) || GameInfo.mode != GAME_MODE_PLAY
         || GameInfo.next_mode || GameInfo.pause_player || count < 0 || count > MaxPlayers
         || (!WebTournamentActive()
             && (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count))
@@ -331,12 +332,13 @@ int WebSnapshotSessionPrepare(const u8* input, u32 length)
         || record.frag_limit != WebNetFfaFragLimit()
         || !WebMatchResultValid(
             record.completion, record.tick, record.slot_mask, &record.participants)
-        || (WebTournamentActive()
-            && record.completion.reasons
-                != (record.tournament.tournament_won   ? 4u
-                        : record.tournament.world_won  ? 16u
-                        : record.tournament.world_lost ? 8u
-                                                       : 0u))
+        || (WebTournamentActive() && record.completion.reasons
+            && (!record.tournament.tournament_accept_input
+                || record.completion.reasons
+                    != (record.tournament.tournament_won   ? 4u
+                            : record.tournament.world_won  ? 16u
+                            : record.tournament.world_lost ? 8u
+                                                           : 0u)))
         || (WebFfaActive() && !!record.completion.reasons != !!record.deathmatch_finished)
         || memcmp(initial, record.initial_participants, sizeof(initial)))
         return 0;

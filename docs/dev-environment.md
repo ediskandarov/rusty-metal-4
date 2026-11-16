@@ -278,6 +278,13 @@ tests/simulation/replay-membership-journal.mjs <journal>` checks every recorded
   The `check_ffa.mjs` variant adds repeated deaths and rollback/recovery across automatic
   respawn. It writes `build/room-tests/ffa.tm4j`; replay it with
   `TM4_TEST_ACTIONS=build/room-tests/ffa-actions.json` and the same simulation inputs.
+- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_tournament_match.mjs`: two original
+  engine car menus, all eight campaign maps and bosses, original Continue presentation,
+  reconnect during combat and overlay loading, final co-op results, then a second Tournament
+  in the same loaded pages through life exhaustion and GAME OVER. Uses the matching diagnostic
+  bundle, native binary and website build described above. Native diagnostic checks under
+  `simulator::tests::tournament` cover complete map replay, local rollback and portable recovery
+  around reinforcements, boss delay/activation, victory, shared-life borrowing and elimination.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent
   admission, creation retries, permissions, reconnect/hibernation, host succession,
   directory outages and complete empty-room cleanup. Allow about 90 seconds.

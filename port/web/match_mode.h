@@ -8,6 +8,7 @@ typedef struct WebMatchResult {
 struct WebParticipantState;
 WebMatchResult WebMatchCapture(void);
 void WebMatchRestore(WebMatchResult result);
+void WebMatchProcessMode(void);
 void WebMatchCompleteTick(void);
 int WebMatchResultValid(
     WebMatchResult result, u32 tick, u32 slots, const struct WebParticipantState* participants);

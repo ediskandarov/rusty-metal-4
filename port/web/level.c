@@ -385,7 +385,7 @@ void WebLevelNetworkStep(void)
     WebCheckpointArenaSelect(checkpoint_arena);
     if (!WebMatchCapture().reasons) {
         process_level_step();
-        GameProcessMode();
+        WebMatchProcessMode();
     }
     WebCheckpointArenaSelect(0);
     if (rendered)

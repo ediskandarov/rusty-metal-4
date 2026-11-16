@@ -63,12 +63,12 @@ export const tournament: RoomMode = {
     const won = result.completion.reasons === 4;
     return {
       summary: won
-        ? "Tournament battle won · Team: " +
+        ? "Tournament won · Team: " +
           result.participants
             .filter((row) => row.winner)
             .map((row) => row.name)
             .join(", ")
-        : "Tournament battle lost",
+        : "Tournament lost",
       rows: [...result.participants]
         .sort((a, b) => a.identity.slot - b.identity.slot)
         .map((participant) => ({ participant, outcome: won ? "Victory" : "Defeat" })),

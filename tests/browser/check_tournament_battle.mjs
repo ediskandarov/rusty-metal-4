@@ -13,16 +13,17 @@ try {
     ).href,
   );
   await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const check = (v, msg) => {
       if (!v) throw Error(msg);
     };
     check(
-      Module.ccall(
+      await Module.ccall(
         "WebNetStartTournament",
         "number",
         ["number", "number", "number", "number", "number", "number", "string", "string"],
         [8, 3, 0, 12345, -1, 1, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
+        { async: true },
       ),
       "start",
     );
@@ -70,14 +71,15 @@ try {
     ).href,
   );
   await fresh.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
-  const recovered = await fresh.evaluate((portable) => {
+  const recovered = await fresh.evaluate(async (portable) => {
     if (
-      !Module.ccall(
+      !(await Module.ccall(
         "WebNetStartTournament",
         "number",
         ["number", "number", "number", "number", "number", "number", "string", "string"],
         [8, 3, 0, 12345, -1, 1, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
-      )
+        { async: true },
+      ))
     )
       throw Error("fresh start");
     tm4Port.portableCheckpoint = Uint8Array.from(portable);
@@ -102,13 +104,13 @@ try {
     }),
   );
 
-  const ending = await page.evaluate(() => {
+  const ending = await page.evaluate(async () => {
     const check = (value, message) => {
       if (!value) throw Error(message);
     };
     const step = () => {
       const tick = tm4Port.netMatch.tick;
-      check(Module._WebNetSetInput(tick, 0, 0, 0, 0), "ending input0");
+      check(Module._WebNetSetInput(tick, 0, tick % 30 === 0 ? 0x40 : 0, 0, 0), "ending input0");
       check(Module._WebNetSetInput(tick, 1, 0, 0, 0), "ending input1");
       check(Module._WebNetQueueTick(tick), "ending step");
       check(!tm4Port.netMatch.unsupported, "ending unsupported: " + tm4Port.netMatch.unsupported);
@@ -147,14 +149,15 @@ try {
   });
   await fresh.reload();
   await fresh.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
-  const finalState = await fresh.evaluate((portable) => {
+  const finalState = await fresh.evaluate(async (portable) => {
     if (
-      !Module.ccall(
+      !(await Module.ccall(
         "WebNetStartTournament",
         "number",
         ["number", "number", "number", "number", "number", "number", "string", "string"],
         [8, 3, 0, 12345, -1, 1, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
-      )
+        { async: true },
+      ))
     )
       throw Error("terminal start");
     tm4Port.portableCheckpoint = Uint8Array.from(portable);
@@ -172,16 +175,17 @@ try {
   console.log("PASS original team victory, rollback and portable terminal state");
   await fresh.reload();
   await fresh.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
-  const defeat = await fresh.evaluate(() => {
+  const defeat = await fresh.evaluate(async () => {
     const check = (v, m) => {
       if (!v) throw Error(m);
     };
     check(
-      Module.ccall(
+      await Module.ccall(
         "WebNetStartTournament",
         "number",
         ["number", "number", "number", "number", "number", "number", "string", "string"],
         [8, 3, 0, 12345, -1, 1, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
+        { async: true },
       ),
       "defeat start",
     );
@@ -231,12 +235,13 @@ try {
   });
   await page.reload();
   await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
-  const defeatRestored = await page.evaluate((portable) => {
-    Module.ccall(
+  const defeatRestored = await page.evaluate(async (portable) => {
+    await Module.ccall(
       "WebNetStartTournament",
       "number",
       ["number", "number", "number", "number", "number", "number", "string", "string"],
       [8, 3, 0, 12345, -1, 1, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
+      { async: true },
     );
     tm4Port.portableCheckpoint = Uint8Array.from(portable);
     if (!Module._WebNetBeginPortableReplay())
@@ -252,6 +257,50 @@ try {
   assert.deepEqual(defeatRestored.completion, defeat.completion);
   console.log("PASS shared lives, exhaustion, original defeat, rollback and portable recovery");
 
+  // The same original GAME OVER renderer must also work with a visible network view.
+  await page.goto(
+    new URL("?session=1&checkpoint=1", process.env.TM4_WEB_URL ?? "http://127.0.0.1:8080/").href,
+  );
+  await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
+  await page.evaluate(async () => {
+    if (
+      !(await Module.ccall(
+        "WebNetStartTournament",
+        "number",
+        ["number", "number", "number", "number", "number", "number", "string", "string"],
+        [8, 3, 0, 12345, 0, 3, "Orbital\nPizza Boy", "0000000000000001\n0000000000000002"],
+        { async: true },
+      ))
+    )
+      throw Error("visible tournament start");
+    for (let life = 0; life < 5; ++life) {
+      for (let slot = 0; slot < 2; ++slot)
+        if (Module._WebTestCarHandle(slot) && !Module._WebTestKillParticipant(slot))
+          throw Error("visible defeat damage");
+      for (let step = 0; step < 240; ++step) {
+        const tick = tm4Port.netMatch.tick;
+        Module._WebNetSetInput(tick, 0, 0, 0, 0);
+        Module._WebNetSetInput(tick, 1, 0, 0, 0);
+        if (!Module._WebNetQueueTick(tick)) throw Error("visible defeat tick");
+      }
+    }
+    // Let the original double-buffered GPU submit and present multiple real frames.
+    for (let frame = 0; frame < 10; ++frame) {
+      const tick = tm4Port.netMatch.tick;
+      Module._WebNetSetInput(tick, 0, 0, 0, 0);
+      Module._WebNetSetInput(tick, 1, 0, 0, 0);
+      if (!Module._WebNetQueueTick(tick)) throw Error("visible terminal tick");
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    Module._WebTestReadMatchState();
+    if (!tm4Port.match.lost || tm4Port.netMatch.completion.reasons !== 8)
+      throw Error("visible original GAME OVER");
+  });
+  await page.waitForFunction(() => tm4Port.levelFrames >= 8);
+  await page
+    .locator("canvas")
+    .screenshot({ path: "build/checks/tournament-game-over-network.png" });
+  console.log("PASS original GAME OVER renders on the network canvas");
   console.log("PASS original tournament, AI, death, respawn, rollback and portable recovery");
 } finally {
   await browser.close();

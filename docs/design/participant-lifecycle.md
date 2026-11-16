@@ -3,7 +3,7 @@
 Design and implementation boundaries for dynamic membership. This extends the identity
 model in [network requirements v0.1](../network-requirements-v0.1.md). The first network
 FFA builds on the live membership foundation. Offline modes retain the original rules.
-Updated 2026-11-15.
+Updated 2026-11-16.
 
 ## Evidence and scope
 
@@ -12,13 +12,14 @@ Updated 2026-11-15.
 | Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
 | Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
 | Implemented FFA policy | Eight gameplay slots; automatic random-model respawn; immutable time/frag limits and deterministic completion with ties. |
+| Implemented Tournament | Two fixed humans, native car selection, original eight-map co-op campaign, shared lives, waves, bosses and final team outcome. |
 | Implemented room lifecycle | Authoritative named final scoreboard retained after private server release; return to the same room and fresh match startup in the loaded player. |
-| Deferred mode policy | Map rotation, spectator seats and live replacement of a living car. |
+| Deferred mode policy | FFA map rotation, spectator seats and live replacement of a living car. |
 
 The first agreed new mode is FFA: eight gameplay slots and joining and leaving
 during play. Car selection belongs to the mode: FFA randomly selects from its prepared
-pool on removal and may choose the same model again. Other modes below are design
-cases, not commitments to implement them now.
+pool on removal and may choose the same model again. Tournament uses the separate original
+co-op policy below; other mode examples remain design cases.
 
 ## First FFA delivery boundary
 
@@ -208,8 +209,8 @@ Constructor RNG consumption otherwise follows the existing state paths.
 
 FFA schedules the shared respawn operation when removal commits. The original-rule
 and manual-respawn startup entry point exists only in diagnostic builds for focused
-foundation fixtures. Production network startup accepts FFA only. Live replacement
-remains deferred; offline round rules are unchanged.
+foundation fixtures. Production network startup dispatches explicit FFA or Tournament rules.
+Live replacement remains deferred; offline round rules are unchanged.
 
 ## Original AI participants
 
@@ -245,6 +246,33 @@ Focused stock-resource simulation validation uses Construction Yard, Orbital and
 including two humans with three bots and an eight-occupied-slot case with six bots. This does
 not establish all-map or all-model coverage. Maps without enabled original AI
 navigation are rejected before client prediction can start.
+
+## Original two-player Tournament
+
+Both humans choose and confirm their cars through the original engine menu. The campaign
+uses the original registry order, AI counts, reinforcement thresholds and boss timers from
+[the recovered tournament driver](../../game/src/main/tournament.c). Each player starts with
+four reserve lives; pooled lives borrow from the teammate when the victim has no reserves.
+The original driver owns death, respawn, elimination and the team outcome. An eliminated
+player alone does not end a battle while the teammate can still play. Defeat has no retry
+or Continue route: GAME OVER remains visible for the original 120 ticks before room results.
+
+A map victory retains the original 150-tick presentation delay and waits for either human's
+Continue input. Memory-card Save belongs to offline play; network progress stays with the
+active authority and authenticated recovery. Intermediate wins start a new prediction epoch,
+clock, checkpoints and journal on the next map while retaining both identities, credentials,
+selected cars, lives, elimination state, progress and cumulative combat results. Loading
+reconnection can restart tick-zero clock negotiation without discarding that campaign.
+
+The final boss produces the original two-player YOU WON presentation, including PLAY SINGLE
+PLAYER TO SEE ENDING MOVIES. No character ending movie runs in co-op. Continue confirms the
+final team result; Room retains the scoreboard and releases the private server. A new
+Tournament requires fresh native confirmation and starts on the first map with fresh lives
+and scores in the same loaded player.
+
+Portable snapshots cover active waves, the delayed boss spawn, active bosses, victory waiting
+for Continue and GAME OVER. Oil Rig's tournament-only oilAi object has unused payload and
+removes itself when its two bosses activate; its descriptor permits that baseline removal.
 
 ## Authoritative event boundary
 
@@ -379,7 +407,7 @@ after the match has ended.
 | Capture the flag, candidate | Also assign a team | Respawn under mode rules | Resolve a carried objective before removing the car |
 | Elimination or limited lives, candidate | May wait for the next round | Wait, spend a life or become eliminated | Decide forfeit and victory rules explicitly |
 | Duel, candidate | Queue when both seats are occupied | Mode-specific | Decide forfeit and promotion from queue |
-| Tournament, candidate | Must respect the existing stage and roster rules | Keep the assigned car model under the stage's respawn rules | Distinguish leaving a match from leaving the tournament |
+| Tournament | Fixed two-human roster through the campaign | Original life stock and selected model; original delayed respawn | Temporary disconnect retains the participant; no live admission or departure |
 
 Mode rules decide admission, car selection, respawn and scoring. The shared
 lifecycle mechanism does not hardcode random selection or couple replacement to

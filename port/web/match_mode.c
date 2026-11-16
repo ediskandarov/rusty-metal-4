@@ -1,5 +1,6 @@
 #include "match_mode.h"
 #include "ffa.h"
+#include "tm4/main/game.h"
 #include "tournament.h"
 
 WebMatchResult WebMatchCapture(void)
@@ -13,6 +14,14 @@ void WebMatchRestore(WebMatchResult result)
         WebTournamentRestoreResult(result);
     else
         WebFfaRestore(result);
+}
+
+void WebMatchProcessMode(void)
+{
+    if (WebTournamentActive())
+        WebTournamentProcessMode();
+    else
+        GameProcessMode();
 }
 
 void WebMatchCompleteTick(void)
@@ -30,4 +39,3 @@ int WebMatchResultValid(
         return WebTournamentResultValid(result, tick, slots);
     return WebFfaResultValid(result, tick, slots, participants);
 }
-

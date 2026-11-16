@@ -65,7 +65,7 @@ export async function joinMatch(
   const { tm4Port: port } = globalThis as typeof globalThis & { tm4Port: NetworkPort };
   delete port.netMatchServerState;
   delete port.netConfirmedTick;
-  show("lobby", "Connecting to Free for all…");
+  show("lobby", "Connecting to the match…");
 
   const journal = startClientJournal();
   const path = new URL(endpoint, location.href).pathname;
@@ -241,9 +241,9 @@ export async function joinMatch(
       );
       const result =
         state.completion.reasons === 4
-          ? "Tournament battle won"
+          ? "Tournament won"
           : state.completion.reasons === 8
-            ? "Tournament battle lost"
+            ? "Tournament lost"
             : winners.length === 1
               ? "Player " + winners[0] + " wins"
               : winners.length

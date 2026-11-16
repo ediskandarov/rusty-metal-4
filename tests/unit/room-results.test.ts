@@ -69,6 +69,6 @@ test("room results require an explicit mode and choose presentation from it", as
     modeId: "tournament",
     completion: { ...common.completion, reasons: 4 },
   });
-  expect(matchResultPresentation(tournament).summary).toBe("Tournament battle won · Team: Host");
+  expect(matchResultPresentation(tournament).summary).toBe("Tournament won · Team: Host");
   expect(matchResultPresentation(tournament).rows[0]?.outcome).toBe("Victory");
 });

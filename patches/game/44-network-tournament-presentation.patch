@@ -1,0 +1,47 @@
+--- a/src/main/tournament.c
++++ b/src/main/tournament.c
+@@ -2,6 +2,7 @@
+  * MAIN.MR names; other names describe inferred behavior. */
+ 
+ #include "tm4/main/tournament.h"
++#include "port/web/tournament.h"
+ #include "tm4/compiler.h"
+ #include "tm4/fixed.h"
+ #include "tm4/integer.h"
+@@ -31,6 +32,10 @@
+         { "6", "TO CONTINUE" },
+         { "7", "TO SAVE" },
+     },
++};
++static Tm4GameMessageList TournamentNetworkContinueMessages = {
++    .count = 1,
++    .pairs = { { "6", "TO CONTINUE" } },
+ };
+ static char* TournamentVictoryLines[]
+     = { "YOU WON", "TWISTED METAL!", "PLAY SINGLE PLAYER", "TO SEE ENDING MOVIES" };
+@@ -371,7 +376,11 @@
+         game->world_lost = 1;
+     }
+     if (!game->tournament_next_mode) {
+-        ObjectCreate("timer", 0, 120, GameSetNextMode, 1, next_mode);
++        if (WebTournamentActive())
++            ObjectCreate("timer", 0, 120, GameSetDeferredValue, 2,
++                &game->tournament_accept_input, 1);
++        else
++            ObjectCreate("timer", 0, 120, GameSetNextMode, 1, next_mode);
+         game->active = 0;
+     }
+ }
+@@ -442,8 +451,10 @@
+         GameDrawTextLinesAtY(display, "large", lines, ArrayCount(lines), 120);
+     } else
+         return;
+-    if (game->tournament_accept_input && !(((u32)GetCurrentTime() / 15) & 1))
+-        GameDrawControllerMessages(display, &TournamentContinueMessages);
++    if (game->tournament_accept_input && !(WebTournamentActive() && game->world_lost)
++        && !(((u32)GetCurrentTime() / 15) & 1))
++        GameDrawControllerMessages(display, WebTournamentActive()
++                ? &TournamentNetworkContinueMessages : &TournamentContinueMessages);
+     addPrim(display->ordering_table, &display->black_tiles[0]);
+     addPrim(display->ordering_table, &display->black_page);
+ }
