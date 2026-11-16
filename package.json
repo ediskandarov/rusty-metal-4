@@ -39,7 +39,8 @@
     "setup:cache": "bun tools/cache/setup.ts",
     "postinstall": "bun run setup:cache",
     "test:cache": "bun tests/cache/shared-cargo.ts",
-    "test:simulation:modules": "bun tests/browser/check_simulation_modules.mjs"
+    "test:simulation:modules": "bun tests/browser/check_simulation_modules.mjs",
+    "test:emscripten": "bun tests/emscripten/dlsym-catchup/check.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",

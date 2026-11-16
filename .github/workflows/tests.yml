@@ -92,6 +92,10 @@ jobs:
           cache-directories: build/rust-tools
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Check Emscripten dynamic linking
+        run: |
+          source .emsdk/emsdk_env.sh
+          bun run test:emscripten
       - name: Build release
         run: |
           source .emsdk/emsdk_env.sh
