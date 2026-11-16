@@ -73,6 +73,7 @@ export const roomSummarySchema = roomSettingsSchema.safeExtend({
 });
 export type RoomSummary = z.infer<typeof roomSummarySchema>;
 export const matchSnapshotSchema = z.object({
+  world: z.string().nullable().default(null),
   location: serverLocationSchema.nullable().default(null),
   id: matchIdSchema,
   stage: z.enum([

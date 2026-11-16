@@ -7,6 +7,7 @@ mod recovery;
 mod reporting;
 mod requests;
 mod tick;
+mod tournament;
 
 pub(crate) use app::run_match;
 pub(crate) use participant::ParticipantRoster;
@@ -66,6 +67,7 @@ impl ControllerState {
 
 #[derive(Resource)]
 struct Match {
+    continuation: Option<game_protocol::TournamentStage>,
     participants: ParticipantRoster,
     membership: membership::LiveMembership,
     room_requests: Option<management::MembershipQueue>,

@@ -20,6 +20,7 @@ fn game() -> Match {
         content: "test".into(),
     };
     Match {
+        continuation: None,
         participants: ParticipantRoster::new(2, &[0, 1]).unwrap(),
         membership: Default::default(),
         room_requests: None,
@@ -43,6 +44,7 @@ fn game() -> Match {
         loading_since: Instant::now(),
         last_step_duration: None,
         session: Some(SessionStart {
+            tournament: None,
             bots: vec![],
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: tm4_network::protocol::FfaLimits::default(),
@@ -1698,4 +1700,148 @@ fn match_report_distinguishes_waiting_round_end_final_results_and_failures() {
             if message == tm4_network::modes::TRANSITION_MESSAGE)
         );
     }
+}
+
+#[test]
+fn intermediate_tournament_victory_keeps_the_room_running() {
+    let mut world = World::new();
+    let mut game = game();
+    game.mode = game_protocol::MatchMode::Tournament;
+    game.ended = true;
+    game.last_state.as_mut().unwrap().completion = game_protocol::MatchCompletion {
+        tick: 100,
+        reasons: 16,
+        winners: 3,
+    };
+    world.insert_resource(game);
+    let report = super::super::reporting::collect(&world, Some("campaign"));
+    assert!(matches!(
+        report.update.outcome,
+        crate::management::MatchOutcome::Playing(_)
+    ));
+    world
+        .resource_mut::<Match>()
+        .last_state
+        .as_mut()
+        .unwrap()
+        .completion
+        .reasons = 4;
+    assert!(matches!(
+        super::super::reporting::collect(&world, Some("campaign"))
+            .update
+            .outcome,
+        crate::management::MatchOutcome::Finished { .. }
+    ));
+}
+
+#[test]
+fn next_stage_rejects_previous_epoch_input_even_from_the_same_participant() {
+    let mut world = World::new();
+    let owner = connection(&mut world, 1);
+    let mut game = game();
+    game.session.as_mut().unwrap().epoch = 2;
+    game.controls[0].connection = Some(owner);
+    world.insert_resource(game);
+    bind(&mut world);
+    let controller = world.resource::<Match>().controls[0].controller.unwrap();
+    world.entity_mut(controller).insert(buffer(999, 9));
+    world.run_system_once(accept_native_inputs).unwrap();
+    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+    let mut input = NativeBuffer::default();
+    input.set(
+        Tick(101),
+        ActionState(ControllerCommand {
+            epoch: 2,
+            sequence: 1,
+            tick: 100,
+            input: Input {
+                buttons: 7,
+                ..Default::default()
+            },
+        }),
+    );
+    world.entity_mut(controller).insert(input);
+    world.run_system_once(accept_native_inputs).unwrap();
+    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 1);
+    assert_eq!(
+        world.resource_mut::<Match>().controls[0]
+            .history
+            .sample(100)
+            .buttons,
+        7
+    );
+}
+
+#[test]
+fn tournament_between_maps_accepts_only_existing_credentials_and_keeps_the_roster() {
+    let mut world = World::new();
+    let newcomer = connection(&mut world, 1);
+    let owner = connection(&mut world, 2);
+    let mut game = game();
+    game.started = false;
+    game.participants.freeze();
+    game.participants.at_slot_mut(0).credential = Some("ab".repeat(32));
+    game.participants.at_slot_mut(0).car = Some("Orbital".into());
+    game.continuation = Some(
+        serde_json::from_value(serde_json::json!({
+            "world": "Neon City", "progress": 512, "gamesCompleted": 512, "sharedLives": false,
+            "players": [
+                {"lives":3,"wins":1,"losses":0,"eliminated":false,"frags":2,"deaths":1},
+                {"lives":4,"wins":1,"losses":0,"eliminated":false,"frags":0,"deaths":0}
+            ]
+        }))
+        .unwrap(),
+    );
+    let identity = game.participants.binding(0);
+    let compatibility = game.compatibility.clone().unwrap();
+    world.insert_resource(game);
+    request(
+        &mut world,
+        newcomer,
+        Request::Join {
+            compatibility: compatibility.clone(),
+        },
+    );
+    assert!(
+        world
+            .resource::<Match>()
+            .controls
+            .iter()
+            .all(|control| control.connection.is_none())
+    );
+    request(
+        &mut world,
+        owner,
+        Request::Resume {
+            token: "ab".repeat(32),
+            compatibility,
+        },
+    );
+    assert_eq!(
+        world.resource::<Match>().controls[0].connection,
+        Some(owner)
+    );
+    request(
+        &mut world,
+        owner,
+        Request::SelectCar {
+            car: "Pizza Boy".into(),
+            ready: true,
+        },
+    );
+    assert_eq!(
+        world
+            .resource::<Match>()
+            .participants
+            .at_slot(0)
+            .car
+            .as_deref(),
+        Some("Orbital")
+    );
+    world
+        .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
+            detach_connection(&mut game, 0, owner, &mut commands);
+        })
+        .unwrap();
+    assert_eq!(world.resource::<Match>().participants.binding(0), identity);
 }

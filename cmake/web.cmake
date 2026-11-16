@@ -315,7 +315,7 @@ if(TM4_STANDALONE)
     list(FILTER options EXCLUDE REGEX "^-s(ASYNCIFY|ENVIRONMENT|PTHREAD|MODULARIZE|EXPORT_NAME|EXPORTED_RUNTIME_METHODS|EXPORTED_FUNCTIONS)")
     set_property(TARGET tm4_web PROPERTY LINK_OPTIONS "${options}")
     set(exports _malloc _free ___dl_seterr _HeadlessInitialize _HeadlessCapture _HeadlessCanonical
-        _HeadlessDigest _HeadlessTick _HeadlessParticipants _WebNetWorldIndex _WebNetStartFfa _WebNetStartTournament
+        _HeadlessDigest _HeadlessTick _HeadlessParticipants _WebNetWorldIndex _WebNetStartFfa _WebNetStartTournament _WebNetStartTournamentStage _WebTournamentNextStage
         _WebNetSlotMask _WebNetParticipantIdentityPart _WebNetAdmissionValid _WebNetAdmitParticipant _WebNetDepartParticipant _WebNetSetInput _WebNetQueueTick _WebNetCaptureLocalCheckpoint
         _WebNetRestoreLocalCheckpoint _WebNetFinishLocalReplay _WebNetCancelMatch
         _HeadlessState _HeadlessError _HeadlessWorldCount _HeadlessWorldName

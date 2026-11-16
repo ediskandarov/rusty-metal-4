@@ -41,6 +41,7 @@ typedef struct NetPadInput {
 typedef struct NetMatchSetup {
     s32 capacity;
     s32 tournament;
+    WebTournamentCarry carry;
     u32 slots;
     u32 bot_slots;
     char* cars[8];
@@ -396,7 +397,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetDepartParticipant(u32 tick, s32 slot, u32 low, u3
  * selection, failed request or cancelled match can contribute configuration. */
 static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot, u32 flags,
     const char* car_names, const char* participant_ids, u32 respawn_delay_ticks,
-    const char* pool_names, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots, int tournament)
+    const char* pool_names, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots, int tournament,
+    const WebTournamentCarry* carry)
 {
     if (WebNetMatchActive() || WebLevelActive() || capacity < 2 || capacity > 8 || !slots
         || (slots & ~((1u << capacity) - 1)) || view_slot < -1 || view_slot >= capacity || world < 0
@@ -506,6 +508,8 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     }
     if (!session_resources_present(&candidate))
         return 0;
+    if (carry)
+        candidate.carry = *carry;
     match.setup = candidate;
     WebMatchRestore((WebMatchResult) { 0 });
     match.initial_participants = participants;
@@ -522,8 +526,7 @@ static int start_match(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_sl
     return 1;
 }
 
-/* Production network matches use FFA. The original driver remains available only
- * to diagnostic fixtures that verify the shared lifecycle independently of policy. */
+/* Mode entry points validate policy before the shared session startup. */
 EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 seed, s32 view_slot,
     u32 flags, const char* car_names, const char* participant_ids, u32 delay,
     const char* model_pool, u32 time_limit_ticks, u32 frag_limit, u32 bot_slots)
@@ -532,7 +535,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 
         || time_limit_ticks > 0x7fffffffu || !frag_limit || frag_limit > 0x7fffffffu)
         return reject_start("Invalid FFA respawn delay or gameplay capacity");
     return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
-        delay, model_pool, time_limit_ticks, frag_limit, bot_slots, 0);
+        delay, model_pool, time_limit_ticks, frag_limit, bot_slots, 0, NULL);
 }
 
 EMSCRIPTEN_KEEPALIVE int WebNetStartTournament(s32 capacity, u32 slots, s32 world, u32 seed,
@@ -541,8 +544,18 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartTournament(s32 capacity, u32 slots, s32 worl
     if (capacity != 8 || slots != 3 || world < 0 || world >= GameGetNumberOfWorlds()
         || strcmp(GameGetWorldName(world), GameGetFirstTournamentWorldName()))
         return reject_start("Tournament requires two fixed players on its first level");
-    return start_match(
-        capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0, 0, 0, 1);
+    return start_match(capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0,
+        0, 0, 1, NULL);
+}
+
+EMSCRIPTEN_KEEPALIVE int WebNetStartTournamentStage(s32 capacity, u32 slots, s32 world, u32 seed,
+    s32 view_slot, u32 flags, const char* cars, const char* identities,
+    const WebTournamentCarry* carry)
+{
+    if (capacity != 8 || slots != 3 || !WebTournamentCarryValid(carry, world))
+        return reject_start("Invalid tournament continuation");
+    return start_match(capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0,
+        0, 0, 1, carry);
 }
 
 int WebNetDeparting(void) { return match.departing; }
@@ -558,7 +571,7 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartMatch(s32 capacity, u32 slots, s32 world, u3
     s32 view_slot, u32 flags, const char* car_names, const char* participant_ids)
 {
     return start_match(capacity, slots, world, seed, view_slot, flags, car_names, participant_ids,
-        0, NULL, 0, 0, 0, 0);
+        0, NULL, 0, 0, 0, 0, NULL);
 }
 #endif
 
@@ -596,6 +609,8 @@ static void start_session(void)
         participants.respawns[slot] = (WebParticipantRespawn) { 0 };
     }
     WebParticipantRestore(&participants);
+    if (WebNetTournament() && match.setup.carry.progress)
+        WebTournamentApplyCarry(&match.setup.carry);
     WebLevelStart();
     match.physical_pad = (PadCache) { 0 };
     memset(PadJpad, 0, sizeof(PadJpad));

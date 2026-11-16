@@ -96,6 +96,7 @@ pub(crate) fn run_match(
         .id();
     app.world_mut().trigger(LinkStart { entity });
     let mut game = Match {
+        continuation: None,
         participants,
         membership: Default::default(),
         room_requests: control.map(|control| control.membership.clone()),

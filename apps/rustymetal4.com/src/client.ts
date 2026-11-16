@@ -202,7 +202,7 @@ async function room(): Promise<void> {
     if (!room || room.closed || state.departed) return;
     document.title = `${room.name} · Rusty Metal 4`;
     element("room-mode").textContent = modeLabel(room.modeId);
-    element("room-map").textContent = mapLabel(room.mapId);
+    element("room-map").textContent = room.match?.world ?? mapLabel(room.mapId);
     element("server-region").textContent = room.match
       ? serverLocationLabel(room.match.location)
       : "Not allocated";

@@ -24,6 +24,16 @@ typedef struct WebTournamentState {
     WEB_TOURNAMENT_FIELDS(FIELD)
 } WebTournamentState;
 #undef FIELD
+/* Scalar campaign state only: no pointers, live cars or map-owned objects. */
+typedef struct WebTournamentCarry {
+    s32 world, progress, games_completed, shared_lives;
+    struct {
+        s32 lives, wins, losses, eliminated, frags, deaths;
+    } players[2];
+} WebTournamentCarry;
+const WebTournamentCarry* WebTournamentNextStage(void);
+int WebTournamentCarryValid(const WebTournamentCarry* carry, s32 world);
+void WebTournamentApplyCarry(const WebTournamentCarry* carry);
 int WebTournamentActive(void);
 WebTournamentState WebTournamentCapture(void);
 int WebTournamentStateValid(WebTournamentState state);

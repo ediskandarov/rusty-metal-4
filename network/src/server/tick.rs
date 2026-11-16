@@ -26,6 +26,9 @@ pub(super) fn update(
     owners: Query<&ControlledBy>,
     mut commands: Commands,
 ) {
+    if !super::tournament::advance_stage(&mut game, &mut simulator, &mut links, &mut commands) {
+        return;
+    }
     let room_requests: Vec<_> = game
         .room_requests
         .as_ref()
@@ -129,6 +132,7 @@ fn prepare_session(
             game.mode
                 .session_parameters(game.limits, &game.catalog.as_ref().unwrap().cars, &cars);
         let start = SessionStart {
+            tournament: game.continuation.clone(),
             bots: game
                 .participants
                 .slots()
@@ -153,7 +157,7 @@ fn prepare_session(
             model_pool: parameters.model_pool,
             compatibility: game.compatibility.clone().unwrap(),
             seed: 12345,
-            epoch: 1,
+            epoch: game.session.as_ref().map_or(1, |session| session.epoch + 1),
             portable: (1..=8).contains(&game.participants.count()),
         };
         game.session = Some(start.clone());

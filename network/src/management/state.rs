@@ -57,6 +57,7 @@ pub struct Status {
 }
 
 pub struct MatchUpdate {
+    pub world: Option<String>,
     pub connected: usize,
     pub tick: u32,
     pub cars: Option<Vec<String>>,
@@ -172,6 +173,9 @@ impl PublishedState {
             return;
         }
         self.status.connected = update.connected;
+        if let Some(world) = update.world {
+            self.status.world = Some(world);
+        }
         self.status.tick = update.tick;
         if let Some(cars) = update.cars {
             self.status.cars = cars;
@@ -289,6 +293,7 @@ mod tests {
 
     fn update(outcome: MatchOutcome) -> MatchUpdate {
         MatchUpdate {
+            world: None,
             connected: 2,
             tick: 100,
             cars: None,

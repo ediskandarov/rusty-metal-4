@@ -71,6 +71,7 @@ export const emptyMatchGrace = 120_000;
 export const monitoringGrace = 30_000;
 export const monitoringTimeout = 5000;
 export interface RoomMatch {
+  world?: string | null;
   location: ServerLocation | null;
   id: string;
   ownerId: string;
@@ -274,6 +275,7 @@ export function snapshot(state: RoomState, key: string): RoomSnapshot {
     match: state.match
       ? {
           location: state.match.location ?? null,
+          world: state.match.world ?? null,
           id: state.match.id,
           stage: state.match.stage,
           deadline: state.match.deadline,

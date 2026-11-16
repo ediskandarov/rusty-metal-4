@@ -113,7 +113,7 @@ async function setup(diagnostics?: Connection["diagnostics"], signal?: AbortSign
   const engine = {
     ccall(name: string): number {
       if (name === "WebNetWorldIndex") return 0;
-      if (name === "WebNetStartFfa") {
+      if (name === "WebNetStartFfa" || name === "WebNetStartTournamentStage") {
         loads++;
         port.netMatch = { tick: 0, ...state };
         return 1;
@@ -724,4 +724,101 @@ test("a normal authority finish closes an in-flight reconnect without a recovery
   expect(statuses.at(-1)).toEqual(["lobby", "Match finished · Player 2 wins"]);
   await Bun.sleep(1100);
   expect(connections).toHaveLength(2);
+});
+
+test("a confirmed stage boundary drops old prediction and loads the next epoch under the same identity", async () => {
+  const { first, counts, statuses, port } = await setup();
+  port.netConfirmedTick = 120;
+  first.onmessage({
+    type: "finished",
+    state: { ...state, completion: { tick: 120, reasons: 16, winners: 3 } },
+  });
+  expect(first.readyState).toBe(WebSocket.CLOSED);
+  await Promise.resolve();
+  expect(counts().cancellations).toBe(1);
+  expect(port.netConfirmedTick).toBeUndefined();
+  const next = await nextConnection();
+  next.onmessage({ type: "welcome", slot: 0 });
+  const player = { lives: 3, wins: 1, losses: 0, eliminated: false, frags: 2, deaths: 1 };
+  next.onmessage({
+    type: "prediction_prepare",
+    ...start,
+    mode: "tournament",
+    limits: { timeLimitTicks: 0, fragLimit: 0 },
+    respawnDelayTicks: 0,
+    epoch: 2,
+    world: "Neon City",
+    tournament: {
+      world: "Neon City",
+      progress: 512,
+      gamesCompleted: 512,
+      sharedLives: false,
+      players: [player, player],
+    },
+  });
+  expect(next.sent).toContainEqual({
+    type: "ready",
+    epoch: 2,
+    digest: 42,
+  });
+  next.onmessage({ type: "prediction_offer", anchor: 200 });
+  next.onmessage({ type: "prediction_begin", anchor: 200 });
+  expect(counts()).toEqual({ cancellations: 1, loads: 2 });
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+  first.onmessage({
+    type: "finished",
+    state: { ...state, completion: { tick: 120, reasons: 16, winners: 3 } },
+  });
+  expect(next.readyState).toBe(WebSocket.OPEN);
+  expect(counts().cancellations).toBe(1);
+});
+
+test("module loading delays readiness and cancellation waits for the suspended C call", async () => {
+  const { first, engine, port, counts } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  const call = engine.ccall.bind(engine);
+  let finish!: () => void;
+  Object.defineProperty(engine, "ccall", {
+    value: (name: string) =>
+      name === "WebNetStartFfa"
+        ? new Promise<number>((resolve) => {
+            finish = () => resolve(call(name));
+          })
+        : call(name),
+  });
+  next.onmessage({ type: "welcome", slot: 0 });
+  next.onmessage({ type: "prediction_prepare", ...start });
+  expect(next.sent.some((message) => message.type === "ready")).toBe(false);
+  stop?.();
+  stop = undefined;
+  await Bun.sleep(0);
+  expect(counts().cancellations).toBe(1);
+  finish();
+  await Bun.sleep(0);
+  expect(counts()).toEqual({ cancellations: 2, loads: 2 });
+  expect(port.netMatch).toBeUndefined();
+  expect(next.sent.some((message) => message.type === "ready")).toBe(false);
+});
+
+test("snapshot messages arriving during asynchronous map loading retain their order", async () => {
+  const { first, engine, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  const call = engine.ccall.bind(engine);
+  let finish!: () => void;
+  Object.defineProperty(engine, "ccall", {
+    value: (name: string) =>
+      name === "WebNetStartFfa"
+        ? new Promise<number>((resolve) => {
+            finish = () => resolve(call(name));
+          })
+        : call(name),
+  });
+  beginSnapshot(next)();
+  expect(next.sent.some((message) => message.type === "resume_clock")).toBe(false);
+  finish();
+  await Bun.sleep(0);
+  expect(next.sent).toContainEqual({ type: "resume_clock", attempt: 1, target: 20 });
+  expect(statuses.some(([status]) => status === "error")).toBe(false);
 });

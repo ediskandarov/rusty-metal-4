@@ -294,3 +294,42 @@ test("tournament dispatches original rules and rejects FFA policy and changing s
   expect(startOptionsSchema.safeParse(request).success).toBe(true);
   expect(startOptionsSchema.safeParse({ ...request, limits: start.limits }).success).toBe(false);
 });
+
+test("tournament continuation carries campaign data into the explicit next-map entry point", () => {
+  const player = { lives: 3, wins: 1, losses: 0, eliminated: false, frags: 2, deaths: 1 };
+  const continuation = {
+    ...start,
+    mode: "tournament" as const,
+    slots: [0, 1],
+    participants: start.participants.slice(0, 2),
+    cars: start.cars.slice(0, 2),
+    limits: { timeLimitTicks: 0, fragLimit: 0 },
+    respawnDelayTicks: 0,
+    epoch: 2,
+    world: "Neon City",
+    tournament: {
+      world: "Neon City",
+      progress: 512,
+      gamesCompleted: 512,
+      sharedLives: true,
+      players: [player, player],
+    },
+  };
+  const setup = startSchema.parse(continuation);
+  expect(startSchema.safeParse({ ...continuation, tournament: undefined }).success).toBe(false);
+  expect(startSchema.safeParse({ ...continuation, world: "Road Rage" }).success).toBe(false);
+  const calls: unknown[][] = [];
+  const engine = {
+    ccall(...args: unknown[]) {
+      calls.push(args);
+      return args[0] === "WebNetWorldIndex" ? 1 : 1;
+    },
+  } as unknown as NetworkEngine;
+  expect(configureMatch(engine, setup, 1)).toBe(1);
+  expect(calls[1]![0]).toBe("WebNetStartTournamentStage");
+  const bytes = (calls[1]![3] as unknown[])[8] as Uint8Array;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  expect(Array.from({ length: 16 }, (_, i) => view.getInt32(i * 4, true))).toEqual([
+    1, 512, 512, 1, 3, 1, 0, 0, 2, 1, 3, 1, 0, 0, 2, 1,
+  ]);
+});

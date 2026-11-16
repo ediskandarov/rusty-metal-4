@@ -38,7 +38,7 @@ pub(super) fn detach_connection(
     if !control.disconnect(entity) {
         return false;
     }
-    if !game.started && !game.room_only {
+    if !game.started && !game.room_only && game.continuation.is_none() {
         let binding = game.participants.binding(slot);
         game.replace_preparation(binding, commands)
             .expect("open lobby is mutable");
@@ -161,6 +161,7 @@ pub(super) fn accept_native_inputs(
     }
     let earliest = game.tick;
     let health = game.health.clone();
+    let epoch = game.session.as_ref().map(|session| session.epoch);
     for (controller, identity, owner, buffer) in &controllers {
         let Some(slot) = game.participants.resolve(identity) else {
             continue;
@@ -185,9 +186,12 @@ pub(super) fn accept_native_inputs(
             }
             if let Some(action) = buffer.get(tick) {
                 let command = action.0;
-                if player.resume.is_none() && command.sequence > player.received_sequence {
+                if player.resume.is_none()
+                    && Some(command.epoch) == epoch
+                    && command.sequence > player.received_sequence
+                {
                     player.received_sequence = command.sequence;
-                    if command.epoch == 1 && player.receives_live() {
+                    if player.receives_live() {
                         health.lock().unwrap().input(usize::from(identity.slot));
                         let queued = player.history.enqueue(
                             earliest,

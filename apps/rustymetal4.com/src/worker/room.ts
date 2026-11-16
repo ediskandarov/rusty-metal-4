@@ -296,6 +296,8 @@ export class Room extends DurableObject<Env> {
         const result = await this.api().results();
         if (!retainResult(state, match.id, result)) throw new Error("Stale match result");
       }
+      const worldChanged = match.world !== status.world;
+      match.world = status.world;
       const locationChanged =
         match.location?.region !== status.location?.region ||
         match.location?.country !== status.location?.country ||
@@ -356,7 +358,7 @@ export class Room extends DurableObject<Env> {
         await this.commit();
         return;
       }
-      if (locationChanged) {
+      if (locationChanged || worldChanged) {
         await this.commit();
         return;
       }

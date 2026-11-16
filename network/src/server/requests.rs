@@ -97,7 +97,11 @@ impl Match {
                 }
             }
             Request::Join { compatibility }
-                if !self.started && !self.ended && slot.is_none() && !self.room_only =>
+                if !self.started
+                    && !self.ended
+                    && slot.is_none()
+                    && !self.room_only
+                    && self.continuation.is_none() =>
             {
                 if Some(&compatibility) != self.compatibility.as_ref() {
                     send(
@@ -137,7 +141,11 @@ impl Match {
                 }
             }
             Request::SelectCar { car, ready }
-                if !self.started && !self.ended && slot.is_some() && !self.room_only =>
+                if !self.started
+                    && !self.ended
+                    && slot.is_some()
+                    && !self.room_only
+                    && self.continuation.is_none() =>
             {
                 match self.participants.at_slot_mut(slot.unwrap()).select_car(
                     self.catalog.as_ref().unwrap(),
@@ -154,24 +162,31 @@ impl Match {
                     ),
                 }
             }
-            Request::Join { .. } if self.ended || self.started => send(
-                links,
-                entity,
-                &Message::Error {
-                    message: if self.ended {
-                        "This lobby is closed. Open a new match link to play."
-                    } else {
-                        "This match has already started. Open a new match link to play."
-                    }
-                    .into(),
-                },
-            ),
+            Request::Join { .. } if self.ended || self.started || self.continuation.is_some() => {
+                send(
+                    links,
+                    entity,
+                    &Message::Error {
+                        message: if self.ended {
+                            "This lobby is closed. Open a new match link to play."
+                        } else {
+                            "This match has already started. Open a new match link to play."
+                        }
+                        .into(),
+                    },
+                )
+            }
             Request::Resume {
                 token,
                 compatibility,
             } if !self.started && !self.ended => {
-                if self.room_only
-                    && let Some(binding) = self.participants.find_room_credential(&token)
+                if (self.room_only || self.continuation.is_some())
+                    && let Some(binding) =
+                        self.participants.find_room_credential(&token).or_else(|| {
+                            self.participants
+                                .find_credential(&token)
+                                .map(|slot| self.participants.binding(slot))
+                        })
                     && self.participants.resolve(&binding).is_some()
                     && self.controls[usize::from(binding.slot)]
                         .connection
@@ -347,7 +362,10 @@ impl Match {
                 unsupported,
             } if self.started
                 && !self.ended
-                && epoch == 1
+                && self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| epoch == session.epoch)
                 && slot.is_some()
                 && self.prediction.anchor.is_none() =>
             {
@@ -361,10 +379,16 @@ impl Match {
                 }
             }
             Request::PredictionClock {
-                epoch: 1,
+                epoch,
                 anchor,
                 tick,
-            } if self.started && !self.ended => {
+            } if self.started
+                && !self.ended
+                && self
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| epoch == session.epoch) =>
+            {
                 if let Some(slot) = slot.filter(|&slot| self.controls[slot].ready) {
                     self.prediction.vote(slot, Tick(anchor), Tick(tick));
                 }

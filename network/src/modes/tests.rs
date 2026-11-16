@@ -9,6 +9,7 @@ fn session(mode: MatchMode) -> SessionStart {
         &cars,
     );
     SessionStart {
+        tournament: None,
         bots: vec![],
         mode,
         limits: parameters.limits,
@@ -37,7 +38,7 @@ fn mode_parameters_preserve_session_fields_and_model_order() {
     for start in [&ffa, &tournament] {
         assert!(start.valid_slots());
         let json = serde_json::to_value(start).unwrap();
-        assert_eq!(json.as_object().unwrap().len(), 14);
+        assert_eq!(json.as_object().unwrap().len(), 15);
         assert_eq!(json["capacity"], 8);
         assert_eq!(json["slots"], serde_json::json!([0, 1]));
         assert_eq!(json["cars"], serde_json::json!(["Orbital", "Orbital"]));
@@ -146,4 +147,35 @@ fn roster_rules_distinguish_humans_from_bots_and_enforce_capacity() {
         MatchMode::Ffa.status_message(BattleProgress::Playing),
         MatchMode::Tournament.status_message(BattleProgress::Playing)
     );
+}
+
+#[test]
+fn continuation_requires_a_tournament_stage_matching_the_new_world() {
+    use crate::protocol::{TournamentPlayer, TournamentStage};
+    let mut next = session(MatchMode::Tournament);
+    next.world = "Neon City".into();
+    next.epoch = 2;
+    assert!(!next.valid_slots());
+    next.tournament = Some(TournamentStage {
+        world: next.world.clone(),
+        progress: 512,
+        games_completed: 512,
+        shared_lives: true,
+        players: std::array::from_fn(|_| TournamentPlayer {
+            lives: 3,
+            wins: 0,
+            losses: 0,
+            eliminated: false,
+            frags: 0,
+            deaths: 1,
+        }),
+    });
+    assert!(next.valid_slots());
+    next.tournament.as_mut().unwrap().world = "Road Rage".into();
+    assert!(!next.valid_slots());
+    next.tournament.as_mut().unwrap().world = next.world.clone();
+    next.mode = MatchMode::Ffa;
+    next.limits = FfaLimits::default();
+    next.respawn_delay_ticks = 90;
+    assert!(!next.valid_slots());
 }

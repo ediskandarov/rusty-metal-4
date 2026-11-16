@@ -11,7 +11,19 @@ export type {
 } from "@tm4/lightyear-client/schemas";
 export const stateSections = ["session", "cars", "objects", "world", "sound"] as const;
 export interface NetworkEngine {
-  ccall(name: string, result: string, types: string[], values: (string | number)[]): number;
+  ccall(
+    name: string,
+    result: string,
+    types: string[],
+    values: (string | number | Uint8Array)[],
+    options: { async: true },
+  ): number | Promise<number>;
+  ccall(
+    name: string,
+    result: string,
+    types: string[],
+    values: (string | number | Uint8Array)[],
+  ): number;
   _WebNetSetInput(
     tick: number,
     slot: number,
@@ -83,6 +95,43 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
     throw new Error("Invalid local gameplay slot");
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
   if (world < 0) throw new Error("Session map is missing locally");
+  if (start.tournament) {
+    const stage = start.tournament;
+    const words = [
+      world,
+      stage.progress,
+      stage.gamesCompleted,
+      +stage.sharedLives,
+      ...stage.players.flatMap((p) => [
+        p.lives,
+        p.wins,
+        p.losses,
+        +p.eliminated,
+        p.frags,
+        p.deaths,
+      ]),
+    ];
+    const bytes = new Uint8Array(words.length * 4);
+    const viewData = new DataView(bytes.buffer);
+    words.forEach((word, index) => viewData.setInt32(index * 4, word, true));
+    return engine.ccall(
+      "WebNetStartTournamentStage",
+      "number",
+      ["number", "number", "number", "number", "number", "number", "string", "string", "array"],
+      [
+        start.capacity,
+        3,
+        world,
+        start.seed,
+        view,
+        2 | (start.portable ? 1 : 0),
+        start.cars.join("\n"),
+        start.participants.join("\n"),
+        bytes,
+      ],
+      { async: true },
+    );
+  }
   if (start.mode === "tournament")
     return engine.ccall(
       "WebNetStartTournament",
@@ -98,6 +147,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
         start.cars.join("\n"),
         start.participants.join("\n"),
       ],
+      { async: true },
     );
   return engine.ccall(
     "WebNetStartFfa",
@@ -132,6 +182,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       start.limits.fragLimit,
       start.bots.reduce((mask, slot) => mask | (1 << slot), 0),
     ],
+    { async: true },
   );
 }
 

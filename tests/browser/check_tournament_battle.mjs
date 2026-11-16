@@ -124,7 +124,7 @@ try {
       }
       Module._WebTestReadMatchState();
       check(
-        tm4Port.netMatch.completion.reasons === 4,
+        tm4Port.netMatch.completion.reasons === 16,
         "original victory: " + JSON.stringify(tm4Port.match),
       );
       check(tm4Port.netMatch.completion.winners === 3, "team victory");

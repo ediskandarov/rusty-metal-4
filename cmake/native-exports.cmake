@@ -67,11 +67,11 @@ function(tm4_dynamic_module module image_name)
     target_include_directories(tm4_module_${module_id} PRIVATE "$<TARGET_PROPERTY:tm4_core,INCLUDE_DIRECTORIES>")
     target_compile_definitions(tm4_module_${module_id} PRIVATE "$<TARGET_PROPERTY:tm4_core,COMPILE_DEFINITIONS>")
     target_compile_options(tm4_module_${module_id} PRIVATE "$<TARGET_PROPERTY:tm4_core,COMPILE_OPTIONS>" -fPIC -fvisibility=hidden)
-    # Menu previews wait for presentation; simulation modules never suspend.
+    # Menu previews and loading callbacks wait for presentation; simulation modules never suspend.
     set(asyncify 0)
     if(module STREQUAL "menu" AND NOT TM4_STANDALONE)
         set(asyncify 1)
-        target_link_options(tm4_module_${module_id} PRIVATE "-sASYNCIFY_IMPORTS=VSync")
+        target_link_options(tm4_module_${module_id} PRIVATE "-sASYNCIFY_IMPORTS=VSync,LoadingDisplay,CDLoadFileLocSize,RegAddReg")
     endif()
     target_link_options(tm4_module_${module_id} PRIVATE -sSIDE_MODULE=2 -sASYNCIFY=${asyncify} -sEXPORTED_FUNCTIONS=_Tm4ModuleExport)
     if(NOT TM4_STANDALONE)

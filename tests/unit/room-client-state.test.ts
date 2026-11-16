@@ -24,6 +24,7 @@ const host = "9bad46c2-542d-4d6e-a78a-2ec81a700a23";
 const compatibility = { protocol: 16, build: "b".repeat(64), content: "c".repeat(64) };
 const disc = { compatibility, cars: ["Calypso", "Quatro"] };
 const match: MatchSnapshot = {
+  world: null,
   location: null,
   id: "74433021-24b5-43fe-b1b9-eb16565b6092",
   stage: "ready",
@@ -789,13 +790,11 @@ test("settings drafts retain invalid in-progress quotas and validate the shared 
   expect(saves).toBe(0);
   expect(store.getState().settingsDraft).toBe(draft);
   expect(store.getState().errors.settings).not.toBeNull();
-  store
-    .getState()
-    .editSettings({
-      ...draft,
-      name: "Valid",
-      modeOptions: { ffa: { bots: ["Quatro"], humanLimit: 7 } },
-    });
+  store.getState().editSettings({
+    ...draft,
+    name: "Valid",
+    modeOptions: { ffa: { bots: ["Quatro"], humanLimit: 7 } },
+  });
   await store.getState().saveSettings();
   expect(saves).toBe(1);
   expect(store.getState().settingsDraft).toBeNull();

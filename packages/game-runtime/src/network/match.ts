@@ -95,6 +95,8 @@ export async function joinMatch(
   };
   sampleTransportDiagnostics();
 
+  let pendingSetup: Promise<number> | undefined;
+  let teardown: Promise<void> | undefined;
   const send = (message: Request) => socket.send(message);
   const stopAttempt = (phase: "closed" | "suspended") => {
     const previous = session;
@@ -108,7 +110,16 @@ export async function joinMatch(
     clearTimeout(recoveryDeadline);
     clearTimeout(reconnectTimer);
     // Teardown must happen after the current C/wasm callback has returned.
-    queueMicrotask(() => engine._WebNetCancelMatch());
+    const loading = pendingSetup;
+    if (loading) {
+      const closing = loading.catch(() => {}).then(() => engine._WebNetCancelMatch());
+      teardown = closing;
+      void closing.finally(() => {
+        if (teardown === closing) teardown = undefined;
+      });
+    } else {
+      queueMicrotask(() => engine._WebNetCancelMatch());
+    }
   };
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (session.phase === "closed") return;
@@ -194,6 +205,20 @@ export async function joinMatch(
   };
 
   const displayOutcome = (state: RoundState, slot: number) => {
+    if (state.completion.reasons === 16) {
+      // A new transport owns a new prediction timeline. No old accepted inputs
+      // or rollback snapshots may survive the map's object/resource teardown.
+      if (session.phase !== "suspended" && session.phase !== "reconnecting") {
+        journal.record("tournament-stage-complete", state.completion.tick, state);
+        stopAttempt("suspended");
+        delete port.netConfirmedTick;
+        delete port.netMatchServerState;
+        reconnectAttempts = 0;
+        show("lobby", "Battle won. Loading the next tournament map…");
+        if (!document.hidden) scheduleReconnect();
+      }
+      return;
+    }
     if (state.completion.reasons) {
       const winners = Array.from({ length: 8 }, (_, index) => index + 1).filter(
         (number) => state.completion.winners & (1 << (number - 1)),
@@ -261,7 +286,7 @@ export async function joinMatch(
     show("playing", "Player " + (match.slot + 1) + " · Live prediction");
   };
 
-  const onmessage = (message: Message) => {
+  const onmessage = async (message: Message) => {
     try {
       switch (message.type) {
         case "resume_pending":
@@ -321,7 +346,9 @@ export async function joinMatch(
           lobby(null);
           show(
             "lobby",
-            message.mode === "tournament" ? "Loading Tournament…" : "Loading Free for all…",
+            message.mode === "tournament"
+              ? "Loading Tournament · " + message.world + "…"
+              : "Loading Free for all…",
           );
           if (session.phase !== "lobby" || session.slot >= message.capacity)
             throw new Error("Invalid live prediction setup");
@@ -343,7 +370,8 @@ export async function joinMatch(
             epoch: message.epoch,
             prediction: attachLivePrediction(engine, port, journal),
           };
-          session = { phase: "preparing", match };
+          const preparing: SessionState = { phase: "preparing", match };
+          session = preparing;
           socket.preparePrediction(
             message.slots.reduce((mask, slot) => mask | (1 << slot), 0),
             message.participants,
@@ -351,7 +379,23 @@ export async function joinMatch(
             message.type === "resume_prepare",
             message.bots.reduce((mask, slot) => mask | (1 << slot), 0),
           );
-          if (!configureMatch(engine, message, slot))
+          if (teardown) await teardown;
+          if (session !== preparing) return;
+          let accepted = configureMatch(engine, message, slot);
+          if (accepted instanceof Promise) {
+            const loading = accepted;
+            pendingSetup = loading;
+            try {
+              accepted = await loading;
+            } catch (error) {
+              if (session !== preparing) return;
+              throw error;
+            } finally {
+              if (pendingSetup === loading) pendingSetup = undefined;
+            }
+          }
+          if (session !== preparing) return;
+          if (!accepted)
             throw new Error(port.netSession?.message ?? "The game refused the match setup");
           if (!port.netMatch || port.netMatch.digest === undefined)
             throw new Error("The game did not become ready at tick zero");
@@ -464,7 +508,19 @@ export async function joinMatch(
       if (current()) onerror(error);
     };
     active.onmessage = (message) => {
-      if (current()) onmessage(message);
+      if (!current()) return;
+      const loading = pendingSetup ?? teardown;
+      if (loading) {
+        // The authority can send snapshot blocks immediately after prepare.
+        // Keep their wire order while the C loader is suspended in dlopen.
+        void loading
+          .then(() => {
+            if (current()) void onmessage(message);
+          })
+          .catch(() => {});
+      } else {
+        void onmessage(message);
+      }
     };
     active.beforeUpdate = (gapMs) => {
       if (!current()) return false;

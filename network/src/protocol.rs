@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 19;
+pub const PROTOCOL_VERSION: u16 = 20;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 130;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -288,7 +288,7 @@ pub struct Score {
 #[serde(rename_all = "camelCase")]
 pub struct MatchCompletion {
     pub tick: u32,
-    /// Bit 1: time, bit 2: frags. Both may be reached on the same completed tick.
+    /// 1: time, 2: frags (may combine); 4: tournament won, 8: lost, 16: stage won.
     pub reasons: u32,
     /// Every occupied participant tied for the highest score; zero for an empty match.
     pub winners: u8,
@@ -323,8 +323,31 @@ pub struct FfaLimits {
     pub frag_limit: u32,
 }
 
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TournamentPlayer {
+    pub lives: i32,
+    pub wins: i32,
+    pub losses: i32,
+    pub eliminated: bool,
+    pub frags: i32,
+    pub deaths: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TournamentStage {
+    pub world: String,
+    pub progress: i32,
+    pub games_completed: i32,
+    pub shared_lives: bool,
+    pub players: [TournamentPlayer; 2],
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct SessionStart {
+    #[serde(default)]
+    pub tournament: Option<TournamentStage>,
     /// Explicit original-AI slots; every other occupied slot belongs to a client.
     pub bots: Vec<u8>,
     pub mode: MatchMode,

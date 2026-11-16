@@ -33,7 +33,7 @@ impl Header {
     fn valid(&self) -> bool {
         let start = &self.start;
         start.valid_slots()
-            && start.epoch == 1
+            && start.epoch > 0
             && !start.world.is_empty()
             && start.cars.iter().all(|car| !car.is_empty())
             && !start.compatibility.build.is_empty()
@@ -358,7 +358,7 @@ pub fn inspect(path: &Path) -> io::Result<Summary> {
         let completion_tick = u32::from_le_bytes(data[118..122].try_into().unwrap());
         let reasons = u32::from_le_bytes(data[122..126].try_into().unwrap());
         let winners = u32::from_le_bytes(data[126..130].try_into().unwrap());
-        if ![0, 1, 2, 3, 4, 8].contains(&reasons)
+        if ![0, 1, 2, 3, 4, 8, 16].contains(&reasons)
             || winners > 255
             || (reasons == 0 && (completion_tick != 0 || winners != 0))
             || (reasons != 0 && completion_tick != summary.ticks + 1)
@@ -404,6 +404,7 @@ mod tests {
     fn header(players: usize) -> Header {
         Header {
             start: SessionStart {
+                tournament: None,
                 bots: vec![],
                 mode: tm4_network::protocol::MatchMode::Ffa,
                 limits: tm4_network::protocol::FfaLimits::default(),
@@ -427,6 +428,53 @@ mod tests {
             },
             initial_digest: 42,
         }
+    }
+
+    #[test]
+    fn next_stage_journal_accepts_a_new_epoch_and_preserves_campaign() {
+        use tm4_network::protocol::{FfaLimits, MatchMode, TournamentPlayer, TournamentStage};
+        let directory = TestDirectory::new();
+        let mut header = header(8);
+        header.start.mode = MatchMode::Tournament;
+        header.start.limits = FfaLimits {
+            time_limit_ticks: 0,
+            frag_limit: 0,
+        };
+        header.start.respawn_delay_ticks = 0;
+        header.start.slots.truncate(2);
+        header.start.participants.truncate(2);
+        header.start.cars.truncate(2);
+        header.start.epoch = 2;
+        header.start.world = "Neon City".into();
+        header.start.tournament = Some(TournamentStage {
+            world: "Neon City".into(),
+            progress: 512,
+            games_completed: 512,
+            shared_lives: false,
+            players: std::array::from_fn(|_| TournamentPlayer {
+                lives: 3,
+                wins: 1,
+                losses: 0,
+                eliminated: false,
+                frags: 2,
+                deaths: 1,
+            }),
+        });
+        let mut journal = Journal::create(&directory.0, &header).unwrap();
+        let mut completed = state(1, 0);
+        completed.completion = tm4_network::protocol::MatchCompletion {
+            tick: 1,
+            reasons: 16,
+            winners: 3,
+        };
+        journal
+            .append(0, &[Input::default(); 8], &[], &completed)
+            .unwrap();
+        let path = journal.path.clone();
+        journal.finish(End::Finished).unwrap();
+        let restored = inspect(&path).unwrap();
+        assert_eq!(restored.header.start.epoch, 2);
+        assert_eq!(restored.header.start.tournament, header.start.tournament);
     }
 
     fn state(tick: u32, next_mode: i32) -> RoundState {

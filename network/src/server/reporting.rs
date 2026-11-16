@@ -12,7 +12,13 @@ pub(super) fn collect(world: &World, session_id: Option<&str>) -> Report {
     let game = world.resource::<Match>();
     let progress = game.battle_progress().unwrap_or(BattleProgress::Playing);
     let outcome = if game.ended {
-        if game.result_state().is_some() {
+        if game
+            .last_state
+            .as_ref()
+            .is_some_and(|state| state.completion.reasons == 16)
+        {
+            MatchOutcome::Playing("Battle won. Loading the next tournament map…")
+        } else if game.result_state().is_some() {
             MatchOutcome::Finished {
                 message: game.mode.status_message(BattleProgress::Completed),
                 result: game
@@ -31,6 +37,7 @@ pub(super) fn collect(world: &World, session_id: Option<&str>) -> Report {
     };
     Report {
         update: MatchUpdate {
+            world: game.selected_world.clone(),
             connected: game
                 .controls
                 .iter()

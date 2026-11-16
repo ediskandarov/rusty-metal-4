@@ -57,6 +57,9 @@ pub(super) fn session_parameters(
 }
 
 pub(super) fn valid_session(session: &SessionStart) -> bool {
+    if session.tournament.is_some() {
+        return false;
+    }
     session.limits.valid() && (1..=3600).contains(&session.respawn_delay_ticks)
 }
 

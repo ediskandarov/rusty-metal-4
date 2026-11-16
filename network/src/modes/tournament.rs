@@ -37,7 +37,17 @@ pub(super) fn valid_session(session: &SessionStart) -> bool {
         && session.bots.is_empty()
         && session.respawn_delay_ticks == 0
         && session.limits == UNUSED_LIMITS
-        && session.world == INITIAL_WORLD
+        && match &session.tournament {
+            None => session.world == INITIAL_WORLD,
+            Some(stage) => {
+                session.world == stage.world
+                    && session.world != INITIAL_WORLD
+                    && stage.progress > 0
+                    && stage.progress < 4096
+                    && stage.games_completed >= stage.progress
+                    && stage.players.iter().all(|player| player.lives >= 0)
+            }
+        }
 }
 
 pub(super) fn check_live_membership() -> Result<(), &'static str> {

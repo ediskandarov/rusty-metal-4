@@ -9,7 +9,7 @@ export const ffaLimitsSchema = z.object({
   timeLimitTicks: z.number().int().min(1).max(0x7fffffff),
   fragLimit: z.number().int().min(1).max(0x7fffffff),
 });
-export const networkProtocolVersion = 19;
+export const networkProtocolVersion = 20;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -44,7 +44,7 @@ export type Score = z.infer<typeof scoreSchema>;
 export const matchCompletionSchema = z
   .object({
     tick: u32,
-    reasons: u32.refine((value) => [0, 1, 2, 3, 4, 8].includes(value)),
+    reasons: u32.refine((value) => [0, 1, 2, 3, 4, 8, 16].includes(value)),
     winners: byte,
   })
   .refine(
@@ -82,9 +82,27 @@ export const participantIdSchema = z
   .string()
   .regex(/^[0-9a-f]{16}$/)
   .refine((id) => id !== "0000000000000000");
+const tournamentPlayerSchema = z.object({
+  lives: i32.min(0),
+  wins: i32,
+  losses: i32,
+  eliminated: z.boolean(),
+  frags: i32,
+  deaths: i32,
+});
+export const tournamentStageSchema = z
+  .object({
+    world: z.string().min(1),
+    progress: i32.min(1).max(4095),
+    gamesCompleted: i32,
+    sharedLives: z.boolean(),
+    players: z.tuple([tournamentPlayerSchema, tournamentPlayerSchema]),
+  })
+  .refine((stage) => stage.gamesCompleted >= stage.progress);
 export const startSchema = slotConfigurationSchema
   .safeExtend({
     mode: z.enum(["ffa", "tournament"]),
+    tournament: tournamentStageSchema.nullable().optional(),
     bots: z.array(z.number().int().min(0).max(7)).max(7),
     limits: z.object({ timeLimitTicks: u32, fragLimit: u32 }),
     respawnDelayTicks: z.number().int().min(0).max(3600),
@@ -120,13 +138,17 @@ export const startSchema = slotConfigurationSchema
   .refine(
     (start) =>
       (start.mode === "ffa"
-        ? ffaLimitsSchema.safeParse(start.limits).success && start.respawnDelayTicks > 0
+        ? !start.tournament &&
+          ffaLimitsSchema.safeParse(start.limits).success &&
+          start.respawnDelayTicks > 0
         : start.slots.join(",") === "0,1" &&
           start.bots.length === 0 &&
           start.respawnDelayTicks === 0 &&
           start.limits.timeLimitTicks === 0 &&
           start.limits.fragLimit === 0 &&
-          start.world === "Construction Yard") &&
+          (start.tournament
+            ? start.world === start.tournament.world && start.world !== "Construction Yard"
+            : start.world === "Construction Yard")) &&
       start.capacity === 8 &&
       start.bots.length < start.slots.length &&
       start.bots.every(

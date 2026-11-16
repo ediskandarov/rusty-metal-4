@@ -1,7 +1,7 @@
 #ifndef TM4_WEB_MATCH_MODE_H
 #define TM4_WEB_MATCH_MODE_H
 #include "tm4_scalar.h"
-/* Completion causes: time, frags, tournament victory, tournament defeat. */
+/* Completion causes: time, frags, tournament victory, tournament defeat, stage victory. */
 typedef struct WebMatchResult {
     u32 tick, reasons, winners;
 } WebMatchResult;

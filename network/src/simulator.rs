@@ -430,13 +430,22 @@ impl Simulator {
         value: &str,
         use_string: impl FnOnce(&mut Self, u32) -> Result<R>,
     ) -> Result<R> {
-        let address = self.call::<u32, u32>("malloc", (value.len() + 1) as u32)?;
-        ensure!(address != 0, "Simulation string allocation failed");
         let mut bytes = value.as_bytes().to_vec();
         bytes.push(0);
-        self.memory
-            .write(&mut self.store, address as usize, &bytes)?;
-        let result = use_string(self, address);
+        self.with_bytes(&bytes, use_string)
+    }
+    fn with_bytes<R>(
+        &mut self,
+        bytes: &[u8],
+        use_bytes: impl FnOnce(&mut Self, u32) -> Result<R>,
+    ) -> Result<R> {
+        let address = self.call::<u32, u32>("malloc", bytes.len() as u32)?;
+        ensure!(address != 0, "Simulation allocation failed");
+        let result = self
+            .memory
+            .write(&mut self.store, address as usize, bytes)
+            .map_err(anyhow::Error::from)
+            .and_then(|()| use_bytes(self, address));
         self.call::<u32, ()>("free", address)?;
         result
     }
@@ -465,6 +474,42 @@ impl Simulator {
         let accepted = self.with_string(&pool, |simulator, pool_address| {
             simulator.with_string(&identities, |simulator, identities_address| {
                 simulator.with_string(&names, |simulator, address| {
+                    if let Some(stage) = &session.tournament {
+                        let mut words = vec![
+                            world,
+                            stage.progress,
+                            stage.games_completed,
+                            i32::from(stage.shared_lives),
+                        ];
+                        for player in &stage.players {
+                            words.extend([
+                                player.lives,
+                                player.wins,
+                                player.losses,
+                                i32::from(player.eliminated),
+                                player.frags,
+                                player.deaths,
+                            ]);
+                        }
+                        let bytes: Vec<u8> =
+                            words.iter().flat_map(|word| word.to_le_bytes()).collect();
+                        return simulator.with_bytes(&bytes, |simulator, carry| {
+                            simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32, u32), i32>(
+                                "WebNetStartTournamentStage",
+                                (
+                                    session.capacity as i32,
+                                    u32::from(session.slot_mask()),
+                                    world,
+                                    session.seed,
+                                    -1,
+                                    u32::from(session.portable),
+                                    address,
+                                    identities_address,
+                                    carry,
+                                ),
+                            )
+                        });
+                    }
                     if session.mode == tm4_network::protocol::MatchMode::Tournament {
                         return simulator.call::<(i32, u32, i32, u32, i32, u32, u32, u32), i32>(
                             "WebNetStartTournament",
@@ -662,12 +707,46 @@ impl Simulator {
         Ok(())
     }
 
-    #[cfg(test)]
     pub fn finish(&mut self) -> Result<()> {
         self.call::<(), ()>("WebNetCancelMatch", ())?;
         self.capacity = 0;
         self.slots.clear();
         Ok(())
+    }
+
+    pub fn next_tournament_stage(&mut self) -> Result<tm4_network::protocol::TournamentStage> {
+        let address = self.call::<(), u32>("WebTournamentNextStage", ())?;
+        ensure!(address != 0, "Tournament has no next stage");
+        let mut bytes = [0u8; 64];
+        self.memory
+            .read(&self.store, address as usize, &mut bytes)?;
+        let words: Vec<i32> = bytes
+            .chunks_exact(4)
+            .map(|word| i32::from_le_bytes(word.try_into().unwrap()))
+            .collect();
+        let world = self
+            .catalog
+            .worlds
+            .get(words[0] as usize)
+            .context("Tournament next map is missing from catalog")?
+            .clone();
+        Ok(tm4_network::protocol::TournamentStage {
+            world,
+            progress: words[1],
+            games_completed: words[2],
+            shared_lives: words[3] != 0,
+            players: std::array::from_fn(|i| {
+                let p = &words[4 + i * 6..];
+                tm4_network::protocol::TournamentPlayer {
+                    lives: p[0],
+                    wins: p[1],
+                    losses: p[2],
+                    eliminated: p[3] != 0,
+                    frags: p[4],
+                    deaths: p[5],
+                }
+            }),
+        })
     }
 
     pub fn state(&mut self) -> Result<RoundState> {
@@ -831,6 +910,7 @@ impl Drop for Simulator {
 #[cfg(test)]
 mod tests {
     mod dynamic_modules;
+    mod tournament;
     use super::*;
     use base64::{Engine as _, engine::general_purpose::STANDARD};
     use wasmtime_wasi::p2::pipe::MemoryOutputPipe;
@@ -901,6 +981,7 @@ mod tests {
     }
     fn session() -> SessionStart {
         SessionStart {
+            tournament: None,
             bots: vec![],
             mode: tm4_network::protocol::MatchMode::Ffa,
             limits: tm4_network::protocol::FfaLimits::default(),
@@ -973,6 +1054,7 @@ mod tests {
     fn sparse_teleports_snap_every_owned_camera() -> Result<()> {
         let (wasm, resources) = paths()?;
         let setup = SessionStart {
+            tournament: None,
             bots: vec![],
             capacity: 8,
             slots: vec![3, 6],
@@ -1006,6 +1088,7 @@ mod tests {
             let count = slots.len();
             let winner = i32::from(*slots.last().unwrap());
             let setup = SessionStart {
+                tournament: None,
                 bots: vec![],
                 capacity: 8,
                 participants: (1..=count)
@@ -1097,6 +1180,7 @@ mod tests {
             if winner < 7 {
                 let mut mismatched = Simulator::new(&wasm, &resources, compatibility())?;
                 mismatched.start(&SessionStart {
+                    tournament: None,
                     bots: vec![],
                     respawn_delay_ticks: 91,
                     ..setup.clone()
@@ -1155,6 +1239,7 @@ mod tests {
         let reference: serde_json::Value =
             serde_json::from_slice(&fs::read(env::var("TM4_BOT_REFERENCE")?)?)?;
         let setup = SessionStart {
+            tournament: None,
             bots: vec![1],
             respawn_delay_ticks: 12,
             limits: tm4_network::protocol::FfaLimits {
@@ -1215,6 +1300,7 @@ mod tests {
             serde_json::from_slice(&fs::read(env::var("TM4_MULTI_BOT_REFERENCE")?)?)?;
         let slots = vec![0, 1, 3, 5, 7];
         let setup = SessionStart {
+            tournament: None,
             bots: vec![3, 5, 7],
             participants: slots
                 .iter()
@@ -1436,6 +1522,7 @@ mod tests {
         use tm4_network::protocol::ParticipantId;
         let (wasm, resources) = paths()?;
         let setup = SessionStart {
+            tournament: None,
             bots: vec![],
             capacity: 8,
             slots: vec![0, 3, 7],
@@ -1531,6 +1618,7 @@ mod tests {
         let (wasm, resources) = paths()?;
         for model in ["Orbital", "Crusher", "Trash Man", "Super Auger"] {
             let setup = SessionStart {
+                tournament: None,
                 bots: vec![],
                 capacity: 8,
                 slots: vec![0, 3, 7],
@@ -1677,6 +1765,7 @@ mod tests {
             "Missing roster accepted"
         );
         let setup = SessionStart {
+            tournament: None,
             bots: vec![],
             capacity: 8,
             slots: vec![0, 3],
@@ -1704,6 +1793,7 @@ mod tests {
         world.step(0, &vec![Input::default(); 8])?;
         world.finish()?;
         let (state, _) = world.start(&SessionStart {
+            tournament: None,
             bots: vec![],
             capacity: 8,
             slots: vec![1, 3],
@@ -1935,6 +2025,7 @@ mod tests {
         );
         let mut world = Simulator::new(&bytes, &resources, compatibility())?;
         let setup = SessionStart {
+            tournament: None,
             bots: vec![],
             world: record.world.clone(),
             cars: record.cars.clone(),
