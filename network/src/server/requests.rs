@@ -82,6 +82,16 @@ impl Match {
                 }
             }
             Request::Leave {} if self.started && !self.ended && slot.is_some() => {
+                if let Err(message) = self.mode.check_live_membership() {
+                    send(
+                        links,
+                        entity,
+                        &Message::Error {
+                            message: message.into(),
+                        },
+                    );
+                    return;
+                }
                 let slot = slot.unwrap();
                 if !self.participants.joining(slot) {
                     let identity = self.participants.binding(slot);
@@ -222,6 +232,29 @@ impl Match {
                     && let Some(message) = self.final_message()
                 {
                     send(links, entity, &message);
+                    return;
+                }
+                if let Some(slot) = requested
+                    && self.started
+                    && !self.ended
+                    && self.tick == 0
+                    && self.prediction.anchor.is_none()
+                    && let Some(prepared) = self
+                        .session
+                        .clone()
+                        .filter(|session| session.compatibility == compatibility)
+                {
+                    if self.controls[slot].connection.is_some() {
+                        send(links, entity, &Message::ResumePending);
+                        return;
+                    }
+                    let player = &mut self.controls[slot];
+                    player.connection = Some(entity);
+                    player.compatibility = Some(compatibility);
+                    player.ready = false;
+                    self.loading_since = Instant::now();
+                    send(links, entity, &Message::Welcome { slot });
+                    send(links, entity, &Message::PredictionPrepare(prepared));
                     return;
                 }
                 let session = self.session.as_ref().filter(|session| {

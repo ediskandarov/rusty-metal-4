@@ -42,11 +42,9 @@ void WebParticipantRecordDeath(const Car* victim, WebParticipantId source)
         return;
     const WebParticipantId dead = WebParticipantObjectIdentity(victim);
     const WebParticipantId attacker = source;
-    if (!present(dead))
-        return;
     for (s32 slot = 0; slot < 8; ++slot) {
         WebParticipantResult* result = &participants.slots[slot];
-        if (equal(result->id, dead) && result->deaths < INT_MAX)
+        if (present(dead) && equal(result->id, dead) && result->deaths < INT_MAX)
             ++result->deaths;
         /* Environmental damage and suicide do not award a frag. This is a
          * combat statistic; Deathmatch still owns its original round scoring. */

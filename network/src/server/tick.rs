@@ -184,7 +184,7 @@ fn prepare_session(
     true
 }
 
-fn synchronize_clock(
+pub(super) fn synchronize_clock(
     game: &mut Match,
     links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
     native_tick: Tick,
@@ -197,10 +197,14 @@ fn synchronize_clock(
             .enumerate()
             .any(|(slot, player)| game.participants.human(slot) && player.connection.is_none())
     {
-        game.fail(
-            links,
-            "A player disconnected before the match clocks were agreed.",
-        );
+        // Restart clock voting after the missing participant reloads the same stage.
+        game.prediction = Default::default();
+        if now.duration_since(game.loading_since) > Duration::from_secs(300) {
+            game.fail(
+                links,
+                "Timed out waiting for players to reconnect during loading.",
+            );
+        }
         return false;
     }
     // Tick-zero readiness belongs to initial clock negotiation. Live members

@@ -49,6 +49,18 @@ fn tournament_next_map_preserves_campaign_and_restores_on_fresh_instance() -> Re
         final_state.completion.reasons == 16 && final_state.completion.winners == 3,
         "Not an intermediate team victory"
     );
+    ensure!(
+        final_state.scores[0].frags > 0,
+        "Tournament AI kills were not credited"
+    );
+    let completed = authority.snapshot()?;
+    authority.finish()?;
+    authority.start(&start)?;
+    authority.restore_portable(&completed)?;
+    ensure!(
+        authority.state()?.digest == final_state.digest,
+        "Completed battle restore diverged"
+    );
     let next = authority.next_tournament_stage()?;
     ensure!(
         next.world == "Neon City" && next.players[0].lives == 3,

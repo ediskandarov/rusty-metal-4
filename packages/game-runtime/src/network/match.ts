@@ -35,6 +35,24 @@ type SessionState =
 
 export type MatchStatus = (state: "lobby" | "playing" | "error", message: string) => void;
 
+// A runtime can outlive a connection or a whole joinMatch invocation.
+const engineWork = new WeakMap<NetworkEngine, Promise<unknown>>();
+function useEngine<T>(engine: NetworkEngine, action: () => T | Promise<T>): T | Promise<T> {
+  const previous = engineWork.get(engine);
+  const result = previous ? previous.then(action) : action();
+  if (result instanceof Promise) {
+    const settled = result.then(
+      () => {},
+      () => {},
+    );
+    engineWork.set(engine, settled);
+    void settled.then(() => {
+      if (engineWork.get(engine) === settled) engineWork.delete(engine);
+    });
+  }
+  return result;
+}
+
 export async function joinMatch(
   engine: NetworkEngine,
   endpoint: string,
@@ -110,16 +128,14 @@ export async function joinMatch(
     clearTimeout(recoveryDeadline);
     clearTimeout(reconnectTimer);
     // Teardown must happen after the current C/wasm callback has returned.
-    const loading = pendingSetup;
-    if (loading) {
-      const closing = loading.catch(() => {}).then(() => engine._WebNetCancelMatch());
-      teardown = closing;
-      void closing.finally(() => {
-        if (teardown === closing) teardown = undefined;
-      });
-    } else {
-      queueMicrotask(() => engine._WebNetCancelMatch());
-    }
+    const closing = useEngine(engine, () =>
+      Promise.resolve().then(() => engine._WebNetCancelMatch()),
+    );
+    const draining = Promise.resolve(closing);
+    teardown = draining;
+    void draining.then(() => {
+      if (teardown === draining) teardown = undefined;
+    });
   };
   const cleanup = (message: string, state: "lobby" | "error") => {
     if (session.phase === "closed") return;
@@ -381,7 +397,7 @@ export async function joinMatch(
           );
           if (teardown) await teardown;
           if (session !== preparing) return;
-          let accepted = configureMatch(engine, message, slot);
+          let accepted = useEngine(engine, () => configureMatch(engine, message, slot));
           if (accepted instanceof Promise) {
             const loading = accepted;
             pendingSetup = loading;
@@ -507,19 +523,17 @@ export async function joinMatch(
     active.onerror = (error) => {
       if (current()) onerror(error);
     };
+    let receiving: Promise<void> | undefined;
     active.onmessage = (message) => {
       if (!current()) return;
-      const loading = pendingSetup ?? teardown;
-      if (loading) {
-        // The authority can send snapshot blocks immediately after prepare.
-        // Keep their wire order while the C loader is suspended in dlopen.
-        void loading
-          .then(() => {
-            if (current()) void onmessage(message);
-          })
-          .catch(() => {});
-      } else {
-        void onmessage(message);
+      const dispatch = () => (current() ? onmessage(message) : Promise.resolve());
+      const waiting = receiving ?? pendingSetup ?? teardown;
+      const handled = waiting ? waiting.then(dispatch, dispatch) : dispatch();
+      if (waiting || pendingSetup) {
+        receiving = handled;
+        void handled.finally(() => {
+          if (receiving === handled) receiving = undefined;
+        });
       }
     };
     active.beforeUpdate = (gapMs) => {

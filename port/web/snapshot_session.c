@@ -333,9 +333,10 @@ int WebSnapshotSessionPrepare(const u8* input, u32 length)
             record.completion, record.tick, record.slot_mask, &record.participants)
         || (WebTournamentActive()
             && record.completion.reasons
-                != ((record.tournament.world_won || record.tournament.tournament_won) ? 4u
-                        : record.tournament.world_lost                                ? 8u
-                                                                                      : 0u))
+                != (record.tournament.tournament_won   ? 4u
+                        : record.tournament.world_won  ? 16u
+                        : record.tournament.world_lost ? 8u
+                                                       : 0u))
         || (WebFfaActive() && !!record.completion.reasons != !!record.deathmatch_finished)
         || memcmp(initial, record.initial_participants, sizeof(initial)))
         return 0;

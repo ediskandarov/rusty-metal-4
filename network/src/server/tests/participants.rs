@@ -1845,3 +1845,61 @@ fn tournament_between_maps_accepts_only_existing_credentials_and_keeps_the_roste
         .unwrap();
     assert_eq!(world.resource::<Match>().participants.binding(0), identity);
 }
+
+#[test]
+fn tournament_reconnect_during_loading_keeps_tick_zero_and_campaign() {
+    let mut world = World::new();
+    let owner = connection(&mut world, 1);
+    let mut game = game();
+    game.mode = game_protocol::MatchMode::Tournament;
+    game.tick = 0;
+    game.prediction = Default::default();
+    game.participants.freeze();
+    game.participants.at_slot_mut(0).credential = Some("ab".repeat(32));
+    let identity = game.participants.binding(0);
+    let compatibility = game.compatibility.clone().unwrap();
+    world.insert_resource(game);
+    world
+        .run_system_once(
+            |mut game: ResMut<Match>,
+             mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>| {
+                assert!(!super::super::tick::synchronize_clock(
+                    &mut game,
+                    &mut links,
+                    Tick(50),
+                    Instant::now()
+                ));
+                assert!(!game.ended);
+            },
+        )
+        .unwrap();
+    request(
+        &mut world,
+        owner,
+        Request::Resume {
+            token: "ab".repeat(32),
+            compatibility,
+        },
+    );
+    let game = world.resource::<Match>();
+    assert_eq!(game.controls[0].connection, Some(owner));
+    assert_eq!(game.participants.binding(0), identity);
+    assert_eq!(game.tick, 0);
+    assert!(!game.ended);
+    assert!(game.controls[0].resume.is_none());
+}
+
+#[test]
+fn tournament_transport_leave_does_not_schedule_membership_change() {
+    let mut world = World::new();
+    let owner = connection(&mut world, 1);
+    let mut game = game();
+    game.mode = game_protocol::MatchMode::Tournament;
+    game.controls[0].connection = Some(owner);
+    game.participants.freeze();
+    world.insert_resource(game);
+    request(&mut world, owner, Request::Leave {});
+    let game = world.resource::<Match>();
+    assert!(game.membership.departing.is_empty());
+    assert!(!game.ended);
+}

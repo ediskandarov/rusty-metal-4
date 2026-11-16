@@ -624,7 +624,7 @@ test("abort followed by a new join cannot tear down the replacement match", asyn
   next.onmessage({ type: "prediction_offer", anchor: 100 });
   next.onmessage({ type: "prediction_begin", anchor: 100 });
   first.onerror(new Error("Old transport failed"));
-  await Promise.resolve();
+  await Bun.sleep(0);
   expect(counts()).toEqual({ cancellations: 1, loads: 2 });
   expect(globalThis.tm4LivePrediction).toBeDefined();
   expect(port.netMatch).toBeDefined();
@@ -820,5 +820,74 @@ test("snapshot messages arriving during asynchronous map loading retain their or
   finish();
   await Bun.sleep(0);
   expect(next.sent).toContainEqual({ type: "resume_clock", attempt: 1, target: 20 });
+  expect(statuses.some(([status]) => status === "error")).toBe(false);
+});
+
+test("cross-join async startup cannot erase the replacement match", async () => {
+  const { first, engine, port, counts } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const loadingConnection = await nextConnection();
+  const call = engine.ccall.bind(engine);
+  let finish!: () => void;
+  let pending = true;
+  Object.defineProperty(engine, "ccall", {
+    value: (name: string) =>
+      name === "WebNetStartFfa" && pending
+        ? new Promise<number>((resolve) => {
+            finish = () => resolve(call(name));
+          })
+        : call(name),
+  });
+  loadingConnection.onmessage({ type: "welcome", slot: 0 });
+  loadingConnection.onmessage({ type: "prediction_prepare", ...start });
+  stop();
+  stop = undefined;
+  pending = false;
+  stop = await joinMatch(
+    engine,
+    "wss://game.test/replacement",
+    () => {},
+    () => {},
+  );
+  const replacement = connections.at(-1);
+  replacement.onopen();
+  replacement.onmessage({ type: "welcome", slot: 0 });
+  replacement.onmessage({ type: "prediction_prepare", ...start });
+  replacement.onmessage({ type: "prediction_offer", anchor: 200 });
+  replacement.onmessage({ type: "prediction_begin", anchor: 200 });
+  expect(counts().loads).toBe(1);
+  finish();
+  await Bun.sleep(0);
+
+  expect(port.netMatch).toBeDefined();
+});
+
+test("reconnect while prior async load drains keeps snapshot messages behind new prepare", async () => {
+  const { first, engine, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const loadingConnection = await nextConnection();
+  const call = engine.ccall.bind(engine);
+  let finish!: () => void;
+  let pending = true;
+  Object.defineProperty(engine, "ccall", {
+    value: (name: string) =>
+      name === "WebNetStartFfa" && pending
+        ? new Promise<number>((resolve) => {
+            finish = () => resolve(call(name));
+          })
+        : call(name),
+  });
+  loadingConnection.onmessage({ type: "welcome", slot: 0 });
+  loadingConnection.onmessage({ type: "resume_prepare", ...start });
+  loadingConnection.onerror(new NetworkConnectionError("load-time disconnect"));
+  await Bun.sleep(1100);
+  const replacement = connections.at(-1);
+  expect(replacement).not.toBe(loadingConnection);
+  replacement.onopen();
+  beginSnapshot(replacement)();
+  pending = false;
+  finish();
+  await Bun.sleep(0);
+
   expect(statuses.some(([status]) => status === "error")).toBe(false);
 });

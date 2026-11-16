@@ -38,6 +38,9 @@ pub(super) fn detach_connection(
     if !control.disconnect(entity) {
         return false;
     }
+    if game.started && game.tick == 0 && game.prediction.anchor.is_none() {
+        game.prediction = Default::default();
+    }
     if !game.started && !game.room_only && game.continuation.is_none() {
         let binding = game.participants.binding(slot);
         game.replace_preparation(binding, commands)
