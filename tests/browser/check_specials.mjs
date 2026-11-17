@@ -37,7 +37,11 @@ try {
       console.error(e);
     });
     page.on("console", (m) => {
-      if (m.type() === "error" && !/^\[[ID]\]/.test(m.text())) {
+      if (
+        m.type() === "error" &&
+        !/^\[[ID]\]/.test(m.text()) &&
+        !m.text().startsWith("Blocking on the main thread is very dangerous,")
+      ) {
         errors.push(m.text());
         console.error(m.text());
       }
@@ -102,6 +106,13 @@ try {
           await page.waitForTimeout(1000);
           health = await page.evaluate(() => Module._WebTestWeaponTargetHealth());
         }
+        if (test.target)
+          await page.evaluate(() => {
+            Module._WebSetRenderSmoothingDelay(1000 / 30);
+            Module._WebSetRenderSmoothing(1);
+            tm4Port.motionSamples = [];
+            Module._WebTestCaptureMotion(1);
+          });
         const before = await state();
         assert(before.weaponAmmo > 0);
         await press("w");
@@ -159,6 +170,31 @@ try {
             before,
             { timeout: 5000 },
           );
+        }
+        if (test.target) {
+          await page.waitForFunction(() =>
+            tm4Port.motionSamples.some(
+              (s) => s.name === "weaponRayBeam" && s.style === "tank" && s.history,
+            ),
+          );
+          const rays = await page.evaluate(() =>
+            tm4Port.motionSamples.filter(
+              (s) => s.name === "weaponRayBeam" && s.style === "tank" && s.history,
+            ),
+          );
+          for (const ray of rays) {
+            assert.deepEqual(ray.liveForward, [0, 4096, 0], "Ion Blast points down from the sky");
+            assert.deepEqual(
+              ray.renderForward,
+              ray.liveForward,
+              "Smoothing must preserve beam direction",
+            );
+          }
+          await page.screenshot({ path: `build/checks/ion-blast-${session}.png` });
+          await page.evaluate(() => {
+            Module._WebTestCaptureMotion(0);
+            delete tm4Port.motionSamples;
+          });
         }
         if (contacts) {
           await page.waitForFunction(

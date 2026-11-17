@@ -38,8 +38,8 @@ try {
     console.log(label, { frames, ticks });
     assert.equal(end.stepCounter - start.stepCounter, end.ticks - start.ticks);
     assert(Math.abs(end.renderCounter - start.renderCounter - (end.frames - start.frames)) <= 1);
-    assert.equal(await page.locator(".performance-row").count(), 3);
-    for (const line of await page.locator(".performance-row polyline").all())
+    assert.equal(await page.locator(".performance-row:visible").count(), 3);
+    for (const line of await page.locator(".performance-row:visible polyline").all())
       assert((await line.getAttribute("points")).length > 0);
     assert(frames >= minimum && frames <= maximum, label + " fresh frame rate");
     assert(ticks >= 28 && ticks <= 32, label + " simulation tick rate");

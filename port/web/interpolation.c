@@ -13,6 +13,9 @@
 #include "src/modules/levels/w_yard/private.h"
 #include "src/modules/lightn/private.h"
 #include "src/modules/weap/private.h"
+#ifdef TM4_WEB_TEST_HOOKS
+#include "src/modules/ray/private.h"
+#endif
 #include "tm4/fixed.h"
 #include "tm4/main/game.h"
 #include "tm4/main/math3d.h"
@@ -650,7 +653,8 @@ static int sample_matrix(const MATRIX* before, const MATRIX* after, MATRIX* resu
         if (fabs(delta) > maximum_delta || value < INT_MIN || value > INT_MAX)
             return 0;
     }
-    if (shortest_arc && memcmp(before->m, after->m, sizeof(before->m)) == 0) {
+    /* Unchanged bases may include reflections (Ion Blast) or scale. Keep them exact. */
+    if (memcmp(before->m, after->m, sizeof(before->m)) == 0) {
         *result = *after;
         for (int i = 0; i < 3; ++i)
             result->t[i] = sample_value(before->t[i], after->t[i], at);
@@ -660,6 +664,9 @@ static int sample_matrix(const MATRIX* before, const MATRIX* after, MATRIX* resu
         if (!sample_rotation_arc(before, after, basis, at))
             return 0;
     } else {
+        /* Rebuilding the third axis is valid only for proper rotation matrices. */
+        if (!rotation_basis(before, basis) || !rotation_basis(after, basis))
+            return 0;
         for (int col = 0; col < 2; ++col) {
             for (int row = 0; row < 3; ++row)
                 basis[col][row] = sample_value(before->m[row][col], after->m[row][col], at);
@@ -1130,6 +1137,19 @@ MATRIX* WebInterpolationRay(const RayBeam* ray, MATRIX* live, MATRIX* sample, s3
 #ifdef TM4_WEB_TEST_HOOKS
     trace_motion(ray, header->name, live->t[0], live->t[1], live->t[2], live_length, result->t[0],
         result->t[1], result->t[2], *length, sampled);
+    if (test_capture_motion) {
+        EM_ASM(
+            {
+                const sample = tm4Port.motionSamples ?.at(-1);
+                if (sample) {
+                    sample.style = UTF8ToString($6);
+                    sample.liveForward = ([ $0, $1, $2 ]);
+                    sample.renderForward = ([ $3, $4, $5 ]);
+                }
+            },
+            live->m[0][2], live->m[1][2], live->m[2][2], result->m[0][2], result->m[1][2],
+            result->m[2][2], ray->type->name);
+    }
 #endif
     return result;
 }
