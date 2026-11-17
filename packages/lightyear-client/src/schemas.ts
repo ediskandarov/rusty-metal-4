@@ -9,7 +9,7 @@ export const ffaLimitsSchema = z.object({
   timeLimitTicks: z.number().int().min(1).max(0x7fffffff),
   fragLimit: z.number().int().min(1).max(0x7fffffff),
 });
-export const networkProtocolVersion = 20;
+export const networkProtocolVersion = 21;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -83,7 +83,7 @@ export const tournamentStageSchema = z
     progress: i32.min(1).max(4095),
     gamesCompleted: i32,
     sharedLives: z.boolean(),
-    players: z.tuple([tournamentPlayerSchema, tournamentPlayerSchema]),
+    players: z.array(tournamentPlayerSchema).min(2).max(4),
   })
   .refine((stage) => stage.gamesCompleted >= stage.progress);
 export const startSchema = slotConfigurationSchema
@@ -128,13 +128,17 @@ export const startSchema = slotConfigurationSchema
         ? !start.tournament &&
           ffaLimitsSchema.safeParse(start.limits).success &&
           start.respawnDelayTicks > 0
-        : start.slots.join(",") === "0,1" &&
+        : start.slots.length >= 2 &&
+          start.slots.length <= 4 &&
+          start.slots.every((slot, index) => slot === index) &&
           start.bots.length === 0 &&
           start.respawnDelayTicks === 0 &&
           start.limits.timeLimitTicks === 0 &&
           start.limits.fragLimit === 0 &&
           (start.tournament
-            ? start.world === start.tournament.world && start.world !== "Construction Yard"
+            ? start.world === start.tournament.world &&
+              start.world !== "Construction Yard" &&
+              start.tournament.players.length === start.slots.length
             : start.world === "Construction Yard")) &&
       start.capacity === 8 &&
       start.bots.length < start.slots.length &&

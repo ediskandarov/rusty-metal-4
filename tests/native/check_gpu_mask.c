@@ -1,7 +1,10 @@
+#include "port/psyz/subpixel.h"
+#include "port/web/car_capacity.h"
 #include <emscripten.h>
 #include <libgpu.h>
+#include <psyz/video.h>
 #include <stdio.h>
-#include "port/psyz/subpixel.h"
+#include <stdlib.h>
 
 /* Exercise real packets and VRAM readback, independently of game assets. */
 static int failures;
@@ -90,7 +93,9 @@ static void check_perspective(void)
     triangle.tpage = GetTPage(2, 0, 384, 0);
     u_long* payload = (u_long*)((char*)&triangle + sizeof(OT_TYPE));
     PsyzSubpixelPosition positions[] = {
-        { 100, 6, 1.0f }, { 116, 6, 0.5f }, { 100, 22, 0.25f },
+        { 100, 6, 1.0f },
+        { 116, 6, 0.5f },
+        { 100, 22, 0.25f },
     };
 
     Psyz_DrawPushPrimWithPositions(payload, getlen(&triangle), positions, 0);
@@ -107,6 +112,42 @@ static void check_perspective(void)
     Psyz_DrawPushPrimWithPositions(
         payload, getlen(&triangle), positions, PSYZ_PERSPECTIVE_TEXTURES);
     expect(104, 0x7fef, "one invalid depth selects affine for the whole polygon");
+}
+
+static void check_car_atlases(void)
+{
+    const short x[] = { 640, 832 };
+    const short y[] = { TM4_EXPERIMENTAL_EXTENDED_VRAM ? 512 : 192,
+        TM4_EXPERIMENTAL_EXTENDED_VRAM ? 512 : 192 };
+    const unsigned short colors[] = { 0x001f, 0x03e0 };
+    for (int i = 0; i < 2; ++i) {
+        RECT texels = { x[i], y[i], 2, 1 };
+        RECT clut = { x[i], y[i] + 63, 16, 1 };
+        u_long indices = 0x11111111;
+        unsigned short palette[16] = { 0 };
+        palette[1] = colors[i];
+        LoadImage(&texels, &indices);
+        LoadImage(&clut, (u_long*)palette);
+        DR_TPAGE page;
+        SetDrawTPage(&page, 0, 0, GetTPage(0, 0, x[i], y[i]));
+        DrawPrim(&page);
+        SPRT sprite;
+        setSprt(&sprite);
+        setXY0(&sprite, 120 + i * 4, 10);
+        setWH(&sprite, 2, 1);
+        setUV0(&sprite, 0, y[i] & 255);
+        setRGB0(&sprite, 128, 128, 128);
+        sprite.clut = GetClut(x[i], y[i] + 63);
+        DrawPrim(&sprite);
+        expect(120 + i * 4, colors[i], "configured atlas page and palette");
+        MoveImage(&texels, x[i] + 8, y[i] + 1);
+        RECT moved = { x[i] + 8, y[i] + 1, 2, 1 };
+        u_long copied = 0;
+        StoreImage(&moved, &copied);
+        DrawSync(0);
+        failures += copied != indices;
+        printf("%s configured atlas upload/copy/readback\n", copied == indices ? "PASS" : "FAIL");
+    }
 }
 
 int main(void)
@@ -218,6 +259,16 @@ int main(void)
     check_dithering(1);
     check_dithering(0);
     check_perspective();
-    EM_ASM({ window.tm4GpuMaskResult = { failures : $0 }; }, failures);
+    check_car_atlases();
+    int width = 0, height = 0;
+    unsigned char* dump = Psyz_VideoAllocVramDump(&width, &height);
+    const int expected_height = TM4_EXPERIMENTAL_EXTENDED_VRAM ? 1024 : 512;
+    failures += !dump || width != 1024 || height != expected_height;
+    printf("%s actual VRAM dimensions: %dx%d\n",
+        dump && width == 1024 && height == expected_height ? "PASS" : "FAIL", width, height);
+    free(dump);
+    EM_ASM(
+        { window.tm4GpuMaskResult = ({ failures : $0, atlasCount : $1, vramHeight : $2 }); },
+        failures, TM4_CAR_ATLAS_COUNT, height);
     return 0;
 }

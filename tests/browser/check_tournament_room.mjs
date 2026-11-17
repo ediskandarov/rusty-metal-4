@@ -102,7 +102,7 @@ try {
     await frame.locator('#tournament-status[data-phase="ready"]').waitFor();
     assert.equal(
       await frame.locator("#tournament-status-title").textContent(),
-      "Both cars confirmed",
+      "All cars confirmed",
     );
   }
   assert(confirmed.participants.every((p) => p.car));

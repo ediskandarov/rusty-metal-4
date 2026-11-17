@@ -249,6 +249,7 @@ export function edit(state: RoomState, key: string, value: unknown): void {
 export function summary(state: RoomState): RoomSummary {
   return {
     ...state.settings,
+    capacity: roomModeCapacity(state.settings.modeId),
     id: state.id,
     host: state.members.find((member) => member.id === state.hostId)?.name ?? "Waiting for a host",
     participantCount: state.members.length + roomBots(state.settings).length,

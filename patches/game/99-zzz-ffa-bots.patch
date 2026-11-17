@@ -118,7 +118,7 @@
 -        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker->index]) {
 -        for (i = GameInfo.entrant_count - 1; i >= 0; i--)
 +        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker_index]) {
-+        for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0;
++        for (i = (WebNetMatchActive() ? WebNetCarCapacity() : GameInfo.entrant_count) - 1; i >= 0;
 +             i--)
              car->ai.attacker_damage[i] = 0;
          if (CarAiFindRouteToNode(car, attacker->ai.selected_node)) {
@@ -148,7 +148,7 @@
  {
      s32 i;
 -    for (i = GameInfo.entrant_count - 1; i >= 0; i--)
-+    for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0; i--)
++    for (i = (WebNetMatchActive() ? WebNetCarCapacity() : GameInfo.entrant_count) - 1; i >= 0; i--)
          car->ai.attacker_damage[i] = 0;
      /* The target can die before our next AI update or destructor; its storage may be reused. */
      if (car->ai.target && GameIsCarRegistered(car->ai.target))

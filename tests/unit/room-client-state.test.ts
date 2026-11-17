@@ -304,7 +304,7 @@ test("engine confirmation received during a player request is sent after it comp
   const tournament = {
     ...snapshot(2),
     modeId: "tournament" as const,
-    capacity: 2 as const,
+    capacity: 4 as const,
     mapId: "construction-yard" as const,
   };
   store.setState({ room: tournament });
@@ -338,7 +338,7 @@ test("engine confirmation received during a player request is sent after it comp
 test("changing from tournament to FFA publishes a new choice without carrying readiness", async () => {
   const { api, store } = setup();
   store.setState({
-    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    room: { ...snapshot(2), modeId: "tournament", capacity: 4 },
     tournament: { ...store.getState().tournament, choice: { car: "Quatro" } },
   });
   const next = snapshot(3);
@@ -414,7 +414,7 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     expect(messages.at(-1)?.action).toBe("join");
     messages.length = 0;
     // Version 11 ended the FFA match while this client was disconnected.
-    store.getState().receive({ ...snapshot(12), modeId: "tournament", capacity: 2 });
+    store.getState().receive({ ...snapshot(12), modeId: "tournament", capacity: 4 });
     expect(messages.map(({ action }) => action)).toEqual([
       "stop",
       "car-selection",
@@ -436,7 +436,7 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     store.getState().receive({
       ...snapshot(13),
       modeId: "tournament",
-      capacity: 2,
+      capacity: 4,
       match: { ...match, stage: "playing", endpoint: "/match/socket", credential: "credential" },
     });
     expect(messages.map((message) => message.action)).toEqual(["car-selection", "join"]);
@@ -445,7 +445,7 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     await store.getState().engineCarSelected(requestId, "Quatro");
     expect(store.getState().tournament.choice).toBeNull();
     messages.length = 0;
-    store.getState().receive({ ...snapshot(14), modeId: "tournament", capacity: 2 });
+    store.getState().receive({ ...snapshot(14), modeId: "tournament", capacity: 4 });
     expect(messages.map((message) => message.action)).toEqual([
       "stop",
       "car-selection",
@@ -477,7 +477,7 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
 
 test("tournament waiting status follows confirmed room state rather than local Done", () => {
   const { store } = setup();
-  const current: RoomSnapshot = { ...snapshot(10), modeId: "tournament", capacity: 2 };
+  const current: RoomSnapshot = { ...snapshot(10), modeId: "tournament", capacity: 4 };
   store.setState({ room: current, connection: "live", playerNeedsSync: false });
   expect(tournamentSelectionStatus(store.getState()).phase).toBe("choosing");
   store.setState({
@@ -525,7 +525,7 @@ test("mode changes atomically reset both slices and discard a pending old-mode r
   const next: RoomSnapshot = {
     ...snapshot(3),
     modeId: "tournament",
-    capacity: 2,
+    capacity: 4,
     mapId: "construction-yard",
     participants: snapshot().participants.map((p) => ({ ...p, car: null, ready: false })),
   };
@@ -559,7 +559,7 @@ test("mode changes atomically reset both slices and discard a pending old-mode r
 test("native confirmations are scoped to the current menu and cannot run FFA actions", async () => {
   const { store } = setup();
   store.setState({
-    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    room: { ...snapshot(2), modeId: "tournament", capacity: 4 },
     operation: "settings",
   });
   const firstId = store.getState().openTournamentSelection()!;
@@ -585,7 +585,7 @@ test("native confirmations are scoped to the current menu and cannot run FFA act
 
 test("a replaced disc discards the old confirmation error and publishes the new resources", async () => {
   const { api, store } = setup();
-  store.setState({ room: { ...snapshot(2), modeId: "tournament", capacity: 2 } });
+  store.setState({ room: { ...snapshot(2), modeId: "tournament", capacity: 4 } });
   const response = deferred<RoomSnapshot>();
   const inputs: unknown[] = [];
   api.player = async (_id, input) => {
@@ -612,7 +612,7 @@ test("a replaced disc discards the old confirmation error and publishes the new 
 test("room expiry clears a native menu and its pending choice without waiting for the view", async () => {
   const { store } = setup();
   store.setState({
-    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    room: { ...snapshot(2), modeId: "tournament", capacity: 4 },
     operation: "settings",
   });
   const requestId = store.getState().openTournamentSelection()!;
@@ -670,7 +670,7 @@ test("FFA controls derive readiness, operation locks and late admission from the
     carDisabled: true,
     readyDisabled: true,
   });
-  store.setState({ room: { ...snapshot(6), modeId: "tournament", capacity: 2 } });
+  store.setState({ room: { ...snapshot(6), modeId: "tournament", capacity: 4 } });
   expect(ffaControls(store.getState())).toBeNull();
 });
 
@@ -680,13 +680,13 @@ test("tournament controls derive waiting status without modifying the selection"
   const { store } = setup();
   expect(tournamentControls(store.getState())).toBeNull();
   store.setState({
-    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
+    room: { ...snapshot(2), modeId: "tournament", capacity: 4 },
     connection: "live",
   });
   expect(tournamentControls(store.getState())?.selectionStatus).toBeNull();
   store.getState().openTournamentSelection();
   expect(tournamentControls(store.getState())?.selectionStatus?.phase).toBe("choosing");
-  const confirmed = { ...snapshot(3), modeId: "tournament" as const, capacity: 2 as const };
+  const confirmed = { ...snapshot(3), modeId: "tournament" as const, capacity: 4 as const };
   confirmed.participants[0]!.ready = true;
   store.getState().receive(confirmed);
   const before = store.getState();
@@ -719,13 +719,13 @@ test("preparation controls follow host authority, upload stage and each mode's m
     prepare: { hidden: true },
     start: { hidden: false, disabled: false },
   });
-  store.setState({ room: { ...ready, modeId: "tournament", capacity: 2 } });
+  store.setState({ room: { ...ready, modeId: "tournament", capacity: 4 } });
   expect(matchPreparationControls(store.getState())?.start.disabled).toBe(true);
   const guest = { ...ready.participants[0]!, id: "guest", name: "Guest" };
   const tournament: RoomSnapshot = {
     ...ready,
     modeId: "tournament",
-    capacity: 2,
+    capacity: 4,
     participants: [...ready.participants, guest],
   };
   store.setState({ room: tournament });
@@ -822,12 +822,10 @@ test("upload reports belong to the current preparation and cannot replace server
   expect(matchPreparationStatus(store.getState())).toBe("Validating resources");
   receive(4, "ready", "Server ready");
   expect(matchPreparationStatus(store.getState())).toBe("Server ready");
-  store
-    .getState()
-    .receive({
-      ...snapshot(5),
-      match: { ...match, id: "new-match", stage: "uploading", message: "New preparation" },
-    });
+  store.getState().receive({
+    ...snapshot(5),
+    match: { ...match, id: "new-match", stage: "uploading", message: "New preparation" },
+  });
   report("error", "Old upload failed");
   expect(matchPreparationStatus(store.getState())).toBe("New preparation");
   report("progress", "New upload", "new-match");
@@ -835,4 +833,22 @@ test("upload reports belong to the current preparation and cannot replace server
   expect(store.getState().uploadReport).toBeNull();
   report("error", "Cancelled upload failed", "new-match");
   expect(store.getState().uploadReport).toBeNull();
+});
+
+test("Tournament readiness considers all four humans and a nonzero reconnect", () => {
+  const { store } = setup();
+  const room: RoomSnapshot = { ...snapshot(2), modeId: "tournament", capacity: 4 };
+  const first = room.participants[0]!;
+  room.participants = [
+    { ...first, ready: true },
+    { ...first, id: "second", name: "Second", ready: true },
+    { ...first, id: "third", name: "Third", ready: true },
+    { ...first, id: "fourth", name: "Fourth", ready: false },
+  ];
+  store.setState({ room, connection: "live" });
+  expect(tournamentSelectionStatus(store.getState()).message).toContain("Fourth to choose");
+  room.participants[3]!.ready = true;
+  expect(tournamentSelectionStatus(store.getState()).phase).toBe("ready");
+  room.participants[2]!.connected = false;
+  expect(tournamentSelectionStatus(store.getState()).message).toContain("Third to reconnect");
 });

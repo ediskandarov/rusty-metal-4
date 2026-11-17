@@ -71,8 +71,11 @@ export const startOptionsSchema = z
     (value) =>
       (value.mode === "ffa" ? !!value.limits : !value.limits) &&
       (value.mode !== "tournament" ||
-        (value.players === 2 &&
-          value.roster?.length === 2 &&
+        (value.players >= 2 &&
+          value.players <= 4 &&
+          value.roster !== undefined &&
+          value.roster.length >= 2 &&
+          value.roster.length <= value.players &&
           !value.bots?.length &&
           value.world === "Construction Yard")) &&
       value.players + (value.bots?.length ?? 0) <= 8 &&

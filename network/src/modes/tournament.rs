@@ -11,12 +11,12 @@ const UNUSED_LIMITS: FfaLimits = FfaLimits {
 };
 
 pub(super) fn validate_start(settings: &StartSettings<'_>) -> Result<FfaLimits, &'static str> {
-    if settings.human_capacity != 2
-        || settings.selected_humans != 2
+    if !(2..=4).contains(&settings.human_capacity)
+        || !(2..=settings.human_capacity).contains(&settings.selected_humans)
         || settings.bots != 0
         || settings.world != INITIAL_WORLD
     {
-        return Err("Tournament requires two selected humans on Construction Yard");
+        return Err("Tournament requires two to four selected humans on Construction Yard");
     }
     if settings.limits.is_some() {
         return Err(INVALID_LIMITS);
@@ -33,7 +33,12 @@ pub(super) fn session_parameters(cars: &[String]) -> SessionParameters {
 }
 
 pub(super) fn valid_session(session: &SessionStart) -> bool {
-    session.slots == [0, 1]
+    (2..=4).contains(&session.slots.len())
+        && session
+            .slots
+            .iter()
+            .enumerate()
+            .all(|(index, slot)| usize::from(*slot) == index)
         && session.bots.is_empty()
         && session.respawn_delay_ticks == 0
         && session.limits == UNUSED_LIMITS
@@ -45,6 +50,7 @@ pub(super) fn valid_session(session: &SessionStart) -> bool {
                     && stage.progress > 0
                     && stage.progress < 4096
                     && stage.games_completed >= stage.progress
+                    && stage.players.len() == session.slots.len()
                     && stage.players.iter().all(|player| player.lives >= 0)
             }
         }
@@ -58,8 +64,10 @@ pub(super) const PLAYING_MESSAGE: &str =
     "Tournament participants are fixed for this battle; existing participants can reconnect.";
 
 pub(super) fn validate_roster(roster: &PreparedRoster) -> Result<(), &'static str> {
-    if roster.humans != 2 || roster.bots != 0 {
-        return Err("Tournament requires two prepared human participants and no lobby bots.");
+    if !(2..=4).contains(&roster.humans) || roster.bots != 0 {
+        return Err(
+            "Tournament requires two to four prepared human participants and no lobby bots.",
+        );
     }
     Ok(())
 }

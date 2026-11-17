@@ -1,8 +1,8 @@
 export const tournament = {
   id: "tournament",
   label: "Tournament",
-  capacity: 2,
-  capacityError: "Tournament has two player places.",
+  capacity: 4,
+  capacityError: "Tournament has four player places.",
   minimumPlayers: 2,
   firstMap: "construction-yard",
   bots(_options?: unknown): string[] {

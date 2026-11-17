@@ -489,6 +489,7 @@ impl Simulator {
                                 player.deaths,
                             ]);
                         }
+                        words.resize(28, 0);
                         let bytes: Vec<u8> =
                             words.iter().flat_map(|word| word.to_le_bytes()).collect();
                         return simulator.with_bytes(&bytes, |simulator, carry| {
@@ -715,7 +716,7 @@ impl Simulator {
     pub fn next_tournament_stage(&mut self) -> Result<tm4_network::protocol::TournamentStage> {
         let address = self.call::<(), u32>("WebTournamentNextStage", ())?;
         ensure!(address != 0, "Tournament has no next stage");
-        let mut bytes = [0u8; 64];
+        let mut bytes = [0u8; 112];
         self.memory
             .read(&self.store, address as usize, &mut bytes)?;
         let words: Vec<i32> = bytes
@@ -733,17 +734,19 @@ impl Simulator {
             progress: words[1],
             games_completed: words[2],
             shared_lives: words[3] != 0,
-            players: std::array::from_fn(|i| {
-                let p = &words[4 + i * 6..];
-                tm4_network::protocol::TournamentPlayer {
-                    lives: p[0],
-                    wins: p[1],
-                    losses: p[2],
-                    eliminated: p[3] != 0,
-                    frags: p[4],
-                    deaths: p[5],
-                }
-            }),
+            players: (0..self.slots.len())
+                .map(|i| {
+                    let p = &words[4 + i * 6..];
+                    tm4_network::protocol::TournamentPlayer {
+                        lives: p[0],
+                        wins: p[1],
+                        losses: p[2],
+                        eliminated: p[3] != 0,
+                        frags: p[4],
+                        deaths: p[5],
+                    }
+                })
+                .collect(),
         })
     }
 

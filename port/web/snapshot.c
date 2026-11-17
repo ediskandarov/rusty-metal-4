@@ -4,15 +4,15 @@
 #include "checkpoint_memory.h"
 #include "net_state.h"
 #include "snapshot_session.h"
-#include "snapshot_world.h"
 #include "snapshot_types.h"
+#include "snapshot_world.h"
 #include "src/main/object/private.h"
 #include "tm4/main/main.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-enum { SnapshotVersion = 12, MaxObjects = 2048 };
+enum { SnapshotVersion = 13, MaxObjects = 2048 };
 
 typedef struct {
     u32 version, count, session_bytes, world_bytes;

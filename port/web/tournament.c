@@ -11,13 +11,10 @@
 
 void TournamentAdvanceWorld(Tm4GameInfo* game);
 
-_Static_assert(sizeof(WebTournamentCarry) == 16 * sizeof(s32), "Tournament carry ABI");
+_Static_assert(sizeof(WebTournamentCarry) == 28 * sizeof(s32), "Tournament carry ABI");
 static WebMatchResult result;
 
-int WebTournamentActive(void)
-{
-    return WebNetMatchActive() && WebNetTournament();
-}
+int WebTournamentActive(void) { return WebNetMatchActive() && WebNetTournament(); }
 
 WebTournamentState WebTournamentCapture(void)
 {
@@ -46,7 +43,7 @@ int WebTournamentStateValid(WebTournamentState state)
         && (u32)state.world_lost <= 1 && (u32)state.tournament_won <= 1
         && (u32)state.reinforcements_spawned <= 1 && (u32)state.bosses_spawned <= 1
         && (u32)state.bosses_active <= 1 && state.active_computer_count >= 0
-        && state.active_computer_count <= GameInfo.entrant_count - 2
+        && state.active_computer_count <= GameInfo.entrant_count - GameInfo.player_car_count
         && state.initial_computer_count == GameInfo.initial_computer_count
         && state.reinforcement_threshold == GameInfo.reinforcement_threshold
         && state.boss_count == GameInfo.boss_count && !state.resume_tournament && !state.save_menu;
@@ -61,15 +58,9 @@ void WebTournamentRestore(WebTournamentState state)
 #undef FIELD
 }
 
-WebMatchResult WebTournamentResult(void)
-{
-    return result;
-}
+WebMatchResult WebTournamentResult(void) { return result; }
 
-void WebTournamentRestoreResult(WebMatchResult value)
-{
-    result = value;
-}
+void WebTournamentRestoreResult(WebMatchResult value) { result = value; }
 
 int WebTournamentResultValid(WebMatchResult value, u32 tick, u32 slots)
 {
@@ -119,7 +110,7 @@ EMSCRIPTEN_KEEPALIVE const WebTournamentCarry* WebTournamentNextStage(void)
         .shared_lives = next.shared_lives };
     WebParticipantState participants;
     WebParticipantCapture(&participants);
-    for (s32 i = 0; i < 2; ++i) {
+    for (s32 i = 0; i < __builtin_popcount(WebNetSlotMask()); ++i) {
         carry.players[i].lives = next.players[i].lives;
         carry.players[i].wins = next.players[i].wins;
         carry.players[i].losses = next.players[i].losses;
@@ -138,7 +129,7 @@ int WebTournamentCarryValid(const WebTournamentCarry* carry, s32 world)
         || carry->progress <= 0 || carry->progress >= 4096
         || carry->games_completed < carry->progress || (u32)carry->shared_lives > 1)
         return 0;
-    for (s32 i = 0; i < 2; ++i)
+    for (s32 i = 0; i < 4; ++i)
         if (carry->players[i].lives < 0 || (u32)carry->players[i].eliminated > 1)
             return 0;
     return 1;
@@ -152,7 +143,7 @@ void WebTournamentApplyCarry(const WebTournamentCarry* carry)
     GameInfo.shared_lives = carry->shared_lives;
     WebParticipantState participants;
     WebParticipantCapture(&participants);
-    for (s32 i = 0; i < 2; ++i) {
+    for (s32 i = 0; i < __builtin_popcount(WebNetSlotMask()); ++i) {
         GameInfo.players[i].lives = carry->players[i].lives;
         GameInfo.players[i].wins = carry->players[i].wins;
         GameInfo.players[i].losses = carry->players[i].losses;

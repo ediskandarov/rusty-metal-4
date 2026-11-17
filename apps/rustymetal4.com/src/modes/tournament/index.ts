@@ -49,7 +49,7 @@ export const tournament: RoomMode = {
         document.getElementById("room-car")!.closest("label")!.hidden = true;
         document.getElementById("room-ready")!.hidden = true;
         document.getElementById("match-help")!.textContent =
-          "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts once both players have confirmed.";
+          "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts once all players have confirmed.";
         if (view.selectionStatus) {
           const status = view.selectionStatus;
           document.getElementById("player-status")!.textContent =

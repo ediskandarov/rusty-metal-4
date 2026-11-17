@@ -29,21 +29,22 @@ export function tournamentSelectionStatus(state: RoomState): TournamentStatus {
       title: "Choose your car",
       message: "Use the game controls below. Done confirms your choice; Back cancels it.",
     };
-  const other = state.room?.participants.find((member) => member.id !== self.id);
+  const others = state.room?.participants.filter((member) => member.id !== self.id) ?? [];
+  const other = others.find((member) => !member.connected || !member.ready);
   const back = "Use Back to change your choice.";
-  if (!other)
+  if (!others.length)
     return {
       phase: "waiting",
       title: `${self.car} confirmed`,
       message: "Waiting for a second player to join. " + back,
     };
-  if (!other.connected)
+  if (other && !other.connected)
     return {
       phase: "waiting",
       title: `${self.car} confirmed`,
       message: `Waiting for ${other.name} to reconnect. ` + back,
     };
-  if (!other.ready)
+  if (other && !other.ready)
     return {
       phase: "waiting",
       title: `${self.car} confirmed`,
@@ -51,7 +52,7 @@ export function tournamentSelectionStatus(state: RoomState): TournamentStatus {
     };
   return {
     phase: "ready",
-    title: "Both cars confirmed",
+    title: "All cars confirmed",
     message: "The host can start after preparing the server. " + back,
   };
 }

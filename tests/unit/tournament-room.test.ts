@@ -20,7 +20,7 @@ const options = {
   name: "Tournament",
   modeId: "tournament",
   mapId: "construction-yard",
-  capacity: 2,
+  capacity: 4,
 };
 const compatibility = {
   protocol: networkProtocolVersion,
@@ -40,11 +40,13 @@ function room() {
   connect(state, "guest", "guest-socket");
   return state;
 }
-test("tournament has two human places and no FFA configuration", () => {
+test("tournament has four human places and no FFA configuration", () => {
   const state = room();
-  expect(summary(state).capacity).toBe(2);
-  expect(summary(state).freePlaces).toBe(0);
-  expect(() => join(state, "third", "Third", 1000)).toThrow("full");
+  expect(summary(state).capacity).toBe(4);
+  expect(summary(state).freePlaces).toBe(2);
+  join(state, "third", "Third", 1000);
+  join(state, "fourth", "Fourth", 1000);
+  expect(() => join(state, "fifth", "Fifth", 1000)).toThrow("full");
   for (const change of [
     { capacity: 8 },
     { mapId: "road-rage" },
@@ -131,4 +133,29 @@ test("finished tournament keeps its mode after switching the next match to FFA",
   edit(state, "host", { ...options, modeId: "ffa", capacity: 8 });
   expect(snapshot(state, "host").modeId).toBe("ffa");
   expect(snapshot(state, "host").result).toEqual(saved);
+});
+
+test("four-player tournament waits for every native Done before fixing the roster", () => {
+  const state = room();
+  for (const key of ["third", "fourth"]) {
+    join(state, key, key, 1000);
+    connect(state, key, key + "-socket");
+  }
+  updatePlayer(state, "host", { car: "Orbital", compatibility, ready: true });
+  const match = beginPreparation(state, "host", 1000);
+  Object.assign(match, { stage: "ready", compatibility, cars: ["Orbital"] });
+  for (const key of ["host", "guest", "third"])
+    updatePlayer(state, key, { car: "Orbital", compatibility, ready: true });
+  expect(() => freezeRoster(state, "host", 1100)).toThrow("ready");
+  updatePlayer(state, "fourth", { car: "Orbital", compatibility, ready: true });
+  freezeRoster(state, "host", 1200);
+  expect(match.roster).toHaveLength(4);
+  expect(new Set(match.roster.map((entry) => entry.credential)).size).toBe(4);
+});
+
+test("stored room summaries derive capacity from the current mode", () => {
+  const state = room();
+  Object.assign(state.settings, { capacity: 2 });
+  expect(summary(state).capacity).toBe(4);
+  expect(summary(state).freePlaces).toBe(2);
 });

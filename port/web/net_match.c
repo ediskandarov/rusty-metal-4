@@ -7,6 +7,7 @@
 #include "match_mode.h"
 #include "net_state.h"
 #include "participant.h"
+#include "port/web/car_capacity.h"
 #include "port/web/module_import.h"
 #include "rollback_audio.h"
 #include "snapshot.h"
@@ -170,6 +171,10 @@ int WebNetParticipantControlKind(int slot)
 }
 
 int WebNetSlotCapacity(void) { return match.setup.capacity; }
+int WebNetCarCapacity(void)
+{
+    return WebNetTournament() ? GameInfo.entrant_count : WebNetSlotCapacity();
+}
 EMSCRIPTEN_KEEPALIVE int WebNetSlotMask(void)
 {
     WebParticipantState participants;
@@ -235,20 +240,20 @@ void WebNetCarLeaving(Car* target)
                 WEB_MODULE("car", CarAiSetTarget)(car, NULL, NULL);
         }
         CarAiNearbyCar** link = &car->ai.nearby_list;
-        for (s32 visited = 0; *link && visited < WebNetSlotCapacity(); ++visited) {
+        for (s32 visited = 0; *link && visited < WebNetCarCapacity(); ++visited) {
             CarAiNearbyCar* entry = *link;
             if (entry->car == target)
                 *link = entry->next;
             else
                 link = &entry->next;
         }
-        for (s32 entry = 0; entry < WebNetSlotCapacity(); ++entry)
+        for (s32 entry = 0; entry < WebNetCarCapacity(); ++entry)
             if (car->ai.nearby_records[entry].car == target) {
                 if (car->ai.target_entry == &car->ai.nearby_records[entry])
                     car->ai.target_entry = NULL;
                 car->ai.nearby_records[entry] = (CarAiNearbyCar) { 0 };
             }
-        if (target->controller_index >= 0 && target->controller_index < WebNetSlotCapacity())
+        if (target->controller_index >= 0 && target->controller_index < WebNetCarCapacity())
             car->ai.attacker_damage[target->controller_index] = 0;
     }
 }
@@ -538,12 +543,21 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartFfa(s32 capacity, u32 slots, s32 world, u32 
         delay, model_pool, time_limit_ticks, frag_limit, bot_slots, 0, NULL);
 }
 
+static int tournament_roster_valid(u32 slots, s32 view_slot)
+{
+    const s32 humans = __builtin_popcount(slots);
+    return humans >= 2 && humans <= (TM4_EXPERIMENTAL_EXTENDED_VRAM ? 4 : 2)
+        && slots == (1u << humans) - 1 && view_slot >= -1 && view_slot < humans;
+}
+
 EMSCRIPTEN_KEEPALIVE int WebNetStartTournament(s32 capacity, u32 slots, s32 world, u32 seed,
     s32 view_slot, u32 flags, const char* cars, const char* identities)
 {
-    if (capacity != 8 || slots != 3 || world < 0 || world >= GameGetNumberOfWorlds()
+    if (capacity != 8 || !tournament_roster_valid(slots, view_slot) || world < 0
+        || world >= GameGetNumberOfWorlds()
         || strcmp(GameGetWorldName(world), GameGetFirstTournamentWorldName()))
-        return reject_start("Tournament requires two fixed players on its first level");
+        return reject_start(
+            "Tournament requires two fixed players (up to four with experimental extended VRAM) on its first level");
     return start_match(capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0,
         0, 0, 1, NULL);
 }
@@ -552,7 +566,8 @@ EMSCRIPTEN_KEEPALIVE int WebNetStartTournamentStage(s32 capacity, u32 slots, s32
     s32 view_slot, u32 flags, const char* cars, const char* identities,
     const WebTournamentCarry* carry)
 {
-    if (capacity != 8 || slots != 3 || !WebTournamentCarryValid(carry, world))
+    if (capacity != 8 || !tournament_roster_valid(slots, view_slot)
+        || !WebTournamentCarryValid(carry, world))
         return reject_start("Invalid tournament continuation");
     return start_match(capacity, slots, world, seed, view_slot, flags, cars, identities, 0, NULL, 0,
         0, 0, 1, carry);

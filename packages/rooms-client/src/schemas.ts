@@ -55,7 +55,7 @@ export const roomSettingsSchema = z
     modeOptions: modeOptionsSchema.optional(),
     modeId: modeIdSchema,
     mapId: z.enum(maps.map((map) => map.id)),
-    capacity: z.union([z.literal(ffaCapacity), z.literal(2)]),
+    capacity: z.union([z.literal(ffaCapacity), z.literal(4)]),
   })
   .refine((settings) => settings.capacity === roomModeCapacity(settings.modeId), {
     message: "Capacity must match the game mode",

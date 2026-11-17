@@ -89,7 +89,7 @@ try {
       [4, [depart(1, 2)]],
       [5, [admit(1, 4)]],
     ]);
-    check(configureMatch(Module, start(100, 1), 0), "oracle startup");
+    check(await configureMatch(Module, start(100, 1), 0), "oracle startup");
     const initial = canonical();
     const oracle = [initial];
     for (let tick = 0; tick < 8; tick++) {
@@ -99,8 +99,8 @@ try {
       oracle.push(canonical());
     }
     Module._WebNetCancelMatch();
-    const run = (configuration = start()) => {
-      check(configureMatch(Module, configuration, 0), "prediction startup");
+    const run = async (configuration = start()) => {
+      check(await configureMatch(Module, configuration, 0), "prediction startup");
       const bridge = attachLivePrediction(Module, tm4Port);
       const fixture = new bindings.MembershipPredictionFixture(JSON.stringify(configuration));
       const advance = (head) => {
@@ -118,7 +118,7 @@ try {
       };
       return { fixture, advance, close };
     };
-    let active = run(start(4));
+    let active = await run(start(4));
     active.fixture.controller(1, id(4));
     for (const [tick, changes] of events) active.fixture.plan(tick, JSON.stringify(changes));
     active.advance(7);
@@ -142,7 +142,7 @@ try {
     active.close();
     // With an explicit one-frag fixture limit, a real projectile completes the predicted match. Authority then cancels
     // its admission, forcing native Lightyear rollback before that car ever existed.
-    active = run(start(100, 1));
+    active = await run(start(100, 1));
     equal(initial, "prediction initial state differs from oracle");
     active.fixture.controller(2, id(3));
     active.fixture.controller(1, id(4));
@@ -181,7 +181,7 @@ try {
       Module._WebNetQueueTick = queue;
       active.close();
     }
-    active = run(start(100, 1));
+    active = await run(start(100, 1));
     active.fixture.controller(2, id(3));
     active.fixture.plan(2, JSON.stringify([admit(2, 3)]));
     active.fixture.plan(4, JSON.stringify([depart(1, 99)]));
@@ -205,7 +205,7 @@ try {
       active.close();
     }
     for (const changes of [[depart(1, 99)], [admit(1, 99)], [admit(2, 1)]]) {
-      active = run();
+      active = await run();
       active.fixture.controller(changes[0].identity.slot, changes[0].identity.participant);
       active.fixture.plan(1, JSON.stringify(changes));
       let rejected = false;
