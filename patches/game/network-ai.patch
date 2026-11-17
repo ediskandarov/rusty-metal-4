@@ -13,7 +13,7 @@ diff --git a/src/modules/car/ai.c b/src/modules/car/ai.c
      fallback = RegGetDirectoryPtrPS(CarClassDirectory, "ai");
      REQUIRE_AI_SETTING(ai_primary, fallback, "aiEnabledFlag", enabled, u8);
 -    car->ai.attacker_damage = MemAlloc(GameInfo.entrant_count * sizeof(*car->ai.attacker_damage));
-+    const s32 capacity = WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count;
++    const s32 capacity = WebNetMatchActive() ? WebNetCarCapacity() : GameInfo.entrant_count;
 +    car->ai.attacker_damage = MemAlloc(capacity * sizeof(*car->ai.attacker_damage));
      if (!car->ai.attacker_damage)
          return 0;
@@ -80,7 +80,7 @@ diff --git a/src/modules/car/ai_control.c b/src/modules/car/ai_control.c
 -        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker->index]) {
 -        for (i = GameInfo.entrant_count - 1; i >= 0; i--)
 +        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker_index]) {
-+        for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0;
++        for (i = (WebNetMatchActive() ? WebNetCarCapacity() : GameInfo.entrant_count) - 1; i >= 0;
 +             i--)
              car->ai.attacker_damage[i] = 0;
          if (CarAiFindRouteToNode(car, attacker->ai.selected_node)) {
@@ -90,7 +90,7 @@ diff --git a/src/modules/car/ai_control.c b/src/modules/car/ai_control.c
  {
      s32 i;
 -    for (i = GameInfo.entrant_count - 1; i >= 0; i--)
-+    for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0; i--)
++    for (i = (WebNetMatchActive() ? WebNetCarCapacity() : GameInfo.entrant_count) - 1; i >= 0; i--)
          car->ai.attacker_damage[i] = 0;
      /* The target can die before our next AI update or destructor; its storage may be reused. */
      if (car->ai.target && GameIsCarRegistered(car->ai.target))

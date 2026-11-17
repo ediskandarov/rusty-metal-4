@@ -341,7 +341,7 @@ pub struct TournamentStage {
     pub progress: i32,
     pub games_completed: i32,
     pub shared_lives: bool,
-    pub players: [TournamentPlayer; 2],
+    pub players: Vec<TournamentPlayer>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

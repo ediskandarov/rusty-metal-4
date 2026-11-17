@@ -23,6 +23,8 @@ unsigned int WebNetModelCount(void);
 char* WebNetModelName(unsigned int index);
 void WebNetModelPool(char output[8][64]);
 int WebNetSlotCapacity(void);
+/* Entrant storage includes original Tournament waves and bosses, not just controllers. */
+int WebNetCarCapacity(void);
 int WebNetSlotMask(void);
 int WebNetParticipantSlot(int index);
 int WebNetParticipantControlKind(int slot);

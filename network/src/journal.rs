@@ -451,14 +451,16 @@ mod tests {
             progress: 512,
             games_completed: 512,
             shared_lives: false,
-            players: std::array::from_fn(|_| TournamentPlayer {
-                lives: 3,
-                wins: 1,
-                losses: 0,
-                eliminated: false,
-                frags: 2,
-                deaths: 1,
-            }),
+            players: (0..2)
+                .map(|_| TournamentPlayer {
+                    lives: 3,
+                    wins: 1,
+                    losses: 0,
+                    eliminated: false,
+                    frags: 2,
+                    deaths: 1,
+                })
+                .collect(),
         });
         let mut journal = Journal::create(&directory.0, &header).unwrap();
         let mut completed = state(1, 0);

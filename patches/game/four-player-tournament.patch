@@ -1,0 +1,200 @@
+--- a/include/tm4/main/game.h
++++ b/include/tm4/main/game.h
+@@ -1,6 +1,8 @@
+ #ifndef TM4_MAIN_GAME_H
+ #define TM4_MAIN_GAME_H
+ 
++#include "port/web/car_capacity.h"
++
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -88,7 +90,7 @@
+ } Tm4GamePlayer;
+ 
+ /* MAIN.MR exports this startup-cleared storage as GameInfo.
+- * The menu saves and restores a complete 0x4A0-byte snapshot. */
++ * The menu saves and restores the complete typed structure. */
+ typedef struct Tm4GameInfo {
+     s32 player_count;
+     s32 extra_player_count;
+@@ -97,7 +99,7 @@
+     s32 entrant_count;
+     s32 games_completed;
+     char* world_name;
+-    char* character_names[8];
++    char* character_names[TM4_MAX_ENTRANTS];
+     s32 screen_x;
+     s32 screen_y;
+     s32 sound_volume;
+@@ -145,7 +147,7 @@
+     s32 car_count;
+     s32 active_computer_count;
+     s32 active_player_count;
+-    struct Car* cars[8];
++    struct Car* cars[TM4_MAX_LIVE_CARS];
+ } Tm4GameInfo;
+ 
+ extern Tm4GameInfo GameInfo;
+--- a/include/tm4/main/render.h
++++ b/include/tm4/main/render.h
+@@ -2,6 +2,7 @@
+ #define TM4_MAIN_RENDER_H
+ 
+ #include "tm4/gpu.h"
++#include "port/web/car_capacity.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/main/font.h"
+@@ -26,7 +27,7 @@
+     TILE lives[4];
+     SPRT target_sticker;
+     DR_TPAGE target_tpage;
+-    TILE radar_dots[8];
++    TILE radar_dots[TM4_MAX_LIVE_CARS];
+     TILE radar_center;
+     POLY_G4 target_bar;
+     TILE message_borders[4];
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -277,8 +277,7 @@
+     viewOffset = 0;
+     do {
+         s32 enemyIndex;
+-        /* Include radar_center, which follows the dot array. */
+-        const s32 radar_tile_count = ArrayCount(buffer->players[0].radar_dots) + 1;
++        const s32 radar_tile_count = ArrayCount(buffer->players[0].radar_dots);
+         const s32 border_count = ArrayCount(buffer->players[0].message_borders);
+         workspace = (Tm4RenderBuffer*)((char*)buffer + viewOffset);
+         {
+@@ -393,6 +392,7 @@
+             register unsigned long panelOffset TM4_BIND_REGISTER("a1")
+                 = offsetof(Tm4RenderBuffer, players[0].message_background);
+             TILE* panel = (TILE*)((char*)workspace + panelOffset);
++            setTile(marker);
+             setWH(marker, 2, 2);
+             setRGB0(marker, 255, 255, 255);
+             setXY0(marker, 35, 50);
+--- a/src/main/tournament.c
++++ b/src/main/tournament.c
+@@ -123,7 +123,8 @@
+ {
+     register s32 entrant TM4_BIND_REGISTER("$18");
+     s32* value;
+-    const s32 entrant_capacity = ArrayCount(game->character_names);
++    /* Retain the original two-human opponent budget as more humans join. */
++    const s32 entrant_capacity = WebTournamentActive() ? game->player_car_count + 6 : 8;
+     RegChangeCurrentDirectoryS("/worlds");
+     if (!strcmp(game->world_name, GameGetFirstTournamentWorldName())) {
+         s32 index;
+--- a/src/main/loadfiles.c
++++ b/src/main/loadfiles.c
+@@ -21,6 +21,7 @@
+ #include <LIBGPU.H>
+ #include <STDIO.H>
+ #include <STRINGS.H>
++#include <stdlib.h>
+ 
+ typedef void (*CarRelocateBitCallback)(RegistryDirectory*, u16, u16, u16, u16);
+ struct LoadFileEntry {
+@@ -39,7 +40,7 @@
+ static char WorldFileRegistrationName[];
+ static char MatchingWorldDirectoryRoot[];
+ static char* CarFileDirectoryRoot;
+-static CarVramSlot CarVramSlots[8] = {
++static CarVramSlot CarVramSlots[] = {
+     {
+         .x = 640,
+         .y = 0,
+@@ -72,7 +73,15 @@
+         .x = 832,
+         .y = 192,
+     },
++
++#if TM4_EXPERIMENTAL_EXTENDED_VRAM
++    /* Explicitly enabled backing pages; original pages stay intact. */
++    { .x = 640, .y = 512 },
++    { .x = 832, .y = 512 },
++#endif
+ };
++_Static_assert(ArrayCount(CarVramSlots) == TM4_CAR_ATLAS_COUNT, "car atlas capacity");
++_Static_assert(TM4_CAR_ATLAS_COUNT <= TM4_MAX_ENTRANTS, "entrant storage capacity");
+ static char CarFilePathFormat[];
+ static char CarFileBitmapPath[];
+ static char CarFileRelocateSymbol[];
+@@ -206,6 +215,10 @@
+     CarRelocateBitCallback relocate;
+     struct VabHdr* bank;
+ 
++    if (slot < 0 || slot >= ArrayCount(CarVramSlots)) {
++        fprintf(stderr, "Unsupported car atlas slot %d (capacity %d)\n", slot, TM4_CAR_ATLAS_COUNT);
++        abort();
++    }
+     directoryName = RegGetDirectoryNameP(directory);
+     {
+         char path[strlen(CarFileDirectoryRoot) + 1 + strlen(directoryName) + 1];
+@@ -364,7 +377,7 @@
+ #if !defined(TM4_LOADFILES_FUNCTION) || TM4_LOADFILES_FUNCTION == 0x80032B20
+ void LoadGameFiles(void)
+ {
+-    char* uniqueCars[8];
++    char* uniqueCars[TM4_MAX_ENTRANTS];
+     char* filename;
+     RegistryDirectory* directory;
+     s32 player, index;
+@@ -404,6 +417,10 @@
+         filename = RegGetFileDataPS(directory, MatchingDirectoryFilename);
+         if (!filename)
+             continue;
++        if (index >= ArrayCount(CarVramSlots)) {
++            fprintf(stderr, "Too many unique car models (atlas capacity %d)\n", TM4_CAR_ATLAS_COUNT);
++            abort();
++        }
+         uniqueCars[index] = model;
+         LoadFilesCarVramSlotCount++;
+         LoadFilesAddWithExtension(
+--- a/src/main/game.c
++++ b/src/main/game.c
+@@ -541,6 +541,8 @@
+ {
+     Tm4GameInfo* game = &GameInfo;
+     const s32 network = WebNetMatchActive();
++    if (game->car_count >= ArrayCount(game->cars))
++        return 0;
+     if (network
+         && (car->index < 0 || car->index >= game->entrant_count
+             || (!WebNetTournament() && !WebNetSlotOccupied(car->controller_index))
+@@ -677,7 +679,7 @@
+     srand(GameInfo.random_seed);
+     WebNetMatchSeed(); /* Before mode reset, roster selection, or constructors. */
+     if (selection == GAME_MODE_DEMO) {
+-        const s32 entrant_capacity = ArrayCount(GameInfo.character_names);
++        const s32 entrant_capacity = 8;
+         GameInfo.player_count = selection;
+         GameInfo.extra_player_count = 0;
+         GameInfo.view_layouts[GameInfo.player_count - 1]
+--- a/src/modules/power/resources.c
++++ b/src/modules/power/resources.c
+@@ -20,9 +20,9 @@
+ #include <STRINGS.H>
+ 
+ typedef char PowerupEntrantOffsetCheck[offsetof(Tm4GameInfo, entrant_count) == 0x10 ? 1 : -1];
+-typedef char PowerupCarCountOffsetCheck[offsetof(Tm4GameInfo, car_count) == 0x474 ? 1 : -1];
++typedef char PowerupCarCountOffsetCheck[offsetof(Tm4GameInfo, car_count) == 0x47c ? 1 : -1];
+ 
+-typedef char PowerupGameTypeOffsetCheck[offsetof(Tm4GameInfo, game_type) == 0x78 ? 1 : -1];
++typedef char PowerupGameTypeOffsetCheck[offsetof(Tm4GameInfo, game_type) == 0x80 ? 1 : -1];
+ 
+ void PowerupClassConstructor(RegistryDirectory* directory)
+ {
+--- a/src/modules/bullet/display.c
++++ b/src/modules/bullet/display.c
+@@ -18,7 +18,7 @@
+ #include <LIBGPU.H>
+ #include <tm4/gte.h>
+ 
+-typedef char BulletDitherOffsetCheck[offsetof(Tm4GameInfo, dither) == 0x4c ? 1 : -1];
++typedef char BulletDitherOffsetCheck[offsetof(Tm4GameInfo, dither) == 0x54 ? 1 : -1];
+ 
+ typedef struct BulletTrailPacket {
+     LINE_G2 line;

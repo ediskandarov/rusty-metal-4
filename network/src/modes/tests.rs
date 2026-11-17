@@ -115,6 +115,9 @@ fn roster_rules_distinguish_humans_from_bots_and_enforce_capacity() {
         (1, 7, true, false),
         (2, 0, true, true),
         (2, 1, true, false),
+        (3, 0, true, true),
+        (4, 0, true, true),
+        (5, 0, true, false),
         (8, 0, true, false),
         (8, 1, false, false),
         (9, 0, false, false),
@@ -161,14 +164,16 @@ fn continuation_requires_a_tournament_stage_matching_the_new_world() {
         progress: 512,
         games_completed: 512,
         shared_lives: true,
-        players: std::array::from_fn(|_| TournamentPlayer {
-            lives: 3,
-            wins: 0,
-            losses: 0,
-            eliminated: false,
-            frags: 0,
-            deaths: 1,
-        }),
+        players: (0..2)
+            .map(|_| TournamentPlayer {
+                lives: 3,
+                wins: 0,
+                losses: 0,
+                eliminated: false,
+                frags: 0,
+                deaths: 1,
+            })
+            .collect(),
     });
     assert!(next.valid_slots());
     next.tournament.as_mut().unwrap().world = "Road Rage".into();
@@ -178,4 +183,31 @@ fn continuation_requires_a_tournament_stage_matching_the_new_world() {
     next.limits = FfaLimits::default();
     next.respawn_delay_ticks = 90;
     assert!(!next.valid_slots());
+}
+
+#[test]
+fn tournament_human_limits_and_fixed_contiguous_ownership() {
+    for humans in 0..=5 {
+        let settings = StartSettings {
+            human_capacity: 4,
+            selected_humans: humans,
+            bots: 0,
+            world: "Construction Yard",
+            limits: None,
+        };
+        assert_eq!(
+            MatchMode::Tournament.validate_start(&settings).is_ok(),
+            (2..=4).contains(&humans)
+        );
+    }
+    let mut four = session(MatchMode::Tournament);
+    four.slots = vec![0, 1, 2, 3];
+    four.participants = (1_u64..=4).map(ParticipantId).collect();
+    four.cars = vec!["Orbital".into(); 4];
+    assert!(four.valid_slots());
+    four.slots[3] = 4;
+    assert!(!four.valid_slots());
+    four.slots[3] = 3;
+    four.bots = vec![3];
+    assert!(!four.valid_slots());
 }

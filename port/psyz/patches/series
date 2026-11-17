@@ -10,3 +10,4 @@ subpixel-positions.patch
 spu-sample-banks.patch
 texture-banks.patch
 screen-transform.patch
+tournament-atlases.patch

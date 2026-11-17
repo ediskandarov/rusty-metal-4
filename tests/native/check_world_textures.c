@@ -134,7 +134,7 @@ int main(void)
         assert(uploaded[640] == 0x1234 && uploaded[641] == 0x5678);
         assert(pixels[640] == 0x5555 && shaders[3] == 0x1f0a && reflection[3] == 0x1f0a);
         assert(WorldDisplayShaders != (u8*)shaders && bound_horizon != horizon.bytes);
-        u16 page = 0x10a | (next_bank << 9);
+        u16 page = 0x10a | ((next_bank & 3) << 9) | ((next_bank & 12) << 10);
         assert(WebWorldTexturePage(0x1f6a) == (page | 0x60));
         assert(((u16*)WorldDisplayShaders)[3] == page);
         assert(((u16*)WorldDisplayShaders)[9] == page);

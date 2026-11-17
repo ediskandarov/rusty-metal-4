@@ -319,7 +319,7 @@ u32 WebSnapshotCarAiStateId(CarAiStateCallback callback)
     return UINT32_MAX;
 }
 
-static u32 ai_capacity(const void* payload) { return WebNetSlotCapacity(); }
+static u32 ai_capacity(const void* payload) { return WebNetCarCapacity(); }
 static void* nearby_base(const void* payload)
 {
     return ((const CarAiRuntime*)payload)->nearby_records;
@@ -333,7 +333,8 @@ static const SnapshotField damage_fields[] = {
     { SnapshotPod, 0, sizeof(s32) },
     { 0 },
 };
-static const SnapshotArray attacker_damage = { damage_fields, sizeof(s32), ai_capacity, 8 };
+static const SnapshotArray attacker_damage
+    = { damage_fields, sizeof(s32), ai_capacity, TM4_MAX_ENTRANTS };
 static const SnapshotField nearby_fields[] = {
     SNAP_WEAK_REF(CarAiNearbyCar, car, "car"),
     SNAP_POD(CarAiNearbyCar, distance),
@@ -343,7 +344,7 @@ static const SnapshotField nearby_fields[] = {
     { 0 },
 };
 static const SnapshotArray nearby_records
-    = { nearby_fields, sizeof(CarAiNearbyCar), ai_capacity, 8 };
+    = { nearby_fields, sizeof(CarAiNearbyCar), ai_capacity, TM4_MAX_ENTRANTS };
 static const SnapshotField driver_location_fields[] = {
     SNAP_POD(CarAiRuntime, steering_input),
     SNAP_POD(CarAiRuntime, update_slot),
@@ -776,7 +777,7 @@ static int car_valid(const void* payload)
 typedef struct {
     u16 area, node;
     u8 suspended, copied_faces, copied_colors, state, saved_state;
-    u8 nearby_next[8];
+    u8 nearby_next[TM4_MAX_ENTRANTS];
 } DriverBinding;
 
 static u32 capture_driver(const void* payload, u8* output, u32 capacity)

@@ -19,7 +19,7 @@ pub(super) fn advance_stage(
     {
         game.fail(
             links,
-            "Tournament transition expired while waiting for both players.",
+            "Tournament transition expired while waiting for all players.",
         );
         return false;
     }

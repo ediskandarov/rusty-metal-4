@@ -143,7 +143,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(ai_length);
     for (u32 i = 0; i < ai_length; ++i)
         state_byte(hash, ai_bytes[i]);
-    for (s32 i = 0; i < WebNetSlotCapacity(); ++i)
+    for (s32 i = 0; i < WebNetCarCapacity(); ++i)
         VALUE(car->ai.nearby_records[i].next
                 ? car->ai.nearby_records[i].next - car->ai.nearby_records + 1
                 : 0);

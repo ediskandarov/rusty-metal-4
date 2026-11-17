@@ -4,7 +4,8 @@
 /* Included by the GL backend. The pool lives as long as the renderer: no texture
  * array reallocations or uploads of unrelated banks when a slot is reused. */
 #define RM4_TEXTURE_BANK_LIMIT 15
-#define RM4_TEXTURE_BANK_WORDS (VRAM_W * VRAM_H)
+#define RM4_TEXTURE_BANK_HEIGHT 512
+#define RM4_TEXTURE_BANK_WORDS (VRAM_W * RM4_TEXTURE_BANK_HEIGHT)
 static GLuint rm4_texture_banks;
 static u16* rm4_texture_bank_pixels;
 static u8* rm4_texture_bank_rgba;
@@ -53,7 +54,7 @@ static void Rm4InitializeTextureBanks(void)
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, VRAM_W, VRAM_H, RM4_TEXTURE_BANK_LIMIT, 0,
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA8, VRAM_W, RM4_TEXTURE_BANK_HEIGHT, RM4_TEXTURE_BANK_LIMIT, 0,
         GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glActiveTexture(GL_TEXTURE0);
     Rm4TextureBankCheckGl();
@@ -87,7 +88,7 @@ int Rm4TextureBankCreate(const u16* pixels)
     ConvertRgb5551ToRgba8888(pixels, rm4_texture_bank_rgba, RM4_TEXTURE_BANK_WORDS);
     glActiveTexture(GL_TEXTURE2);
     glBindTexture(GL_TEXTURE_2D_ARRAY, rm4_texture_banks);
-    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, index, VRAM_W, VRAM_H, 1, GL_RGBA,
+    glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, index, VRAM_W, RM4_TEXTURE_BANK_HEIGHT, 1, GL_RGBA,
         GL_UNSIGNED_BYTE, rm4_texture_bank_rgba);
     glActiveTexture(GL_TEXTURE0);
     Rm4TextureBankCheckGl();
@@ -123,7 +124,7 @@ static int Rm4TextureBankUpload(const PS1_RECT* rectangle, const u16* pixels)
         return 0;
     if (!Rm4TextureBankValid(bank) || !rectangle || !pixels || rectangle->x < 0 || rectangle->y < 0
         || rectangle->w <= 0 || rectangle->h <= 0 || rectangle->x + rectangle->w > VRAM_W
-        || rectangle->y + rectangle->h > VRAM_H)
+        || rectangle->y + rectangle->h > RM4_TEXTURE_BANK_HEIGHT)
         Rm4TextureBankError("invalid upload rectangle or bank");
     size_t count = (size_t)rectangle->w * rectangle->h;
     Draw_FlushBuffer();

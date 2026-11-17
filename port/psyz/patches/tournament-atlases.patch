@@ -1,0 +1,197 @@
+--- a/internal.h
++++ b/internal.h
+@@ -21,7 +21,13 @@
+ #endif
+ 
+ #define VRAM_W 1024
++#if TM4_EXPERIMENTAL_EXTENDED_VRAM
++#define VRAM_H 1024
++#define VRAM_TPAGE_MASK 0x9FF
++#else
+ #define VRAM_H 512
++#define VRAM_TPAGE_MASK 0x1FF
++#endif
+ 
+ // how many StoreImage can be queued without a DrawSync(0)
+ #define MAX_PENDING_STORES 16
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -54,7 +54,7 @@
+     "layout(location = 2) in vec4 color;\n"
+     "layout(location = 3) in vec4 twin;\n"
+     "layout(location = 4) in float invDepth;\n"
+-    "layout(location = 5) in float transformedSprite;\n"
++    "layout(location = 5) in float primitiveFlags;\n"
+     "uniform vec2 resolution;\n"
+     "uniform vec2 drawOffset, halfPixel, targetSize;\n"
+     "out vec4 vertexColor;\n"
+@@ -76,7 +76,7 @@
+     "void main() {\n"
+     // polygons move their PS1 integer coords onto the pixel centres, while
+     // 1:1 sprites keep their position and step their UVs back instead
+-    "    vec2 shift = (uint(tex.w) & 0x2000u) != 0u ? halfPixel : vec2(0.0);\n"
++    "    vec2 shift = (uint(primitiveFlags) & 2u) != 0u ? halfPixel : vec2(0.0);\n"
+     "    float x = ((pos.x + drawOffset.x + shift.x) / (targetSize.x / 2.0)) - "
+     "1.0;\n"
+     "    float y = ((pos.y + drawOffset.y + shift.y) / (targetSize.y / 2.0)) - "
+@@ -87,11 +87,15 @@
+     // select the right texture coords based on the tpage
+     "    clut = uint(tex.z);\n"
+     "    uint texWord = uint(tex.w);\n"
++#if TM4_EXPERIMENTAL_EXTENDED_VRAM
++    "    tpage = texWord & 0x9FFu;\n"
++#else
+     "    tpage = texWord & 0x1FFu;\n"
++#endif
+     "    textureBank = ((texWord >> 9u) & 3u) | ((texWord >> 10u) & 12u);\n"
+     "    dither = (texWord & 0x4000u) != 0u ? 1u : 0u;\n"
+     // Keep the sprite flag separate from TPAGE texture-bank bits.
+-    "    vec2 uvBias = transformedSprite != 0.0 ? vec2(0.0) : halfPixel;\n"
++    "    vec2 uvBias = (uint(primitiveFlags) & 1u) != 0u ? vec2(0.0) : halfPixel;\n"
+     "    rawUV = tex.xy + shift - uvBias;\n"
+     // Keep clip W at 1 so coverage and Gouraud colors stay unchanged.
+     // Screen-space interpolation of (uv/z, 1/z) corrects UVs alone.
+@@ -122,7 +126,7 @@
+     "        }\n"
+     "    }\n"
+     "    pageBase = ivec2(int((tpage % 32u) % 16u) * 64,\n"
+-    "                     int((tpage % 32u) / 16u) * 256);\n"
++    "                     int((tpage % 32u) / 16u) * 256 + int((tpage & 0x800u) >> 11u) * 512);\n"
+     "    texWindow = uvec4(twin);\n"
+     "}\n"};
+ 
+@@ -1391,7 +1395,7 @@
+                           (void*)offsetof(Vertex, inv_depth));
+     glEnableVertexAttribArray(4);
+     glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+-                          (void*)offsetof(Vertex, transformed_sprite));
++                          (void*)offsetof(Vertex, primitive_flags));
+     glEnableVertexAttribArray(5);
+     glBindVertexArray(0);
+ }
+@@ -1466,7 +1470,6 @@
+                 clut = -1;
+                 tpage = cur_tpage | TPAGE_NOTEXTURE;
+             }
+-            tpage |= TPAGE_POLYGON;
+             if (CanPolyDither(isGouraud, isTextured, isShadeTex)) {
+                 tpage |= TPAGE_DITHER;
+             }
+@@ -1490,7 +1493,7 @@
+                 }
+                 vertex_cur[i].inv_depth = perspective ? positions[i].inv_depth : 0.0f;
+             }
+-            Draw_EnqueueBuffer(nVertices, nIndices);
++            Draw_EnqueueBuffer(nVertices, nIndices, true);
+         } else {
+             // shouldn't happen on a normal PSX application
+             WARNF("code %02X not supported", code);
+@@ -1604,7 +1607,7 @@
+                 index_cur[3] = base + 0;
+                 index_cur[4] = base + 2;
+                 index_cur[5] = base + 3;
+-                Draw_EnqueueBuffer(4, 6);
++                Draw_EnqueueBuffer(4, 6, false);
+             }
+         }
+     } else if (isTile) {
+@@ -1680,7 +1683,7 @@
+         SET_TC_ALL(vertex_cur, tpage, clut);
+         for (int i = 0; i < 4; ++i)
+             vertex_cur[i].inv_depth = 0.0f;
+-        Draw_EnqueueBuffer(4, 6);
++        Draw_EnqueueBuffer(4, 6, false);
+     }
+     return max_len - len;
+ }
+--- a/platform/sdl3_draw.h
++++ b/platform/sdl3_draw.h
+@@ -34,7 +34,7 @@
+     unsigned int twin;
+ #ifdef PSYZ_FLOAT_VERTEX_POSITION
+     float inv_depth;
+-    float transformed_sprite;
++    float primitive_flags;
+ #endif
+ } Vertex;
+ 
+@@ -90,18 +90,18 @@
+ }
+ #endif
+ 
+-static void Draw_EnqueueBuffer(int vertices, int indices) {
++static void Draw_EnqueueBuffer(int vertices, int indices, bool polygon) {
+     assert(n_vertices + vertices <= MAX_VERTEX_COUNT);
+     assert(n_indices + indices <= MAX_INDEX_COUNT);
+ 
+ #ifdef PSYZ_FLOAT_VERTEX_POSITION
+     for (int i = 0; i < vertices; ++i) {
+-        vertex_cur[i].transformed_sprite = 0.0f;
++        vertex_cur[i].primitive_flags = polygon ? 2.0f : 0.0f;
+         if (screen_scale != 1.0f || screen_x != 0.0f || screen_y != 0.0f) {
+             vertex_cur[i].x = vertex_cur[i].x * screen_scale + screen_x;
+             vertex_cur[i].y = vertex_cur[i].y * screen_scale + screen_y;
+-            if (!(vertex_cur[i].t & (TPAGE_POLYGON | TPAGE_NOTEXTURE)))
+-                vertex_cur[i].transformed_sprite = 1.0f;
++            if (!polygon && !(vertex_cur[i].t & TPAGE_NOTEXTURE))
++                vertex_cur[i].primitive_flags = 1.0f;
+         }
+     }
+ #endif
+@@ -188,10 +188,12 @@
+     // implements SetDrawMode, SetDrawEnv
+     unsigned short mode = *(u_short*)p;
+     SetDither((mode & 0x200) ? 1 : 0);
+-    cur_tpage = mode & 0x1FF;
++    cur_tpage = mode & VRAM_TPAGE_MASK;
++#if !TM4_EXPERIMENTAL_EXTENDED_VRAM
+     if (p->tex_y_extra_vram) {
+         DEBUGF("tex_y_extra_vram not implemented");
+     }
++#endif
+     if (p->tex_flip_x) {
+         DEBUGF("tex_flip_x not implemented");
+     }
+--- a/platform/sdl3_common.h
++++ b/platform/sdl3_common.h
+@@ -469,9 +469,9 @@
+     u16 clut = (u16)(p[2] >> 16);
+     u16 tpage = is_poly ? (u16)(p[tpage_word] >> 16) : cur_tpage;
+     int bpp = MIN((tpage >> 7) & 3, 2);
+-    SDL_Rect page = {(tpage & 15) * 64, ((tpage >> 4) & 1) * 256, 64 << bpp,
++    SDL_Rect page = {(tpage & 15) * 64, ((tpage >> 4) & 1) * 256 + ((tpage & VRAM_TPAGE_MASK) >> 11) * 512, 64 << bpp,
+                      256};
+-    SDL_Rect pal = {(clut & 63) * 16, (clut >> 6) & 511, bpp ? 256 : 16, 1};
++    SDL_Rect pal = {(clut & 63) * 16, (clut >> 6) & (VRAM_H - 1), bpp ? 256 : 16, 1};
+     return OverlapsDirtyCanvas(page, pending) ||
+            (bpp < 2 && OverlapsDirtyCanvas(pal, pending));
+ }
+--- a/platform/sdl3_gpu.c
++++ b/platform/sdl3_gpu.c
+@@ -1588,7 +1588,7 @@
+             }
+ 
+             SET_TC_ALL(vertex_cur, tpage, clut);
+-            Draw_EnqueueBuffer(nVertices, nIndices);
++            Draw_EnqueueBuffer(nVertices, nIndices, true);
+         } else {
+             // shouldn't happen on a normal PSX application
+             WARNF("code %02X not supported", code);
+@@ -1701,7 +1701,7 @@
+                 index_cur[3] = base + 0;
+                 index_cur[4] = base + 2;
+                 index_cur[5] = base + 3;
+-                Draw_EnqueueBuffer(4, 6);
++                Draw_EnqueueBuffer(4, 6, false);
+             }
+         }
+     } else if (isTile) {
+@@ -1775,7 +1775,7 @@
+         index_cur[4] = n_vertices + 3;
+         index_cur[5] = n_vertices + 2;
+         SET_TC_ALL(vertex_cur, tpage, clut);
+-        Draw_EnqueueBuffer(4, 6);
++        Draw_EnqueueBuffer(4, 6, false);
+     }
+     batch_has_texture |= isTextured;
+     return max_len - len;

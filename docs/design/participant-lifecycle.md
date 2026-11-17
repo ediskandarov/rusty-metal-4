@@ -12,7 +12,7 @@ Updated 2026-11-16.
 | Implemented foundation | Sparse gameplay slots, stable participant identity, C-owned combat results and car respawn; authoritative live admission, departure and reuse within the prepared model pool. |
 | Recovery boundary | Current roster, car lifetimes and results restore through local rollback and portable checkpoints; committed membership decisions accompany accepted inputs in the server journal. |
 | Implemented FFA policy | Eight gameplay slots; automatic random-model respawn; immutable time/frag limits and deterministic completion with ties. |
-| Implemented Tournament | Two fixed humans, native car selection, original eight-map co-op campaign, shared lives, waves, bosses and final team outcome. |
+| Implemented Tournament | Two to four fixed humans, native car selection, original eight-map co-op campaign, shared lives, waves, bosses and final team outcome. |
 | Implemented room lifecycle | Authoritative named final scoreboard retained after private server release; return to the same room and fresh match startup in the loaded player. |
 | Deferred mode policy | FFA map rotation, spectator seats and live replacement of a living car. |
 
@@ -248,32 +248,56 @@ including two humans with three bots and an eight-occupied-slot case with six bo
 not establish all-map or all-model coverage. Maps without enabled original AI
 navigation are rejected before client prediction can start.
 
-## Original two-player Tournament
+## Network Tournament
 
-Both humans choose and confirm their cars through the original engine menu. The campaign
-uses the original registry order, AI counts, reinforcement thresholds and boss timers from
+Two to four humans choose and confirm their cars through the original engine menu. The campaign
+uses the original registry order, reinforcement thresholds and boss timers from
 [the recovered tournament driver](../../game/src/main/tournament.c). Each player starts with
-four reserve lives; pooled lives borrow from the teammate when the victim has no reserves.
+four reserve lives; pooled lives borrow from a teammate when the victim has no reserves.
 The original driver owns death, respawn, elimination and the team outcome. An eliminated
-player alone does not end a battle while the teammate can still play. Defeat has no retry
+player alone does not end a battle while another teammate can still play. Defeat has no retry
 or Continue route: GAME OVER remains visible for the original 120 ticks before room results.
 
-A map victory retains the original 150-tick presentation delay and waits for either human's
+A map victory retains the original 150-tick presentation delay and waits for any human's
 Continue input. Memory-card Save belongs to offline play; network progress stays with the
 active authority and authenticated recovery. Intermediate wins start a new prediction epoch,
-clock, checkpoints and journal on the next map while retaining both identities, credentials,
+clock, checkpoints and journal on the next map while retaining all identities, credentials,
 selected cars, lives, elimination state, progress and cumulative combat results. Loading
 reconnection can restart tick-zero clock negotiation without discarding that campaign.
 
-The final boss produces the original two-player YOU WON presentation, including PLAY SINGLE
+The final boss produces the original co-op YOU WON presentation, including PLAY SINGLE
 PLAYER TO SEE ENDING MOVIES. No character ending movie runs in co-op. Continue confirms the
 final team result; Room retains the scoreboard and releases the private server. A new
 Tournament requires fresh native confirmation and starts on the first map with fresh lives
 and scores in the same loaded player.
 
+Human seats remain separate from car storage: all network roster sizes retain the original
+two-human runtime opponent counts. The eight entrant places originally allow six opponent
+places including bosses, so regular enemy totals are 3, 4, 5, 5, 5, 4, 5 and 5 across the
+campaign. Four humans therefore require ten entrant places and up to ten unique loaded models; bosses
+are retained and the regular waves peak at eight simultaneous cars. Live-car records and radar
+packets have a separate ten-car storage limit. This is a fixed experimental capacity, not an
+arbitrary-car-count switch. Offline and FFA slot limits remain unchanged.
+
+The CMake option `TM4_EXPERIMENTAL_EXTENDED_VRAM` defaults to OFF: ordinary builds retain
+1024×512 graphics storage and eight model atlases, and reject Tournament rosters above two
+humans. Enable it for both browser and authority builds to use three or four humans. It adds
+two explicitly initialized model atlases and increases the browser's PsyZ backing allocation
+to 1024×1024 for every mode in that build. Unsupported model counts fail before indexing the
+atlas table. Requested RGBA8 storage then increases by 2 MiB for
+base VRAM plus 2×r² MiB for WebGL's mandatory separate draw target at render scale r
+(4 MiB total at 1×, 130 MiB at 8×). Lazy scratch and readback buffers add 2 MiB each. A mask
+snapshot of a full-VRAM draw target can add another 2×r² MiB; native canvas-sized snapshots
+are unchanged. These figures exclude driver overhead and CPU conversion scratch sized to
+actual image transfers. The port builds the GL browser backend; texture page, palette and
+dirty-framebuffer dependency decoding all retain the extra Y bit. Upload/copy bounds and
+wrapping use the backing dimensions. The unbuilt native SDL GPU/software backends are not
+extended by this port.
+
 Portable snapshots cover active waves, the delayed boss spawn, active bosses, victory waiting
 for Continue and GAME OVER. Oil Rig's tournament-only oilAi object has unused payload and
 removes itself when its two bosses activate; its descriptor permits that baseline removal.
+Its targeting limit of two counts attackers per target, independently of the human roster.
 
 ## Authoritative event boundary
 
@@ -408,7 +432,7 @@ after the match has ended.
 | Capture the flag, candidate | Also assign a team | Respawn under mode rules | Resolve a carried objective before removing the car |
 | Elimination or limited lives, candidate | May wait for the next round | Wait, spend a life or become eliminated | Decide forfeit and victory rules explicitly |
 | Duel, candidate | Queue when both seats are occupied | Mode-specific | Decide forfeit and promotion from queue |
-| Tournament | Fixed two-human roster through the campaign | Original life stock and selected model; original delayed respawn | Temporary disconnect retains the participant; no live admission or departure |
+| Tournament | Fixed two-to-four-human roster through the campaign | Original life stock and selected model; original delayed respawn | Temporary disconnect retains the participant; no live admission or departure |
 
 Mode rules decide admission, car selection, respawn and scoring. The shared
 lifecycle mechanism does not hardcode random selection or couple replacement to

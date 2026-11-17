@@ -327,7 +327,7 @@ test("finished FFA keeps its mode after the host switches the next match to tour
   edit(state, "host", {
     name: "Tournament next",
     modeId: "tournament",
-    capacity: 2,
+    capacity: 4,
     mapId: "construction-yard",
   });
   expect(snapshot(state, "host").modeId).toBe("tournament");

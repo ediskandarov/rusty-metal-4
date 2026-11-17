@@ -29,7 +29,7 @@ typedef struct WebTournamentCarry {
     s32 world, progress, games_completed, shared_lives;
     struct {
         s32 lives, wins, losses, eliminated, frags, deaths;
-    } players[2];
+    } players[4];
 } WebTournamentCarry;
 const WebTournamentCarry* WebTournamentNextStage(void);
 int WebTournamentCarryValid(const WebTournamentCarry* carry, s32 world);

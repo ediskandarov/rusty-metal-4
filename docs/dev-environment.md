@@ -71,6 +71,12 @@ MR teardown still clears gameplay state and invalidates imported addresses.
 player and server-launcher builds invoke it automatically. `bun run test:mr-preparation` runs its
 asset-free native tests; the Bun unit suite exercises the Wasm bindings.
 
+The four-human Tournament experiment requires the CMake option
+`-DTM4_EXPERIMENTAL_EXTENDED_VRAM=ON` in both browser and authority configurations. It defaults
+to OFF; the normal build keeps eight model atlases and the original graphics allocation.
+The option persists in each CMake build directory. See the
+[capacity and graphics cost](design/participant-lifecycle.md#network-tournament) before enabling it.
+
 The root commands
 (`build`, `build:dev`, `build:diagnostic`, `dev`, `match`, `test`, `fmt`, `lint`
 and `typecheck`) cover the workspaces together.
@@ -314,6 +320,13 @@ scenario flags (timing, audio, background tabs) remain local to their tests.
   `startDiagnosticGame` rejects ordinary Wasm with a build hint instead of waiting
   for nonexistent game counters. Match scenarios additionally need the server
   fixtures described below.
+- `check_car_capacity.mjs` checks nine and ten synthetic live cars through the real radar writer
+  and WebGL packets, including neighboring HUD memory and pixel readback. Set `TM4_WASM_SITE`
+  to the diagnostic player output and `TM4_DISC_DIR` to the local disc folder.
+  `check_gpu_mask.mjs` additionally checks actual graphics dimensions, model-page texture and
+  palette sampling, uploads, copies and readback. Set `TM4_WEB_URL` to its served site. Both
+  checks expect the default graphics configuration unless `TM4_EXTENDED_VRAM=1` is set. These
+  boundary fixtures do not establish full ten-car gameplay support.
 - `bun tests/browser/check_network_latency.mjs` checks live Lightyear RTT, a 90 ms
   incoming packet delay, stale diagnostics and connection replacement. Set
   `TM4_WEB_URL` to a dev player with local disc resources and `TM4_MATCH_ENDPOINT`
@@ -394,11 +407,12 @@ tests/simulation/replay-membership-journal.mjs <journal>` checks every recorded
   The `check_ffa.mjs` variant adds repeated deaths and rollback/recovery across automatic
   respawn. It writes `build/room-tests/ffa.tm4j`; replay it with
   `TM4_TEST_ACTIONS=build/room-tests/ffa-actions.json` and the same simulation inputs.
-- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_tournament_match.mjs`: two original
+- `TM4_DISC_DIR=<disc folder> bun tests/browser/check_tournament_match.mjs`: original
   engine car menus, all eight campaign maps and bosses, original Continue presentation,
   reconnect during combat and overlay loading, final co-op results, then a second Tournament
-  in the same loaded pages through life exhaustion and GAME OVER. Uses the matching diagnostic
-  bundle, native binary and website build described above. Native diagnostic checks under
+  in the same loaded pages through life exhaustion and GAME OVER. Set
+  `TM4_TOURNAMENT_HUMANS=4` to run all four independent native selections and controllers.
+  Uses the matching diagnostic bundle, native binary and website build described above. Native diagnostic checks under
   `simulator::tests::tournament` cover complete map replay, local rollback and portable recovery
   around reinforcements, boss delay/activation, victory, shared-life borrowing and elimination.
 - `bun run test:rooms`: real local Worker/SQLite Durable Objects, concurrent

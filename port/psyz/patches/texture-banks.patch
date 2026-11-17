@@ -22,7 +22,7 @@
      "    clut = uint(tex.z);\n"
      "    uint texWord = uint(tex.w);\n"
      "    tpage = texWord & 0x1FFu;\n"
-+    "    textureBank = (texWord >> 9u) & 15u;\n"
++    "    textureBank = ((texWord >> 9u) & 3u) | ((texWord >> 10u) & 12u);\n"
      "    dither = (texWord & 0x4000u) != 0u ? 1u : 0u;\n"
      "    rawUV = tex.xy + shift - halfPixel;\n"
      // Keep clip W at 1 so coverage and Gouraud colors stay unchanged.

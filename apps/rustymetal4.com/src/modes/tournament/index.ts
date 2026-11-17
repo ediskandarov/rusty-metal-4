@@ -9,7 +9,7 @@ export const tournament: RoomMode = {
       store,
       send,
       tournamentSelectionStatus,
-      "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts once both players have confirmed.",
+      "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts once all players have confirmed.",
     );
   },
   results(result) {

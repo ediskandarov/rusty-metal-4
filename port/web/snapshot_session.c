@@ -17,7 +17,7 @@
 #include <string.h>
 
 enum {
-    SessionVersion = 13,
+    SessionVersion = 14,
     MaxPlayers = 8,
     MaxSquares = 4096,
     MaxObjects = 4096,
@@ -62,7 +62,7 @@ typedef struct {
     char model_pool[8][64];
     WebParticipantState participants;
     WebParticipantId initial_participants[8];
-    u32 car_order[MaxPlayers];
+    u32 car_order[TM4_MAX_LIVE_CARS];
     PlayerRecord players[MaxPlayers];
     s32 games_completed, deathmatch_winner, deathmatch_finished;
     s32 deathmatch_next_mode, deathmatch_accept_input, deathmatch_rounds;
@@ -78,8 +78,9 @@ static int supported_session(void)
 {
     const s32 count = GameInfo.player_car_count;
     if ((!GameInfo.active && !WebMatchCapture().reasons
-            && !(WebTournamentActive() && GameInfo.world_lost)) || GameInfo.mode != GAME_MODE_PLAY
-        || GameInfo.next_mode || GameInfo.pause_player || count < 0 || count > MaxPlayers
+            && !(WebTournamentActive() && GameInfo.world_lost))
+        || GameInfo.mode != GAME_MODE_PLAY || GameInfo.next_mode || GameInfo.pause_player
+        || count < 0 || count > MaxPlayers
         || (!WebTournamentActive()
             && (GameInfo.game_type != GAME_TYPE_DEATHMATCH || GameInfo.computer_count))
         || GameInfo.active_player_count + GameInfo.active_computer_count != GameInfo.car_count
@@ -378,7 +379,7 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
     }
     if (!directory)
         return 0;
-    Car* cars[MaxPlayers] = { 0 };
+    Car* cars[TM4_MAX_LIVE_CARS] = { 0 };
     Car* player_cars[MaxPlayers] = { 0 };
     Camera* cameras[MaxPlayers] = { 0 };
     for (u32 i = 0; i < record.car_count; ++i) {
@@ -430,10 +431,12 @@ int WebSnapshotSessionRestore(const u8* input, u32 length, WebSnapshotFindObject
         return 0;
     for (u32 i = 0; i < MaxPlayers; ++i) {
         const PlayerRecord empty = { 0 };
-        if ((i >= record.car_count && record.car_order[i])
-            || (!WebNetSlotOccupied(i) && memcmp(&record.players[i], &empty, sizeof(empty))))
+        if (!WebNetSlotOccupied(i) && memcmp(&record.players[i], &empty, sizeof(empty)))
             return 0;
     }
+    for (u32 i = record.car_count; i < TM4_MAX_LIVE_CARS; ++i)
+        if (record.car_order[i])
+            return 0;
     Tm4ObjectHeader* lists[OBJECT_LIST_COUNT];
     u32 objects = 0;
     for (u32 i = 0; i < OBJECT_LIST_COUNT; ++i) {

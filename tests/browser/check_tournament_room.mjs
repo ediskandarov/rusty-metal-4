@@ -100,12 +100,12 @@ try {
     await frame.locator('#car-selection-status[data-phase="ready"]').waitFor();
     assert.equal(
       await frame.locator("#car-selection-status-title").textContent(),
-      "Both cars confirmed",
+      "All cars confirmed",
     );
   }
   assert(confirmed.participants.every((p) => p.car));
-  assert.equal(confirmed.capacity, 2);
-  assert.equal(confirmed.freePlaces, 0);
+  assert.equal(confirmed.capacity, 4);
+  assert.equal(confirmed.freePlaces, 2);
   assert.equal(confirmed.match, null, "Selection does not allocate an FFA server");
   assert.equal(await host.locator("#room-car").count(), 0);
   assert.equal(await host.locator("#room-ready").count(), 0);

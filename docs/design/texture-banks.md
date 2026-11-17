@@ -25,5 +25,11 @@ frees its runtime copies before its MR registration is removed.
 
 Modules can create independent banks with `WebTextureBankCreate` and must release them
 with `WebTextureBankDestroy` after deleting users. A zero create result means no bank
-was allocated. Put the returned ID in bits 9–12 of each material's texture page;
+was allocated. Encode the returned ID as `((bank & 3) << 9) | ((bank & 12) << 10)` in each
+material's texture page;
 zero selects ordinary VRAM. Bank IDs are renderer resources, not snapshot state.
+
+Texture bank IDs use tpage bits 9, 10, 12 and 13; bit 11 remains available for
+the experimental upper car-atlas pages. Banks remain 1024×512 even when the
+base VRAM is expanded to 1024×1024. Polygon-centering and transformed-sprite
+flags travel in a separate vertex attribute, outside the texture-page bits.

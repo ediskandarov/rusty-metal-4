@@ -91,7 +91,13 @@ export interface NetworkPort {
 
 export function configureMatch(engine: NetworkEngine, proposed: Start, view: number) {
   const start = startSchema.parse(proposed);
-  if (!Number.isInteger(view) || view < 0 || view >= start.capacity || start.bots.includes(view))
+  if (
+    !Number.isInteger(view) ||
+    view < 0 ||
+    view >= start.capacity ||
+    start.bots.includes(view) ||
+    (start.mode === "tournament" && !start.slots.includes(view))
+  )
     throw new Error("Invalid local gameplay slot");
   const world = engine.ccall("WebNetWorldIndex", "number", ["string"], [start.world]);
   if (world < 0) throw new Error("Session map is missing locally");
@@ -111,7 +117,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
         p.deaths,
       ]),
     ];
-    const bytes = new Uint8Array(words.length * 4);
+    const bytes = new Uint8Array(28 * 4);
     const viewData = new DataView(bytes.buffer);
     words.forEach((word, index) => viewData.setInt32(index * 4, word, true));
     return engine.ccall(
@@ -120,7 +126,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       ["number", "number", "number", "number", "number", "number", "string", "string", "array"],
       [
         start.capacity,
-        3,
+        start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
         world,
         start.seed,
         view,
@@ -139,7 +145,7 @@ export function configureMatch(engine: NetworkEngine, proposed: Start, view: num
       ["number", "number", "number", "number", "number", "number", "string", "string"],
       [
         start.capacity,
-        3,
+        start.slots.reduce((mask, slot) => mask | (1 << slot), 0),
         world,
         start.seed,
         view,

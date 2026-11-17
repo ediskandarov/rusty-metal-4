@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { BankBytes = 1024 * 512 * 2, BankMask = 0x1e00, ShaderBytes = 12 };
+enum { BankBytes = 1024 * 512 * 2, BankMask = 0x3e00, ShaderBytes = 12 };
 static unsigned world_texture_bank;
 static u8 *world_shaders, *world_horizon;
 static Tm4CardTexture original_chrome, original_specular;
@@ -52,7 +52,8 @@ static void* copy_resource(RegistryFile* file)
 
 u16 WebWorldTexturePage(u16 page)
 {
-    return (page & ~BankMask) | (world_texture_bank << 9);
+    /* External banks are 512 pixels high: clear the base VRAM upper-page bit too. */
+    return (page & ~BankMask) | ((world_texture_bank & 3) << 9) | ((world_texture_bank & 12) << 10);
 }
 
 static void bind_world_page(u16* page)

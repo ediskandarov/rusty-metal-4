@@ -6,8 +6,8 @@ import type { ModeRules } from "../rules-types.ts";
 export const tournamentRules: ModeRules = {
   minimumPlayers: modeDefinitions.tournament.minimumPlayers,
   allowLateJoin: false,
-  playingMessage: "Tournament battle in progress. The two participants can reconnect.",
-  readyMessage: "Server ready. Both players must confirm their cars before the host starts.",
+  playingMessage: "Tournament battle in progress. The participants can reconnect.",
+  readyMessage: "Server ready. All players must confirm their cars before the host starts.",
   ...carSelectionRules,
   serverOptions(settings) {
     return {

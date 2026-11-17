@@ -328,8 +328,60 @@ test("tournament continuation carries campaign data into the explicit next-map e
   expect(configureMatch(engine, setup, 1)).toBe(1);
   expect(calls[1]![0]).toBe("WebNetStartTournamentStage");
   const bytes = (calls[1]![3] as unknown[])[8] as Uint8Array;
+  expect(bytes.byteLength).toBe(112);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   expect(Array.from({ length: 16 }, (_, i) => view.getInt32(i * 4, true))).toEqual([
     1, 512, 512, 1, 3, 1, 0, 0, 2, 1, 3, 1, 0, 0, 2, 1,
   ]);
+});
+
+test("Tournament supports two to four fixed human controllers and retains each carry record", async () => {
+  const calls: unknown[][] = [];
+  const engine = {
+    ccall(...args: unknown[]) {
+      calls.push(args);
+      return 0;
+    },
+  } as unknown as NetworkEngine;
+  const player = { lives: 3, wins: 1, losses: 0, eliminated: false, frags: 2, deaths: 1 };
+  for (const count of [2, 3, 4]) {
+    const setup = {
+      ...start,
+      mode: "tournament" as const,
+      slots: Array.from({ length: count }, (_, i) => i),
+      cars: Array(count).fill("Orbital"),
+      participants: Array.from({ length: count }, (_, i) => (i + 1).toString(16).padStart(16, "0")),
+      modelPool: ["Orbital"],
+      respawnDelayTicks: 0,
+      limits: { timeLimitTicks: 0, fragLimit: 0 },
+    };
+    expect(startSchema.safeParse(setup).success).toBe(true);
+    expect(() => configureMatch(engine, setup, count)).toThrow("local gameplay slot");
+    const stage = {
+      ...setup,
+      world: "Neon City",
+      tournament: {
+        world: "Neon City",
+        progress: 512,
+        gamesCompleted: 512,
+        sharedLives: true,
+        players: Array(count).fill(player),
+      },
+    };
+    expect(startSchema.safeParse(stage).success).toBe(true);
+    expect(
+      startSchema.safeParse({
+        ...stage,
+        tournament: { ...stage.tournament, players: Array(count - 1).fill(player) },
+      }).success,
+    ).toBe(false);
+    calls.length = 0;
+    await configureMatch(engine, stage, count - 1);
+    const values = calls[1]![3] as unknown[];
+    expect(values[1]).toBe((1 << count) - 1);
+    const bytes = values[8] as Uint8Array;
+    const view = new DataView(bytes.buffer);
+    expect(view.getInt32((4 + (count - 1) * 6) * 4, true)).toBe(3);
+    expect(bytes.byteLength).toBe(112);
+  }
 });

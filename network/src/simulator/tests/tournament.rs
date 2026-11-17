@@ -119,7 +119,7 @@ fn tournament_next_map_preserves_campaign_and_restores_on_fresh_instance() -> Re
 
 fn tournament_rules(world: &mut Simulator) -> Result<Vec<i32>> {
     let address = world.call::<(), u32>("WebTestTournamentState", ())?;
-    let mut bytes = [0u8; 84];
+    let mut bytes = [0u8; 116];
     world
         .memory
         .read(&world.store, address as usize, &mut bytes)?;
@@ -132,9 +132,19 @@ fn tournament_rules(world: &mut Simulator) -> Result<Vec<i32>> {
 #[test]
 #[ignore = "requires diagnostic Wasm and private stock resources"]
 fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
+    tournament_campaign(2)
+}
+
+#[test]
+#[ignore = "requires diagnostic Wasm and private stock resources"]
+fn tournament_four_human_campaign_original_waves_bosses_and_reuse() -> Result<()> {
+    tournament_campaign(4)
+}
+
+fn tournament_campaign(humans: u8) -> Result<()> {
     let (bytes, resources) = paths()?;
     let mut authority = Simulator::new(&bytes, &resources, compatibility())?;
-    let first = SessionStart {
+    let mut first = SessionStart {
         mode: tm4_network::protocol::MatchMode::Tournament,
         limits: tm4_network::protocol::FfaLimits {
             time_limit_ticks: 0,
@@ -143,6 +153,16 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
         respawn_delay_ticks: 0,
         ..session()
     };
+    first.slots = (0..humans).collect();
+    first.participants = (1..=humans)
+        .map(|id| tm4_network::protocol::ParticipantId(u64::from(id)))
+        .collect();
+    first.cars = ["Orbital", "Pizza Boy", "Microblast", "Quatro"]
+        .into_iter()
+        .take(usize::from(humans))
+        .map(str::to_owned)
+        .collect();
+    first.model_pool = first.cars.clone();
     let worlds = [
         "Construction Yard",
         "Neon City",
@@ -177,6 +197,17 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
                 "Campaign carry was lost: {initial:?} {carry:?}"
             );
         }
+        let expected_ai = [3, 4, 5, 5, 5, 4, 5, 5][stage];
+        ensure!(
+            initial[0] == expected_ai,
+            "Original two-human opponent roster changed on {expected_world}: {initial:?}"
+        );
+        let mut handles = std::collections::HashSet::new();
+        for slot in 0..i32::from(humans) {
+            ensure!(authority.call::<i32, u32>("WebTestNetworkSlotBindings", slot)? == 15);
+            ensure!(handles.insert(authority.call::<i32, u32>("WebTestCarHandle", slot)?));
+            ensure!(authority.call::<(i32, i32), i32>("WebTestAiState", (slot, 0))? == 1);
+        }
         let checkpoint = authority.snapshot()?;
         ensure!(authority.call::<(), u32>("WebNetCaptureLocalCheckpoint", ())? > 0);
         let mut tape = Vec::new();
@@ -185,13 +216,15 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
         let mut saw_reinforcements = false;
         let mut saw_boss_delay = false;
         let mut saw_boss = false;
+        let mut peak_enemies = 0;
+        let mut peak_cars = 0;
         for tick in 0..1800 {
-            if tick % 90 == 0 {
-                authority.call::<(), ()>("WebTestDefeatOpponents", ())?;
-            }
+            campaign_actions(&mut authority, stage, u32::try_from(tick)?, humans)?;
             inputs[0].buttons = if tick % 30 == 0 { 0x40 } else { 0 };
             let state = authority.step(tick, &inputs)?;
             let rules = tournament_rules(&mut authority)?;
+            peak_enemies = peak_enemies.max(rules[7]);
+            peak_cars = peak_cars.max(rules[26]);
             saw_reinforcements |= rules[4] != 0;
             saw_boss_delay |= rules[5] != 0;
             saw_boss |= rules[6] != 0;
@@ -218,13 +251,14 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
             if state.completion.reasons != 0 {
                 let expected = if stage == worlds.len() - 1 { 4 } else { 16 };
                 ensure!(
-                    state.completion.reasons == expected && state.completion.winners == 3,
+                    state.completion.reasons == expected
+                        && state.completion.winners == (1 << humans) - 1,
                     "Wrong result {expected_world}: {:?} {rules:?}",
                     state.completion
                 );
                 ensure!(
                     rules[16] == 0,
-                    "Two-player campaign selected a single-player ending"
+                    "Co-op campaign selected a single-player ending"
                 );
                 break;
             }
@@ -242,12 +276,23 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
             initial[3] == 0 || (saw_boss_delay && saw_boss),
             "Missing original boss sequence on {expected_world}"
         );
+        if stage > 0 && humans == 4 {
+            ensure!(initial[22] == start.tournament.as_ref().unwrap().players[3].lives);
+        }
+        if stage == 4 {
+            ensure!(
+                peak_cars == i32::from(humans) + 4,
+                "Wrong simultaneous car peak: {peak_cars}"
+            );
+            ensure!(
+                peak_enemies == 4,
+                "Amazonia did not exercise four simultaneous original enemies: {peak_enemies}"
+            );
+        }
         let completed = authority.snapshot()?;
         ensure!(authority.call::<(), i32>("WebNetRestoreLocalCheckpoint", ())? == 1);
         for (tick, digest) in tape.iter().enumerate() {
-            if tick % 90 == 0 {
-                authority.call::<(), ()>("WebTestDefeatOpponents", ())?;
-            }
+            campaign_actions(&mut authority, stage, tick as u32, humans)?;
             inputs[0].buttons = if tick % 30 == 0 { 0x40 } else { 0 };
             ensure!(
                 authority.step(tick as u32, &inputs)?.digest == *digest,
@@ -260,9 +305,7 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
         authority.start(&start)?;
         authority.restore_portable(&checkpoint)?;
         for (tick, digest) in tape.iter().enumerate() {
-            if tick % 90 == 0 {
-                authority.call::<(), ()>("WebTestDefeatOpponents", ())?;
-            }
+            campaign_actions(&mut authority, stage, tick as u32, humans)?;
             inputs[0].buttons = if tick % 30 == 0 { 0x40 } else { 0 };
             ensure!(
                 &authority.step(tick as u32, &inputs)?.digest == digest,
@@ -279,9 +322,7 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
             authority.start(&start)?;
             authority.restore_portable(&checkpoint)?;
             for tick in boundary..tape.len() as u32 {
-                if tick % 90 == 0 {
-                    authority.call::<(), ()>("WebTestDefeatOpponents", ())?;
-                }
+                campaign_actions(&mut authority, stage, tick as u32, humans)?;
                 inputs[0].buttons = if tick % 30 == 0 { 0x40 } else { 0 };
                 ensure!(
                     authority.step(tick, &inputs)?.digest == tape[tick as usize],
@@ -347,9 +388,19 @@ fn tournament_full_campaign_original_waves_bosses_and_reuse() -> Result<()> {
 #[test]
 #[ignore = "requires diagnostic Wasm and private stock resources"]
 fn tournament_shared_lives_elimination_and_original_game_over_recovery() -> Result<()> {
+    tournament_game_over(2)
+}
+
+#[test]
+#[ignore = "requires diagnostic Wasm and private stock resources"]
+fn tournament_four_human_shared_lives_elimination_and_original_game_over_recovery() -> Result<()> {
+    tournament_game_over(4)
+}
+
+fn tournament_game_over(humans: u8) -> Result<()> {
     let (bytes, resources) = paths()?;
     let mut world = Simulator::new(&bytes, &resources, compatibility())?;
-    let start = SessionStart {
+    let mut start = SessionStart {
         mode: tm4_network::protocol::MatchMode::Tournament,
         limits: tm4_network::protocol::FfaLimits {
             time_limit_ticks: 0,
@@ -359,6 +410,19 @@ fn tournament_shared_lives_elimination_and_original_game_over_recovery() -> Resu
         ..session()
     };
     let inputs = vec![Input::default(); 8];
+    start.slots = (0..humans).collect();
+    start.participants = (1..=humans)
+        .map(|id| tm4_network::protocol::ParticipantId(u64::from(id)))
+        .collect();
+    start.cars = (0..humans)
+        .map(|slot| {
+            if slot % 2 == 0 {
+                "Orbital".into()
+            } else {
+                "Pizza Boy".into()
+            }
+        })
+        .collect();
     for shared in [0, 1] {
         world.start(&start)?;
         // Original option plus a small remaining stock. Damage/removal/respawn remain original.
@@ -391,7 +455,7 @@ fn tournament_shared_lives_elimination_and_original_game_over_recovery() -> Resu
         let mut pending_loss = None;
         for tick in 241..1500 {
             if (tick - 241) % 240 == 0 {
-                for slot in 0..2 {
+                for slot in 0..i32::from(humans) {
                     if world.call::<i32, u32>("WebTestCarHandle", slot)? != 0 {
                         ensure!(world.call::<i32, i32>("WebTestKillParticipant", slot)? == 1);
                         events.push((tick, slot));
@@ -454,5 +518,59 @@ fn tournament_shared_lives_elimination_and_original_game_over_recovery() -> Resu
         }
         world.finish()?;
     }
+    Ok(())
+}
+
+fn campaign_actions(world: &mut Simulator, stage: usize, tick: u32, humans: u8) -> Result<()> {
+    if tick % 90 == 0 {
+        world.call::<i32, ()>("WebTestDefeatOpponentsTo", if tick == 0 { 2 } else { 0 })?;
+    }
+    if stage == 0 && tick == 120 {
+        ensure!(world.call::<i32, i32>("WebTestKillParticipant", i32::from(humans) - 1)? == 1);
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires diagnostic Wasm and private stock resources"]
+fn tournament_four_human_inputs_control_only_their_owned_car() -> Result<()> {
+    let (bytes, resources) = paths()?;
+    let mut world = Simulator::new(&bytes, &resources, compatibility())?;
+    let mut start = session();
+    start.mode = tm4_network::protocol::MatchMode::Tournament;
+    start.slots = vec![0, 1, 2, 3];
+    start.participants = (1_u64..=4)
+        .map(tm4_network::protocol::ParticipantId)
+        .collect();
+    start.cars = vec!["Orbital".into(); 4];
+    start.model_pool = vec!["Orbital".into()];
+    start.limits = tm4_network::protocol::FfaLimits {
+        time_limit_ticks: 0,
+        frag_limit: 0,
+    };
+    start.respawn_delay_ticks = 0;
+    world.start(&start)?;
+    let mut tick = 0;
+    for controlled in 0..4 {
+        let mut inputs = [Input::default(); 8];
+        inputs[controlled].buttons = 0x40;
+        for _ in 0..8 {
+            world.step(tick, &inputs)?;
+            tick += 1;
+        }
+        for slot in 0_i32..4 {
+            let throttle = world.call::<(i32, i32), u32>("WebTestCarResource", (slot, 5))?;
+            ensure!(
+                (throttle > 0) == (usize::try_from(slot)? == controlled),
+                "Input for controller {controlled} changed car {slot}: throttle={throttle}"
+            );
+            ensure!(world.call::<i32, u32>("WebTestNetworkSlotBindings", slot)? == 15);
+        }
+        ensure!(
+            tournament_rules(&mut world)?[7] == 2,
+            "Original opponents disappeared"
+        );
+    }
+    world.finish()?;
     Ok(())
 }

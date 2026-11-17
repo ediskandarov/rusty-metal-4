@@ -8,6 +8,8 @@ import { launchBrowser } from "./helpers/browser.mjs";
 import { setPanelOpen } from "./helpers/player.mjs";
 
 assert(process.env.TM4_DISC_DIR, "Set TM4_DISC_DIR to your disc folder");
+const humans = Number(process.env.TM4_TOURNAMENT_HUMANS ?? 2);
+assert([2, 3, 4].includes(humans));
 const fixture = resolve("build/room-tests/tournament-victory.json");
 const waves = [360, 600, 840, 1080];
 await Bun.write(
@@ -31,8 +33,9 @@ const browser = await launchBrowser({
 const pages = [];
 try {
   const origin = (await mf.ready).origin;
-  for (let i = 0; i < 2; ++i) pages.push(await (await browser.newContext()).newPage());
-  const [host, guest] = pages;
+  for (let i = 0; i < humans; ++i) pages.push(await (await browser.newContext()).newPage());
+  const host = pages[0],
+    guest = pages.at(-1);
   const errors = [];
   for (const page of pages) {
     page.on("pageerror", (error) => {
@@ -58,9 +61,12 @@ try {
   const roomId = new URL(host.url()).pathname.split("/").pop();
   const view = async () =>
     (await (await host.request.get(`${origin}/api/rooms/${roomId}`)).json()).room;
-  await guest.goto(host.url());
-  await guest.locator("#join-player").fill("Guest");
-  await guest.locator("#join-form button").click();
+  for (const [index, page] of pages.entries()) {
+    if (!index) continue;
+    await page.goto(host.url());
+    await page.locator("#join-player").fill("Guest " + index);
+    await page.locator("#join-form button").click();
+  }
   const load = async (page) => {
     console.log("Loading disc");
     await page.locator("#room-player").waitFor();
@@ -74,21 +80,24 @@ try {
     await setPanelOpen(frame, "render-settings", true);
     await frame.locator("#render-scale").selectOption("1");
     await setPanelOpen(frame, "render-settings", false);
-    await frame.evaluate((waves) => {
-      const step = Module._WebNetQueueTick;
-      Module._WebNetQueueTick = (tick) => {
-        if (globalThis.tournamentSecondCampaign) {
-          if ([120, 360, 600, 840, 1080].includes(tick))
-            for (let slot = 0; slot < 2; ++slot)
-              if (Module._WebTestCarHandle(slot)) Module._WebTestKillParticipant(slot);
-        } else if (waves.includes(tick)) Module._WebTestDefeatOpponents();
-        return step(tick);
-      };
-    }, waves);
+    await frame.evaluate(
+      ({ waves, humans }) => {
+        const step = Module._WebNetQueueTick;
+        Module._WebNetQueueTick = (tick) => {
+          if (globalThis.tournamentSecondCampaign) {
+            if ([120, 360, 600, 840, 1080].includes(tick))
+              for (let slot = 0; slot < humans; ++slot)
+                if (Module._WebTestCarHandle(slot)) Module._WebTestKillParticipant(slot);
+          } else if (waves.includes(tick)) Module._WebTestDefeatOpponents();
+          return step(tick);
+        };
+      },
+      { waves, humans },
+    );
     return frame;
   };
   const frames = [];
-  for (const page of pages) {
+  for (const [index, page] of pages.entries()) {
     await page.bringToFront();
     const frame = await load(page);
     frames.push(frame);
@@ -97,14 +106,19 @@ try {
     });
     console.log("Car menu ready");
     await frame.locator("canvas").focus();
-    await page.keyboard.press("ArrowRight", { delay: 150 });
+    for (let move = 0; move <= index; ++move)
+      await page.keyboard.press("ArrowRight", { delay: 150 });
     await frame.waitForFunction(() => tm4Port.menuReady);
     await page.keyboard.press("KeyX", { delay: 150 });
     await frame.waitForFunction(() => Module.ccall("WebSelectedCar", "string", [], []));
+    if (index + 1 < humans) {
+      await frames[0].locator('#car-selection-status[data-phase="waiting"]').waitFor();
+      assert(!(await view()).participants.every((p) => p.ready));
+    }
   }
   const participants = (await view()).participants.map(({ id, car }) => ({ id, car }));
   await eventually(view, (room) => room.participants.every((p) => p.ready));
-  console.log("Both choices confirmed");
+  console.log(humans + " native choices confirmed");
   await host.bringToFront();
   await host.locator("#prepare-match").click();
   console.log("Server preparation requested");
@@ -125,7 +139,7 @@ try {
   console.log("Match started");
   for (const frame of frames)
     await frame.waitForFunction(() => tm4Port.netConfirmedTick > 120, null, { timeout: 120000 });
-  console.log("PASS two native menus start the same tournament battle on Rust and two browsers");
+  console.log("PASS " + humans + " native menus start the same Tournament on Rust and browsers");
   const states = await Promise.all(
     frames.map((frame) =>
       frame.evaluate(() => {
@@ -136,8 +150,21 @@ try {
   );
   assert.deepEqual(
     states.map((s) => s.view),
-    [0, 1],
+    Array.from({ length: humans }, (_, i) => i),
   );
+  for (const frame of frames) {
+    assert.equal(
+      await frame.evaluate(() => Module._WebTestNetworkSlotBindings(tm4Port.netViewSlot)),
+      15,
+    );
+    const handles = await frame.evaluate(
+      (humans) => Array.from({ length: humans }, (_, slot) => Module._WebTestCarHandle(slot)),
+      humans,
+    );
+    assert.equal(new Set(handles).size, humans);
+    assert(handles.every(Boolean));
+    assert.equal(await frame.evaluate(() => Module._WebTestAiState(tm4Port.netViewSlot, 0)), 1);
+  }
   for (const state of states) {
     assert(state.match.opponents > 0);
     assert.equal(state.net.unsupported, null);
@@ -150,12 +177,12 @@ try {
   await guest.reload();
   const recovered = await load(guest);
   await recovered.waitForFunction(() => tm4Port.netConfirmedTick > 720, null, { timeout: 120000 });
-  assert.equal(await recovered.evaluate(() => tm4Port.netViewSlot), 1);
+  assert.equal(await recovered.evaluate(() => tm4Port.netViewSlot), humans - 1);
   assert.equal(await recovered.evaluate(() => tm4Port.menuReady), false);
   assert.deepEqual(errors, []);
   await host.screenshot({ path: "build/checks/tournament-match.png", fullPage: true });
   console.log("PASS tournament reconnect restores the same participant without car selection");
-  frames[1] = recovered;
+  frames[humans - 1] = recovered;
   const worlds = [
     "Construction Yard",
     "Neon City",
@@ -232,7 +259,7 @@ try {
     console.log("PASS original tournament stage", stage + 1, world);
     // Pause an actual side-module instantiation while replacing the transport.
     if (stage === 0)
-      await frames[1].evaluate(() => {
+      await frames[humans - 1].evaluate(() => {
         const instantiate = WebAssembly.instantiate;
         WebAssembly.instantiate = (...args) => {
           WebAssembly.instantiate = instantiate;
@@ -247,9 +274,13 @@ try {
     await frames[0].locator("canvas").focus();
     await host.keyboard.press("KeyX", { delay: 150 });
     if (stage === 0) {
-      await frames[1].waitForFunction(() => globalThis.tournamentOverlayLoadStarted, null, {
-        timeout: 15000,
-      });
+      await frames[humans - 1].waitForFunction(
+        () => globalThis.tournamentOverlayLoadStarted,
+        null,
+        {
+          timeout: 15000,
+        },
+      );
       await guest.locator("#reconnect-match").click();
       console.log("Reconnecting during Neon City overlay instantiation");
     }
@@ -260,7 +291,7 @@ try {
     60000,
   );
   assert.equal(finished.result.modeId, "tournament");
-  assert.equal(finished.result.completion.winners, 3);
+  assert.equal(finished.result.completion.winners, (1 << humans) - 1);
   assert(finished.result.participants.every((p) => p.winner));
   assert.equal(native.starts, 1);
   assert.equal(native.stops, 1);
@@ -277,7 +308,7 @@ try {
     assert.equal(
       await frames[index].evaluate(() => !!tm4Port.movie?.active),
       false,
-      "original two-player victory does not play single-player ending movies",
+      "original co-op victory does not play single-player ending movies",
     );
     await page.locator("#return-to-room").click();
   }
@@ -290,7 +321,11 @@ try {
     fixture,
     JSON.stringify({
       actions: [120, 360, 600, 840, 1080].flatMap((tick) =>
-        [0, 1].map((slot) => ({ tick, name: "kill", args: [slot] })),
+        Array.from({ length: humans }, (_, slot) => slot).map((slot) => ({
+          tick,
+          name: "kill",
+          args: [slot],
+        })),
       ),
     }),
   );
