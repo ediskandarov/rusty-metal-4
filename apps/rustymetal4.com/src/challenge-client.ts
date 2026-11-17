@@ -58,9 +58,25 @@ async function board() {
       name.scope = "row";
       name.textContent = entry.name;
       score.textContent = String(entry.score);
-      score.title = entry.completions
-        .map((item) => `${item.model} · ${item.map} · ${item.date.slice(0, 10)}`)
-        .join("\n");
+      if (entry.completions.length) {
+        const details = document.createElement("details"),
+          summary = document.createElement("summary"),
+          wins = document.createElement("ul");
+        details.className = "challenge-wins";
+        summary.textContent = entry.completions.map((item) => item.model).join(" · ");
+        for (const item of entry.completions) {
+          const win = document.createElement("li"),
+            car = document.createElement("strong"),
+            date = document.createElement("time");
+          car.textContent = item.model;
+          date.dateTime = item.date;
+          date.textContent = item.date.slice(0, 10);
+          win.append(car, ` — ${item.map} · `, date);
+          wins.append(win);
+        }
+        details.append(summary, wins);
+        score.append(details);
+      }
       row.append(name, score);
       return row;
     }),

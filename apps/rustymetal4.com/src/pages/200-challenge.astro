@@ -66,7 +66,7 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
       Loading completions…
     </p>
     <div class="room-table-scroll">
-      <table class="room-table">
+      <table class="room-table challenge-leaderboard">
         <thead>
           <tr>
             <th scope="col">Driver</th>
@@ -89,6 +89,30 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
   </script>
 </Page>
 <style>
+  .challenge-leaderboard {
+    min-width: 0;
+    table-layout: fixed;
+  }
+  :global(#challenge-board th),
+  :global(#challenge-board td) {
+    vertical-align: top;
+  }
+  :global(#challenge-board .challenge-wins) {
+    margin-top: 0.4rem;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  :global(#challenge-board .challenge-wins summary) {
+    cursor: pointer;
+    color: var(--accent, #e9aa55);
+  }
+  :global(#challenge-board .challenge-wins ul) {
+    padding-left: 1.2rem;
+    margin: 0.6rem 0 0;
+  }
+  :global(#challenge-board .challenge-wins li + li) {
+    margin-top: 0.4rem;
+  }
   .challenge-play iframe {
     width: 100%;
     height: min(780px, 85svh);

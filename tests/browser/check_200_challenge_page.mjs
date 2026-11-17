@@ -59,6 +59,21 @@ assert.equal(
 );
 await page.reload();
 await page.getByText("Local challenge driver: 1 car mastered.", { exact: true }).waitFor();
+const driverRow = page.locator("#challenge-board tr").filter({ hasText: "Local challenge driver" });
+const cars = driverRow.locator("summary");
+await cars.waitFor({ state: "visible" });
+assert.equal(await cars.textContent(), "Orbital");
+assert.equal(await driverRow.locator("li").isVisible(), false);
+await cars.focus();
+await page.keyboard.press("Enter");
+await driverRow.locator("li").waitFor({ state: "visible" });
+assert.match(await driverRow.locator("li").innerText(), /Orbital — Construction Yard/);
+assert.match(await driverRow.locator("time").innerText(), /^\d{4}-\d{2}-\d{2}$/);
+await page.setViewportSize({ width: 390, height: 844 });
+await cars.click();
+assert.equal(await driverRow.locator("li").isVisible(), false);
+await cars.click();
+assert.equal(await driverRow.locator("li").isVisible(), true);
 assert.deepEqual(errors, []);
 await page.screenshot({ path: "build/checks/challenge-page.png" });
 console.log(
