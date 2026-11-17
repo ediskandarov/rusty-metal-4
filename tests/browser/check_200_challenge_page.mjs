@@ -14,7 +14,7 @@ await page.goto(url);
 await page.waitForFunction(() => !document.querySelector("#challenge-launch").disabled);
 await page.locator("#challenge-name").fill("Local challenge driver");
 await page.locator("#challenge-name-form button").click();
-await page.getByText("Local challenge driver: 0 models completed.", { exact: true }).waitFor();
+await page.getByText("Local challenge driver: 0 cars mastered.", { exact: true }).waitFor();
 await page.locator("#challenge-launch").click();
 const frame = page.frameLocator("#challenge-player");
 await frame.locator("#disc-folder").waitFor();
@@ -36,7 +36,7 @@ await child.evaluate(() =>
     location.origin,
   ),
 );
-await page.getByText("Orbital completed! Your score is 1.", { exact: true }).waitFor();
+await page.getByText("You survived in Orbital! Your score is 1.", { exact: true }).waitFor();
 await child.evaluate(() =>
   window.parent.postMessage(
     {
@@ -55,10 +55,10 @@ await child.evaluate(() =>
 await page.waitForTimeout(200);
 assert.equal(
   await page.locator("#challenge-profile").innerText(),
-  "Local challenge driver: 1 models completed.",
+  "Local challenge driver: 1 car mastered.",
 );
 await page.reload();
-await page.getByText("Local challenge driver: 1 models completed.", { exact: true }).waitFor();
+await page.getByText("Local challenge driver: 1 car mastered.", { exact: true }).waitFor();
 assert.deepEqual(errors, []);
 await page.screenshot({ path: "build/checks/challenge-page.png" });
 console.log(

@@ -41,15 +41,15 @@ const submitted = new Set<string>();
 function profile(value: ChallengePlayer | null) {
   player = value;
   element("challenge-profile").textContent = value
-    ? `${value.name}: ${value.score} models completed.`
-    : "Save a display name to keep your completions.";
+    ? `${value.name}: ${value.score} ${value.score === 1 ? "car" : "cars"} mastered.`
+    : "Save your name to record your wins.";
   if (value) element<HTMLInputElement>("challenge-name").value = value.name;
 }
 async function board() {
   const { players } = await api<{ players: ChallengePlayer[] }>("leaderboard");
   element("challenge-board-status").textContent = players.length
-    ? "Top 100 drivers, ranked by unique models completed."
-    : "No completed models yet.";
+    ? "Top 100 drivers, ranked by cars mastered."
+    : "No survivors yet. Be the first.";
   element("challenge-board").replaceChildren(
     ...players.map((entry) => {
       const row = document.createElement("tr"),
@@ -75,8 +75,8 @@ async function saveWin() {
     pendingWins.delete(win.model);
     profile(value.player);
     element("challenge-game-status").textContent = value.added
-      ? `${win.model} completed! Your score is ${value.player.score}.`
-      : `${win.model} was already completed. Your score stays ${value.player.score}.`;
+      ? `You survived in ${win.model}! Your score is ${value.player.score}.`
+      : `You already mastered ${win.model}. Your score stays ${value.player.score}.`;
   }
   await board();
 }
@@ -111,8 +111,7 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
     element("challenge-game-status").textContent =
       `${String(state.model)} · ${String(state.map)} · ${String(state.cars)} cars remaining`;
   if (state.status === "lost")
-    element("challenge-game-status").textContent =
-      "You were eliminated. Choose another attempt in the game.";
+    element("challenge-game-status").textContent = "Wrecked. Pick a car and try again.";
   if (state.status === "error") error(state.error ?? "This challenge round could not start.");
   if (state.status === "won") {
     try {
@@ -120,7 +119,7 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
       pendingWins.set(win.model, win);
       if (!player)
         element("challenge-game-status").textContent =
-          `${win.model} completed! Save your display name to record it.`;
+          `You survived in ${win.model}! Save your name to record the win.`;
       void saveWin().catch(error);
     } catch (value) {
       error(value);

@@ -5,40 +5,50 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
 
 <Page title="200 Challenge">
   <h1>200 Challenge</h1>
+  <p>Your car. 200 enemies. One survivor.</p>
+  <p>Pick a car. Pick an arena. Be the last one standing.</p>
+  <h2>The rules</h2>
+  <ul>
+    <li>You and 200 opponents drive the same car. Everyone fights everyone.</li>
+    <li>One life. No respawns.</li>
+    <li>Unlimited specials. Original cooldowns.</li>
+    <li>No shields, invisibility or teleportation.</li>
+  </ul>
+  <h2>Survive. Switch cars. Do it again.</h2>
   <p>
-    One driver. 200 opponents. Everyone drives the car you choose, and everyone fights everyone.
-  </p>
-  <p>
-    Choose your model and tournament map in the original game menus. You have one life. Be the last
-    survivor to complete that model. Specials have unlimited ammunition and their original
-    cooldowns; machine guns, health pickups, turbo and map events remain in play.
-  </p>
-  <p>
-    Your score is the number of different models you have completed, on any allowed map. Completing
-    the same model again never adds another point. Results are trusted as reported by your browser.
+    Win on any map to master your chosen car. Each different car adds one point
+    to your score. Winning with the same car again earns bragging rights.
   </p>
   <section aria-labelledby="challenge-driver-heading">
-    <h2 id="challenge-driver-heading">Your driver</h2>
+    <h2 id="challenge-driver-heading">Your name</h2>
     <form id="challenge-name-form">
       <label for="challenge-name">
         Display name
-        <input id="challenge-name" name="name" autocomplete="nickname" maxlength="24" required />
+        <input
+          id="challenge-name"
+          name="name"
+          autocomplete="nickname"
+          maxlength="24"
+          required
+        />
       </label>
       <button type="submit">Save name</button>
     </form>
     <p id="challenge-profile" role="status">
       Loading your driver…
     </p>
-    <p>Your browser remembers your driver. Display names can be shared by different people.</p>
+    <p>Your progress is saved in this browser.</p>
   </section>
   <section aria-labelledby="challenge-play-heading" class="challenge-play">
     <h2 id="challenge-play-heading">Play</h2>
-    <p>You need your own Twisted Metal 4 disc files. They stay on your computer.</p>
+    <p>
+      You need your own Twisted Metal 4 disc files. They stay on your computer.
+    </p>
     <p id="challenge-release" role="status">
       Checking the pinned challenge build…
     </p>
     <button id="challenge-launch" type="button" disabled>
-      Load challenge player
+      Take the wheel
     </button>
     <p id="challenge-game-status" role="status"></p>
     <p id="challenge-error" class="error" role="alert" hidden></p>
@@ -60,7 +70,7 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
         <thead>
           <tr>
             <th scope="col">Driver</th>
-            <th scope="col">Models completed</th>
+            <th scope="col">Cars mastered</th>
           </tr>
         </thead>
         <tbody id="challenge-board"></tbody>
@@ -68,10 +78,10 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
     </div>
   </section>
   <details>
-    <summary>Maps and models</summary>
+    <summary>Cars &amp; arenas</summary>
     <p>{challengeMaps.join(" · ")}</p>
     <p>
-      {challengeModels.length} original models: {challengeModels.join(" · ")}
+      {challengeModels.length} original cars: {challengeModels.join(" · ")}
     </p>
   </details>
   <script>
