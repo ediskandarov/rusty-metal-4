@@ -1,3 +1,4 @@
+#include "widescreen.h"
 #include <libgte.h>
 #include "level.h"
 #include "car.h"
@@ -228,6 +229,7 @@ void WebLevelStop(void)
         WebCheckpointArenaClose();
     checkpoint_arena = 0;
     active = 0;
+    WebWidescreenUpdate();
 }
 
 static void finish_session(void)

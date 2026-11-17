@@ -199,6 +199,7 @@ add_executable(tm4_web
     "${TM4_WEB}/loading.c"
     "${TM4_WEB}/sqrt.c"
     "${TM4_WEB}/render_sync.c"
+    "${TM4_WEB}/widescreen.c"
     "${TM4_WEB}/interpolation.c"
     "${TM4_WEB}/subpixel.c"
     "${TM4_WEB}/level.c"

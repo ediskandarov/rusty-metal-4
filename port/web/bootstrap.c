@@ -7,6 +7,7 @@
 #include "overlays.h"
 #include "port/web/module_import.h"
 #include "render_sync.h"
+#include "widescreen.h"
 #include "subpixel.h"
 #include "tournament_menu.h"
 #include <libgte.h>
@@ -417,6 +418,7 @@ static void browser_frame(void)
         }
     }
     apply_render_settings();
+    WebWidescreenUpdate();
     WebApplyCheats();
 #ifdef TM4_WEB_TEST_HOOKS
     WebTestStartPendingMovie();
