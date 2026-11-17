@@ -182,6 +182,47 @@ to compare accepted live inputs and all subsystem digests in Node.
 Combat placement and obstacle recovery are controlled simulation fixtures; navigation,
 weapon choice and driving still execute through the original C AI.
 
+## 200 Challenge hosting
+
+`main` owns the `/200-challenge` page, trusted leaderboard and delivery of an already
+built player. Gameplay, expanded car storage, original-menu integration and
+`build:challenge` live only on `codex/r361-200-challenge`. Do not merge that branch
+wholesale into `main`. Building or deploying the website never compiles the challenge.
+
+The game branch freezes HTML, JavaScript, Wasm, modules and manifests together under
+`build/challenge-releases/<sha256>/`. Keep this directory intact when transferring it
+to the publishing checkout. Disc resources are excluded. The publisher checks file
+hashes, the challenge runtime export and the absence of diagnostic test exports.
+
+Provision the `rm4-challenge-releases` R2 bucket before the first website deployment.
+Set bucket-scoped S3 credentials in `TM4_R2_ACCOUNT_ID`, `TM4_R2_ACCESS_KEY_ID` and
+`TM4_R2_SECRET_ACCESS_KEY`, then run:
+
+```sh
+bun run publish:challenge /path/to/frozen-release
+```
+
+Publication creates objects without overwriting existing ones and uploads `release.json`
+last. Retrying a partial upload reuses only byte-identical files. It neither creates
+cloud resources nor changes the pin. After successful publication, set `buildId` in
+`config/challenge-release.json`, then run the ordinary website deployment. The null
+pin means unpublished. Subsequent deployments leave R2 files and the selected build intact.
+
+For a local preview, build the website with `bun run build:rustymetal4.com`, then run
+`bun run dev:challenge /path/to/frozen-release`. Open
+[localhost:8362/200-challenge](http://localhost:8362/200-challenge). This uses local R2
+and leaderboard storage under `build/challenge-local-state/`; the release pin is
+only overridden for that process. Users supply their own disc files.
+
+The leaderboard stores one completion per browser identity and model, including the
+first map, date and challenge version. Display names need not be unique. Results are
+trusted; the service validates only the catalog and score rule. A one-year cookie
+identifies the driver. Unsent results are not retained after a page reload.
+
+Run `bun test tests/unit/challenge.test.ts` for the service and artifact checks, and
+`bun tests/browser/check_200_challenge_page.mjs` against the local preview for the
+page, result bridge and identity persistence. Gameplay checks belong to the game branch.
+
 ## Browser checks
 
 Run from the repository root. All Chromium scenarios use

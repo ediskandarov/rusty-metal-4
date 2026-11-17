@@ -40,7 +40,9 @@
     "postinstall": "bun run setup:cache",
     "test:cache": "bun tests/cache/shared-cargo.ts",
     "test:simulation:modules": "bun tests/browser/check_simulation_modules.mjs",
-    "test:emscripten": "bun tests/emscripten/dlsym-catchup/check.mjs"
+    "test:emscripten": "bun tests/emscripten/dlsym-catchup/check.mjs",
+    "publish:challenge": "bun tools/challenge/publish.ts",
+    "dev:challenge": "bun tools/challenge/serve.ts"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",

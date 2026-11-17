@@ -1,0 +1,91 @@
+---
+import Page from "../layouts/Page.astro";
+import { challengeMaps, challengeModels } from "../challenge.ts";
+---
+
+<Page title="200 Challenge">
+  <h1>200 Challenge</h1>
+  <p>
+    One driver. 200 opponents. Everyone drives the car you choose, and everyone fights everyone.
+  </p>
+  <p>
+    Choose your model and tournament map in the original game menus. You have one life. Be the last
+    survivor to complete that model. Specials have unlimited ammunition and their original
+    cooldowns; machine guns, health pickups, turbo and map events remain in play.
+  </p>
+  <p>
+    Your score is the number of different models you have completed, on any allowed map. Completing
+    the same model again never adds another point. Results are trusted as reported by your browser.
+  </p>
+  <section aria-labelledby="challenge-driver-heading">
+    <h2 id="challenge-driver-heading">Your driver</h2>
+    <form id="challenge-name-form">
+      <label for="challenge-name">
+        Display name
+        <input id="challenge-name" name="name" autocomplete="nickname" maxlength="24" required />
+      </label>
+      <button type="submit">Save name</button>
+    </form>
+    <p id="challenge-profile" role="status">
+      Loading your driver…
+    </p>
+    <p>Your browser remembers your driver. Display names can be shared by different people.</p>
+  </section>
+  <section aria-labelledby="challenge-play-heading" class="challenge-play">
+    <h2 id="challenge-play-heading">Play</h2>
+    <p>You need your own Twisted Metal 4 disc files. They stay on your computer.</p>
+    <p id="challenge-release" role="status">
+      Checking the pinned challenge build…
+    </p>
+    <button id="challenge-launch" type="button" disabled>
+      Load challenge player
+    </button>
+    <p id="challenge-game-status" role="status"></p>
+    <p id="challenge-error" class="error" role="alert" hidden></p>
+    <iframe
+      id="challenge-player"
+      title="200 Challenge game player"
+      allow="autoplay; fullscreen"
+      allowfullscreen
+      hidden
+    ></iframe>
+  </section>
+  <section aria-labelledby="challenge-leaderboard-heading">
+    <h2 id="challenge-leaderboard-heading">Leaderboard</h2>
+    <p id="challenge-board-status" role="status">
+      Loading completions…
+    </p>
+    <div class="room-table-scroll">
+      <table class="room-table">
+        <thead>
+          <tr>
+            <th scope="col">Driver</th>
+            <th scope="col">Models completed</th>
+          </tr>
+        </thead>
+        <tbody id="challenge-board"></tbody>
+      </table>
+    </div>
+  </section>
+  <details>
+    <summary>Maps and models</summary>
+    <p>{challengeMaps.join(" · ")}</p>
+    <p>
+      {challengeModels.length} original models: {challengeModels.join(" · ")}
+    </p>
+  </details>
+  <script>
+    import "../challenge-client.ts";
+  </script>
+</Page>
+<style>
+  .challenge-play iframe {
+    width: 100%;
+    height: min(780px, 85svh);
+    border: 1px solid #354151;
+    margin-top: 20px;
+  }
+  .challenge-play iframe[hidden] {
+    display: none;
+  }
+</style>
