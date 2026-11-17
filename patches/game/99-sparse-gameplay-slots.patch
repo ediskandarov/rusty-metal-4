@@ -6,7 +6,7 @@
      }
 -    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index, object_index,
 +    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index, WebNetParticipantSlot(object_index),
-         kind, &position, &rotation);
+         kind, &position, &heading_q12);
  }
  #endif
 --- a/src/main/deathmatch.c

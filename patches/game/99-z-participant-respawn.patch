@@ -27,9 +27,9 @@
          }
      }
 -    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index, WebNetParticipantSlot(object_index),
--        kind, &position, &rotation);
+-        kind, &position, &heading_q12);
 +    ObjectCreate(GAME_CAR_CLASS, 0, GameInfo.character_names[object_index], index,
-+        WebNetParticipantSlot(object_index), kind, &position, &rotation);
++        WebNetParticipantSlot(object_index), kind, &position, &heading_q12);
  }
  #endif
 
