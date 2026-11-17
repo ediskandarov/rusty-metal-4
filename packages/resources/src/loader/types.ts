@@ -21,6 +21,7 @@ export interface TrackLayout {
 
 export interface DiscTrack extends TrackLayout {
   source: DiscSource | undefined;
+  warning?: string;
   start: number;
   end: number;
   toc: number;

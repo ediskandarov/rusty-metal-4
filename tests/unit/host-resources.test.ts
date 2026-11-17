@@ -218,3 +218,46 @@ test("resource export rejects parent traversal and takes its output destination 
     writeResourceFiles(new Map([["/../escape.bin", bytes]]), destination),
   ).rejects.toThrow("escapes its destination");
 });
+
+test("custom or disabled music does not block resource inspection and game loading", async () => {
+  const { checkResources, resourceRows, compatibilityReport } =
+    await import("@tm4/resources/compatibility");
+  const { loadDisc } = await import("@tm4/resources/loader/loader");
+  const { root, reference, exe } = await discFixture();
+  const stock = await generateResourceReference(root, reference);
+  const expected = [
+    { id: "/SCUS_945.60", size: exe.length, sha256: await sha256(exe) },
+    ...stock.files,
+  ];
+  for (const bytes of [new Uint8Array(2356).fill(7), new Uint8Array(2353), null]) {
+    if (bytes) await writeFile(join(root, "audio.bin"), bytes);
+    else await rm(join(root, "audio.bin"));
+    const sources = await discDirectorySources(root);
+    const signal = new AbortController().signal;
+    const found = await discoverResources(sources, signal, reference);
+    const rows = resourceRows(found.resources, expected);
+    await checkResources(found.resources, rows, signal, () => {});
+    const valid = bytes?.length === 2356;
+    expect(rows.find((r) => r.id === "AUDIO/02")!.status).toBe(valid ? "compatible" : "warning");
+    expect(compatibilityReport(rows).status).not.toBe("uncompatible");
+    const warnings: string[] = [];
+    const assets = await loadDisc(sources, {
+      discReference: reference,
+      resourceReference: expected,
+      warn: (message) => warnings.push(message),
+    });
+    expect(assets.files.has("/DATA/SOUND.VAB")).toBe(true);
+    expect(assets.tracks).toHaveLength(2);
+    if (valid) {
+      const audio = await assets.readAudio(2);
+      expect(audio).toHaveLength(4704);
+      expect(audio.slice(0, 2356)).toEqual(bytes);
+      expect(audio.slice(2356)).toEqual(new Uint8Array(2348));
+      expect(warnings).toEqual([]);
+    } else {
+      await expect(assets.readAudio(2)).rejects.toThrow("unavailable");
+      expect(warnings).toHaveLength(1);
+      expect(found.notices).toEqual(warnings);
+    }
+  }
+});

@@ -241,3 +241,123 @@ test("disc loading stops when its descriptor read is cancelled", async () => {
   await expect(loadDisc(sources, { signal: abort.signal })).rejects.toThrow("Cancelled disc load");
   expect(imageReads).toBe(0);
 });
+
+function separateMusic(audio?: Uint8Array<ArrayBuffer>, index = "00:00:01") {
+  return localSources([
+    new File([sectors(1, 2)], "data.bin"),
+    new File([sectors(5, 6)], "next.bin"),
+    new File(
+      [
+        `FILE "data.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\nFILE "audio.bin" BINARY\nTRACK 02 AUDIO\nINDEX 01 ${index}\nFILE "next.bin" BINARY\nTRACK 03 AUDIO\nINDEX 01 00:00:00`,
+      ],
+      "disc.cue",
+    ),
+    ...(audio ? [new File([audio], "audio.bin")] : []),
+  ]);
+}
+
+test("separate custom music uses actual duration and pads only its final sector", async () => {
+  for (const size of [2352 + 4, 3 * 2352, 5 * 2352 + 988]) {
+    const audio = new Uint8Array(size).fill(7);
+    const notices: string[] = [];
+    const result = await discTracks(separateMusic(audio), reference, (s) => notices.push(s));
+    const track = result.tracks[1]!;
+    const paddedSize = Math.ceil(size / 2352) * 2352;
+    expect(track.source!.size).toBe(paddedSize);
+    expect([track.start, track.end, track.index]).toEqual([2, 2 + paddedSize / 2352, 1]);
+    expect(result.tracks[2]!.number).toBe(3);
+    expect(result.tracks[2]!.start).toBe(track.end);
+    const expected = new Uint8Array(paddedSize);
+    expected.set(audio);
+    expect(await track.source!.read(0, paddedSize)).toEqual(expected);
+    if (size < paddedSize) {
+      expect(await track.source!.read(size - 2, 4)).toEqual(new Uint8Array([7, 7, 0, 0]));
+      expect(await track.source!.read(size, paddedSize - size)).toEqual(
+        new Uint8Array(paddedSize - size),
+      );
+    }
+    expect(await track.source!.read(paddedSize, 0)).toHaveLength(0);
+    await expect(track.source!.read(paddedSize, 1)).rejects.toThrow("outside disc file");
+    const abort = new AbortController();
+    abort.abort();
+    await expect(track.source!.read(paddedSize - 1, 1, { signal: abort.signal })).rejects.toThrow();
+    expect(notices).toEqual([]);
+  }
+});
+
+test("separate audio padding preserves stored and synthetic pregaps", async () => {
+  const sources = separateMusic(new Uint8Array(2356).fill(9));
+  const descriptor = sources.get("disc.cue")!;
+  const cue = new TextDecoder().decode(await descriptor.read(0, descriptor.size));
+  sources.set(
+    "disc.cue",
+    localSources([
+      new File(
+        [cue.replace("TRACK 02 AUDIO\n", "TRACK 02 AUDIO\nPREGAP 00:00:02\nINDEX 00 00:00:00\n")],
+        "disc.cue",
+      ),
+    ]).get("disc.cue")!,
+  );
+  const { tracks } = await discTracks(sources, reference, () => {});
+  const audio = tracks[1]!;
+  expect([audio.start, audio.end, audio.index, audio.index0]).toEqual([2, 6, 3, 2]);
+  expect(await audio.source!.read(4702, 4)).toEqual(new Uint8Array([0, 0, 9, 9]));
+  expect(await audio.source!.read(7058, 4)).toEqual(new Uint8Array([9, 9, 0, 0]));
+});
+
+test("bad separate music is disabled without removing its TOC slot or the next track", async () => {
+  for (const [audio, index, reason] of [
+    [undefined, "00:00:01", "missing"],
+    [new Uint8Array(), "00:00:01", "stereo samples"],
+    [new Uint8Array(2353), "00:00:00", "stereo samples"],
+    [sectors(7), "00:00:01", "INDEX 01"],
+  ] as const) {
+    const notices: string[] = [];
+    const { tracks } = await discTracks(separateMusic(audio, index), reference, (s) =>
+      notices.push(s),
+    );
+    expect(tracks.map((t) => t.number)).toEqual([1, 2, 3]);
+    expect(tracks[1]!.source).toBeUndefined();
+    expect(tracks[1]!.warning).toContain(reason);
+    expect(notices).toHaveLength(1);
+    expect(notices[0]).toContain(reason);
+    expect(await tracks[0]!.source!.read(0, 2 * 2352)).toEqual(sectors(1, 2));
+    expect(await tracks[2]!.source!.read(0, 2 * 2352)).toEqual(sectors(5, 6));
+  }
+});
+
+test("unreferenced missing separate audio is optional and retains numbering", async () => {
+  const notices: string[] = [];
+  const { tracks } = await discTracks(
+    separateMusic(undefined),
+    {
+      ...reference,
+      tracks: reference.tracks.slice(0, 1),
+    },
+    (s) => notices.push(s),
+  );
+  expect(tracks[1]!.source).toBeUndefined();
+  expect(tracks[1]!.end - tracks[1]!.start).toBe(76);
+  expect(tracks[2]!.number).toBe(3);
+  expect(notices).toHaveLength(1);
+});
+
+test("partial data sectors and shared audio BIN sectors remain invalid", async () => {
+  const data = separateMusic(sectors(8, 9));
+  data.set(
+    "data.bin",
+    localSources([new File([new Uint8Array(2356)], "data.bin")]).get("data.bin")!,
+  );
+  await expect(discTracks(data, reference, () => {})).rejects.toThrow("boundaries");
+  const shared = localSources([
+    new File([sectors(1, 2)], "data.bin"),
+    new File([new Uint8Array(3 * 2352 + 4)], "audio.bin"),
+    new File(
+      [
+        'FILE "data.bin" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:00:00\nFILE "audio.bin" BINARY\nTRACK 02 AUDIO\nINDEX 01 00:00:00\nTRACK 03 AUDIO\nINDEX 01 00:00:02',
+      ],
+      "disc.cue",
+    ),
+  ]);
+  await expect(discTracks(shared, reference, () => {})).rejects.toThrow("boundaries");
+});

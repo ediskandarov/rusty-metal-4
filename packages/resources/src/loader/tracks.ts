@@ -45,43 +45,69 @@ export async function discTracks(
     if (!sharesPrevious && visitedFiles.has(key))
       throw new Error(`Disc descriptor reopens an image out of order: ${track.file}`);
     visitedFiles.add(key);
-    const source = sources.get(key);
+    let source = sources.get(key);
+    const separateAudio = track.audio && !sharesPrevious && !sharesNext;
+    let trailingSilence = 0;
+    let warning: string | undefined;
+    if (separateAudio && source) {
+      if (!Number.isSafeInteger(source.size) || source.size <= 0 || source.size % 4 !== 0)
+        warning = `Optional audio disabled: ${track.file}, track ${track.number}: expected complete 16-bit stereo samples`;
+      else if (track.index * RAW_SECTOR >= source.size)
+        warning = `Optional audio disabled: ${track.file}, track ${track.number}: INDEX 01 is outside the file`;
+      if (warning) source = undefined;
+      else trailingSilence = (RAW_SECTOR - (source.size % RAW_SECTOR)) % RAW_SECTOR;
+    }
     if (!source && !track.audio) throw new Error(`Required data track missing: ${track.file}`);
     const canonical = reference.tracks.find((t) => t.number === track.number);
     const begin = sharesPrevious ? (track.index0 ?? track.index) : 0;
-    const fallbackEnd =
+    let fallbackEnd =
       canonical === undefined
         ? undefined
         : sharesPrevious
           ? track.index + canonical.size / RAW_SECTOR - canonical.index
           : canonical.size / RAW_SECTOR;
+    // An unavailable separate track retains a TOC slot, never shifting track numbers.
+    // Use its reference duration when known, or reserve one second after INDEX 01.
+    if (separateAudio && !source) fallbackEnd = Math.max(fallbackEnd ?? 0, track.index + 75);
     const end = sharesNext
       ? (next.index0 ?? next.index)
       : source
-        ? source.size / RAW_SECTOR
+        ? (source.size + trailingSilence) / RAW_SECTOR
         : fallbackEnd;
     if (
-      (source && (!Number.isSafeInteger(source.size) || source.size % RAW_SECTOR !== 0)) ||
+      (source &&
+        (!Number.isSafeInteger(source.size) ||
+          (source.size + trailingSilence) % RAW_SECTOR !== 0)) ||
       end === undefined ||
       !Number.isSafeInteger(end) ||
       end <= begin ||
       track.index < begin ||
       track.index >= end ||
-      (source && end > source.size / RAW_SECTOR)
+      (source && end > (source.size + trailingSilence) / RAW_SECTOR)
     )
       throw new Error(`Invalid or unknown track boundaries: ${track.file}, track ${track.number}`);
     const pregap = track.pregap ?? 0;
     const index = pregap + track.index - begin;
     const sectors = pregap + end - begin;
     if (!Number.isSafeInteger(start + sectors)) throw new Error("Disc is too large");
-    if (!source) warn(`Optional audio missing: ${track.file}`);
+    if (!source) {
+      warning ??= `Optional audio missing: ${track.file}, track ${track.number}`;
+      warn(warning);
+    }
     resolved.push({
       ...track,
       index,
       ...(track.index0 === undefined ? {} : { index0: pregap + track.index0 - begin }),
       source: source
-        ? trackSource(source, begin * RAW_SECTOR, (end - begin) * RAW_SECTOR, pregap * RAW_SECTOR)
+        ? trackSource(
+            source,
+            begin * RAW_SECTOR,
+            (end - begin) * RAW_SECTOR - trailingSilence,
+            pregap * RAW_SECTOR,
+            trailingSilence,
+          )
         : undefined,
+      ...(warning ? { warning } : {}),
       start,
       end: start + sectors,
       toc: Math.floor((start + index + 150) / 75) * 75 - 150,

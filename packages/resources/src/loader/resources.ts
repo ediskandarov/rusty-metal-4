@@ -64,7 +64,15 @@ export async function discoverResources(
   for (const track of tracks) {
     if (!track.audio) continue;
     const audio = track.source;
-    if (!audio) continue;
+    if (!audio) {
+      if (track.warning)
+        resources.push({
+          id: `AUDIO/${String(track.number).padStart(2, "0")}`,
+          size: 0,
+          read: () => Promise.reject(new Error(track.warning)),
+        });
+      continue;
+    }
     const end = audio.size;
     const offset = track.index * RAW_SECTOR;
     resources.push({
