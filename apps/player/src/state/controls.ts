@@ -45,10 +45,12 @@ interface ControlsState {
   keyboard: readonly string[];
   gamepads: readonly (readonly number[])[];
   player: number;
+  trackpadLook: boolean;
   storageAvailable: boolean;
   capture: Capture | null;
   notice: Notice;
   selectPlayer: (player: number) => void;
+  setTrackpadLook: (enabled: boolean) => void;
   beginCapture: (kind: Capture["kind"], target: number, device: number, buttons: number) => void;
   cancelCapture: () => void;
   assign: (source: string | number) => void;
@@ -68,11 +70,13 @@ export function createControlsStore(
   let keyboard = [...defaultKeys];
   let gamepads = Array.from({ length: 4 }, () => [...defaultPad]);
   let storageAvailable = true;
+  let trackpadLook = false;
   try {
     const stored = storage.getItem(storageKey);
     if (stored !== null) {
       const parsed: unknown = JSON.parse(stored);
       const config = parsed && typeof parsed === "object" ? parsed : {};
+      trackpadLook = "trackpadLook" in config && config.trackpadLook === true;
       const savedKeyboard = "keyboard" in config ? config.keyboard : undefined;
       const savedPads: unknown[] =
         "gamepads" in config && Array.isArray(config.gamepads) ? config.gamepads : [];
@@ -106,12 +110,17 @@ export function createControlsStore(
     keyboard,
     gamepads,
     storageAvailable,
+    trackpadLook,
     player: 0,
     capture: null,
     notice: null,
     selectPlayer(player) {
       if (!Number.isInteger(player) || player < 0 || player >= get().gamepads.length) return;
       set({ player, capture: null, notice: null });
+    },
+    setTrackpadLook(enabled) {
+      set({ trackpadLook: enabled });
+      persist();
     },
     beginCapture(kind, target, device, buttons) {
       if (!Number.isInteger(target) || target < 0 || target >= defaultKeys.length) return;
@@ -164,6 +173,7 @@ export function createControlsStore(
     reset() {
       set({
         keyboard: [...defaultKeys],
+        trackpadLook: false,
         gamepads: get().gamepads.map(() => [...defaultPad]),
         capture: null,
         notice: { kind: "reset" },
@@ -172,9 +182,9 @@ export function createControlsStore(
     },
   }));
   function persist() {
-    const { keyboard, gamepads } = store.getState();
+    const { keyboard, gamepads, trackpadLook } = store.getState();
     try {
-      storage.setItem(storageKey, JSON.stringify({ keyboard, gamepads }));
+      storage.setItem(storageKey, JSON.stringify({ keyboard, gamepads, trackpadLook }));
       store.setState({ storageAvailable: true });
     } catch {
       store.setState({ storageAvailable: false });

@@ -8,6 +8,9 @@
 #include "loading.h"
 #include "match_mode.h"
 #include "movie.h"
+#ifndef TM4_STANDALONE
+#include "mouse_look.h"
+#endif
 #include "net_match.h"
 #include "participant.h"
 #include "render_sync.h"
@@ -208,6 +211,9 @@ int WebLevelCheckpointActive(void)
 
 void WebLevelStop(void)
 {
+#ifndef TM4_STANDALONE
+    WebMouseLookReset();
+#endif
     WebCheckpointDiscard();
     WebSnapshotWorldClose();
     WebInterpolationReset();

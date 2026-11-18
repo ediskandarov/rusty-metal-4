@@ -258,6 +258,7 @@ target_link_libraries(tm4_web PRIVATE tm4_core psyz)
 target_link_options(tm4_web PRIVATE -sUSE_ZLIB=1 -sASSERTIONS=1 -Wl,--error-limit=0
     -sPTHREAD_POOL_SIZE=2 -sINITIAL_MEMORY=67108864 "-sEXPORTED_FUNCTIONS=_main,_malloc" "-sEXPORTED_RUNTIME_METHODS=FS,callMain,ccall")
 if(NOT TM4_STANDALONE)
+    target_sources(tm4_web PRIVATE "${TM4_WEB}/mouse_look.c")
     target_link_options(tm4_web PRIVATE "--js-library=${TM4_ROOT}/port/emscripten/dylink.js")
     set_property(TARGET tm4_web APPEND PROPERTY LINK_DEPENDS "${TM4_ROOT}/port/emscripten/dylink.js")
 endif()

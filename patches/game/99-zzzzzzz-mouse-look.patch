@@ -1,0 +1,79 @@
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -30,6 +30,9 @@
+ 
+ #ifdef __psyz
+ #include "port/web/interpolation.h"
++#ifndef TM4_STANDALONE
++#include "port/web/mouse_look.h"
++#endif
+ #include "port/web/render_sync.h"
+ #include "port/web/subpixel.h"
+ #endif
+@@ -1084,6 +1087,10 @@
+ #ifdef __psyz
+         Camera pose;
+         camera = WebInterpolationCamera(camera, &pose);
++#ifndef TM4_STANDALONE
++        Camera orbit;
++        camera = WebMouseLookCamera(&view_state->players[0], camera, &orbit);
++#endif
+ #endif
+         GameInfo.active_view = camera;
+         SetRotMatrix(&camera->world_to_camera);
+--- a/include/tm4/main/world.h
++++ b/include/tm4/main/world.h
+@@ -209,5 +209,6 @@
+ /* A successful query writes hit->position in world-space Q12. */
+ s32 IntersectWorldWithRay(
+     SVECTOR* start_world, SVECTOR* end_world, s32 position_mode, Tm4WorldHit* hit);
++s32 WebIntersectWorldTwoSided(SVECTOR* start, SVECTOR* end, Tm4WorldHit* hit);
+ 
+ #endif
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -2388,8 +2388,8 @@
+ #endif
+ 
+ #if !defined(TM4_WORLD_FUNCTION) || TM4_WORLD_FUNCTION == 0x8001e5a4
+-s32 IntersectWorldWithRay(
+-    SVECTOR* start_world, SVECTOR* end_world, s32 position_mode, Tm4WorldHit* hit)
++static s32 intersect_world_ray(SVECTOR* start_world, SVECTOR* end_world, s32 position_mode,
++    Tm4WorldRay* reverse, Tm4WorldHit* hit)
+ {
+     Tm4WorldRay ray;
+     VECTOR position_q12;
+@@ -2471,6 +2471,11 @@
+                         s32 fraction_q12;
+                         fraction_q12
+                             = IntersectPolygonWithRay(polygon, &ray, position_mode, result_q12);
++                        if (fraction_q12 < 0 && reverse) {
++                            fraction_q12 = IntersectPolygonWithRay(polygon, reverse, 0, result_q12);
++                            if (fraction_q12 >= 0)
++                                fraction_q12 = ONE - fraction_q12;
++                        }
+                         if (fraction_q12 >= 0 && (u32)fraction_q12 < nearest_fraction_q12) {
+                             s32 px, py, pz;
+                             px = position_q12.vx;
+@@ -2515,6 +2520,21 @@
+     return found;
+ }
+ 
++s32 IntersectWorldWithRay(
++    SVECTOR* start_world, SVECTOR* end_world, s32 position_mode, Tm4WorldHit* hit)
++{
++    return intersect_world_ray(start_world, end_world, position_mode, NULL, hit);
++}
++
++s32 WebIntersectWorldTwoSided(SVECTOR* start, SVECTOR* end, Tm4WorldHit* hit)
++{
++    Tm4WorldRay reverse = {
++        .origin = { end->vx, end->vy, end->vz },
++        .displacement = { start->vx - end->vx, start->vy - end->vy, start->vz - end->vz },
++    };
++    return intersect_world_ray(start, end, 0, &reverse, hit);
++}
++
+ #endif
+ 
+ #if !defined(TM4_WORLD_FUNCTION)

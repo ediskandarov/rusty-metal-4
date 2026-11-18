@@ -1,6 +1,6 @@
 import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
-import { bindableKey, createControlsStore } from "../state/controls.ts";
+import { bindableKey, type ControlsStore } from "../state/controls.ts";
 import { element, item } from "./dom.ts";
 
 // PS1 packet bit order. Controller names describe positions across brands.
@@ -83,6 +83,7 @@ export function initializeInputSettings(
   toolbar: HTMLElement,
   settings: HTMLDetailsElement,
   canvas: HTMLCanvasElement,
+  store: ControlsStore,
 ) {
   const playerSelect = element("input-player", HTMLSelectElement);
   const device = element("input-device", HTMLElement);
@@ -93,7 +94,7 @@ export function initializeInputSettings(
   const list = element("input-map", HTMLElement);
   const controller = settings.querySelector<HTMLElement>(".input-controller");
   if (!controller) throw new Error("Missing controller diagram");
-  const store = createControlsStore();
+  const trackpadLookToggle = element("trackpad-look", HTMLInputElement);
   let focused = document.hasFocus();
   let blocked = false;
   let captureOrigin: HTMLElement | null = null;
@@ -191,7 +192,9 @@ export function initializeInputSettings(
   }
 
   function render() {
-    const { player, keyboard, gamepads, capture, notice, storageAvailable } = store.getState();
+    const { player, keyboard, gamepads, capture, notice, storageAvailable, trackpadLook } =
+      store.getState();
+    trackpadLookToggle.checked = trackpadLook;
     playerSelect.value = String(player);
     captureBox.hidden = !capture;
     if (capture) {
@@ -311,6 +314,9 @@ export function initializeInputSettings(
       if (settings.contains(document.activeElement)) canvas.focus();
     }
     updateBlocked();
+  });
+  trackpadLookToggle.addEventListener("change", () => {
+    store.getState().setTrackpadLook(trackpadLookToggle.checked);
   });
   playerSelect.addEventListener("change", () => {
     const player = Number(playerSelect.value);

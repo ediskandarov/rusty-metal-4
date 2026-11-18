@@ -1,5 +1,6 @@
 import type { GameModule } from "@tm4/game-runtime/runtime/module";
 
+import type { ControlsStore } from "../state/controls.ts";
 import { createRenderingStore } from "../state/rendering.ts";
 import { initializeInputSettings } from "./controls.ts";
 import { element } from "./dom.ts";
@@ -34,7 +35,11 @@ function initializeCheats(module: GameModule, panel: HTMLDetailsElement) {
   refresh();
 }
 
-export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement) {
+export function initializeSettings(
+  module: GameModule,
+  canvas: HTMLCanvasElement,
+  controls: ControlsStore,
+) {
   const toolbar = element("video-controls", HTMLElement);
   const rendering = element("render-settings", HTMLDetailsElement);
   const cheats = element("cheat-settings", HTMLDetailsElement);
@@ -61,7 +66,7 @@ export function initializeSettings(module: GameModule, canvas: HTMLCanvasElement
       if (panel.open) for (const other of panels) if (other !== panel) other.open = false;
     });
   }
-  initializeInputSettings(module, toolbar, input, canvas);
+  initializeInputSettings(module, toolbar, input, canvas, controls);
   initializeCheats(module, cheats);
   input.hidden = false;
   rendering.hidden = false;

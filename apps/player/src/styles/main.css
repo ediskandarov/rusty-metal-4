@@ -11,6 +11,9 @@ body {
   margin: 0;
   background: #080b10;
 }
+html[data-trackpad-look] {
+  overscroll-behavior-x: none;
+}
 body {
   overflow: hidden;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

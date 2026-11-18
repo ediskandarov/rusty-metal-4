@@ -39,6 +39,17 @@ test("keyboard assignment swaps occupied keys without mutating prior snapshots",
   expect(saved.writes()).toBe(1);
 });
 
+test("Trackpad look is opt-in, persists across loads and resets with controls", () => {
+  const saved = storage("{}");
+  const store = createControlsStore(saved);
+  expect(store.getState().trackpadLook).toBe(false);
+  store.getState().setTrackpadLook(true);
+  const restored = createControlsStore(saved);
+  expect(restored.getState().trackpadLook).toBe(true);
+  restored.getState().reset();
+  expect(createControlsStore(saved).getState().trackpadLook).toBe(false);
+});
+
 test("gamepad capture waits for release and rejects simultaneous buttons", () => {
   const saved = storage();
   const store = createControlsStore(saved);

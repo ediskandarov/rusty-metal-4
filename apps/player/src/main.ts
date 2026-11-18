@@ -8,6 +8,7 @@ import { installCarMods } from "@tm4/resources/mods/install";
 
 import { prepareIsolation } from "./isolation.ts";
 import { inRoom, roomPlayerReady } from "./room.ts";
+import { createControlsStore } from "./state/controls.ts";
 import { createModsStore } from "./state/mods.ts";
 import { createResourcesStore } from "./state/resources.ts";
 import { createStartupStore, type DiscSource, runtimeWasStarted } from "./state/startup.ts";
@@ -16,6 +17,7 @@ import { element } from "./ui/dom.ts";
 import { initializeFullscreen } from "./ui/fullscreen.ts";
 import { matchStatus } from "./ui/match-status.ts";
 import { initializeMods } from "./ui/mods.ts";
+import { initializeMouseLook } from "./ui/mouse-look.ts";
 import { initializePopups } from "./ui/popups.ts";
 import { initializeResources } from "./ui/resources.ts";
 import { initializeSettings } from "./ui/settings.ts";
@@ -28,6 +30,8 @@ document.documentElement.classList.toggle("network-game", networkGame);
 
 const folderPicker = element("disc-folder", HTMLInputElement);
 const canvas = element("canvas", HTMLCanvasElement);
+const controls = createControlsStore();
+initializeMouseLook(canvas, controls);
 initializeFullscreen(canvas);
 const popups = initializePopups();
 initializeTroubleshoot();
@@ -76,7 +80,7 @@ async function launch(
     const runtime = await startGame(assets, canvas, {
       resourceMods: selectedMods.length,
       session: inRoom,
-      beforeMain: (module) => initializeSettings(module, canvas),
+      beforeMain: (module) => initializeSettings(module, canvas, controls),
     });
     if (inRoom) {
       if (!hasNetworkEngine(runtime))
