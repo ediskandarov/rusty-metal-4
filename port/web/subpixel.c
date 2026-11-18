@@ -1,4 +1,5 @@
 #include "subpixel.h"
+#include "widescreen.h"
 #include <emscripten.h>
 #include <psyz/gte.h>
 #include <stdint.h>
@@ -56,6 +57,7 @@ EMSCRIPTEN_KEEPALIVE void WebSetPerspectiveTextures(int enabled)
 
 void WebSubpixelBegin(enum WebSubpixelBuffer buffer)
 {
+    WebWidescreenHudReset(buffer >= WEB_SUBPIXEL_GAME_0 ? buffer - WEB_SUBPIXEL_GAME_0 : -1);
     BufferPositions* state = &buffers[buffer];
     if (state->count != 0) {
         memset(state->packets, 0, sizeof(state->packets));
@@ -76,7 +78,9 @@ void WebSubpixelDraw(enum WebSubpixelBuffer buffer, OT_TYPE* ordering)
     submitted = fractional = 0;
 #endif
     WebSubpixelSelect(buffer);
+    WebWidescreenHudSelect(buffer >= WEB_SUBPIXEL_GAME_0 ? buffer - WEB_SUBPIXEL_GAME_0 : -1);
     DrawOTag(ordering);
+    WebWidescreenHudSelect(-1);
     ++rendered_frames;
     WebSubpixelSelect(WEB_SUBPIXEL_NONE);
     static unsigned int applied = UINT32_MAX;

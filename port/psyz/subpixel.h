@@ -15,4 +15,6 @@ typedef struct PsyzSubpixelPosition {
 int Psyz_DrawPushPrimWithPositions(u_long* packets, int max_len,
     const PsyzSubpixelPosition* positions, unsigned int options);
 
+void Psyz_DrawSetScreenTransform(float scale, float x, float y);
+
 #endif

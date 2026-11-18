@@ -3,14 +3,17 @@
 #include "level.h"
 #include "tm4/main/game.h"
 #include <emscripten.h>
+#include <libgpu.h>
+#include <stdint.h>
+#include <string.h>
 #ifndef TM4_STANDALONE
 #include <psyz/video.h>
 #endif
 
 static int active;
-static int left;
-static int right = 320;
+static PsyzRect draw_area = { 0, 0, 320, 240 };
 static double projection_scale = 1;
+static double visible_width = 320;
 static int saved_x, saved_y;
 static long saved_projection;
 static int drawing;
@@ -33,12 +36,12 @@ void WebWidescreenUpdate(void)
             return;
         requested = size;
         active = size.w != 0;
+        if (!active)
+            draw_area = (PsyzRect) { 0, 0, 320, 240 };
         EM_ASM({ globalThis.tm4Port.widescreen = !!$0; }, active);
     }
     if (active) {
-        PsyzRect area = Psyz_VideoGetDrawArea();
-        left = area.sx;
-        right = area.ex;
+        draw_area = Psyz_VideoGetDrawArea();
         /* PsyZ expands a centred, eight-pixel-aligned canvas. Compensate for
          * its integer pixel scale to preserve the original vertical view. */
         int pixel_scale = size.h / 240;
@@ -47,9 +50,12 @@ void WebWidescreenUpdate(void)
         if (pixel_scale < 1)
             pixel_scale = 1;
         projection_scale = (double)size.h / (pixel_scale * 240);
+        visible_width = (double)size.w / pixel_scale;
     }
 #endif
 }
+
+PsyzRect WebWidescreenDrawArea(void) { return draw_area; }
 
 void WebWidescreenBeginDraw(void)
 {
@@ -75,5 +81,96 @@ void WebWidescreenEndDraw(void)
 
 int WebWidescreenClipX(int x, unsigned int original_width)
 {
-    return active ? x < left || x > right : (unsigned short)x > original_width;
+    return active ? x < draw_area.sx || x > draw_area.ex : (unsigned short)x > original_width;
+}
+
+/* HUD packets share an ordering bucket with other overlays. Record only the
+ * packets emitted by each named HUD section, without changing their XYs or UVs.
+ * Keep both frame buffers: submission can follow a later browser callback. */
+enum { HUD_PACKET_BITS = 11, HUD_PACKET_CAPACITY = 1 << HUD_PACKET_BITS };
+typedef struct {
+    const void* payload;
+    enum WebHudAnchor anchor;
+} HudPacket;
+typedef struct {
+    HudPacket packets[HUD_PACKET_CAPACITY];
+    unsigned int count;
+    const void* boundary;
+    float scale, left, top;
+} HudBuffer;
+static HudBuffer hud_buffers[2];
+static HudBuffer* building_hud;
+static HudBuffer* drawing_hud;
+
+static unsigned int hud_slot(const void* payload)
+{
+    uint32_t address = (uintptr_t)payload / sizeof(u_long);
+    return (address * UINT32_C(0x9e3779b9)) >> (32 - HUD_PACKET_BITS);
+}
+
+void WebWidescreenHudReset(int buffer)
+{
+    if (buffer >= 0 && buffer < 2)
+        memset(&hud_buffers[buffer], 0, sizeof(hud_buffers[buffer]));
+}
+
+void WebWidescreenHudBegin(int buffer, const void* ordering)
+{
+    building_hud = NULL;
+    if (buffer < 0 || buffer >= 2)
+        return;
+    HudBuffer* hud = &hud_buffers[buffer];
+    if (!active)
+        return;
+    building_hud = hud;
+    hud->boundary = nextPrim(ordering);
+    hud->scale = projection_scale;
+    hud->left = 160 - visible_width / 2;
+    hud->top = 120 - 120 * projection_scale;
+}
+
+void WebWidescreenHudSection(const void* ordering, enum WebHudAnchor anchor)
+{
+    HudBuffer* hud = building_hud;
+    if (hud == NULL)
+        return;
+    const void* head = nextPrim(ordering);
+    for (const void* packet = head; packet != hud->boundary; packet = nextPrim(packet)) {
+        if ((uintptr_t)packet == 0xffffff || packet == NULL)
+            break;
+        const void* payload = (const char*)packet + sizeof(OT_TYPE);
+        if (hud->count == HUD_PACKET_CAPACITY - 1)
+            break;
+        unsigned int slot = hud_slot(payload);
+        while (hud->packets[slot].payload != NULL && hud->packets[slot].payload != payload)
+            slot = (slot + 1) % HUD_PACKET_CAPACITY;
+        if (hud->packets[slot].payload == NULL)
+            ++hud->count;
+        hud->packets[slot] = (HudPacket) { payload, anchor };
+    }
+    hud->boundary = head;
+}
+
+void WebWidescreenHudSelect(int buffer)
+{
+    drawing_hud = buffer >= 0 && buffer < 2 ? &hud_buffers[buffer] : NULL;
+}
+
+void WebWidescreenHudTransform(const void* payload, float* scale, float* x, float* y)
+{
+    *scale = 1;
+    *x = *y = 0;
+    HudBuffer* hud = drawing_hud;
+    if (hud == NULL || hud->count == 0)
+        return;
+    for (unsigned int slot = hud_slot(payload); hud->packets[slot].payload != NULL;
+         slot = (slot + 1) % HUD_PACKET_CAPACITY) {
+        const HudPacket* packet = &hud->packets[slot];
+        if (packet->payload != payload)
+            continue;
+        *scale = hud->scale;
+        *x = packet->anchor == WEB_HUD_BOTTOM_RIGHT ? 320 - hud->left - 320 * *scale : hud->left;
+        *y = packet->anchor == WEB_HUD_TOP_LEFT ? hud->top : 240 - hud->top - 240 * *scale;
+        return;
+    }
 }

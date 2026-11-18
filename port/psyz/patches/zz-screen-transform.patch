@@ -1,0 +1,55 @@
+--- a/platform/sdl3_draw.h
++++ b/platform/sdl3_draw.h
+@@ -41,6 +41,7 @@
+ #define TPAGE_NOTEXTURE 0x8000 // flag untextured poly
+ #define TPAGE_DITHER 0x4000    // flag a dithered primitive
+ #define TPAGE_POLYGON 0x2000   // flag a polygon to sample at PS1 integer coords
++#define TPAGE_TRANSFORMED_SPRITE 0x1000 // sprite UVs follow scaled screen geometry
+ 
+ #define VRGBA(p) (*(unsigned int*)(&((p).r)))
+ #define SET_TC(p, tpage, clut)                                                 \
+@@ -79,10 +80,30 @@
+         Draw_FlushBuffer();
+     }
+ }
++#ifdef PSYZ_FLOAT_VERTEX_POSITION
++static float screen_scale = 1.0f, screen_x, screen_y;
++
++void Psyz_DrawSetScreenTransform(float scale, float x, float y) {
++    screen_scale = scale;
++    screen_x = x;
++    screen_y = y;
++}
++#endif
++
+ static void Draw_EnqueueBuffer(int vertices, int indices) {
+     assert(n_vertices + vertices <= MAX_VERTEX_COUNT);
+     assert(n_indices + indices <= MAX_INDEX_COUNT);
+ 
++#ifdef PSYZ_FLOAT_VERTEX_POSITION
++    if (screen_scale != 1.0f || screen_x != 0.0f || screen_y != 0.0f) {
++        for (int i = 0; i < vertices; ++i) {
++            vertex_cur[i].x = vertex_cur[i].x * screen_scale + screen_x;
++            vertex_cur[i].y = vertex_cur[i].y * screen_scale + screen_y;
++            if (!(vertex_cur[i].t & (TPAGE_POLYGON | TPAGE_NOTEXTURE)))
++                vertex_cur[i].t |= TPAGE_TRANSFORMED_SPRITE;
++        }
++    }
++#endif
+     vertex_cur += vertices;
+     index_cur += indices;
+     n_vertices += vertices;
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -86,7 +86,10 @@
+     "    uint texWord = uint(tex.w);\n"
+     "    tpage = texWord & 0x1FFu;\n"
+     "    dither = (texWord & 0x4000u) != 0u ? 1u : 0u;\n"
+-    "    rawUV = tex.xy + shift - halfPixel;\n"
++    // Transformed sprites map their UV rectangle to the new screen rectangle.
++    // The 1:1 half-pixel bias can otherwise sample outside the sprite atlas tile.
++    "    vec2 uvBias = (texWord & 0x1000u) != 0u ? vec2(0.0) : halfPixel;\n"
++    "    rawUV = tex.xy + shift - uvBias;\n"
+     // Keep clip W at 1 so coverage and Gouraud colors stay unchanged.
+     // Screen-space interpolation of (uv/z, 1/z) corrects UVs alone.
+     "    weightedUV = vec3(rawUV * invDepth, invDepth);\n"

@@ -1,0 +1,118 @@
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -1,3 +1,4 @@
++#include "port/web/widescreen.h"
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+ #include "tm4/integer.h"
+@@ -811,6 +812,7 @@
+     car = GameInfo.players[WebNetGameplaySlot(player)].car;
+     if (!car)
+         return;
++    WebWidescreenHudBegin(buffer->buffer_index, orderingTable);
+     primitives = &buffer->players[player];
+     sprintf(text, HudDecimalFormat, car->display_speed);
+     if (car->controls.reverse) {
+@@ -848,6 +850,7 @@
+         orderingTable, FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW,
+         ScreenAbbrPlayerTurboColor->r, ScreenAbbrPlayerTurboColor->g, ScreenAbbrPlayerTurboColor->b,
+         1, 1);
++    WebWidescreenHudSection(orderingTable, WEB_HUD_BOTTOM_LEFT);
+     weapon = &car->weapons[car->controls.selected_weapon];
+     if (!weapon->amount && (!weapon->descriptor->detonate || !weapon->active)) {
+         name = HudEmptyWeaponText;
+@@ -878,6 +881,7 @@
+     FontPrint(text, ScreenMessageFontName, RenderViewWidth - 16, RenderViewHeight - 40,
+         &buffer->font_prims, orderingTable, FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW,
+         ScreenAbbrComboColor->r, ScreenAbbrComboColor->g, ScreenAbbrComboColor->b, 1, 1);
++    WebWidescreenHudSection(orderingTable, WEB_HUD_BOTTOM_RIGHT);
+     target = car->ai.target;
+     if (!GameIsCarRegistered(target))
+         target = NULL;
+@@ -904,6 +908,7 @@
+         ScreenAbbrEnemyNumberColor->g, ScreenAbbrEnemyNumberColor->b, 1, 1);
+     ScreenDisplayRadar(car, target, primitives, orderingTable);
+     addPrim(orderingTable, &primitives->radar_center);
++    WebWidescreenHudSection(orderingTable, WEB_HUD_TOP_LEFT);
+ }
+ #endif
+ 
+@@ -935,6 +940,7 @@
+     car = GameInfo.players[WebNetGameplaySlot(player)].car;
+     if (!car)
+         return;
++    WebWidescreenHudBegin(buffer->buffer_index, orderingTable);
+     primitives = &buffer->players[player];
+     sprintf(text, HudDecimalFormat, car->display_speed);
+     if (car->controls.reverse) {
+@@ -950,6 +956,7 @@
+     }
+     FontPrint(text, ScreenDigitsFontName, 51, RenderViewHeight - 37, &buffer->font_prims,
+         orderingTable, FONT_PRINT_COLOR | FONT_PRINT_RIGHT, red, green, blue);
++    WebWidescreenHudSection(orderingTable, WEB_HUD_BOTTOM_LEFT);
+     weapon = &car->weapons[car->controls.selected_weapon];
+     if (!weapon->amount && (!weapon->descriptor->detonate || !weapon->active)) {
+         name = HudEmptyWeaponText;
+@@ -1022,6 +1029,7 @@
+         primitives->combo_bar.x3 = barWidth;
+     }
+     addPrim(orderingTable, &primitives->combo_bar);
++    WebWidescreenHudSection(orderingTable, WEB_HUD_BOTTOM_RIGHT);
+     if (car->control_kind == CAR_CONTROL_PLAYER) {
+         ratio = car->turbo_fuel * 99 / car->maximum_turbo_fuel;
+         pulse = 0;
+@@ -1067,6 +1075,7 @@
+         setRGB0(&primitives->lives[index], 0, 0, 0);
+         addPrim(orderingTable, &primitives->lives[index]);
+     }
++    WebWidescreenHudSection(orderingTable, WEB_HUD_BOTTOM_LEFT);
+     target = car->ai.target;
+     if (!GameIsCarRegistered(target))
+         target = NULL;
+@@ -1095,8 +1104,10 @@
+         &primitives->target_sticker.r0);
+     addPrim(orderingTable, &primitives->target_sticker);
+     addPrim(orderingTable, &primitives->target_tpage);
+-    if (!target)
++    if (!target) {
++        WebWidescreenHudSection(orderingTable, WEB_HUD_TOP_LEFT);
+         return;
++    }
+     ScreenInterpolateColor(
+         ScreenHealth0Color, ScreenHealthCritical0Color, pulse, &primitives->target_bar.r0);
+     ScreenInterpolateColor(
+@@ -1114,6 +1125,7 @@
+         setXY4(&primitives->target_bar, leftEdge, 16, rightEdge, 16, leftEdge, 23, rightEdge, 23);
+     }
+     addPrim(orderingTable, &primitives->target_bar);
++    WebWidescreenHudSection(orderingTable, WEB_HUD_TOP_LEFT);
+ }
+ #endif
+ 
+--- a/src/main/pause.c
++++ b/src/main/pause.c
+@@ -1,5 +1,6 @@
+ 
+ #include "tm4/main/pause.h"
++#include "port/web/widescreen.h"
+ #include "tm4/compiler.h"
+ #include "tm4_scalar.h"
+ 
+@@ -204,6 +205,7 @@
+     RedbookPause();
+     result = confirmation ? -2 : -1;
+     while ((u32)(result + 2) < 2) {
++        WebWidescreenUpdate();
+         RenderBuildFrame();
+         RenderPresent(1);
+         buffer = RenderBeginFrame();
+@@ -572,6 +574,9 @@
+         }
+         for (index = 0; index < marker_count; index++)
+             addPrim(buffer->ordering_table, &workspace->markers[index]);
++        PsyzRect area = WebWidescreenDrawArea();
++        setXY0(&workspace->background, area.sx, area.sy);
++        setWH(&workspace->background, area.ex - area.sx, area.ey - area.sy);
+         addPrim(buffer->ordering_table, &workspace->background);
+         addPrim(buffer->ordering_table, &workspace->page);
+         display = RenderGetDisplayBuffer();

@@ -3,6 +3,7 @@
 #include "subpixel.h"
 #ifdef TM4_WEB_SUBPIXEL
 #include "../web/subpixel.h"
+#include "../web/widescreen.h"
 #endif
 
 /* PsyZ declares this PsyQ command builder but does not implement it yet. */
@@ -92,7 +93,7 @@ static void draw_triangle(const u_long* packets, const int* xy, const int* verti
  * the screen. Quads are two independent triangles; retain either valid half.
  * https://psx-spx.consoledev.net/graphicsprocessingunitgpu/#vertex-parameter-for-polygon-line-rectangle-commands
  */
-int __wrap_Draw_PushPrim(u_long* packets, int max_len)
+static int draw_primitive(u_long* packets, int max_len)
 {
     if (max_len <= 0)
         return __real_Draw_PushPrim(packets, max_len);
@@ -120,4 +121,18 @@ int __wrap_Draw_PushPrim(u_long* packets, int max_len)
     if (quad)
         draw_triangle(packets, xy, second, reject_second, positions, options);
     return length;
+}
+
+int __wrap_Draw_PushPrim(u_long* packets, int max_len)
+{
+#ifdef TM4_WEB_SUBPIXEL
+    float scale, x, y;
+    WebWidescreenHudTransform(packets, &scale, &x, &y);
+    Psyz_DrawSetScreenTransform(scale, x, y);
+#endif
+    int consumed = draw_primitive(packets, max_len);
+#ifdef TM4_WEB_SUBPIXEL
+    Psyz_DrawSetScreenTransform(1, 0, 0);
+#endif
+    return consumed;
 }

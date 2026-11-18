@@ -177,3 +177,8 @@ void WebTestDrawMenu(MenuGraphics* graphics)
         },
         preview_angle, WEB_MODULE("menu", MenuPreviewRotationAngle));
 }
+
+EMSCRIPTEN_KEEPALIVE void WebTestSetAbbreviatedHud(int enabled)
+{
+    GameInfo.players[0].abbreviated_hud = enabled != 0;
+}
