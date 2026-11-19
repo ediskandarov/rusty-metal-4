@@ -521,7 +521,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestReadCarGrab(void)
     if (!car || !car->callback_context)
         return 0;
     Car* target;
-    s32 angle, remaining;
+    s32 angle, remaining, speed = 0;
     SoundEmitter* sound;
     if (!strcasecmp(car->filename, "Crusher")) {
         CrusherPinchers* pinchers = car->callback_context;
@@ -540,6 +540,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestReadCarGrab(void)
         target = drill->target;
         angle = drill->angle;
         remaining = drill->active_ticks;
+        speed = drill->angular_speed;
         sound = drill->loop_sound;
     } else {
         return 0;
@@ -554,12 +555,16 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestReadCarGrab(void)
                 holding : !!$2,
                 health : $3,
                 position : [ $4, $5, $6 ],
-                sound : !!$7
+                sound : !!$7,
+                speed : $8,
+                targetUp : [ $9, $10, $11 ]
             });
         },
         angle, remaining, target != NULL, target ? target->health : -1,
         target ? target->position.vx : 0, target ? target->position.vy : 0,
-        target ? target->position.vz : 0, sound != NULL);
+        target ? target->position.vz : 0, sound != NULL, speed,
+        target ? target->transform.m[0][1] : 0, target ? target->transform.m[1][1] : 0,
+        target ? target->transform.m[2][1] : 0);
     return 1;
 }
 /* Read-only state for exercising energy actions through ordinary controller input. */

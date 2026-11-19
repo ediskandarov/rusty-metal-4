@@ -12,6 +12,13 @@ const files = [...new Bun.Glob("DATA/*").scanSync({ cwd: resources })].filter((p
 const modules = [...new Bun.Glob("modules/*.wasm").scanSync({ cwd: site })];
 assert.ok(files.includes("DATA/files.tsv"), "Missing extracted disc DATA/files.tsv");
 assert.ok(modules.length > 0, "Missing compiled resource modules");
+const auger = await WebAssembly.compile(
+  await Bun.file(join(site, "modules/c_auger.wasm")).arrayBuffer(),
+);
+assert.ok(
+  !WebAssembly.Module.imports(auger).some(({ name }) => name.startsWith("emscripten_asm_const")),
+  "Super Auger must load without a JavaScript diagnostics host",
+);
 const html = '<!doctype html><canvas id="canvas" width="640" height="480"></canvas>';
 const server = Bun.serve({
   port: 0,

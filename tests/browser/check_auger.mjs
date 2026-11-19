@@ -13,12 +13,25 @@ page.on("pageerror", (e) => {
   console.error(e);
 });
 page.on("console", (m) => {
+  // Emscripten reports synchronous module loading as a console error in pthread builds.
+  if (
+    m.text() ===
+    "Blocking on the main thread is very dangerous, see https://emscripten.org/docs/porting/pthreads.html#blocking-on-the-main-browser-thread"
+  ) {
+    console.warn(m.text());
+    return;
+  }
   if (m.type() === "error" && !/^\[[ID]\]/.test(m.text())) {
     errors.push(m.text());
     console.error(m.text());
   }
 });
 const state = () => page.evaluate(() => tm4Port);
+const grab = () =>
+  page.evaluate(() => {
+    if (!Module._WebTestReadCarGrab()) throw new Error("Car grab state is unavailable");
+    return tm4Port.carGrab;
+  });
 const checkExports = async (expected) => {
   const modules = await page.evaluate(() => {
     if (!Module._WebTestReadNativeModules) return null;
@@ -74,11 +87,16 @@ try {
     });
     await checkExports(true);
     const before = await state();
-    assert(before.auger && before.auger.ticks === 0);
+    assert.equal((await grab()).remaining, 0);
+    assert.equal("auger" in before, false);
     assert.equal(before.carSelectedWeapon, 0);
     await press("w");
     await page.waitForFunction(
-      () => tm4Port.auger?.ticks > 0 && tm4Port.auger.speed > 0 && tm4Port.auger.sound,
+      () =>
+        Module._WebTestReadCarGrab() &&
+        tm4Port.carGrab.remaining > 0 &&
+        tm4Port.carGrab.speed > 0 &&
+        tm4Port.carGrab.sound,
       null,
       { timeout: 5000 },
     );
@@ -86,27 +104,38 @@ try {
     if (contacts) {
       const health = await page.evaluate(() => Module._WebTestPlaceAugerTarget());
       assert(health > 0);
-      await page.waitForFunction(() => tm4Port.auger.holding, null, { timeout: 5000 });
-      const captured = (await state()).auger;
       await page.waitForFunction(
-        (health) => tm4Port.auger.holding && tm4Port.auger.targetHealth < health,
+        () => Module._WebTestReadCarGrab() && tm4Port.carGrab.holding,
+        null,
+        { timeout: 5000 },
+      );
+      const captured = await grab();
+      await page.waitForFunction(
+        (health) =>
+          Module._WebTestReadCarGrab() &&
+          tm4Port.carGrab.holding &&
+          tm4Port.carGrab.health < health,
         health,
         { timeout: 5000 },
       );
       await page.waitForFunction(
-        (up) => tm4Port.auger.holding && tm4Port.auger.targetUp.some((x, i) => x !== up[i]),
+        (up) =>
+          Module._WebTestReadCarGrab() &&
+          tm4Port.carGrab.holding &&
+          tm4Port.carGrab.targetUp.some((x, i) => x !== up[i]),
         captured.targetUp,
         { timeout: 5000 },
       );
-      console.log("PASS Auger captures, spins and damages target", (await state()).auger);
+      console.log("PASS Auger captures, spins and damages target", await grab());
     }
     await page.screenshot({ path: `build/checks/auger-${session}-active.png` });
     await page.waitForFunction(
       () =>
-        tm4Port.auger.ticks === 0 &&
-        !tm4Port.auger.holding &&
-        tm4Port.auger.speed === 0 &&
-        !tm4Port.auger.sound,
+        Module._WebTestReadCarGrab() &&
+        tm4Port.carGrab.remaining === 0 &&
+        !tm4Port.carGrab.holding &&
+        tm4Port.carGrab.speed === 0 &&
+        !tm4Port.carGrab.sound,
       null,
       { timeout: 30000 },
     );
