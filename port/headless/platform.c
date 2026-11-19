@@ -184,6 +184,9 @@ void Draw_SetAreaStart(int x, int y)
 void Draw_SetAreaEnd(int x, int y)
 {
 }
+void Psyz_DrawSetScreenTransform(float scale, float x, float y)
+{
+}
 void Draw_SetOffset(int x, int y)
 {
 }
