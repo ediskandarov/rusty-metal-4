@@ -86,11 +86,11 @@ try {
   await page.waitForFunction(() => window.ready || window.failure, null, { timeout: 60000 });
   assert.equal(await page.evaluate(() => window.failure), undefined);
   const result = await page.evaluate(
-    async ({ action, commands }) => {
+    async ({ action, commands, opponent }) => {
       const { Module, tm4Port } = globalThis;
       const fixtureAction = eval(`(${action})`),
         fixtureCommands = eval(`(${commands})`);
-      const cars = ["Orbital", "Microblast"];
+      const cars = ["Orbital", opponent];
       const started = await Module.ccall(
         "WebNetStartFfa",
         "number",
@@ -115,7 +115,7 @@ try {
           0,
           12345,
           -1,
-          0,
+          1,
           cars.join("\n"),
           "0000000000000001\n0000000000000002",
           90,
@@ -154,6 +154,8 @@ try {
             throw new Error("input");
         if (!Module._WebNetQueueTick(tick)) throw new Error("tick");
         rows.push(read());
+        if (tick === 81 && !Module._WebNetCapturePortableCheckpoint())
+          throw new Error(`Portable capture at tick 82: ${tm4Port.portableCheckpointError}`);
         Module._WebTestLocalCheckpointProjectiles();
         events.push({ live: structuredClone(tm4Port.testLiveProjectiles) });
       }
@@ -170,7 +172,11 @@ try {
         events,
       };
     },
-    { action: fixtureAction.toString(), commands: fixtureCommands.toString() },
+    {
+      action: fixtureAction.toString(),
+      commands: fixtureCommands.toString(),
+      opponent: process.env.TM4_TEST_OPPONENT ?? "Microblast",
+    },
   );
   assert.equal(result.rows.length, 301);
   assert.ok(result.events[81].live.length > 0, "Replay checkpoint must contain a live projectile");

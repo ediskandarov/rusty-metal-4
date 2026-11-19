@@ -9,10 +9,14 @@ s32 FragmentConstructor(Fragment*, va_list);
 void FragmentProcess(Fragment*);
 void FragmentDisplay(Fragment*, Tm4OrderingTag*, u8**, u8*, MATRIX*);
 
-static s32 construct(void* object, va_list arguments)
+static void prepare_resources(void)
 {
     Import_G = OSSymbolGetAddressAssert("G");
     Import_SpawnExplosion = WEB_MODULE("expl", SpawnExplosion);
+}
+static s32 construct(void* object, va_list arguments)
+{
+    prepare_resources();
     s32 result = FragmentConstructor(object, arguments);
     if (result)
         WEB_BROWSER_REPORT({ tm4Port.fragmentSpawns = (tm4Port.fragmentSpawns || 0) + 1; });
@@ -31,6 +35,7 @@ OSWord WebFragmentExport(const char* name)
 #define EXPORT(key, value)                                                                         \
     if (!strcmp(name, key))                                                                        \
     return (OSWord)(value)
+    EXPORT("WebFragmentPrepareResources", prepare_resources);
     EXPORT("FragmentConstructor", construct);
     EXPORT("FragmentProcess", process);
     EXPORT("FragmentDisplay", display);

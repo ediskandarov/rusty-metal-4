@@ -13,6 +13,7 @@
 #include "src/modules/expl/private.h"
 #include "src/modules/fire/private.h"
 #include "src/modules/firing/private.h"
+#include "src/modules/frag/private.h"
 #include "src/modules/lightn/private.h"
 #include "src/modules/ray/private.h"
 #include "src/modules/timer/private.h"
@@ -312,7 +313,7 @@ static int lightning_emitter_valid(const void* payload)
         && emitter->bolt_count <= emitter->type->max_bolts;
 }
 
-static const SnapshotField lightning_point_fields[] = {
+static const SnapshotField short_vector_fields[] = {
     SNAP_POD(SVECTOR, vx),
     SNAP_POD(SVECTOR, vy),
     SNAP_POD(SVECTOR, vz),
@@ -320,7 +321,7 @@ static const SnapshotField lightning_point_fields[] = {
     { 0 },
 };
 static const SnapshotArray lightning_points = {
-    lightning_point_fields,
+    short_vector_fields,
     sizeof(SVECTOR),
     NULL,
     ArrayCount(((Lightning*)0)->points),
@@ -612,6 +613,96 @@ static int restore_timer_binding(
     return 1;
 }
 
+/* FragmentDisplay projects fresh screen coordinates and links a copy of the packet.
+ * Only the face colors and the original shader's UVs, CLUT and texture page persist. */
+#define FRAG_RGB(type, n) SNAP_POD(type, r##n), SNAP_POD(type, g##n), SNAP_POD(type, b##n)
+#define FRAG_UV(type, n) SNAP_POD(type, u##n), SNAP_POD(type, v##n)
+#define FRAG_FACE(type)                                                                            \
+    FRAG_RGB(type, 0), SNAP_POD(type, clut), SNAP_POD(type, tpage), FRAG_UV(type, 0),              \
+        FRAG_UV(type, 1), FRAG_UV(type, 2)
+static const SnapshotField flat_triangle[] = { FRAG_FACE(POLY_FT3), { 0 } };
+static const SnapshotField flat_quad[] = { FRAG_FACE(POLY_FT4), FRAG_UV(POLY_FT4, 3), { 0 } };
+static const SnapshotField gouraud_triangle[]
+    = { FRAG_FACE(POLY_GT3), FRAG_RGB(POLY_GT3, 1), FRAG_RGB(POLY_GT3, 2), { 0 } };
+static const SnapshotField gouraud_quad[] = { FRAG_FACE(POLY_GT4), FRAG_UV(POLY_GT4, 3),
+    FRAG_RGB(POLY_GT4, 1), FRAG_RGB(POLY_GT4, 2), FRAG_RGB(POLY_GT4, 3), { 0 } };
+#undef FRAG_FACE
+#undef FRAG_UV
+#undef FRAG_RGB
+
+static const SnapshotType* fragment_face(const Fragment* frag)
+{
+    static const SnapshotType ft3 = { .fields = flat_triangle }, ft4 = { .fields = flat_quad },
+                              gt3 = { .fields = gouraud_triangle },
+                              gt4 = { .fields = gouraud_quad };
+    switch (frag->primitive.gt4.code & TM4_FACE_TYPE_MASK) {
+    case TM4_FACE_FT3:
+        return &ft3;
+    case TM4_FACE_FT4:
+        return &ft4;
+    case TM4_FACE_GT3:
+        return &gt3;
+    case TM4_FACE_GT4:
+        return &gt4;
+    default:
+        return NULL;
+    }
+}
+
+static u32 fragment_vertex_count(const void* object)
+{
+    const Fragment* frag = object;
+    switch (frag->primitive.gt4.code & TM4_FACE_TYPE_MASK) {
+    case TM4_FACE_GT4:
+    case TM4_FACE_FT4:
+        return 4;
+    default:
+        return 3;
+    }
+}
+static const SnapshotArray fragment_vertices
+    = { short_vector_fields, sizeof(SVECTOR), fragment_vertex_count, 4 };
+static const SnapshotField fragment_fields[]
+    = { SNAP_POD(Fragment, collision_origin.vx), SNAP_POD(Fragment, collision_origin.vy),
+          SNAP_POD(Fragment, collision_origin.vz), SNAP_POD(Fragment, world_position_q12),
+          SNAP_POD(Fragment, frame_displacement_q12), SNAP_POD(Fragment, gravity_step_q12),
+          SNAP_POD(Fragment, rotation_step.m), SNAP_POD(Fragment, local_to_world.m),
+          SNAP_POD(Fragment, local_to_world.t), SNAP_POD(Fragment, collision_countdown),
+          SNAP_POD(Fragment, radius), SNAP_POD(Fragment, primitive.gt4.code),
+          SNAP_ARRAY(Fragment, local_vertices, &fragment_vertices), { 0 } };
+static u32 capture_fragment(const void* object, u8* output, u32 capacity)
+{
+    const Fragment* frag = object;
+    const SnapshotType* face = fragment_face(frag);
+    return face ? WebSnapshotFieldsCapture(face, &frag->primitive, output, capacity) : 0;
+}
+void WebFragmentPrepareResources(void);
+static int restore_fragment(void* object, const u8* input, u32 length, WebSnapshotFindObject* find)
+{
+    Fragment* frag = object;
+    const SnapshotType* face = fragment_face(frag);
+    if (!face || !WebSnapshotFieldsRestore(face, &frag->primitive, input, length, find))
+        return 0;
+    const u8 code = frag->primitive.gt4.code;
+    switch (code & TM4_FACE_TYPE_MASK) {
+    case TM4_FACE_FT3:
+        setPolyFT3(&frag->primitive.ft3);
+        break;
+    case TM4_FACE_FT4:
+        setPolyFT4(&frag->primitive.ft4);
+        break;
+    case TM4_FACE_GT3:
+        setPolyGT3(&frag->primitive.gt3);
+        break;
+    case TM4_FACE_GT4:
+        setPolyGT4(&frag->primitive.gt4);
+        break;
+    }
+    frag->primitive.gt4.code = code;
+    WEB_MODULE("frag", WebFragmentPrepareResources)();
+    return 1;
+}
+
 static void* carpart_model(char* key)
 {
     RegistryDirectory* models = RegGetDirectoryPtrS("/objects/car/characters");
@@ -681,6 +772,7 @@ static int restore_carpart(void* payload, const u8* input, u32 length, WebSnapsh
 static Tm4ObjectCallback afc_process(void) { return WEB_MODULE("afc", WebAfcAdvanceFlareRotation); }
 
 const SnapshotType WebSnapshotEffectTypes[] = {
+    { "fragment", sizeof(Fragment), fragment_fields, NULL, capture_fragment, restore_fragment },
     { "carpart", sizeof(WebCarpart), carpart_fields, carpart_valid, NULL, restore_carpart,
         .hash_fields = 1 },
     { "fireRing", sizeof(FireRing), fire_ring_fields, fire_ring_valid, .hash_fields = 1 },
