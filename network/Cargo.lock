@@ -7609,11 +7609,12 @@ dependencies = [
 
 [[package]]
 name = "wasmtime-dylink"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e8b0ce7eb8b307f87b02bdc43dac635734b2b94dfffcb2a01ce06805a774109"
+checksum = "a4ec9fba545c667d9fabf9ab583255609a50d3502a459894cafe56b7a9fe7211"
 dependencies = [
  "wasmtime",
+ "wiggle",
 ]
 
 [[package]]
