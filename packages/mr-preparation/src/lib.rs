@@ -6,21 +6,36 @@ mod index;
 mod module;
 
 use anyhow::{Result, ensure};
-use std::collections::BTreeMap;
+pub use index::{INDEX_LIMIT, ResourceEntry, ResourceIndex};
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct Preparation {
-    index: index::Index,
+    index: ResourceIndex,
+    pending: BTreeSet<String>,
     modules: BTreeMap<String, Vec<u8>>,
 }
 impl Preparation {
     pub fn new(index: &str) -> Result<Self> {
-        Ok(Self {
-            index: index::Index::new(index)?,
-            modules: BTreeMap::new(),
-        })
+        Ok(Self::from_index(ResourceIndex::parse(index)?))
     }
-    pub fn paths(&self) -> &[String] {
-        &self.index.paths
+    pub fn from_index(index: ResourceIndex) -> Self {
+        let pending = index
+            .entries()
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect();
+        Self {
+            index,
+            pending,
+            modules: BTreeMap::new(),
+        }
+    }
+    pub fn paths(&self) -> Vec<String> {
+        self.index
+            .entries()
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect()
     }
     pub fn add_module(&mut self, name: &str, bytes: Vec<u8>) -> Result<()> {
         ensure!(
@@ -38,10 +53,18 @@ impl Preparation {
         archive::archive(bytes, &mut self.modules)
     }
     pub fn set_size(&mut self, path: &str, size: u64) -> Result<()> {
-        self.index.set_size(path, size)
+        self.index.set_size(path, size)?;
+        self.pending.remove(&path.to_ascii_uppercase());
+        Ok(())
     }
-    pub fn index(&self) -> Result<String> {
-        self.index.render()
+    pub fn repacked_index(&self) -> Result<String> {
+        ensure!(
+            self.pending.is_empty(),
+            "Not all indexed resources were prepared"
+        );
+        let mut index = self.index.clone();
+        index.repack(1)?;
+        index.to_tsv()
     }
     pub fn into_modules(self) -> BTreeMap<String, Vec<u8>> {
         self.modules

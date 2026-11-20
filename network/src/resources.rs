@@ -1,15 +1,16 @@
 //! Validated simulator inputs. No HTTP or gameplay-state ownership.
 use anyhow::{Result, ensure};
+use rm4_mr_preparation::{INDEX_LIMIT, ResourceIndex};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::borrow::Cow;
 use std::{
     collections::BTreeMap,
     env, fs,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
 };
 
 const SECTOR_INDEX: &str = "/DATA/files.tsv";
-const INDEX_LIMIT: usize = 128 * 1024;
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct Resource {
@@ -97,31 +98,19 @@ impl ResourceStore {
     // The caller serializes uploads through publication, including cancelled HTTP requests.
     pub fn publish(&self, id: &str, data: &[u8]) -> Result<usize> {
         ensure!(data.len() <= self.limit(id)?, "Unexpected resource size");
-        if let Some(file) = self.manifest.get(id) {
+        let data = if let Some(file) = self.manifest.get(id) {
             ensure!(
                 data.len() == file.size && format!("{:x}", Sha256::digest(data)) == file.sha256,
                 "Stock resource checksum differs"
             );
+            Cow::Borrowed(data)
         } else {
-            validate_index(data)?;
-            let text = std::str::from_utf8(data)?;
-            let mut indexed = BTreeMap::new();
-            for line in text.lines() {
-                let fields: Vec<_> = line.split('\t').collect();
-                ensure!(
-                    indexed
-                        .insert(fields[2], fields[1].parse::<usize>()?)
-                        .is_none(),
-                    "Duplicate resource sector index entry"
-                );
+            let index = ResourceIndex::parse(std::str::from_utf8(data)?)?;
+            for file in self.manifest.values() {
+                index.require(&file.id, file.size as u64)?;
             }
-            ensure!(
-                self.manifest
-                    .values()
-                    .all(|file| indexed.get(file.id.as_str()) == Some(&file.size)),
-                "Resource sector index must include each required stock file with its exact size"
-            );
-        }
+            Cow::Owned(index.to_tsv()?.into_bytes())
+        };
         let target = self.directory.0.join(id.trim_start_matches('/'));
         fs::create_dir_all(target.parent().unwrap())?;
         let pending = self.directory.0.join("upload.tmp");
@@ -136,31 +125,6 @@ impl ResourceStore {
             .count();
         Ok(uploaded)
     }
-}
-
-fn validate_index(data: &[u8]) -> Result<()> {
-    let text = std::str::from_utf8(data)?;
-    ensure!(!text.is_empty(), "Empty resource sector index");
-    for line in text.lines() {
-        let fields: Vec<_> = line.split('\t').collect();
-        ensure!(
-            fields.len() == 3
-                && fields[0].parse::<u32>().is_ok()
-                && fields[1].parse::<u32>().is_ok(),
-            "Invalid sector index row"
-        );
-        let path = fields[2];
-        ensure!(
-            path.starts_with("/DATA/")
-                && !path.contains(['%', '\\'])
-                && !path.bytes().any(|byte| byte.is_ascii_control())
-                && Path::new(path.trim_start_matches('/'))
-                    .components()
-                    .all(|c| matches!(c, Component::Normal(_))),
-            "Invalid sector index path"
-        );
-    }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -210,6 +174,9 @@ mod tests {
             format!("{index}{index}"),
             "10\t1\t/DATA/OTHER.MR\n".into(),
             format!("{index}12\t1\t/DATA/../secret\n"),
+            format!("{index}12\t-1\t/DATA/OTHER.MR\n"),
+            format!("{index}449849\t2049\t/DATA/OTHER.MR\n"),
+            format!("{index}12\t1\t/DATA/name;1\n"),
         ] {
             assert!(store.publish(SECTOR_INDEX, bad.as_bytes()).is_err());
             assert_eq!(
@@ -218,6 +185,24 @@ mod tests {
             );
         }
         assert!(!store.directory().join("upload.tmp").exists());
+    }
+
+    #[test]
+    fn publication_canonicalizes_paths_without_relocating_sectors_or_requiring_extras() {
+        let store = store();
+        let index = format!(
+            "900\t{}\t/data/main.mr\n20\t4096\t/data/menu/extra.tim\n",
+            DATA.len()
+        );
+        store.publish(SECTOR_INDEX, index.as_bytes()).unwrap();
+        assert_eq!(
+            fs::read_to_string(store.directory().join("DATA/files.tsv")).unwrap(),
+            format!(
+                "900\t{}\t/DATA/MAIN.MR\n20\t4096\t/DATA/MENU/EXTRA.TIM\n",
+                DATA.len()
+            )
+        );
+        assert!(!store.directory().join("DATA/MENU/EXTRA.TIM").exists());
     }
 
     #[test]

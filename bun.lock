@@ -89,6 +89,7 @@
       "name": "@tm4/resources",
       "dependencies": {
         "@tm4/dev-server-client": "workspace:*",
+        "@tm4/mr-preparation": "workspace:*",
       },
     },
     "packages/room-player-protocol": {

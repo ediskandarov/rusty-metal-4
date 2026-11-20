@@ -64,11 +64,15 @@ fn hash(bytes: impl AsRef<[u8]>) -> String {
 }
 fn resource_content(directory: &Path) -> Result<String> {
     let reference: Reference = serde_json::from_str(include_str!("../../config/resources.json"))?;
+    let index = rm4_mr_preparation::ResourceIndex::parse(&fs::read_to_string(
+        directory.join("DATA/files.tsv"),
+    )?)?;
     let mut fingerprints = Vec::new();
     for file in reference.files {
         if !(file.id.ends_with(".MR") || file.id.ends_with(".IMG") || file.id.ends_with(".VAB")) {
             continue;
         }
+        index.require(&file.id, file.size)?;
         let path = directory.join(file.id.trim_start_matches('/'));
         let bytes = fs::read(&path)
             .with_context(|| format!("Reading local resource {}", path.display()))?;
@@ -82,20 +86,6 @@ fn resource_content(directory: &Path) -> Result<String> {
         }
     }
     fingerprints.sort();
-    // The original sector index is needed by the C CD adapter; no host path is exposed.
-    let index = fs::read_to_string(directory.join("DATA/files.tsv"))?;
-    ensure!(
-        !index.is_empty()
-            && index.lines().all(|line| {
-                let fields: Vec<_> = line.split('\t').collect();
-                fields.len() == 3
-                    && fields[0].parse::<u32>().is_ok()
-                    && fields[1].parse::<u32>().is_ok()
-                    && fields[2].starts_with("/DATA/")
-                    && !fields[2].contains("..")
-            }),
-        "Invalid local resource sector index"
-    );
     Ok(hash(fingerprints.join("\n")))
 }
 
@@ -2125,6 +2115,10 @@ mod tests {
         let file = directory.join(first.id.trim_start_matches('/'));
         fs::create_dir_all(file.parent().unwrap())?;
         fs::write(&file, [0])?;
+        fs::write(
+            directory.join("DATA/files.tsv"),
+            format!("1\t{}\t{}\n", first.size, first.id),
+        )?;
         let error = resource_content(&directory).unwrap_err().to_string();
         fs::remove_dir_all(&directory)?;
         ensure!(error.contains("Local stock resource differs"), "{error}");

@@ -1,3 +1,5 @@
+import { writeResourceIndex } from "@tm4/mr-preparation";
+
 import defaultDiscReference from "../../../../config/disc.json";
 import {
   checkResource,
@@ -68,9 +70,9 @@ export async function loadDisc(
     if (result.status === "warning") warn(`${entry.path}: ${result.message}`);
     if (entry.path.toUpperCase() === "/SCUS_945.60") continue;
     files.set(entry.path.toUpperCase(), bytes);
-    manifest.push(`${entry.lba}\t${entry.size}\t${entry.path}`);
+    manifest.push({ sector: entry.lba, size: entry.size, path: entry.path });
   }
-  files.set("/DATA/files.tsv", new TextEncoder().encode(manifest.join("\n") + "\n"));
+  files.set("/DATA/files.tsv", new TextEncoder().encode(await writeResourceIndex(manifest)));
   const movies = new Map(
     entries
       .filter((e) => /\.STR$/i.test(e.path))

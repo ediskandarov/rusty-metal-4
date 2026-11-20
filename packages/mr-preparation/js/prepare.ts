@@ -1,15 +1,32 @@
-import { Preparation } from "../build/rm4_mr_preparation.js";
+import { Preparation, ResourceIndex } from "../build/rm4_mr_preparation.js";
 
-export function createPreparer(initialize: () => Promise<unknown>) {
+export function createResourceTools(initialize: () => Promise<unknown>) {
   let ready: Promise<unknown> | undefined;
-  return async (
-    files: Map<string, Uint8Array<ArrayBuffer>>,
-    modules: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
-  ): Promise<void> => {
-    await (ready ??= initialize().catch((error) => {
+  const initialized = () =>
+    (ready ??= initialize().catch((error) => {
       ready = undefined;
       throw error;
     }));
+  const resourceIndex = async (text?: string) => {
+    await initialized();
+    return new ResourceIndex(text);
+  };
+  const writeResourceIndex = async (
+    entries: Iterable<{ path: string; sector: number; size: number }>,
+  ) => {
+    const index = await resourceIndex();
+    try {
+      for (const { path, sector, size } of entries) index.add(path, sector, size);
+      return index.toTsv();
+    } finally {
+      index.free();
+    }
+  };
+  const prepareModuleResources = async (
+    files: Map<string, Uint8Array<ArrayBuffer>>,
+    modules: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
+  ): Promise<void> => {
+    await initialized();
     const index = files.get("/DATA/files.tsv");
     if (!index) throw Error("Missing resource sector index");
     const preparation = new Preparation(new TextDecoder().decode(index));
@@ -25,10 +42,11 @@ export function createPreparer(initialize: () => Promise<unknown>) {
         preparation.setSize(path, prepared.length);
         if (prepared !== bytes) output.set(path, prepared);
       }
-      output.set("/DATA/files.tsv", new TextEncoder().encode(preparation.index()));
+      output.set("/DATA/files.tsv", new TextEncoder().encode(preparation.repackedIndex()));
       for (const [path, bytes] of output) files.set(path, bytes);
     } finally {
       preparation.free();
     }
   };
+  return { resourceIndex, writeResourceIndex, prepareModuleResources };
 }

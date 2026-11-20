@@ -12,7 +12,7 @@ export async function buildSite(
   mode: "release" | "dev" | "diagnostic",
   site: string,
 ) {
-  if (app === "player") await buildPreparation();
+  if (app === "player" || app === "server") await buildPreparation();
   const commit = (await $`git rev-parse HEAD`.cwd(root).text()).trim();
   const output = join(root, "build", mode, "astro", app);
   await build({

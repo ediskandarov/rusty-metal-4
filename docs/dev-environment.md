@@ -30,6 +30,11 @@ The byte-oriented Rust crate in `packages/mr-preparation` performs the same
 transformation in both environments: browser Wasm via `@tm4/mr-preparation`,
 and a native dependency on the server. Browser and server adapters only supply
 bytes and store the result; the server uses a private temporary runtime copy.
+Its `ResourceIndex` also owns `files.tsv` parsing and validation for disc loading,
+mod installation and server uploads. Reading or writing an index preserves its
+sectors; only explicit repacking relocates files. Callers supply required-file
+checks. Unuploaded menu images retain their indexed spans on the server so its
+virtual CD layout matches the browser's.
 Build artifacts still contain individual module files for this preparation, but the runtime loads code from MR. `port/web/movie.c` retains
 browser-owned movie playback; the original movie code entry is removed.
 
@@ -50,7 +55,7 @@ range, sized from the complete prepared inventory's `dylink.0` metadata. Loaded 
 MR teardown still clears gameplay state and invalidates imported addresses.
 
 `bun run build:mr-preparation` builds the browser preparer; typechecking and
-player builds invoke it automatically. `bun run test:mr-preparation` runs its
+player and server-launcher builds invoke it automatically. `bun run test:mr-preparation` runs its
 asset-free native tests; the Bun unit suite exercises the Wasm bindings.
 
 The root commands

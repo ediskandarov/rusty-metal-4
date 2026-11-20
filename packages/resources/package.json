@@ -13,6 +13,7 @@
     "./host/*": "./src/host/*.ts"
   },
   "dependencies": {
-    "@tm4/dev-server-client": "workspace:*"
+    "@tm4/dev-server-client": "workspace:*",
+    "@tm4/mr-preparation": "workspace:*"
   }
 }

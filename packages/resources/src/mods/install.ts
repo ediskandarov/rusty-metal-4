@@ -1,3 +1,5 @@
+import { resourceIndex } from "@tm4/mr-preparation";
+
 import { type MrDirectory, readMr } from "../compatibility/mr.ts";
 import type { DiscAssets } from "../loader/types.ts";
 import { installEngineSound } from "./independent-car.ts";
@@ -133,28 +135,21 @@ export async function installCarMods(assets: DiscAssets, mods: readonly CarMod[]
   files.set("/DATA/MENU/CHAR.MR", writeMr(previews));
   const manifestBytes = files.get("/DATA/files.tsv");
   if (!manifestBytes) throw new Error("Missing disc file index");
-  const rows = new TextDecoder()
-    .decode(manifestBytes)
-    .trim()
-    .split("\n")
-    .map((row) => {
-      const [lba, size, path] = row.split("\t");
-      if (!path || !Number.isSafeInteger(Number(lba)) || !Number.isSafeInteger(Number(size)))
-        throw new Error("Invalid disc file index");
-      return { lba: Number(lba), size: Number(size), path };
-    });
-  let sector = Math.max(...rows.map((r) => r.lba + Math.ceil(r.size / 2048)));
-  const indexed = new Set(rows.map((r) => r.path));
-  for (const row of rows) row.size = files.get(row.path)?.length ?? row.size;
-  for (const [path, data] of files) {
-    if (indexed.has(path) || path === "/DATA/files.tsv") continue;
-    rows.push({ lba: sector, size: data.length, path });
-    sector += Math.ceil(data.length / 2048);
+  const index = await resourceIndex(new TextDecoder().decode(manifestBytes));
+  try {
+    const indexed = new Set(index.paths());
+    for (const path of indexed) {
+      const bytes = files.get(path);
+      if (bytes) index.setSize(path, bytes.length);
+    }
+    for (const [path, data] of files) {
+      if (indexed.has(path) || path === "/DATA/files.tsv") continue;
+      index.add(path, 0, data.length);
+    }
+    index.repack(1);
+    files.set("/DATA/files.tsv", new TextEncoder().encode(index.toTsv()));
+  } finally {
+    index.free();
   }
-  if (sector + 150 >= 100 * 60 * 75) throw new Error("Virtual CD address capacity exceeded");
-  files.set(
-    "/DATA/files.tsv",
-    new TextEncoder().encode(rows.map((r) => `${r.lba}\t${r.size}\t${r.path}`).join("\n") + "\n"),
-  );
   assets.files = files;
 }

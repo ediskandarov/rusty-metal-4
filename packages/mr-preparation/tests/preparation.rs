@@ -8,12 +8,12 @@ fn index_keeps_order_and_uses_prepared_lengths() -> anyhow::Result<()> {
         prep.paths(),
         ["/DATA/MENU/A.MR", "/DATA/X.IMG", "/DATA/EMPTY.MR"]
     );
-    assert!(prep.index().is_err());
+    assert!(prep.repacked_index().is_err());
     prep.set_size("/DATA/MENU/A.MR", 2049)?;
     prep.set_size("/DATA/X.IMG", 0)?;
     prep.set_size("/DATA/EMPTY.MR", 19)?;
     assert_eq!(
-        prep.index()?,
+        prep.repacked_index()?,
         "1\t2049\t/DATA/MENU/A.MR\n3\t0\t/DATA/X.IMG\n4\t19\t/DATA/EMPTY.MR\n"
     );
     assert!(prep.set_size("/DATA/UNLISTED.MR", 4).is_err());
