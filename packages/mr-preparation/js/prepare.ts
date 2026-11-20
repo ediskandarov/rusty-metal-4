@@ -1,15 +1,36 @@
-import { Preparation, ResourceIndex } from "../build/rm4_mr_preparation.js";
+import type * as Runtime from "../build/rm4_mr_preparation.js";
 
-export function createResourceTools(initialize: () => Promise<unknown>) {
-  let ready: Promise<unknown> | undefined;
+export function createResourceTools(initialize: () => Promise<typeof Runtime>) {
+  let ready: Promise<typeof Runtime> | undefined;
   const initialized = () =>
     (ready ??= initialize().catch((error) => {
       ready = undefined;
       throw error;
     }));
   const resourceIndex = async (text?: string) => {
-    await initialized();
+    const { ResourceIndex } = await initialized();
     return new ResourceIndex(text);
+  };
+  const buildManifest = async (json: string) => {
+    const { BuildManifest } = await initialized();
+    return new BuildManifest(json);
+  };
+  const getBuildManifest = async (url: string | URL, signal?: AbortSignal) => {
+    const response = await fetch(url, { cache: "no-store", signal });
+    if (!response.ok) throw new Error("Game build manifest: HTTP " + response.status);
+    return buildManifest(await response.text());
+  };
+  const loadBuildModules = async (
+    build: Runtime.BuildManifest,
+    target: "browser" | "authority",
+    read: (name: string) => Promise<Uint8Array<ArrayBuffer>>,
+  ) => {
+    const files = await Promise.all(
+      build.moduleNames().map(async (name) => [name, await read(name)] as const),
+    );
+    return new Map(
+      files.map(([name, bytes]) => [build.verifyModule(name, bytes, target), bytes] as const),
+    );
   };
   const writeResourceIndex = async (
     entries: Iterable<{ path: string; sector: number; size: number }>,
@@ -26,7 +47,7 @@ export function createResourceTools(initialize: () => Promise<unknown>) {
     files: Map<string, Uint8Array<ArrayBuffer>>,
     modules: ReadonlyMap<string, Uint8Array<ArrayBuffer>>,
   ): Promise<void> => {
-    await initialized();
+    const { Preparation } = await initialized();
     const index = files.get("/DATA/files.tsv");
     if (!index) throw Error("Missing resource sector index");
     const preparation = new Preparation(new TextDecoder().decode(index));
@@ -48,5 +69,12 @@ export function createResourceTools(initialize: () => Promise<unknown>) {
       preparation.free();
     }
   };
-  return { resourceIndex, writeResourceIndex, prepareModuleResources };
+  return {
+    buildManifest,
+    getBuildManifest,
+    loadBuildModules,
+    resourceIndex,
+    writeResourceIndex,
+    prepareModuleResources,
+  };
 }

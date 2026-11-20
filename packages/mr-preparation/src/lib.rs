@@ -2,11 +2,14 @@
 mod archive;
 #[cfg(feature = "web")]
 mod bindings;
+mod build;
 mod index;
 mod module;
 
 use anyhow::{Result, ensure};
+pub use build::{BuildManifest, ModuleTarget};
 pub use index::{INDEX_LIMIT, ResourceEntry, ResourceIndex};
+pub use module::{module_file, module_symbol};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub struct Preparation {

@@ -1,7 +1,6 @@
 import { z } from "zod";
 
 import {
-  buildManifestSchema,
   diagnosticsSchema,
   type Message,
   messageSchema,
@@ -190,12 +189,6 @@ export async function connectNetwork(endpoint: string) {
     }
   }, 5);
   return transport;
-}
-
-export async function getBuildManifest(url: string | URL, signal?: AbortSignal) {
-  const response = await fetch(url, { cache: "no-store", signal });
-  if (!response.ok) throw new Error("Game build manifest: HTTP " + response.status);
-  return buildManifestSchema.parse(await response.json());
 }
 
 export type NetworkDiagnostics = ReturnType<

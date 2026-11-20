@@ -79,7 +79,7 @@ pub(super) fn attach(
         ensure!(
             files
                 .insert(
-                    format!("/mr/{}", name.replace(".wasm", ".sym")),
+                    format!("/mr/{}", rm4_mr_preparation::module_symbol(&name)?),
                     bytes.into_owned()
                 )
                 .is_none(),

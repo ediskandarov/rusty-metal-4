@@ -1,5 +1,43 @@
 use wasm_bindgen::prelude::*;
 
+#[wasm_bindgen(js_name = BuildManifest)]
+pub struct WebBuildManifest(crate::BuildManifest);
+
+#[wasm_bindgen(js_class = BuildManifest)]
+impl WebBuildManifest {
+    #[wasm_bindgen(constructor)]
+    pub fn new(json: &str) -> Result<WebBuildManifest, JsError> {
+        Ok(Self(
+            crate::BuildManifest::parse(json.as_bytes()).map_err(error)?,
+        ))
+    }
+    #[wasm_bindgen(getter)]
+    pub fn sha256(&self) -> String {
+        self.0.sha256().to_owned()
+    }
+    #[wasm_bindgen(getter, js_name = authoritySha256)]
+    pub fn authority_sha256(&self) -> String {
+        self.0.authority_sha256().to_owned()
+    }
+    #[wasm_bindgen(js_name = moduleNames)]
+    pub fn module_names(&self) -> Vec<String> {
+        self.0.module_names().map(str::to_owned).collect()
+    }
+    #[wasm_bindgen(js_name = verifyModule)]
+    pub fn verify_module(&self, name: &str, bytes: &[u8], target: &str) -> Result<String, JsError> {
+        let target = match target {
+            "browser" => crate::ModuleTarget::Browser,
+            "authority" => crate::ModuleTarget::Authority,
+            _ => return Err(JsError::new("Unknown module target")),
+        };
+        self.0.verify_module(name, bytes, target).map_err(error)
+    }
+    #[wasm_bindgen(js_name = verifyAuthority)]
+    pub fn verify_authority(&self, bytes: &[u8]) -> Result<(), JsError> {
+        self.0.verify_authority(bytes).map_err(error)
+    }
+}
+
 #[wasm_bindgen(js_name = Preparation)]
 pub struct WebPreparation(crate::Preparation);
 

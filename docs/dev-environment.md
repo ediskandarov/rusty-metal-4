@@ -35,6 +35,10 @@ mod installation and server uploads. Reading or writing an index preserves its
 sectors; only explicit repacking relocates files. Callers supply required-file
 checks. Unuploaded menu images retain their indexed spans on the server so its
 virtual CD layout matches the browser's.
+The same crate validates `simulation-build.json` and module bytes through
+`BuildManifest`. Browser and authority hashes remain distinct; both targets
+check the module's embedded identity against its filename before MR preparation.
+TypeScript supplies file/network I/O and calls the Wasm validator.
 Build artifacts still contain individual module files for this preparation, but the runtime loads code from MR. `port/web/movie.c` retains
 browser-owned movie playback; the original movie code entry is removed.
 

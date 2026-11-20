@@ -45,6 +45,7 @@
       "name": "@tm4/rustymetal4.com",
       "dependencies": {
         "@tm4/lightyear-client": "workspace:*",
+        "@tm4/mr-preparation": "workspace:*",
         "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
         "@tm4/rustymetal-server-client": "workspace:*",

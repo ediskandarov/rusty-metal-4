@@ -1,4 +1,4 @@
-import { getBuildManifest } from "@tm4/lightyear-client";
+import { getBuildManifest } from "@tm4/mr-preparation";
 import { playerMessageSchema, type RoomAction, type RoomCommand } from "@tm4/room-player-protocol";
 
 import { matchPreparation } from "./match-preparation.ts";
@@ -116,7 +116,10 @@ export function roomMatch(id: string, store: RoomStore) {
   const unsubscribe = store.subscribe(synchronize);
   synchronize();
   void getBuildManifest(new URL("/play/simulation-build.json", location.href)).then(
-    () => store.getState().runtimeChecked(true),
+    (build) => {
+      build.free();
+      store.getState().runtimeChecked(true);
+    },
     () => store.getState().runtimeChecked(false),
   );
   el("return-to-room").onclick = () => store.getState().returnToRoom();

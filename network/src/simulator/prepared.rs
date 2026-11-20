@@ -1,6 +1,6 @@
 //! Filesystem adapter for the shared, byte-oriented MR preparer.
 use super::*;
-use rm4_mr_preparation::{Preparation, ResourceIndex};
+use rm4_mr_preparation::{Preparation, ResourceIndex, module_file, module_symbol};
 use std::borrow::Cow;
 
 pub(super) fn resources(
@@ -10,10 +10,7 @@ pub(super) fn resources(
     let index = ResourceIndex::parse(&fs::read_to_string(source.join("DATA/files.tsv"))?)?;
     let mut preparation = Preparation::from_index(index.clone());
     for (name, bytes) in modules {
-        let id = name
-            .strip_suffix(".wasm")
-            .context("Invalid module filename")?;
-        preparation.add_module(&format!("{id}.sym"), bytes.into_owned())?;
+        preparation.add_module(&module_symbol(&name)?, bytes.into_owned())?;
     }
     let directory = tempfile::Builder::new()
         .prefix("rustymetal4-runtime-")
@@ -52,8 +49,8 @@ pub(super) fn resources(
     let modules = preparation
         .into_modules()
         .into_iter()
-        .map(|(name, bytes)| (name.replace(".sym", ".wasm"), Cow::Owned(bytes)))
-        .collect();
+        .map(|(name, bytes)| Ok((module_file(&name)?, Cow::Owned(bytes))))
+        .collect::<Result<_>>()?;
     Ok((directory, modules))
 }
 

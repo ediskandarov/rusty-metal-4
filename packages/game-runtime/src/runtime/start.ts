@@ -1,6 +1,5 @@
-import { getBuildManifest } from "@tm4/lightyear-client";
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
-import { prepareModuleResources } from "@tm4/mr-preparation";
+import { getBuildManifest, loadBuildModules, prepareModuleResources } from "@tm4/mr-preparation";
 import type { DiscAssets } from "@tm4/resources/loader/types";
 
 import { type GameModule, requireRuntime } from "./module.ts";
@@ -28,23 +27,18 @@ export async function startGame(
   }
   const content = await digest(new TextEncoder().encode(fingerprints.join("\n")));
   const build = await getBuildManifest(new URL("simulation-build.json", document.baseURI));
-
-  const modules = await Promise.all(
-    build.modules.map(async (entry) => {
-      const response = await fetch(new URL(`modules/${entry.name}`, document.baseURI));
+  const buildHash = build.sha256;
+  try {
+    const modules = await loadBuildModules(build, "browser", async (name) => {
+      const response = await fetch(new URL(`modules/${name}`, document.baseURI));
       if (!response.ok)
-        throw new Error(`Could not load resource module ${entry.name}: ${response.status}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
-      if ((await digest(bytes)) !== entry.sha256)
-        throw new Error(`Resource module belongs to a different build: ${entry.name}`);
-      return { name: entry.name, bytes };
-    }),
-  );
-  await prepareModuleResources(
-    assets.files,
-    new Map(modules.map(({ name, bytes }) => [name.replace(/\.wasm$/, ".sym"), bytes])),
-  );
-  modules.length = 0;
+        throw new Error(`Could not load resource module ${name}: ${response.status}`);
+      return new Uint8Array(await response.arrayBuffer());
+    });
+    await prepareModuleResources(assets.files, modules);
+  } finally {
+    build.free();
+  }
   const parameters = new URLSearchParams(location.search);
   return new Promise((resolve, reject) => {
     globalThis.tm4Assets = assets;
@@ -92,7 +86,7 @@ export async function startGame(
             }
           ).tm4Port.compatibility = {
             protocol: networkProtocolVersion,
-            build: build.sha256,
+            build: buildHash,
             content,
           };
           resolve(module);

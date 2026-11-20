@@ -2,9 +2,7 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { buildManifestSchema } from "@tm4/lightyear-client/schemas";
-
-import { playerBuildDigest } from "../../tools/build-identity.ts";
+import { type BuildIdentity, playerBuildDigest } from "../../tools/build-identity.ts";
 import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer } from "../player/build.ts";
 
@@ -15,9 +13,8 @@ await buildSite("rustymetal4.com", "release", site);
 
 const runtime = process.env.TM4_PLAYER_RUNTIME ?? join(root, "build/release/site");
 if (await Bun.file(join(runtime, "simulation-build.json")).exists()) {
-  const manifest = buildManifestSchema.parse(
-    await Bun.file(join(runtime, "simulation-build.json")).json(),
-  );
+  // playerBuildDigest validates the complete manifest through Rust before using it.
+  const manifest = (await Bun.file(join(runtime, "simulation-build.json")).json()) as BuildIdentity;
   const digest = await playerBuildDigest(runtime, manifest);
   if (digest !== manifest.sha256)
     throw new Error("Player runtime does not match its compatibility manifest");

@@ -10,6 +10,18 @@ fn valid_name(name: &str) -> bool {
             byte.is_ascii_lowercase() || i > 0 && (byte.is_ascii_digit() || byte == b'_')
         })
 }
+pub fn module_symbol(file: &str) -> Result<String> {
+    let stem = file
+        .strip_suffix(".wasm")
+        .context("Invalid module filename")?;
+    let name = format!("{stem}.sym");
+    ensure!(valid_name(&name), "Invalid module filename: {file}");
+    Ok(name)
+}
+pub fn module_file(symbol: &str) -> Result<String> {
+    ensure!(valid_name(symbol), "Invalid module identity: {symbol}");
+    Ok(format!("{}.wasm", symbol.strip_suffix(".sym").unwrap()))
+}
 fn leb(data: &mut &[u8]) -> Result<usize> {
     let mut value = 0u32;
     for shift in (0..35).step_by(7) {

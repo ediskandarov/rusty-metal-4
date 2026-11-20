@@ -1,18 +1,17 @@
 import { join } from "node:path";
 
-const sha256 = (bytes: ArrayBuffer) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+import { buildManifest, loadBuildModules } from "@tm4/mr-preparation";
 
-export async function playerBuildDigest(
-  site: string,
-  identity: {
-    authoritySha256: string;
-    modules: { name: string; sha256: string; authoritySha256: string }[];
-  },
-) {
-  for (const entry of identity.modules) {
-    if (sha256(await Bun.file(join(site, "modules", entry.name)).arrayBuffer()) !== entry.sha256)
-      throw new Error("Resource module does not match its build: " + entry.name);
-  }
+const sha256 = (bytes: ArrayBuffer) => new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+export type BuildIdentity = {
+  sha256: string;
+  authoritySha256: string;
+  modules: { name: string; sha256: string; authoritySha256: string }[];
+};
+const readModule = (site: string) => async (name: string) =>
+  new Uint8Array(await Bun.file(join(site, "modules", name)).arrayBuffer());
+
+async function calculatePlayerDigest(site: string, identity: Omit<BuildIdentity, "sha256">) {
   return new Bun.CryptoHasher("sha256")
     .update(await Bun.file(join(site, "tm4_web.wasm")).arrayBuffer())
     .update(await Bun.file(join(site, "network/tm4_network_bg.wasm")).arrayBuffer())
@@ -21,7 +20,17 @@ export async function playerBuildDigest(
     .digest("hex");
 }
 
-export async function buildIdentity(directory: string) {
+export async function playerBuildDigest(site: string, identity: BuildIdentity) {
+  const build = await buildManifest(JSON.stringify(identity));
+  try {
+    await loadBuildModules(build, "browser", readModule(site));
+    return await calculatePlayerDigest(site, identity);
+  } finally {
+    build.free();
+  }
+}
+
+export async function buildIdentity(directory: string): Promise<BuildIdentity> {
   const site = join(directory, "site");
   const authority = join(directory, "authority/site");
   const names = [...new Bun.Glob("*.wasm").scanSync({ cwd: join(site, "modules") })].sort();
@@ -40,10 +49,17 @@ export async function buildIdentity(directory: string) {
   const authoritySha256 = sha256(
     await Bun.file(join(authority, "tm4_standalone.wasm")).arrayBuffer(),
   );
-  if (!names.length) throw new Error("No resource modules in build");
-  return {
+  const identity = {
     authoritySha256,
     modules,
-    sha256: await playerBuildDigest(site, { authoritySha256, modules }),
+    sha256: await calculatePlayerDigest(site, { authoritySha256, modules }),
   };
+  const build = await buildManifest(JSON.stringify(identity));
+  try {
+    await loadBuildModules(build, "browser", readModule(site));
+    await loadBuildModules(build, "authority", readModule(authority));
+  } finally {
+    build.free();
+  }
+  return identity;
 }

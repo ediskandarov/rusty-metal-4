@@ -179,14 +179,11 @@ impl Simulator {
     pub fn from_assets(wasm: &crate::assets::Simulation, resources: &Path) -> Result<Self> {
         let build = wasm.build()?;
         let bytes = wasm.read()?;
-        ensure!(
-            hash(&bytes) == build.authority_sha256,
-            "Standalone simulation does not match its build manifest"
-        );
+        build.verify_authority(&bytes)?;
         let modules = wasm.modules(&build)?;
         let compatibility = Compatibility {
             protocol: PROTOCOL_VERSION,
-            build: build.sha256,
+            build: build.sha256().to_owned(),
             content: resource_content(resources)?,
         };
         let cache = env::var_os("TM4_SIMULATION_PRECOMPILED").map(PathBuf::from);
