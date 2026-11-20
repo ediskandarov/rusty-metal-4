@@ -371,10 +371,29 @@ fn authored_mr_module_follows_registry_ownership() -> Result<()> {
     archive.extend_from_slice(&0u32.to_le_bytes());
     archive.extend_from_slice(b"behavior.mod\0\0\0\0");
     archive.extend_from_slice(&image);
-    let mut modules = dylink::test_modules()?;
-    modules.push(("mprobe.wasm".into(), image.into()));
     let (bytes, resources) = paths()?;
-    let mut world = Simulator::new_with_cache(&bytes, &resources, compatibility(), modules, None)?;
+    let input = tempfile::tempdir()?;
+    let mut index = rm4_mr_preparation::ResourceIndex::parse(&fs::read_to_string(
+        resources.join("DATA/files.tsv"),
+    )?)?;
+    for entry in index.entries() {
+        let name = entry.path.trim_start_matches('/');
+        let source = resources.join(name);
+        if !source.try_exists()? && name.ends_with(".TIM") {
+            continue;
+        }
+        let destination = input.path().join(name);
+        fs::create_dir_all(destination.parent().unwrap())?;
+        fs::copy(source, destination)?;
+    }
+    fs::write(input.path().join("DATA/PROBE.MR"), &archive)?;
+    index.add("/DATA/PROBE.MR", 0, archive.len() as u64)?;
+    fs::write(input.path().join("DATA/files.tsv"), index.to_tsv()?)?;
+    // No mprobe entry in the stock module list: preparation must discover it in MR.
+    let modules = dylink::test_modules()?;
+    assert!(!modules.iter().any(|(name, _)| name == "mprobe.wasm"));
+    let mut world =
+        Simulator::new_with_cache(&bytes, input.path(), compatibility(), modules, None)?;
     fn put(world: &mut Simulator, bytes: &[u8]) -> Result<u32> {
         let ptr = world.call::<u32, u32>("malloc", bytes.len() as u32)?;
         ensure!(ptr != 0, "Allocation failed");

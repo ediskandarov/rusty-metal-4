@@ -33,8 +33,9 @@ bytes and store the result; the server uses a private temporary runtime copy.
 Its `ResourceIndex` also owns `files.tsv` parsing and validation for disc loading,
 mod installation and server uploads. Reading or writing an index preserves its
 sectors; only explicit repacking relocates files. Callers supply required-file
-checks. Unuploaded menu images retain their indexed spans on the server so its
-virtual CD layout matches the browser's.
+checks. Unuploaded menu images retain their indexed spans on the server.
+Virtual CD sectors are local to each runtime: browser and authority Wasm sizes
+differ. Snapshot compatibility must not depend on equal sector addresses.
 The same crate validates `simulation-build.json` and module bytes through
 `BuildManifest`. Browser and authority hashes remain distinct; both targets
 check the module's embedded identity against its filename before MR preparation.
