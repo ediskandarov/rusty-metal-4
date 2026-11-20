@@ -103,6 +103,7 @@ test("complete release pin includes JS, HTML and modules and rejects changed byt
       "coi-serviceworker.LICENSE.txt",
       "modules/o_car.wasm",
       "_astro/player.js",
+      "_astro/rm4_mr_preparation_bg.test.wasm",
     ])
       await Bun.write(join(directory, path), `fixture:${path}`);
     const files = await inventory(directory);
@@ -130,6 +131,12 @@ test("complete release pin includes JS, HTML and modules and rejects changed byt
       expect(asset.headers.get("Cache-Control")).toContain("immutable");
       expect(asset.headers.get("Cross-Origin-Opener-Policy")).toBe("same-origin");
       expect(asset.headers.get("Cross-Origin-Embedder-Policy")).toBe("require-corp");
+      const helper = await mf.dispatchFetch(
+        `${origin}${pinned.release.playerUrl}_astro/rm4_mr_preparation_bg.test.wasm`,
+      );
+      expect(await helper.text()).toBe("fixture:_astro/rm4_mr_preparation_bg.test.wasm");
+      expect(helper.headers.get("Content-Type")).toBe("application/wasm");
+      expect(helper.headers.get("Cache-Control")).toContain("immutable");
       expect(
         (await mf.dispatchFetch(`${origin}${pinned.release.playerUrl}missing.wasm`)).status,
       ).toBe(404);
