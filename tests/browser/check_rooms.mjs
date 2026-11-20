@@ -126,8 +126,16 @@ try {
     await b.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     "mobile layout must not overflow",
   );
-  assert(
-    !requests.some((request) => /\.wasm|\/api\/(prepare|start|resources)|\/match/.test(request)),
+  assert.deepEqual(
+    requests.filter((request) => {
+      const path = new URL(request).pathname;
+      // Astro bundles UI assets here; simulation binaries are served outside these directories.
+      if (path.startsWith("/_astro/") || path.startsWith("/play/_astro/")) return false;
+      return /\.wasm|\/tm4_web\.js$|\/api\/(?:rooms\/[^/]+\/)?(?:prepare|start|resources)|\/match/.test(
+        path,
+      );
+    }),
+    [],
     "rooms never request simulation startup or game assets",
   );
   assert.deepEqual(errors, []);
