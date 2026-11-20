@@ -11,7 +11,7 @@ import {
   releasePath,
 } from "../../apps/rustymetal4.com/src/challenge.ts";
 import { challengeRuntime } from "../../tools/challenge/local.ts";
-import { putImmutable } from "../../tools/challenge/publish.ts";
+import { publishObject } from "../../tools/challenge/publish.ts";
 import {
   inventory,
   publicArtifact,
@@ -146,33 +146,101 @@ test("complete release pin includes JS, HTML and modules and rejects changed byt
     await rm(root, { recursive: true, force: true });
   }
 });
-test("publisher resumes identical create-only objects and refuses differing bytes", async () => {
-  for (const identical of [true, false]) {
-    const calls: string[] = [];
-    const pending = putImmutable({
-      endpoint: "https://account.r2.cloudflarestorage.com",
-      bucket: "test",
-      key: "release/index.html",
-      accessKey: "test",
-      secretKey: "secret",
-      bytes: new TextEncoder().encode("hello"),
-      contentType: "text/html",
-      now: new Date("2026-11-17T10:00:00.000Z"),
-      fetch: ((_url, init) => {
-        const headers = new Headers(init?.headers);
-        calls.push(init!.method!);
-        expect(headers.get("Authorization")).toContain("AWS4-HMAC-SHA256 Credential=test/");
-        if (init?.method === "PUT") {
-          expect(headers.get("If-None-Match")).toBe("*");
-          expect(headers.get("Authorization")).toContain("if-none-match");
-          return Promise.resolve(new Response(null, { status: 412 }));
+const commandResult = (exitCode: number, stdout = "", stderr = "") => ({
+  exitCode,
+  stdout: new TextEncoder().encode(stdout),
+  stderr: new TextEncoder().encode(stderr),
+});
+const missingObject = () => commandResult(1, "", "The specified key does not exist.");
+
+test("publisher resumes identical objects and refuses differing bytes without writing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "rm4-publish-"));
+  try {
+    const file = join(directory, "index.html");
+    await Bun.write(file, "hello");
+    for (const identical of [true, false]) {
+      const calls: string[] = [];
+      const pending = publishObject(
+        { bucket: "test", key: "release/index.html", file, contentType: "text/html" },
+        (args) => {
+          calls.push(args[2]!);
+          expect(args).toContain("--remote");
+          expect(args).toContain("--pipe");
+          return Promise.resolve(commandResult(0, identical ? "hello" : "different"));
+        },
+      );
+      if (identical) expect(await pending).toBe(false);
+      else await expect(pending).rejects.toThrow("Refusing to overwrite");
+      expect(calls).toEqual(["get"]);
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test.each([
+  {
+    name: "new object is uploaded and verified",
+    replies: [missingObject(), commandResult(0), commandResult(0, "hello")],
+    calls: ["get", "put", "get"],
+    error: null,
+  },
+  {
+    name: "authentication failure never uploads",
+    replies: [commandResult(1, "", "Authentication error")],
+    calls: ["get"],
+    error: "could not read",
+  },
+  {
+    name: "network failure never uploads",
+    replies: [commandResult(1, "", "fetch failed")],
+    calls: ["get"],
+    error: "could not read",
+  },
+  {
+    name: "failed upload is not successful",
+    replies: [missingObject(), commandResult(1, "", "upload failed")],
+    calls: ["get", "put"],
+    error: "could not upload",
+  },
+  {
+    name: "corrupted upload is rejected",
+    replies: [missingObject(), commandResult(0), commandResult(0, "wrong")],
+    calls: ["get", "put", "get"],
+    error: "verification failed",
+  },
+  {
+    name: "missing upload is rejected",
+    replies: [missingObject(), commandResult(0), missingObject()],
+    calls: ["get", "put", "get"],
+    error: "verification failed",
+  },
+])("publisher: $name", async ({ replies, calls, error }) => {
+  const directory = await mkdtemp(join(tmpdir(), "rm4-publish-"));
+  try {
+    const file = join(directory, "index.html");
+    await Bun.write(file, "hello");
+    const seen: string[] = [];
+    const pending = publishObject(
+      { bucket: "test", key: "release/index.html", file, contentType: "text/html" },
+      (args) => {
+        seen.push(args[2]!);
+        expect(args[3]).toBe("test/release/index.html");
+        expect(args).toContain("--remote");
+        if (args[2] === "put") {
+          expect(args[args.indexOf("--file") + 1]).toBe(file);
+          expect(args[args.indexOf("--content-type") + 1]).toBe("text/html");
+          expect(args[args.indexOf("--cache-control") + 1]).toContain("immutable");
         }
-        expect(headers.has("If-None-Match")).toBe(false);
-        return Promise.resolve(new Response(identical ? "hello" : "different", { status: 200 }));
-      }) as typeof fetch,
-    });
-    if (identical) expect(await pending).toBe(false);
-    else await expect(pending).rejects.toThrow("Refusing to overwrite");
-    expect(calls).toEqual(["PUT", "GET"]);
+        const response = replies[seen.length - 1];
+        if (!response) throw new Error("Unexpected Wrangler call");
+        return Promise.resolve(response);
+      },
+    );
+    if (error) await expect(pending).rejects.toThrow(error);
+    else expect(await pending).toBe(true);
+    expect(seen).toEqual([...calls]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
 });

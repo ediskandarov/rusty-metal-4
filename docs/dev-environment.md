@@ -223,16 +223,17 @@ to the publishing checkout. Disc resources are excluded. The publisher checks fi
 hashes, the challenge runtime export and the absence of diagnostic test exports.
 
 Provision the `rm4-challenge-releases` R2 bucket before the first website deployment.
-Set bucket-scoped S3 credentials in `TM4_R2_ACCOUNT_ID`, `TM4_R2_ACCESS_KEY_ID` and
-`TM4_R2_SECRET_ACCESS_KEY`, then run:
+Use the existing Wrangler login (`bunx wrangler login` if needed), then run:
 
 ```sh
 bun run publish:challenge /path/to/frozen-release
 ```
 
-Publication creates objects without overwriting existing ones and uploads `release.json`
-last. Retrying a partial upload reuses only byte-identical files. It neither creates
-cloud resources nor changes the pin. After successful publication, set `buildId` in
+Publication checks existing objects, refuses differing bytes, verifies each upload and
+uploads `release.json` last. Retrying a partial upload reuses byte-identical files.
+Wrangler does not provide atomic conditional creation; release keys are scoped by the
+complete build hash. Publication neither creates cloud resources nor changes the pin.
+After successful publication, set `buildId` in
 `config/challenge-release.json`, then run the ordinary website deployment. The null
 pin means unpublished. Subsequent deployments leave R2 files and the selected build intact.
 
