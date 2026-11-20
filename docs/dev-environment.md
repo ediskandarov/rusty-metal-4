@@ -16,11 +16,20 @@ Resource modules share the main instance's memory. Browser modules use
 `SIDE_MODULE=2`. Cars, maps and simulation modules use `ASYNCIFY=0`; only the
 menu and main browser module retain Asyncify for presentation waits.
 
-The MR type-6 handler selects `modules/<original-image-name>.wasm`, loads it
-with the platform's `dlopen`, and resolves exports through the original symbol
-registry. The 37 game modules are no longer linked into `tm4_core`. Their hashes
-participate in build compatibility. Disc data stays unchanged; original MIPS code
-is not executed. `port/web/movie.c` retains browser-owned movie playback.
+The MR type-6 handler loads Wasm embedded in the resource entry. A `rm4.module`
+custom section identifies the image (for example `o_car.sym`); exports still use
+`Tm4ModuleExport` and the original symbol registry. Mod images use the same path,
+without a compiled-in module list. `nameModule` in `@tm4/resources/mods/modules`
+adds this section to a compiled side module.
+
+Before startup, resource preparation replaces original MIPS entries with the
+verified Wasm of the current build. Other encoded records retain their names,
+compression and contents. The sector index is rebuilt for the prepared lengths.
+Disc uploads and content compatibility are checked before this transformation.
+Browser preparation runs in `@tm4/resources`; the server makes a private temporary
+runtime copy. Build artifacts still contain individual module files for this
+preparation, but the runtime loads code from MR. `port/web/movie.c` retains
+browser-owned movie playback; the original movie code entry is removed.
 
 Module ownership follows MR registrations. Removing the last registration closes
 the loader handle and invalidates imported-address caches and snapshot metadata.
@@ -30,9 +39,12 @@ import trampolines cannot change identity comparisons in snapshots.
 The server uses `wasmtime-dylink`'s Emscripten adapter on the existing Wasmtime/WASI
 store. Both targets compile with Emscripten; the headless core and server modules
 omit Asyncify and threads. The browser retains its presentation runtime.
-Only modules listed in the verified build manifest are available to `dlopen`.
+The host indexes embedded MR modules before initialization and rejects conflicting
+bytes under one image name. Browser loading stages those same bytes in `/mr/` for
+Emscripten's `dlopen`; Wasmtime resolves that virtual name from the prepared MR
+inventory after checking the MR entry against those exact bytes. Replacing an image with different code requires a new runtime instance.
 The host reserves their data through guest `malloc` and a separate function-table
-range, sized from `dylink.0` metadata. Loaded images live until the store is dropped;
+range, sized from the complete prepared inventory's `dylink.0` metadata. Loaded images live until the store is dropped;
 MR teardown still clears gameplay state and invalidates imported addresses.
 
 The root commands

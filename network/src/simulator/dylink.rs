@@ -9,6 +9,59 @@ use wasmtime_wasi::p1::WasiP1Ctx;
 pub(super) struct Host {
     pub wasi: WasiP1Ctx,
     pub dylink: Option<Emscripten<Host>>,
+    pub module_images: Arc<BTreeMap<String, Vec<u8>>>,
+}
+
+pub(super) fn add_to_linker(linker: &mut Linker<Host>) -> Result<()> {
+    wasmtime_dylink::emscripten::add_to_linker(linker, |host| &mut host.dylink)?;
+    linker.func_wrap(
+        "env",
+        "rm4_validate_module",
+        |mut caller: wasmtime::Caller<'_, Host>,
+         path: u32,
+         data: u32,
+         size: u32|
+         -> wasmtime::Result<()> {
+            validate_module(&mut caller, path, data, size).map_err(wasmtime::Error::from_anyhow)
+        },
+    )?;
+    Ok(())
+}
+
+fn validate_module(
+    caller: &mut wasmtime::Caller<'_, Host>,
+    path: u32,
+    data: u32,
+    size: u32,
+) -> Result<()> {
+    let memory = caller
+        .get_export("memory")
+        .and_then(|e| e.into_memory())
+        .context("Missing module memory")?;
+    let memory = memory.data(&caller);
+    let name = memory
+        .get(path as usize..)
+        .context("Invalid module path pointer")?;
+    let end = name
+        .iter()
+        .take(160)
+        .position(|&b| b == 0)
+        .context("Invalid module path")?;
+    let name = std::str::from_utf8(&name[..end])?;
+    let expected = caller
+        .data()
+        .module_images
+        .get(name)
+        .with_context(|| format!("Module absent from prepared resources: {name}"))?;
+    let bytes = memory
+        .get(data as usize..)
+        .and_then(|tail| tail.get(..size as usize))
+        .context("Invalid module byte range")?;
+    ensure!(
+        bytes == expected,
+        "MR module differs from prepared resources: {name}"
+    );
+    Ok(())
 }
 
 pub(super) fn attach(
@@ -24,10 +77,17 @@ pub(super) fn attach(
             .map_err(|error| anyhow::anyhow!("Reading module metadata {name}: {error:#}"))?;
         requirements.add_module(&metadata)?;
         ensure!(
-            files.insert(format!("/modules/{name}"), bytes).is_none(),
+            files
+                .insert(
+                    format!("/mr/{}", name.replace(".wasm", ".sym")),
+                    bytes.into_owned()
+                )
+                .is_none(),
             "Duplicate module: {name}"
         );
     }
+    let files = Arc::new(files);
+    store.data_mut().module_images = files.clone();
     // Reserve once through guest malloc so libc and module data cannot overlap.
     // A non-null reservation is required even for modules without static data.
     let base = instance

@@ -46,12 +46,6 @@ async function plan({ gameRoot, sourcesFile, output }) {
     (module) => `tm4_dynamic_module("${module}" "${manifest.modules[module].image_name}")`,
   );
   await write(join(output, "sources.cmake"), rules.join("\n") + "\n" + dynamic.join("\n") + "\n");
-  await write(
-    join(output, "modules.inc"),
-    Object.keys(manifest.modules)
-      .map((module) => `{ "${manifest.modules[module].image_name}" },`)
-      .join("\n") + "\n",
-  );
 }
 
 async function generate({ manifestFile, unitId, output, compiler }) {

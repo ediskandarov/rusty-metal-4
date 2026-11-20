@@ -22,6 +22,8 @@ page.on("pageerror", (e) => {
   console.error(e);
 });
 page.on("console", (m) => {
+  // Emscripten reports this startup pthread warning through printErr.
+  if (m.text().startsWith("Blocking on the main thread is very dangerous,")) return;
   if (m.type() === "error" && !/^\[[ID]\]/.test(m.text())) {
     errors.push(m.text());
     console.error(m.text());

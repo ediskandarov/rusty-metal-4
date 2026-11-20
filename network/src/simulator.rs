@@ -22,6 +22,7 @@ use wasmtime::{
 use wasmtime_wasi::{DirPerms, FilePerms, WasiCtxBuilder, p1};
 
 mod dylink;
+mod prepared;
 use dylink::Host;
 
 const SNAPSHOT_MAX: usize = 256 * 1024;
@@ -33,6 +34,7 @@ pub struct Simulator {
     capacity: usize,
     slots: Vec<u8>,
     store: Store<Host>,
+    prepared_resources: Option<tempfile::TempDir>,
     instance: Instance,
     memory: Memory,
     stop_clock: Arc<AtomicBool>,
@@ -259,14 +261,17 @@ impl Simulator {
         modules: crate::assets::ModuleFiles,
         cache: Option<&Path>,
     ) -> Result<Self> {
+        let (prepared, modules) = prepared::resources(resources, modules)?;
         let mut wasi = WasiCtxBuilder::new();
         wasi.inherit_stdout().inherit_stderr().preopened_dir(
-            resources.join("DATA"),
+            prepared.path().join("DATA"),
             "/DATA",
             DirPerms::READ,
             FilePerms::READ,
         )?;
-        Self::with_wasi_cached(bytes, compatibility, wasi, modules, cache)
+        let mut result = Self::with_wasi_cached(bytes, compatibility, wasi, modules, cache)?;
+        result.prepared_resources = Some(prepared);
+        Ok(result)
     }
 
     #[cfg(test)]
@@ -285,7 +290,11 @@ impl Simulator {
         let module = load_module(&engine, bytes, cache)?;
         for import in module.imports() {
             ensure!(
-                (import.module() == "env" && matches!(import.name(), "_dlopen_js" | "_dlsym_js"))
+                (import.module() == "env"
+                    && matches!(
+                        import.name(),
+                        "_dlopen_js" | "_dlsym_js" | "rm4_validate_module"
+                    ))
                     || import.module() == "wasi_snapshot_preview1"
                         && matches!(
                             import.name(),
@@ -310,12 +319,13 @@ impl Simulator {
             Host {
                 wasi: wasi.build_p1(),
                 dylink: None,
+                module_images: Default::default(),
             },
         );
         store.set_epoch_deadline(LOADING_DEADLINE_EPOCHS);
         let mut linker = Linker::new(&engine);
         p1::add_to_linker_sync(&mut linker, |context: &mut Host| &mut context.wasi)?;
-        wasmtime_dylink::emscripten::add_to_linker(&mut linker, |context| &mut context.dylink)?;
+        dylink::add_to_linker(&mut linker)?;
         let instance = linker.instantiate(&mut store, &module)?;
         let memory = instance
             .get_memory(&mut store, "memory")
@@ -329,6 +339,7 @@ impl Simulator {
             }
         });
         let mut result = Self {
+            prepared_resources: None,
             capacity: 0,
             slots: Vec::new(),
             store,

@@ -50,7 +50,20 @@ async function inflate(bytes: Uint8Array<ArrayBuffer>, size: number, signal?: Ab
 }
 
 // Container validation only: entry types and payload semantics belong to resource-specific checks.
-export async function readMr(bytes: Uint8Array<ArrayBuffer>, signal?: AbortSignal) {
+type EntryTransform = (path: string, entry: MrEntry) => MrEntry | null;
+async function parseMr(
+  bytes: Uint8Array<ArrayBuffer>,
+  signal?: AbortSignal,
+  transform?: EntryTransform,
+) {
+  const chunks: Uint8Array<ArrayBuffer>[] = [];
+  let outputSize = 0;
+  const append = (chunk: Uint8Array<ArrayBuffer>) => {
+    if (!transform) return;
+    outputSize += chunk.length;
+    if (outputSize > maxExpandedBytes) throw Error("MR output exceeds size limit");
+    chunks.push(chunk);
+  };
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let offset = 0;
   let expanded = 0;
@@ -78,24 +91,46 @@ export async function readMr(bytes: Uint8Array<ArrayBuffer>, signal?: AbortSigna
     if (folders.has(path)) throw new Error(`Duplicate MR directory: ${path}`);
     const result: MrDirectory = { files: new Map(), folders: new Map() };
     folders.set(path, result);
+    const directoryHeader = bytes.slice(header, offset);
+    append(directoryHeader);
     const fileCount = view.getUint16(header + 2, true);
+    let outputFileCount = fileCount;
     const folderCount = view.getUint8(header + 1);
     for (let i = 0; i < fileCount; i++) {
       signal?.throwIfAborted();
       const entry = take(12);
       const fileName = name(view.getUint8(entry));
       if (result.files.has(fileName)) throw new Error(`Duplicate MR entry: ${path}/${fileName}`);
+      const entryHeader = bytes.subarray(entry, offset);
       const stored = view.getUint32(entry + 4, true);
       const unpacked = view.getUint32(entry + 8, true);
       expanded += unpacked || stored;
       if (expanded > maxExpandedBytes) throw new Error("MR expanded size limit exceeded");
       const payload = bytes.subarray(take(stored), offset);
-      result.files.set(fileName, {
+      const decoded = {
         type: view.getUint8(entry + 1),
         arraySize: view.getUint16(entry + 2, true),
         bytes: unpacked ? await inflate(payload, unpacked, signal) : payload,
-      });
+      };
+      result.files.set(fileName, decoded);
+      if (transform) {
+        const replacement = transform(`${path}/${fileName}`, decoded);
+        if (replacement === decoded) {
+          append(entryHeader);
+          append(payload);
+        } else if (replacement) {
+          const header = entryHeader.slice();
+          const headerView = new DataView(header.buffer);
+          headerView.setUint8(1, replacement.type);
+          headerView.setUint16(2, replacement.arraySize, true);
+          headerView.setUint32(4, replacement.bytes.length, true);
+          headerView.setUint32(8, 0, true);
+          append(header);
+          append(replacement.bytes);
+        } else outputFileCount--;
+      }
     }
+    new DataView(directoryHeader.buffer).setUint16(2, outputFileCount, true);
     for (let i = 0; i < folderCount; i++) {
       const [childName, child] = await directory(path, depth + 1);
       result.folders.set(childName, child);
@@ -103,11 +138,28 @@ export async function readMr(bytes: Uint8Array<ArrayBuffer>, signal?: AbortSigna
     return [folderName, result];
   }
   take(4);
+  append(bytes.subarray(0, 4));
   const magic = view.getUint32(0, true);
   if (magic !== 0xcccc0067 && magic !== 0x00000067) throw new Error("Invalid MR signature");
   const [rootName, root] = await directory("", 0);
   if (bytes.subarray(offset).some((byte) => ![0, 0xcc, 0xcd, 0xfd].includes(byte)))
     throw new Error("Unexpected data after MR root");
 
-  return { rootName, root, directories: folders };
+  const rewritten = transform ? new Uint8Array(outputSize) : undefined;
+  let written = 0;
+  for (const chunk of chunks) {
+    rewritten!.set(chunk, written);
+    written += chunk.length;
+  }
+  return { rootName, root, directories: folders, rewritten };
+}
+
+export async function readMr(bytes: Uint8Array<ArrayBuffer>, signal?: AbortSignal) {
+  const { rootName, root, directories } = await parseMr(bytes, signal);
+  return { rootName, root, directories };
+}
+
+// Preserve untouched encoded records, including original byte-valued names and compression.
+export async function rewriteMrEntries(bytes: Uint8Array<ArrayBuffer>, transform: EntryTransform) {
+  return (await parseMr(bytes, undefined, transform)).rewritten!;
 }

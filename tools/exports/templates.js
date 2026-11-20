@@ -50,11 +50,12 @@ export function renderRegistry(manifest, { collisions }) {
 
 int WebNativeModuleLoaded(const char* image_name);
 OSWord WebDynamicModuleExport(const char* image_name, const char* name);
+OSWord WebResourceModuleExport(const char* name);
 
 OSWord WebNativeModuleExport(const char* module, const char* name)
 {
 ${moduleLookups.join("\n")}
-    return 0;
+    return WebDynamicModuleExport(module, name);
 }
 
 OSWord WebNativeExport(const char* name)
@@ -62,7 +63,7 @@ OSWord WebNativeExport(const char* name)
     OSWord result;
 ${collisionLookups.join("\n")}
 ${loadedLookups.join("\n")}
-    return 0;
+    return WebResourceModuleExport(name);
 }
 `;
 }

@@ -215,10 +215,11 @@ fn loader_fixture(modules: crate::assets::ModuleFiles) -> Result<Simulator> {
         Host {
             wasi: WasiCtxBuilder::new().build_p1(),
             dylink: None,
+            module_images: Default::default(),
         },
     );
     let mut linker = Linker::new(&engine);
-    wasmtime_dylink::emscripten::add_to_linker(&mut linker, |host: &mut Host| &mut host.dylink)?;
+    dylink::add_to_linker(&mut linker)?;
     linker.func_wrap("env", "fail_constructor", || -> wasmtime::Result<()> {
         Err(wasmtime::Error::msg("fixture constructor root cause"))
     })?;
@@ -239,6 +240,7 @@ fn loader_fixture(modules: crate::assets::ModuleFiles) -> Result<Simulator> {
     let memory = instance.get_memory(&mut store, "memory").unwrap();
     dylink::attach(&mut store, instance, linker, modules)?;
     Ok(Simulator {
+        prepared_resources: None,
         capacity: 0,
         slots: vec![],
         store,
@@ -273,7 +275,7 @@ fn module_descriptor(world: &mut Simulator, name: &str) -> Result<u32> {
 
 fn load_all_entry_points(world: &mut Simulator, names: &[String]) -> Result<()> {
     let mut linker = Linker::new(world.store.engine());
-    wasmtime_dylink::emscripten::add_to_linker(&mut linker, |host: &mut Host| &mut host.dylink)?;
+    dylink::add_to_linker(&mut linker)?;
     let open = linker
         .get(&mut world.store, "env", "_dlopen_js")
         .unwrap()
@@ -291,7 +293,7 @@ fn load_all_entry_points(world: &mut Simulator, names: &[String]) -> Result<()> 
         .memory
         .write(&mut world.store, name as usize, b"Tm4ModuleExport\0")?;
     for file in names {
-        let handle = module_descriptor(world, &format!("/modules/{file}"))?;
+        let handle = module_descriptor(world, &format!("/mr/{}", file.replace(".wasm", ".sym")))?;
         ensure!(open.call(&mut world.store, handle)? == 1, "opening {file}");
         let pointer = sym.call(&mut world.store, (handle, name, name + 24))?;
         ensure!(pointer != 0, "resolving {file}");
@@ -312,14 +314,14 @@ fn dynamic_module_failure_preserves_constructor_cause_and_blocks_reentry() -> Re
       (func (export "__wasm_call_ctors") call $fail))"#,
     )?;
     let mut world = loader_fixture(vec![("broken.wasm".into(), bytes.into())])?;
-    let handle = module_descriptor(&mut world, "/modules/broken.wasm")?;
+    let handle = module_descriptor(&mut world, "/mr/broken.sym")?;
     let error = world.call::<u32, i32>("open", handle).unwrap_err();
     let detail = format!("{error:#}");
     assert!(
         detail.contains("Resource-module loader failed during open"),
         "{detail}"
     );
-    assert!(detail.contains("broken.wasm"), "{detail}");
+    assert!(detail.contains("broken.sym"), "{detail}");
     assert!(
         detail.contains("fixture constructor root cause"),
         "{detail}"
@@ -344,4 +346,134 @@ fn dynamic_module_arena_loads_entire_stock_inventory() -> Result<()> {
         .collect::<Vec<_>>();
     let mut world = Simulator::new(&bytes, &resources, compatibility())?;
     load_all_entry_points(&mut world, &names)
+}
+
+#[test]
+#[ignore = "requires diagnostic Wasm and private stock resources"]
+fn authored_mr_module_follows_registry_ownership() -> Result<()> {
+    let image = wat::parse_str(
+        r#"(module
+      (@dylink.0 (mem-info (memory 0 0) (table 1 0)))
+      (@custom "rm4.module" "mprobe.sym")
+      (import "env" "memory" (memory 1))
+      (import "env" "__indirect_function_table" (table 0 funcref))
+      (import "env" "__table_base" (global $base i32))
+      (func $probe (result i32) i32.const 37)
+      (elem (global.get $base) $probe)
+      (func (export "Tm4ModuleExport") (param $name i32) (result i32)
+        local.get $name i32.load8_u i32.const 80 i32.eq
+        if (result i32) global.get $base else i32.const 0 end))"#,
+    )?;
+    let mut archive = vec![0x67, 0, 0, 0, 8, 0, 1, 0];
+    archive.extend_from_slice(b"Root\0\0\0\0");
+    archive.extend_from_slice(&[16, 6, 255, 255]);
+    archive.extend_from_slice(&(image.len() as u32).to_le_bytes());
+    archive.extend_from_slice(&0u32.to_le_bytes());
+    archive.extend_from_slice(b"behavior.mod\0\0\0\0");
+    archive.extend_from_slice(&image);
+    let mut modules = dylink::test_modules()?;
+    modules.push(("mprobe.wasm".into(), image.into()));
+    let (bytes, resources) = paths()?;
+    let mut world = Simulator::new_with_cache(&bytes, &resources, compatibility(), modules, None)?;
+    fn put(world: &mut Simulator, bytes: &[u8]) -> Result<u32> {
+        let ptr = world.call::<u32, u32>("malloc", bytes.len() as u32)?;
+        ensure!(ptr != 0, "Allocation failed");
+        world.memory.write(&mut world.store, ptr as usize, bytes)?;
+        Ok(ptr)
+    }
+    let mr = put(&mut world, &archive)?;
+    let root = put(&mut world, b"/\0")?;
+    let first = put(&mut world, b"probe-a\0")?;
+    let second = put(&mut world, b"probe-b\0")?;
+    let image_name = put(&mut world, b"mprobe.sym\0")?;
+    let symbol = put(&mut world, b"ProbeValue\0")?;
+    for registration in [first, second] {
+        assert_eq!(
+            world.call::<(u32, u32, u32), i32>("RegAddReg", (root, mr, registration))?,
+            1
+        );
+    }
+    let function = world.call::<(u32, u32), u32>("WebDynamicModuleExport", (image_name, symbol))?;
+    let table = world
+        .instance
+        .get_table(&mut world.store, "__indirect_function_table")
+        .unwrap();
+    let wasmtime::Ref::Func(Some(probe)) = table.get(&mut world.store, function as u64).unwrap()
+    else {
+        anyhow::bail!("Missing probe function")
+    };
+    assert_eq!(
+        probe
+            .typed::<(), i32>(&world.store)?
+            .call(&mut world.store, ())?,
+        37
+    );
+    world.call::<u32, ()>("RegRemoveReg", first)?;
+    assert_eq!(
+        world.call::<u32, i32>("WebNativeModuleLoaded", image_name)?,
+        1
+    );
+    world.call::<u32, ()>("RegRemoveReg", second)?;
+    assert_eq!(
+        world.call::<(u32, u32), u32>("WebDynamicModuleExport", (image_name, symbol))?,
+        0
+    );
+    assert_eq!(
+        world.call::<(u32, u32, u32), i32>("RegAddReg", (root, mr, first))?,
+        1
+    );
+    assert_ne!(
+        world.call::<(u32, u32), u32>("WebDynamicModuleExport", (image_name, symbol))?,
+        0
+    );
+    world.call::<u32, ()>("RegRemoveReg", first)?;
+    for ptr in [mr, root, first, second, image_name, symbol] {
+        world.call::<u32, ()>("free", ptr)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn module_validation_rejects_substitution_and_invalid_memory() -> Result<()> {
+    let engine = Engine::default();
+    let mut linker = Linker::new(&engine);
+    dylink::add_to_linker(&mut linker)?;
+    let mut store = Store::new(
+        &engine,
+        Host {
+            wasi: WasiCtxBuilder::new().build_p1(),
+            dylink: None,
+            module_images: Arc::new(std::collections::BTreeMap::from([(
+                "/mr/probe.sym".into(),
+                vec![1, 2, 3],
+            )])),
+        },
+    );
+    let module = Module::new(
+        &engine,
+        wat::parse_str(
+            r#"(module
+      (import "env" "rm4_validate_module" (func $validate (param i32 i32 i32)))
+      (memory (export "memory") 1)
+      (data (i32.const 0) "/mr/probe.sym\00")
+      (data (i32.const 32) "\01\02\03\04")
+      (func (export "validate") (param i32 i32 i32)
+        local.get 0 local.get 1 local.get 2 call $validate))"#,
+        )?,
+    )?;
+    let instance = linker.instantiate(&mut store, &module)?;
+    let validate = instance.get_typed_func::<(u32, u32, u32), ()>(&mut store, "validate")?;
+    validate.call(&mut store, (0, 32, 3))?;
+    let error = validate.call(&mut store, (0, 33, 3)).unwrap_err();
+    assert!(format!("{error:#}").contains("differs from prepared resources"));
+    for args in [
+        (0, 32, 4),
+        (0, u32::MAX, 3),
+        (0, 65535, 3),
+        (u32::MAX, 32, 3),
+        (1, 32, 3),
+    ] {
+        assert!(validate.call(&mut store, args).is_err());
+    }
+    Ok(())
 }

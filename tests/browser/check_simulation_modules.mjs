@@ -3,10 +3,12 @@ import { join, resolve } from "node:path";
 
 import { fixtureAction, fixtureCommands } from "../../tools/headless/fixture.mjs";
 import { launchBrowser } from "./helpers/browser.mjs";
+import { checkModuleLifecycle, moduleProbe } from "./helpers/module-lifecycle.mjs";
+import { prepareRuntimeFiles } from "./helpers/module-resources.mjs";
 const output = resolve(process.env.TM4_TEST_RECORD ?? "build/checks/simulation-modules.json");
 const site = resolve(process.env.TM4_WASM_SITE ?? "build/diagnostic/site");
 const resources = resolve(process.env.TM4_RESOURCE_DIR ?? "build/resources");
-const files = [...new Bun.Glob("DATA/*").scanSync({ cwd: resources })].filter((p) =>
+const files = [...new Bun.Glob("DATA/**/*").scanSync({ cwd: resources })].filter((p) =>
   /\.(MR|IMG|VAB|TIM|tsv)$/i.test(p),
 );
 const modules = [...new Bun.Glob("modules/*.wasm").scanSync({ cwd: site })];
@@ -19,6 +21,8 @@ assert.ok(
   !WebAssembly.Module.imports(auger).some(({ name }) => name.startsWith("emscripten_asm_const")),
   "Super Auger must load without a JavaScript diagnostics host",
 );
+const prepared = await prepareRuntimeFiles(resources, site);
+const probe = await moduleProbe(output);
 const html = '<!doctype html><canvas id="canvas" width="640" height="480"></canvas>';
 const server = Bun.serve({
   port: 0,
@@ -34,7 +38,7 @@ const server = Bun.serve({
       return new Response(html, { headers: { ...headers, "Content-Type": "text/html" } });
     if (path.includes("..")) return new Response("Not found", { status: 404 });
     return new Response(
-      Bun.file(path.startsWith("/assets/") ? join(resources, path.slice(8)) : join(site, path)),
+      path.startsWith("/assets/") ? prepared.get("/" + path.slice(8)) : Bun.file(join(site, path)),
       { headers },
     );
   },
@@ -47,16 +51,13 @@ try {
   page.on("pageerror", (e) => console.log(e.stack));
   await page.goto(server.url.href);
   await page.evaluate(
-    async ({ files, modules }) => {
+    async ({ files }) => {
       const load = async (path, url) => {
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Cannot load ${url}: ${response.status}`);
         return [path, new Uint8Array(await response.arrayBuffer())];
       };
-      const data = await Promise.all([
-        ...files.map((path) => load(path, "/assets/" + path)),
-        ...modules.map((path) => load(path, "/" + path)),
-      ]);
+      const data = await Promise.all([...files.map((path) => load(path, "/assets/" + path))]);
       globalThis.Module = {
         canvas: document.querySelector("canvas"),
         noInitialRun: true,
@@ -69,8 +70,10 @@ try {
           try {
             const { Module } = globalThis;
             Module.FS.mkdirTree("/DATA");
-            Module.FS.mkdirTree("/modules");
-            for (const [path, bytes] of data) Module.FS.writeFile("/" + path, bytes);
+            for (const [path, bytes] of data) {
+              Module.FS.mkdirTree("/" + path.slice(0, path.lastIndexOf("/")));
+              Module.FS.writeFile("/" + path, bytes);
+            }
             Module.tm4LocalCheckpoint = true;
             Module.callMain(["--session", "--simulation-only"]);
             globalThis.ready = true;
@@ -80,11 +83,12 @@ try {
         },
       };
     },
-    { files, modules },
+    { files },
   );
   await page.addScriptTag({ url: new URL("tm4_web.js", server.url).href });
   await page.waitForFunction(() => window.ready || window.failure, null, { timeout: 60000 });
   assert.equal(await page.evaluate(() => window.failure), undefined);
+  await checkModuleLifecycle(page, probe);
   const result = await page.evaluate(
     async ({ action, commands, opponent }) => {
       const { Module, tm4Port } = globalThis;

@@ -1,6 +1,7 @@
 import { getBuildManifest } from "@tm4/lightyear-client";
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
 import type { DiscAssets } from "@tm4/resources/loader/types";
+import { prepareModuleResources } from "@tm4/resources/mods/modules";
 
 import { type GameModule, requireRuntime } from "./module.ts";
 
@@ -39,6 +40,11 @@ export async function startGame(
       return { name: entry.name, bytes };
     }),
   );
+  await prepareModuleResources(
+    assets.files,
+    new Map(modules.map(({ name, bytes }) => [name.replace(/\.wasm$/, ".sym"), bytes])),
+  );
+  modules.length = 0;
   const parameters = new URLSearchParams(location.search);
   return new Promise((resolve, reject) => {
     globalThis.tm4Assets = assets;
@@ -60,10 +66,6 @@ export async function startGame(
             module.FS.writeFile(path, bytes, { canOwn: true });
           }
           assets.files.clear();
-          module.FS.mkdirTree("/modules");
-          for (const { name, bytes } of modules)
-            module.FS.writeFile(`/modules/${name}`, bytes, { canOwn: true });
-          modules.length = 0;
           for (const track of assets.tracks) {
             module._WebMusicConfigureTrack(track.number, track.start, track.end, track.toc);
           }
