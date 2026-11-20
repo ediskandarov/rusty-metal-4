@@ -1,7 +1,7 @@
 import { getBuildManifest } from "@tm4/lightyear-client";
 import { networkProtocolVersion } from "@tm4/lightyear-client/schemas";
+import { prepareModuleResources } from "@tm4/mr-preparation";
 import type { DiscAssets } from "@tm4/resources/loader/types";
-import { prepareModuleResources } from "@tm4/resources/mods/modules";
 
 import { type GameModule, requireRuntime } from "./module.ts";
 

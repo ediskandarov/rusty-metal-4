@@ -1,0 +1,24 @@
+[package]
+name = "rm4-mr-preparation"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+web = ["dep:wasm-bindgen"]
+
+[dependencies]
+anyhow = "1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+wasm-bindgen = { version = "=0.2.114", optional = true }
+
+[dev-dependencies]
+wat = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true

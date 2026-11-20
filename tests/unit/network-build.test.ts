@@ -20,7 +20,12 @@ if (process.argv[2] === "--version") {
 async function runBuild(installed?: string, requirement = `=${expected}`, replacement = expected) {
   const directory = await mkdtemp(join(tmpdir(), "rm4 network build "));
   try {
-    for (const path of ["tools/common.js", "tools/cli.js", "tools/network/build.ts"])
+    for (const path of [
+      "tools/common.js",
+      "tools/cli.js",
+      "tools/network/build.ts",
+      "tools/rust/wasm-bindgen.ts",
+    ])
       await Bun.write(join(directory, path), await Bun.file(join(root, path)).text());
     await Bun.write(
       join(directory, "network/Cargo.toml"),

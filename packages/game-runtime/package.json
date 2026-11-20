@@ -7,7 +7,8 @@
   },
   "dependencies": {
     "@tm4/resources": "workspace:*",
-    "@tm4/lightyear-client": "workspace:*"
+    "@tm4/lightyear-client": "workspace:*",
+    "@tm4/mr-preparation": "workspace:*"
   },
   "exports": {
     "./runtime/*": "./src/runtime/*.ts",

@@ -1,0 +1,18 @@
+{
+  "name": "@tm4/mr-preparation",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "bun": "./js/host.ts",
+      "default": "./js/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "bun build.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "vite": "8.3.8"
+  }
+}

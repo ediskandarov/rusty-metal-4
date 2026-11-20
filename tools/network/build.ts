@@ -5,6 +5,7 @@ import { $ } from "bun";
 
 import { runCli, UsageError } from "../cli.js";
 import { root } from "../common.js";
+import { wasmBindgen } from "../rust/wasm-bindgen.ts";
 
 await runCli(async () => {
   const { values } = parseArgs({
@@ -22,39 +23,11 @@ await runCli(async () => {
   const profile = mode !== "diagnostic" ? "release" : "debug";
   const manifest = join(root, "network/Cargo.toml");
   const target = join(root, "build/network-wasm");
-  const tools = join(root, "build/rust-tools");
-  const bindgen = join(
-    tools,
-    "bin",
-    process.platform === "win32" ? "wasm-bindgen.exe" : "wasm-bindgen",
-  );
   const cwd = join(root, "network");
   const cargo = Bun.TOML.parse(await Bun.file(manifest).text()) as {
     dependencies: { "wasm-bindgen": string };
   };
-  const requirement = cargo.dependencies?.["wasm-bindgen"];
-  if (typeof requirement !== "string" || !/^=\d+\.\d+\.\d+$/.test(requirement))
-    throw new Error(
-      "Pin wasm-bindgen to an exact release in network/Cargo.toml (for example =0.2.114)",
-    );
-  const bindgenVersion = requirement.slice(1);
-  const hasExpectedVersion = async () => {
-    if (!(await Bun.file(bindgen).exists())) return false;
-    const result = await $`${bindgen} --version`.quiet().nothrow();
-    return (
-      result.exitCode === 0 && result.stdout.toString().trim() === `wasm-bindgen ${bindgenVersion}`
-    );
-  };
-  if (!(await hasExpectedVersion())) {
-    const toolsTarget = join(root, "build/rust-tools-target");
-    await $`cargo install wasm-bindgen-cli --version ${requirement} --locked --force --root ${tools} --target-dir ${toolsTarget}`.cwd(
-      cwd,
-    );
-    if (!(await hasExpectedVersion()))
-      throw new Error(
-        `Installed wasm-bindgen-cli does not report expected version ${bindgenVersion}`,
-      );
-  }
+  const bindgen = await wasmBindgen(cargo.dependencies["wasm-bindgen"]);
   const features = mode === "diagnostic" ? "client,rollback_probe" : "client";
   const release = mode !== "diagnostic" ? ["--release"] : [];
   await $`cargo build --locked --lib --no-default-features --features ${features} --target wasm32-unknown-unknown --manifest-path ${manifest} --target-dir ${target} ${release}`.cwd(

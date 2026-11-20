@@ -2790,7 +2790,6 @@ checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
- "zlib-rs",
 ]
 
 [[package]]
@@ -6222,6 +6221,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57b0b88a509053cbfd535726dcaaceee631313cef981266119527a1d110f6d2b"
 
 [[package]]
+name = "rm4-mr-preparation"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "flate2",
+]
+
+[[package]]
 name = "robust"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7072,11 +7079,11 @@ dependencies = [
  "bevy_time",
  "console_error_panic_hook",
  "ctrlc",
- "flate2",
  "futures-util",
  "getrandom 0.4.3",
  "lightyear",
  "postcard",
+ "rm4-mr-preparation",
  "serde",
  "serde_json",
  "sha2",
@@ -8761,12 +8768,6 @@ dependencies = [
  "quote",
  "syn 3.0.9",
 ]
-
-[[package]]
-name = "zlib-rs"
-version = "0.6.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

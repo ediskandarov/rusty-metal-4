@@ -26,9 +26,11 @@ Before startup, resource preparation replaces original MIPS entries with the
 verified Wasm of the current build. Other encoded records retain their names,
 compression and contents. The sector index is rebuilt for the prepared lengths.
 Disc uploads and content compatibility are checked before this transformation.
-Browser preparation runs in `@tm4/resources`; the server makes a private temporary
-runtime copy. Build artifacts still contain individual module files for this
-preparation, but the runtime loads code from MR. `port/web/movie.c` retains
+The byte-oriented Rust crate in `packages/mr-preparation` performs the same
+transformation in both environments: browser Wasm via `@tm4/mr-preparation`,
+and a native dependency on the server. Browser and server adapters only supply
+bytes and store the result; the server uses a private temporary runtime copy.
+Build artifacts still contain individual module files for this preparation, but the runtime loads code from MR. `port/web/movie.c` retains
 browser-owned movie playback; the original movie code entry is removed.
 
 Module ownership follows MR registrations. Removing the last registration closes
@@ -46,6 +48,10 @@ inventory after checking the MR entry against those exact bytes. Replacing an im
 The host reserves their data through guest `malloc` and a separate function-table
 range, sized from the complete prepared inventory's `dylink.0` metadata. Loaded images live until the store is dropped;
 MR teardown still clears gameplay state and invalidates imported addresses.
+
+`bun run build:mr-preparation` builds the browser preparer; typechecking and
+player builds invoke it automatically. `bun run test:mr-preparation` runs its
+asset-free native tests; the Bun unit suite exercises the Wasm bindings.
 
 The root commands
 (`build`, `build:dev`, `build:diagnostic`, `dev`, `match`, `test`, `fmt`, `lint`

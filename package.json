@@ -11,11 +11,11 @@
     "dev:diagnostic": "bun tools/serve.js --site build/diagnostic/site",
     "match": "bun tools/network/run.ts",
     "server": "bun tools/network/server.ts",
-    "test": "bun test tests/unit",
+    "test": "bun run build:mr-preparation && bun test tests/unit",
     "fmt": "bun fmt --no-script tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml && bun tools/web/format.ts",
     "fmt:check": "bun fmt --no-script --check tools apps packages tests package.json config tsconfig.json tsconfig.base.json bunfig.toml && bun tools/web/format.ts --check",
     "lint": "bun lint --no-script tools apps packages tests",
-    "typecheck": "tsc --noEmit && bun run --filter \"@tm4/*\" typecheck && tsc --noEmit -p tests/rooms/tsconfig.json",
+    "typecheck": "bun run build:mr-preparation && tsc --noEmit && bun run --filter \"@tm4/*\" typecheck && tsc --noEmit -p tests/rooms/tsconfig.json",
     "test:player": "bun tests/browser/check_player_ui.mjs",
     "test:pages": "bun tests/browser/check_pages.mjs",
     "test:server": "bun tests/browser/check_server.mjs",
@@ -42,7 +42,9 @@
     "test:simulation:modules": "bun tests/browser/check_simulation_modules.mjs",
     "test:emscripten": "bun tests/emscripten/dlsym-catchup/check.mjs",
     "publish:challenge": "bun tools/challenge/publish.ts",
-    "dev:challenge": "bun tools/challenge/serve.ts"
+    "dev:challenge": "bun tools/challenge/serve.ts",
+    "build:mr-preparation": "bun packages/mr-preparation/build.ts",
+    "test:mr-preparation": "bun packages/mr-preparation/build.ts --test"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.12",
@@ -70,6 +72,7 @@
     "@tm4/rustymetal-server-client": "workspace:*",
     "@tm4/lightyear-client": "workspace:*",
     "@tm4/dev-server-client": "workspace:*",
-    "@tm4/room-player-protocol": "workspace:*"
+    "@tm4/room-player-protocol": "workspace:*",
+    "@tm4/mr-preparation": "workspace:*"
   }
 }

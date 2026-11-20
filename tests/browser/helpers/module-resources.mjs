@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-import { prepareModuleResources } from "../../../packages/resources/src/mods/modules.ts";
+import { prepareModuleResources } from "@tm4/mr-preparation";
 
 export async function prepareRuntimeFiles(resources, site) {
   const files = new Map();

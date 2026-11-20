@@ -25,7 +25,7 @@ for (const path of readdirSync(site, { recursive: true })) {
   if (stat.isDirectory()) continue;
   assert(stat.isFile(), `Only regular files can be published: ${path}`);
   assert(
-    allowed.has(path) || /^_astro\/[\w.-]+\.(?:css|js)$/.test(path),
+    allowed.has(path) || /^_astro\/[\w.-]+\.(?:css|js|wasm)$/.test(path),
     `Unexpected file in the public site: ${path}`,
   );
 }

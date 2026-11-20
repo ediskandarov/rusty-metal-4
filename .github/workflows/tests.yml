@@ -16,7 +16,9 @@ concurrency:
 jobs:
   checks:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      CARGO_BUILD_BUILD_DIR: ${{ github.workspace }}/build/mr-preparation
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -26,10 +28,20 @@ jobs:
           bun-version: "1.4.4"
       - name: Install locked workspace dependencies
         run: bun install --frozen-lockfile
+      - name: Set up pinned Rust toolchain
+        run: bun tools/ci/setup-rust.ts
+      - name: Cache MR preparation tools and dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: packages/mr-preparation -> ../../build/mr-preparation
+          cache-directories: build/rust-tools
+          cache-bin: false
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: bun run fmt:check
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run test
+      - run: bun run test:mr-preparation
       - run: bun run build:rustymetal4.com
       - run: bun run test:rooms
       - name: Check room browsers without game files

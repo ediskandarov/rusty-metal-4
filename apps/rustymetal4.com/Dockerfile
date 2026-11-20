@@ -15,6 +15,8 @@ ENV PATH=/opt/zig:$PATH
 RUN cargo install --locked cargo-zigbuild --version 0.24.1 && rustup target add x86_64-unknown-linux-musl
 WORKDIR /source
 COPY network/Cargo.toml network/Cargo.lock network/build.rs network/
+COPY packages/mr-preparation/Cargo.toml packages/mr-preparation/Cargo.toml
+COPY packages/mr-preparation/src packages/mr-preparation/src
 COPY network/src network/src
 COPY network/examples network/examples
 COPY config/resources.json config/ffa.json config/

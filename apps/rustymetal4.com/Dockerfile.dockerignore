@@ -18,3 +18,8 @@
 !network/examples/**
 !build/release/server/modules/
 !build/release/server/modules/**
+!packages/
+!packages/mr-preparation/
+!packages/mr-preparation/Cargo.toml
+!packages/mr-preparation/src/
+!packages/mr-preparation/src/**

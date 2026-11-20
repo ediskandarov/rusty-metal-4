@@ -1,11 +1,9 @@
 import { expect, test } from "bun:test";
 
-import { readMr, rewriteMrEntries } from "../../packages/resources/src/compatibility/mr.ts";
-import {
-  moduleName,
-  nameModule,
-  prepareModuleResources,
-} from "../../packages/resources/src/mods/modules.ts";
+import { prepareModuleResources } from "@tm4/mr-preparation";
+
+import { readMr } from "../../packages/resources/src/compatibility/mr.ts";
+import { moduleName, nameModule } from "../../packages/resources/src/mods/modules.ts";
 import { binary, directory, writeMr } from "../../packages/resources/src/mods/mr-writer.ts";
 const empty = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]);
 function original(name: string) {
@@ -42,7 +40,6 @@ test("stock and authored modules end up as Wasm in MR without changing other rec
     (_, i) => new TextDecoder().decode(source.subarray(i, i + 6)) === "opaque",
   );
   source[nameOffset + 1] = 0x85;
-  expect(await rewriteMrEntries(source, (_, entry) => entry)).toEqual(source);
   const assets = files(source),
     stock = nameModule(empty, "o_car.sym");
   await prepareModuleResources(assets, new Map([["o_car.sym", stock]]));
@@ -70,6 +67,10 @@ test("a preparation failure leaves the input assets intact", async () => {
   const bad = directory();
   bad.files.set("bad.mod", original("unknown.sym"));
   assets.set("/DATA/SECOND.MR", writeMr(bad));
+  assets.set(
+    "/DATA/files.tsv",
+    new TextEncoder().encode(`1\t1\t/DATA/MAIN.MR\n2\t1\t/DATA/SECOND.MR\n`),
+  );
   const before = new Map(assets);
   await expect(
     prepareModuleResources(assets, new Map([["o_car.sym", nameModule(empty, "o_car.sym")]])),

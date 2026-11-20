@@ -8,6 +8,7 @@
         "@tm4/dev-server-client": "workspace:*",
         "@tm4/game-runtime": "workspace:*",
         "@tm4/lightyear-client": "workspace:*",
+        "@tm4/mr-preparation": "workspace:*",
         "@tm4/resources": "workspace:*",
         "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
@@ -68,6 +69,7 @@
       "name": "@tm4/game-runtime",
       "dependencies": {
         "@tm4/lightyear-client": "workspace:*",
+        "@tm4/mr-preparation": "workspace:*",
         "@tm4/resources": "workspace:*",
       },
     },
@@ -75,6 +77,12 @@
       "name": "@tm4/lightyear-client",
       "dependencies": {
         "zod": "4.6.7",
+      },
+    },
+    "packages/mr-preparation": {
+      "name": "@tm4/mr-preparation",
+      "devDependencies": {
+        "vite": "8.3.8",
       },
     },
     "packages/resources": {
@@ -415,6 +423,8 @@
     "@tm4/game-runtime": ["@tm4/game-runtime@workspace:packages/game-runtime"],
 
     "@tm4/lightyear-client": ["@tm4/lightyear-client@workspace:packages/lightyear-client"],
+
+    "@tm4/mr-preparation": ["@tm4/mr-preparation@workspace:packages/mr-preparation"],
 
     "@tm4/player": ["@tm4/player@workspace:apps/player"],
 
