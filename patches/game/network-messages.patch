@@ -1,3 +1,4 @@
+diff --git a/src/main/screen.c b/src/main/screen.c
 --- a/src/main/screen.c
 +++ b/src/main/screen.c
 @@ -12,6 +12,9 @@
@@ -7,10 +8,10 @@
 +#include "port/web/checkpoint.h"
 +#include <emscripten.h>
 +#include <string.h>
-
+ 
  #include "tm4_scalar.h"
-
-@@ -102,6 +105,53 @@
+ 
+@@ -102,6 +105,53 @@ static char HudWeaponsTexturePath[];
  static char HudPlayerTexturePath[];
  static char HudEnemyTexturePath[];
  static ScreenMessageQueue ScreenLocalMessages[4];
@@ -64,15 +65,16 @@
  static char ScreenMessageFontName[];
  static char FontTextureDirectory[];
  static char ScreenPowerupDisplaySymbol[];
-@@ -398,23 +448,19 @@
+@@ -398,22 +448,19 @@ void ScreenRemoveLocalMessage(s32 player)
  #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002F8F0
  void ScreenLocalMessageRegisterV(s32 player, const char* format, va_list arguments)
  {
 -    ScreenMessageQueue* base;
 -    ScreenMessageQueue* queue;
      const s32 queue_count = ArrayCount(ScreenLocalMessages);
-     player = WebNetLocalView(player);
-     if (player < 0 || player >= queue_count || player >= GameInfo.player_count)
+-    if (player >= queue_count || player >= GameInfo.player_count)
++    player = WebNetLocalView(player);
++    if (player < 0 || player >= queue_count || player >= GameInfo.player_count)
          return;
 -    base = ScreenLocalMessages;
 -    queue = &base[player];
@@ -81,23 +83,22 @@
 -        queue->timer = 60;
 -    } else if (queue->count == 0) {
 -        queue->timer = 60;
--    }
--    FormatStringV(
--        ScreenLocalMessages[player].messages[ScreenLocalMessages[player].count], format, arguments);
--    ScreenLocalMessages[player].count++;
 +    ScreenMessageQueue* queue = &ScreenLocalMessages[player];
 +    if (WebNetRenderedPrediction()) {
 +        queue = NetworkMessageTick;
 +        if (!queue)
 +            return;
-+    }
+     }
+-    FormatStringV(
+-        ScreenLocalMessages[player].messages[ScreenLocalMessages[player].count], format, arguments);
+-    ScreenLocalMessages[player].count++;
 +    append_local_message(queue);
 +    FormatStringV(queue->messages[queue->count], format, arguments);
 +    ++queue->count;
  }
  #endif
-
-@@ -495,6 +541,8 @@
+ 
+@@ -494,6 +541,8 @@ void ScreenLoadFont(char* file, const char* name, s32 inputFirstCharacter)
  #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002FE64
  void ScreenInitialize(void)
  {
@@ -105,4 +106,4 @@
 +    NetworkMessageTick = NULL;
      s32 player;
      const s32 queue_count = ArrayCount(ScreenLocalMessages);
-
+ 

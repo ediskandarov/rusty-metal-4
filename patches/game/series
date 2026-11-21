@@ -21,6 +21,7 @@ network.patch
 world-motion.patch
 bullet-motion.patch
 network-session.patch
+network-local-view.patch
 scene-motion.patch
 ribbon-motion.patch
 attached-motion.patch

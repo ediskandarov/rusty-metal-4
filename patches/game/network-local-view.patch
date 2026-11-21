@@ -1,0 +1,65 @@
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -1077,7 +1077,7 @@ void RenderBuildFrame(void)
+ 
+         ordering += otSize;
+         primitives += RenderPrimitiveCount;
+-        view_state = (Tm4GameInfo*)((u8*)&GameInfo + view * sizeof(Tm4GamePlayer));
++        view_state = (Tm4GameInfo*)((u8*)&GameInfo + WebNetGameplaySlot(view) * sizeof(Tm4GamePlayer));
+         camera = view_state->players[0].camera;
+ #ifdef __psyz
+         Camera pose;
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -11,6 +11,7 @@
+ /* MAIN screen messages, HUD resources, and per-player drawing. */
+ #include "tm4/main/render.h"
+ #include "tm4/main/screen.h"
++#include "port/web/net_match.h"
+ 
+ #include "tm4_scalar.h"
+ 
+@@ -722,7 +723,7 @@ void ScreenDisplayAbbreviatedHud(Tm4RenderBuffer* buffer, Tm4OrderingTag* orderi
+     s32 green;
+     s32 blue;
+ 
+-    car = GameInfo.players[player].car;
++    car = GameInfo.players[WebNetGameplaySlot(player)].car;
+     if (!car)
+         return;
+     primitives = &buffer->players[player];
+@@ -742,7 +743,7 @@ void ScreenDisplayAbbreviatedHud(Tm4RenderBuffer* buffer, Tm4OrderingTag* orderi
+     FontPrint(text, ScreenMessageFontName, 28, RenderViewHeight - 24, statusFont, orderingTable,
+         FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, red, green, blue, 1, 1);
+     if (GameInfo.game_type == GAME_TYPE_TOURNAMENT) {
+-        sprintf(text, HudDecimalFormat, GameInfo.players[player].lives);
++        sprintf(text, HudDecimalFormat, GameInfo.players[WebNetGameplaySlot(player)].lives);
+         FontPrint(text, ScreenMessageFontName, 28, RenderViewHeight - 48, statusFont, orderingTable,
+             FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, ScreenAbbrPlayerLivesColor->r,
+             ScreenAbbrPlayerLivesColor->g, ScreenAbbrPlayerLivesColor->b, 1, 1);
+@@ -839,12 +840,12 @@ void ScreenDisplayHud(Tm4RenderBuffer* buffer, Tm4OrderingTag* orderingTable, s3
+     const s32 lives_count = ArrayCount(primitives->lives);
+ 
+     if (GameInfo.mode == GAME_MODE_PLAY
+-        && (GameInfo.players[player].abbreviated_hud || GameInfo.player_count >= 3)) {
++        && (GameInfo.players[WebNetGameplaySlot(player)].abbreviated_hud || GameInfo.player_count >= 3)) {
+         ScreenDisplayAbbreviatedHud(buffer, orderingTable, player);
+         return;
+     }
+     ScreenDisplayLocalMessages(player, buffer, orderingTable);
+-    car = GameInfo.players[player].car;
++    car = GameInfo.players[WebNetGameplaySlot(player)].car;
+     if (!car)
+         return;
+     primitives = &buffer->players[player];
+@@ -964,7 +965,7 @@ void ScreenDisplayHud(Tm4RenderBuffer* buffer, Tm4OrderingTag* orderingTable, s3
+             RenderViewHeight + (u16)-16);
+     }
+     addPrim(orderingTable, &primitives->health_bar);
+-    for (index = 0; index < Int32Min(GameInfo.players[player].lives, lives_count); index++) {
++    for (index = 0; index < Int32Min(GameInfo.players[WebNetGameplaySlot(player)].lives, lives_count); index++) {
+         setSemiTrans(&primitives->lives[index], 0);
+         setRGB0(&primitives->lives[index], ScreenPlayerLivesColor->r, ScreenPlayerLivesColor->g,
+             ScreenPlayerLivesColor->b);
