@@ -94,6 +94,13 @@ if(TM4_WEB_TEST_HOOKS)
     target_link_options(tm4_web PRIVATE -Wl,--export=WebDynamicModuleExport
         -Wl,--export=WebNativeModuleLoaded -Wl,--export=RegAddReg -Wl,--export=RegRemoveReg -Wl,--export=free)
 endif()
+# Surface adapters are called by the dynamically loaded car module.
+target_link_options(tm4_web PRIVATE
+    -Wl,--export=WebSurfaceEffectsLoad -Wl,--export=WebSurfaceEffectsUnload
+    -Wl,--export=WebSurfaceEffectsOwnsAudio
+    -Wl,--export=WebSurfaceEffectsImpact -Wl,--export=WebSurfaceEffectsCompression -Wl,--export=WebSurfaceEffectsAttach
+    -Wl,--export=WebSurfaceEffectsDetach -Wl,--export=WebSurfaceEffectsBegin
+    -Wl,--export=WebSurfaceEffectsStep -Wl,--export=WebSurfaceEffectsReset)
 include("${TM4_EXPORT_DIRECTORY}/sources.cmake")
 get_property(TM4_GENERATED_EXPORT_SOURCES GLOBAL PROPERTY TM4_GENERATED_EXPORT_SOURCES)
 list(REMOVE_ITEM TM4_CORE_SOURCES ${TM4_EXPORT_INPUTS})

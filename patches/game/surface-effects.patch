@@ -1,0 +1,115 @@
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -1,6 +1,7 @@
+ #ifndef TM4_MODULES_CAR_H
+ #define TM4_MODULES_CAR_H
+ 
++#include "port/extensions/surface_effects_runtime.h"
+ #include "port/web/participant.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+@@ -402,3 +403,4 @@
++    Rm4SurfaceBinding surface_effects;
+ };
+ 
+ typedef struct CarCameraState {
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -81,6 +81,7 @@
+     CarPhysicsClassConstructor(registry);
+     CarDisplayClassConstructor(registry);
+     CarCharacterClassConstructor();
++    WebSurfaceEffectsLoad();
+ }
+ 
+ void CarClassDestructor(RegistryDirectory* registry)
+@@ -91,6 +92,7 @@
+     CarPhysicsClassDestructor(registry);
+     CarDisplayClassDestructor(registry);
+     CarCharacterClassDestructor();
++    WebSurfaceEffectsUnload();
+ }
+ 
+ void* CarGetFileData(char* path)
+@@ -247,6 +249,10 @@
+             CarDestructor(car);
+             return 0;
+         }
++    }
++    if (!WebSurfaceEffectsAttach(car)) {
++        CarDestructor(car);
++        return 0;
+     }
+     return 1;
+ }
+@@ -346,8 +352,10 @@
+     if (action != CarActionNone && CarInputActions[action].name)
+         ScreenLocalMessageRegister(car->controller_index, "%s!", CarInputActions[action].name);
+     CarWeaponProcess(car);
++    WebSurfaceEffectsBegin(car);
+     if (CarPhysicsProcess(car) != 1)
+         return;
++    WebSurfaceEffectsStep(car);
+     CarDisplayProcess(car);
+     for (particle = 0; particle < particle_count; particle++) {
+         s32 material, surface;
+@@ -529,6 +535,7 @@
+ {
+     Car* car = payload;
+     WebNetCarLeaving(car);
++    WebSurfaceEffectsDetach(car);
+     CarReleaseResources(car);
+     if (car->fire_effect)
+         ObjectDestroy(car->fire_effect);
+--- a/src/modules/car/orientation.c
++++ b/src/modules/car/orientation.c
+@@ -96,6 +96,7 @@
+     const s32 wheel_count = ArrayCount(car->wheels);
+ #ifdef __psyz
+     WebInterpolationCutCar(car);
++    WebSurfaceEffectsReset(car);
+ #endif
+     car->transform = *matrix;
+     TransformOriginalBox(car);
+--- a/src/modules/car/wheel_physics.c
++++ b/src/modules/car/wheel_physics.c
+@@ -367,8 +367,9 @@
+             car->contact_countdown = 30;
+             SubtractVector3ToVector(movement, car->transform.t, car->previous_transform.t);
+             speed = SquareRoot0(DotSelf0(movement));
++            WebSurfaceEffectsImpact(car, speed);
+             volume = speed * 3072 / 250;
+-            {
++            if (!WebSurfaceEffectsOwnsAudio(car)) {
+                 char* sound = volume <= 1536 ? CarSmallCollisionSound : CarMediumCollisionSound;
+                 volume += 1024;
+                 if (volume > ONE)
+@@ -500,6 +501,7 @@
+             displacement->vz = z;
+         }
+         gap = DotS12_64(&displacement->vx, &axis.vx) - car->physics_box.dimensions.vy;
++        WebSurfaceEffectsCompression(car, i, wheel->direction.fields.displacement - gap);
+         if (wheel->direction.fields.displacement - gap >= 29)
+             shocks++;
+         {
+@@ -511,7 +513,7 @@
+         }
+     }
+     if (shocks >= 4 && ground && car->transform.m[1][1] > 0
+-        && !SoundPlaying(car, CarLandingSound)) {
++        && (WebSurfaceEffectsOwnsAudio(car) || !SoundPlaying(car, CarLandingSound))) {
+         VECTOR* movement = &delta;
+         SVECTOR* normal = &skid_axis;
+         car->contact_countdown = 30;
+@@ -522,8 +524,9 @@
+         volume = speed * ONE / 300;
+         if (volume > ONE)
+             volume = ONE;
+-        ObjectCreate(CarSoundName, OBJECT_FOLLOW_OWNER, car, CarLandingSound,
+-            SOUND_EMITTER_VOLUME_SCALE, volume);
++        if (!WebSurfaceEffectsOwnsAudio(car))
++            ObjectCreate(CarSoundName, OBJECT_FOLLOW_OWNER, car, CarLandingSound,
++                SOUND_EMITTER_VOLUME_SCALE, volume);
+         if (car->control_kind == CAR_CONTROL_PLAYER)
+             GamePadVibrateS(car->controller_index, CarShockVibration);
+     }

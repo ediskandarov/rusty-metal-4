@@ -1,4 +1,5 @@
 #include "overlays.h"
+#include "port/extensions/surface_effects_state.h"
 #include "port/web/module_import.h"
 #include "snapshot_types.h"
 
@@ -657,6 +658,7 @@ static const SnapshotField car_fields[] = {
     SNAP_LOCAL(Car, process_callback),
     SNAP_LOCAL(Car, collision_callback),
     SNAP_LOCAL(Car, destructor_callback),
+    SNAP_GROUP(Car, surface_effects, &WebSurfaceEffectsSnapshot),
     { 0 },
 };
 

@@ -1,5 +1,6 @@
 #include "net_match.h"
 #include "net_state_fields.h"
+#include "port/extensions/surface_effects_state.h"
 #include "port/web/module_import.h"
 #include "snapshot_types.h"
 #include "src/modules/car/private.h"
@@ -43,6 +44,7 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(car->energy);
     VALUE(car->turbo_fuel);
     VALUE(car->turbo_amount);
+    WebSurfaceEffectsWriteState(hash, &car->surface_effects);
     VALUE(car->fire_ticks);
     VALUE(car->burn_source.low);
     VALUE(car->burn_source.high);
