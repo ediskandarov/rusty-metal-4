@@ -1,0 +1,40 @@
+diff --git a/src/main/font.c b/src/main/font.c
+--- a/src/main/font.c
++++ b/src/main/font.c
+@@ -15,14 +15,13 @@
+ #include <STDDEF.H>
+ #include <STRINGS.H>
+ 
+-/* The original compiler accepts initialized zero-length tails. Grid records have
+- * just the 24-byte header; proportional records append 64 inclusive UV bounds. */
++/* Grid records have only the header; proportional records append glyph bounds. */
+ typedef struct FontGlyphBounds {
+     u8 left, top, right, bottom;
+ } FontGlyphBounds;
+ 
+ typedef struct FontRecord {
+-    char* name;
++    const char* name;
+     s32 proportional;
+     u8 u;
+     u8 v;
+@@ -337,7 +336,6 @@
+     else if (!strcmp(name, "memcard"))
+         FontTable[FontCount] = &FontMemcard;
+     font = FontTable[FontCount++];
+-    strcpy(font->name, name);
+     font->first_character = first_character;
+     font->tpage = texture->tpage;
+     font->clut = texture->clut;
+diff --git a/src/main/object/classes.c b/src/main/object/classes.c
+--- a/src/main/object/classes.c
++++ b/src/main/object/classes.c
+@@ -55,6 +55,8 @@
+ {
+     s32 lower = ObjectFindClassIndex(first);
+     s32 upper = ObjectFindClassIndex(second);
++    if (lower < 0 || upper < 0)
++        return NULL;
+     if (upper < lower) {
+         s32 swap = lower;
+         lower = upper;

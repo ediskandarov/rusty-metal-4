@@ -1,4 +1,7 @@
-runtime.patch
+runtime-fixes.patch
+runtime-platform.patch
+runtime-integration.patch
+browser-report.patch
 car.patch
 menu.patch
 overlays.patch
@@ -12,7 +15,6 @@ bullet-motion.patch
 network-session.patch
 scene-motion.patch
 ribbon-motion.patch
-browser-report.patch
 attached-motion.patch
 cosmetic-motion.patch
 motion-effects.patch

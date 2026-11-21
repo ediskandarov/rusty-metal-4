@@ -25,7 +25,7 @@ diff --git a/src/main/loading.c b/src/main/loading.c
 +#include "port/web/net_match.h"
  
  #include "tm4_scalar.h"
- #include <emscripten.h>
+ #include "port/web/browser_report.h"
 @@ -31,6 +32,8 @@
  #if !defined(TM4_LOADING_FUNCTION) || TM4_LOADING_FUNCTION == 0x80031FBC
  void LoadingInitializeDisplay(void)

@@ -45,17 +45,6 @@ diff --git a/include/tm4/main/math3d.h b/include/tm4/main/math3d.h
  
  /* Returns the Q12 fraction along the segment, or -1 when it misses. */
  s32 PolygonRayParameter(const Tm4CollisionPolygon* polygon, const Tm4WorldRay* ray);
-diff --git a/include/tm4/main/memory.h b/include/tm4/main/memory.h
---- a/include/tm4/main/memory.h
-+++ b/include/tm4/main/memory.h
-@@ -6,6 +6,7 @@
- u32 MemGetAlignedStartupAddress(void);
- void MemSetHeapStartAddress(u32 address);
- void MemInitDefaultHeap(void);
-+void MemInitHeap(u8* heapStart, u32 heapBytes);
- 
- void* MemAlloc(u32 payloadBytes);
- void* MemAllocTail(u32 payloadBytes);
 diff --git a/include/tm4/main/object.h b/include/tm4/main/object.h
 --- a/include/tm4/main/object.h
 +++ b/include/tm4/main/object.h
@@ -67,34 +56,6 @@ diff --git a/include/tm4/main/object.h b/include/tm4/main/object.h
  
  enum Tm4ObjectFlags {
      OBJECT_HAS_OWNER = 1 << 0,
-diff --git a/src/main/font.c b/src/main/font.c
---- a/src/main/font.c
-+++ b/src/main/font.c
-@@ -15,14 +15,13 @@
- #include <STDDEF.H>
- #include <STRINGS.H>
- 
--/* The original compiler accepts initialized zero-length tails. Grid records have
-- * just the 24-byte header; proportional records append 64 inclusive UV bounds. */
-+/* Grid records have only the header; proportional records append glyph bounds. */
- typedef struct FontGlyphBounds {
-     u8 left, top, right, bottom;
- } FontGlyphBounds;
- 
- typedef struct FontRecord {
--    char* name;
-+    const char* name;
-     s32 proportional;
-     u8 u;
-     u8 v;
-@@ -337,7 +336,6 @@
-     else if (!strcmp(name, "memcard"))
-         FontTable[FontCount] = &FontMemcard;
-     font = FontTable[FontCount++];
--    strcpy(font->name, name);
-     font->first_character = first_character;
-     font->tpage = texture->tpage;
-     font->clut = texture->clut;
 diff --git a/src/main/geometry/box.c b/src/main/geometry/box.c
 --- a/src/main/geometry/box.c
 +++ b/src/main/geometry/box.c
@@ -204,98 +165,6 @@ diff --git a/src/main/geometry/polyhedron.c b/src/main/geometry/polyhedron.c
 -#endif
 +#endif
 +#endif
-diff --git a/src/main/loading.c b/src/main/loading.c
---- a/src/main/loading.c
-+++ b/src/main/loading.c
-@@ -1,6 +1,7 @@
- #include "tm4/main/loading.h"
- 
- #include "tm4_scalar.h"
-+#include <emscripten.h>
- 
- #include "tm4/fixed.h"
- #include "tm4/main/game.h"
-@@ -70,6 +71,8 @@
-     s32 loaded;
- 
-     loaded = loadingBytesLoaded + mul64s(loadingBytesCurrent, progress, 12);
--    LoadingDisplay(((loaded << 8) / loadingBytesTotal) << 4);
-+    s32 total_progress = ((loaded << 8) / loadingBytesTotal) << 4;
-+    EM_ASM({ tm4Port.loading = $0 / 4096; }, total_progress);
-+    LoadingDisplay(total_progress);
- }
- #endif
-diff --git a/src/main/object/classes.c b/src/main/object/classes.c
---- a/src/main/object/classes.c
-+++ b/src/main/object/classes.c
-@@ -55,6 +55,8 @@
- {
-     s32 lower = ObjectFindClassIndex(first);
-     s32 upper = ObjectFindClassIndex(second);
-+    if (lower < 0 || upper < 0)
-+        return NULL;
-     if (upper < lower) {
-         s32 swap = lower;
-         lower = upper;
-@@ -154,58 +156,6 @@
-         }
-     }
-     return 0;
--}
--#endif
--
--#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x800197d4
--/* A failed child lookup leaves the VLA scope before the next iteration. */
--/* Keep uppercasing sequenced before the second prefix-path_length query. */
--/* The SDK char return adds an instruction here; retain the observed int call ABI. */
--extern s32 func_8003CDB8(s32);
--/* Registry walk: mutable visitor name lives only through callback and recursion. */
--void ObjectVisitDirectory(char* prefix, RegistryDirectory* directory, Tm4DirectoryVisitor visitor)
--{
--    s32 child_count = RegGetNumberOfDirectoriesP(directory);
--    s32 i;
--    for (i = 0; i < child_count; i++) {
--        char* name = RegGetDirectoryNamePN(directory, i);
--        if (name != NULL) {
--            s32 path_length = strlen(prefix) + strlen(name) + 1;
--            char path[path_length];
--            RegistryDirectory* child;
--            s32 uppercase_initial;
--            strcpy(path, prefix);
--            strcat(path, name);
--            uppercase_initial = func_8003CDB8(path[strlen(prefix)]);
--            path[strlen(prefix)] = uppercase_initial;
--            child = RegGetDirectoryPtrPN(directory, i);
--            if (child == NULL)
--                continue;
--            if (visitor == NULL || visitor(path, child))
--                ObjectVisitDirectory(path, child, visitor);
--        }
--    }
--}
--#endif
--
--#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x80019940
--/* Directory traversal needs the main stack for its variable-length paths. */
--s32 ObjectDirectoryRecurse(Tm4DirectoryVisitor visitor)
--{
--    RegistryDirectory* directory = RegGetDirectoryPtrS(OBJECT_REGISTRY_PATH);
--    u32 stack;
--    if (directory == NULL)
--        return 0;
--    StackGetPointer(stack);
--    if (StackIsScratchpad(stack)) {
--        ObjectDirectorySavedStack = (void*)stack;
--        StackSetPointer(MainSavedStack);
--        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
--        StackSetPointer(ObjectDirectorySavedStack);
--    } else {
--        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
--    }
--    return 1;
- }
- #endif
- 
 diff --git a/src/main/object/interaction.c b/src/main/object/interaction.c
 --- a/src/main/object/interaction.c
 +++ b/src/main/object/interaction.c
@@ -310,17 +179,6 @@ diff --git a/src/main/object/interaction.c b/src/main/object/interaction.c
                      distance_squared = square_x;
                      distance_squared += y_component;
                      distance_squared += z_component;
-diff --git a/src/main/object/private.h b/src/main/object/private.h
---- a/src/main/object/private.h
-+++ b/src/main/object/private.h
-@@ -74,4 +74,7 @@
- #define OBJECT_EMPTY_PATH ""
- #define OBJECT_INTERACTION_EXTENDER_NAME "interaction extender"
- 
-+s32 ObjectRegisterInteractionCallback(
-+    char* first, char* second, Tm4ObjectInteractionCallback callback);
-+
- #endif
 diff --git a/src/main/pause.c b/src/main/pause.c
 --- a/src/main/pause.c
 +++ b/src/main/pause.c
@@ -354,16 +212,3 @@ diff --git a/src/main/system.c b/src/main/system.c
  #include "tm4/main/carresources.h"
  #include "tm4/main/game.h"
  #include "tm4/main/image.h"
-@@ -138,6 +139,12 @@
- {
-     SystemRandomRandomState = seed;
- }
-+#ifdef __psyz
-+u32 WebRenderEffectRandomState(void)
-+{
-+    return SystemRandomRandomState;
-+}
-+#endif
- #endif
- 
- #if !defined(TM4_SYSTEM_FUNCTION) || TM4_SYSTEM_FUNCTION == 0x800101E4
