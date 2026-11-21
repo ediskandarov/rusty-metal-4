@@ -1,0 +1,369 @@
+diff --git a/include/tm4/fixed.h b/include/tm4/fixed.h
+--- a/include/tm4/fixed.h
++++ b/include/tm4/fixed.h
+@@ -3,6 +3,10 @@
+ 
+ #include <SYS/TYPES.H>
+ #include <LIBGTE.H>
++
++#ifndef ONE
++#define ONE 4096
++#endif
+ 
+ #define Q12FromInt(value) ((value) << 12)
+ /* Signed values round down, preserving the arithmetic right shift. */
+diff --git a/include/tm4/main/math3d.h b/include/tm4/main/math3d.h
+--- a/include/tm4/main/math3d.h
++++ b/include/tm4/main/math3d.h
+@@ -20,23 +20,13 @@
+ #define Q12PackedSine(entry) ((s32)(s16)(entry))
+ #define Q12PackedCosine(entry) ((s32)(entry) >> 16)
+ 
+-/* Require -ANGLE_FULL_TURN < angle < ANGLE_FULL_TURN. Pass side-effect-free arguments. */
+-#define Q12Sin(angle)                                                                              \
+-    ((angle) >= 0 ? Q12PackedSine(rcossin_tbl[(angle)]) : -Q12PackedSine(rcossin_tbl[-(angle)]))
+-#define Q12Cos(angle)                                                                              \
+-    Q12PackedCosine(rcossin_tbl[Int32NegateWithMask((angle), Int32SignMask(angle))])
+-
++#define Q12Sin(angle) rsin(angle)
++#define Q12Cos(angle) rcos(angle)
+ #define Q12SinCos(angle, sine, cosine)                                                             \
+-    ({                                                                                             \
+-        if ((angle) >= 0) {                                                                        \
+-            (cosine) = rcossin_tbl[(angle)];                                                       \
+-            (sine) = Q12PackedSine(rcossin_tbl[(angle)]);                                          \
+-        } else {                                                                                   \
+-            (sine) = -Q12PackedSine(rcossin_tbl[-(angle)]);                                        \
+-            (cosine) = rcossin_tbl[-(angle)];                                                      \
+-        }                                                                                          \
+-        (cosine) = Q12PackedCosine(cosine);                                                        \
+-    })
++    do {                                                                                           \
++        (sine) = rsin(angle);                                                                      \
++        (cosine) = rcos(angle);                                                                    \
++    } while (0)
+ 
+ /* Returns the Q12 fraction along the segment, or -1 when it misses. */
+ s32 PolygonRayParameter(const Tm4CollisionPolygon* polygon, const Tm4WorldRay* ray);
+diff --git a/include/tm4/main/memory.h b/include/tm4/main/memory.h
+--- a/include/tm4/main/memory.h
++++ b/include/tm4/main/memory.h
+@@ -6,6 +6,7 @@
+ u32 MemGetAlignedStartupAddress(void);
+ void MemSetHeapStartAddress(u32 address);
+ void MemInitDefaultHeap(void);
++void MemInitHeap(u8* heapStart, u32 heapBytes);
+ 
+ void* MemAlloc(u32 payloadBytes);
+ void* MemAllocTail(u32 payloadBytes);
+diff --git a/include/tm4/main/object.h b/include/tm4/main/object.h
+--- a/include/tm4/main/object.h
++++ b/include/tm4/main/object.h
+@@ -14,6 +14,7 @@
+ #include <STDARG.H>
+ #include <STDDEF.H>
+ #include <STRINGS.H>
++#include <libgpu.h>
+ 
+ enum Tm4ObjectFlags {
+     OBJECT_HAS_OWNER = 1 << 0,
+diff --git a/src/main/font.c b/src/main/font.c
+--- a/src/main/font.c
++++ b/src/main/font.c
+@@ -15,14 +15,13 @@
+ #include <STDDEF.H>
+ #include <STRINGS.H>
+ 
+-/* The original compiler accepts initialized zero-length tails. Grid records have
+- * just the 24-byte header; proportional records append 64 inclusive UV bounds. */
++/* Grid records have only the header; proportional records append glyph bounds. */
+ typedef struct FontGlyphBounds {
+     u8 left, top, right, bottom;
+ } FontGlyphBounds;
+ 
+ typedef struct FontRecord {
+-    char* name;
++    const char* name;
+     s32 proportional;
+     u8 u;
+     u8 v;
+@@ -337,7 +336,6 @@
+     else if (!strcmp(name, "memcard"))
+         FontTable[FontCount] = &FontMemcard;
+     font = FontTable[FontCount++];
+-    strcpy(font->name, name);
+     font->first_character = first_character;
+     font->tpage = texture->tpage;
+     font->clut = texture->clut;
+diff --git a/src/main/geometry/box.c b/src/main/geometry/box.c
+--- a/src/main/geometry/box.c
++++ b/src/main/geometry/box.c
+@@ -11,6 +11,7 @@
+ #include "tm4/main/stack.h"
+ #include "tm4/vector.h"
+ 
++#include "tm4/gte.h"
+ #include <INLINE_C.H>
+ #include <LIBGPU.H>
+ #include <MEMORY.H>
+@@ -259,12 +260,17 @@
+ #if !defined(TM4_BOX_FUNCTION) || TM4_BOX_FUNCTION == 0x80025F50
+ /* Register-form GTE transfers: the supplied pointer-form helpers introduce
+  * memory traffic absent from these separating-axis projections. */
+-#define BoxLoadAxis(xy, z) __asm__ volatile("ctc2 %0,$0; ctc2 %z1,$1" : : "r"(xy), "rJ"(z))
++#define BoxLoadAxis(xy, z)                                                                         \
++    do {                                                                                           \
++        Psyz_GteCtrlWrite(0, xy);                                                                  \
++        Psyz_GteCtrlWrite(1, z);                                                                   \
++    } while (0)
+ #define BoxDotAxis(result, xy, z)                                                                  \
+     do {                                                                                           \
+-        __asm__ volatile("mtc2 %0,$0; mtc2 %1,$1" : : "r"(xy), "r"(z));                            \
++        Psyz_GteDataWrite(0, xy);                                                                  \
++        Psyz_GteDataWrite(1, z);                                                                   \
+         gte_mvmva(0, 0, 0, 3, 0);                                                                  \
+-        __asm__ volatile("mfc2 %0,$25; nop" : "=r"(result));                                       \
++        (result) = (s32)Psyz_GteDataRead(25);                                                      \
+     } while (0)
+ 
+ static struct BoxEdge {
+diff --git a/src/main/geometry/geometry.c b/src/main/geometry/geometry.c
+--- a/src/main/geometry/geometry.c
++++ b/src/main/geometry/geometry.c
+@@ -9,6 +9,7 @@
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/render.h"
+ 
++#include "tm4/gte.h"
+ #include <INLINE_C.H>
+ #include <LIBGPU.H>
+ #include <MEMORY.H>
+@@ -91,7 +92,10 @@
+     } while (0)
+ 
+ #define ReadWideProductWords(product, low, high)                                                   \
+-    __asm__ volatile("mflo %0\n\tmfhi %1" : "=r"(low), "=r"(high) : "x"(product))
++    do {                                                                                           \
++        (low) = (u32)(product);                                                                    \
++        (high) = (u32)((unsigned long long)(product) >> 32);                                       \
++    } while (0)
+ 
+ /* Keep the round-bit extraction together before starting the next multiply.
+  * The do/while form preserves this scheduling boundary with CC1PSX. */
+@@ -1274,7 +1278,7 @@
+     long origin[3] = { direction->vx, direction->vy, direction->vz };
+     s16 faces[3] = { 0 };
+     s16 axis;
+-    long* originBase;
++    s32* originBase;
+     s32 selector;
+     long* selectedTime;
+     s16 best;
+@@ -1296,7 +1300,7 @@
+         long* timeBase = times;
+         long time;
+         long* timeAddress;
+-        register long* originStart TM4_BIND_REGISTER("v0");
++        register s32* originStart TM4_BIND_REGISTER("v0");
+         register long* coordinate TM4_BIND_REGISTER("t1");
+         register const s16* boundary TM4_BIND_REGISTER("a3");
+         s16 minimumValue;
+@@ -1337,7 +1341,7 @@
+         selector = best;
+         selectedTime = times + selector;
+         if (axis != selector) {
+-            long* originCoordinate;
++            s32* originCoordinate;
+             (&point->vx)[axis] = *(originCoordinate = originBase + axis)
+                 - Q18MulRound(*selectedTime, (&direction->vx)[axis]);
+         }
+diff --git a/src/main/geometry/polyhedron.c b/src/main/geometry/polyhedron.c
+--- a/src/main/geometry/polyhedron.c
++++ b/src/main/geometry/polyhedron.c
+@@ -1007,11 +1007,10 @@
+ #endif
+ 
+ #if !defined(TM4_POLYHEDRON_FUNCTION) || TM4_POLYHEDRON_FUNCTION == 0x8002C32C
++#if !defined(__EMSCRIPTEN__)
+ #include "polyhedron_get_faces.s"
+-
+-/* clang-format off */
+-/*
+- * Nonmatching C reference; the native assembly above is the executable body.
++#else
++/* Native implementation of the face ordering used by box intersections. */
+ int PolyhedronGetFaces(const Polyhedron* polyhedron, unsigned char* records, SVECTOR* vertices,
+     unsigned int* vertexCount)
+ {
+@@ -1092,6 +1091,5 @@
+     *vertexCount = PolyhedronGetVertices(polyhedron, vertices);
+     return faceCount;
+ }
+-*/
+-/* clang-format on */
+-#endif
++#endif
++#endif
+diff --git a/src/main/loading.c b/src/main/loading.c
+--- a/src/main/loading.c
++++ b/src/main/loading.c
+@@ -1,6 +1,7 @@
+ #include "tm4/main/loading.h"
+ 
+ #include "tm4_scalar.h"
++#include <emscripten.h>
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/main/game.h"
+@@ -70,6 +71,8 @@
+     s32 loaded;
+ 
+     loaded = loadingBytesLoaded + mul64s(loadingBytesCurrent, progress, 12);
+-    LoadingDisplay(((loaded << 8) / loadingBytesTotal) << 4);
++    s32 total_progress = ((loaded << 8) / loadingBytesTotal) << 4;
++    EM_ASM({ tm4Port.loading = $0 / 4096; }, total_progress);
++    LoadingDisplay(total_progress);
+ }
+ #endif
+diff --git a/src/main/object/classes.c b/src/main/object/classes.c
+--- a/src/main/object/classes.c
++++ b/src/main/object/classes.c
+@@ -55,6 +55,8 @@
+ {
+     s32 lower = ObjectFindClassIndex(first);
+     s32 upper = ObjectFindClassIndex(second);
++    if (lower < 0 || upper < 0)
++        return NULL;
+     if (upper < lower) {
+         s32 swap = lower;
+         lower = upper;
+@@ -154,58 +156,6 @@
+         }
+     }
+     return 0;
+-}
+-#endif
+-
+-#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x800197d4
+-/* A failed child lookup leaves the VLA scope before the next iteration. */
+-/* Keep uppercasing sequenced before the second prefix-path_length query. */
+-/* The SDK char return adds an instruction here; retain the observed int call ABI. */
+-extern s32 func_8003CDB8(s32);
+-/* Registry walk: mutable visitor name lives only through callback and recursion. */
+-void ObjectVisitDirectory(char* prefix, RegistryDirectory* directory, Tm4DirectoryVisitor visitor)
+-{
+-    s32 child_count = RegGetNumberOfDirectoriesP(directory);
+-    s32 i;
+-    for (i = 0; i < child_count; i++) {
+-        char* name = RegGetDirectoryNamePN(directory, i);
+-        if (name != NULL) {
+-            s32 path_length = strlen(prefix) + strlen(name) + 1;
+-            char path[path_length];
+-            RegistryDirectory* child;
+-            s32 uppercase_initial;
+-            strcpy(path, prefix);
+-            strcat(path, name);
+-            uppercase_initial = func_8003CDB8(path[strlen(prefix)]);
+-            path[strlen(prefix)] = uppercase_initial;
+-            child = RegGetDirectoryPtrPN(directory, i);
+-            if (child == NULL)
+-                continue;
+-            if (visitor == NULL || visitor(path, child))
+-                ObjectVisitDirectory(path, child, visitor);
+-        }
+-    }
+-}
+-#endif
+-
+-#if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x80019940
+-/* Directory traversal needs the main stack for its variable-length paths. */
+-s32 ObjectDirectoryRecurse(Tm4DirectoryVisitor visitor)
+-{
+-    RegistryDirectory* directory = RegGetDirectoryPtrS(OBJECT_REGISTRY_PATH);
+-    u32 stack;
+-    if (directory == NULL)
+-        return 0;
+-    StackGetPointer(stack);
+-    if (StackIsScratchpad(stack)) {
+-        ObjectDirectorySavedStack = (void*)stack;
+-        StackSetPointer(MainSavedStack);
+-        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
+-        StackSetPointer(ObjectDirectorySavedStack);
+-    } else {
+-        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
+-    }
+-    return 1;
+ }
+ #endif
+ 
+diff --git a/src/main/object/interaction.c b/src/main/object/interaction.c
+--- a/src/main/object/interaction.c
++++ b/src/main/object/interaction.c
+@@ -359,9 +359,7 @@
+                     if (radius < 0 || other_radius < 0)
+                         continue;
+                     GteReadMACVector(square_x, y_component, z_component);
+-                    /* Matching-driven: read the C radius product before the distance sums.
+-                     * l requires LO; the separate =r output is a compiler-selected CPU register. */
+-                    __asm__ volatile("mflo %0" : "=r"(radius_limit) : "l"(radius_squared));
++                    radius_limit = radius_squared;
+                     distance_squared = square_x;
+                     distance_squared += y_component;
+                     distance_squared += z_component;
+diff --git a/src/main/object/private.h b/src/main/object/private.h
+--- a/src/main/object/private.h
++++ b/src/main/object/private.h
+@@ -74,4 +74,7 @@
+ #define OBJECT_EMPTY_PATH ""
+ #define OBJECT_INTERACTION_EXTENDER_NAME "interaction extender"
+ 
++s32 ObjectRegisterInteractionCallback(
++    char* first, char* second, Tm4ObjectInteractionCallback callback);
++
+ #endif
+diff --git a/src/main/pause.c b/src/main/pause.c
+--- a/src/main/pause.c
++++ b/src/main/pause.c
+@@ -74,7 +74,7 @@
+     {
+         s32 width = workspace->texture.u1;
+         s32 firstU = workspace->texture.u0;
+-        register volatile s32 markerWidth TM4_BIND_REGISTER("v1") = 1;
++        volatile s32 markerWidth = 1;
+         workspace->markers[0].w = markerWidth;
+         workspace->markers[1].w = markerWidth;
+         workspace->markers[2].h = markerWidth;
+diff --git a/src/main/sprintf.c b/src/main/sprintf.c
+--- a/src/main/sprintf.c
++++ b/src/main/sprintf.c
+@@ -273,7 +273,7 @@
+                         length = options.fields.precision;
+                     }
+                 } else if (!options.fields.precise) {
+-                    length = strlen(text);
++                    length = strlen((const char*)text);
+                 } else {
+                     u8* end = memchr(text, 0, options.fields.precision);
+                     length = end - text;
+diff --git a/src/main/system.c b/src/main/system.c
+--- a/src/main/system.c
++++ b/src/main/system.c
+@@ -1,4 +1,5 @@
+ 
++#include "tm4/fixed.h"
+ #include "tm4/main/carresources.h"
+ #include "tm4/main/game.h"
+ #include "tm4/main/image.h"
+@@ -138,6 +139,12 @@
+ {
+     SystemRandomRandomState = seed;
+ }
++#ifdef __psyz
++u32 WebRenderEffectRandomState(void)
++{
++    return SystemRandomRandomState;
++}
++#endif
+ #endif
+ 
+ #if !defined(TM4_SYSTEM_FUNCTION) || TM4_SYSTEM_FUNCTION == 0x800101E4

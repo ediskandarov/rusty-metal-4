@@ -39,21 +39,6 @@
                  &projectile->bullet.current_world, WebParticipantObjectIdentity(projectile));
          } else {
              SVECTOR rotation;
---- a/src/modules/car/audio.c
-+++ b/src/modules/car/audio.c
-@@ -1,3 +1,4 @@
-+#include "port/web/module_import.h"
- #include "tm4/fixed.h"
- #include "tm4/modules/car.h"
- #include "tm4/modules/sound.h"
-@@ -8,6 +9,6 @@
-         s32 pitch = car->force_sum * 2;
-         if (pitch > ONE)
-             pitch = ONE;
--        SoundEmitterSetPitchScale(car->engine_sound, pitch);
-+        WEB_MODULE("sound", SoundEmitterSetPitchScale)(car->engine_sound, pitch);
-     }
- }
 --- a/src/modules/ray/collision.c
 +++ b/src/modules/ray/collision.c
 @@ -1,3 +1,4 @@

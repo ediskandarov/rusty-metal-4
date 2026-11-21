@@ -12,6 +12,14 @@ is compiling. CMake outputs remain local; Docker retains its BuildKit cache.
 CI uses a single checkout per job and overrides the intermediate directory to the
 existing platform-specific target directory retained by the Rust cache action.
 
+The game and PsyZ patch directories each contain a `series` file defining application
+order. Every `.patch` must appear exactly once; preparation rejects missing,
+duplicate or unlisted patches. Add patches to the series at their dependency point,
+not by encoding order in filenames. Patches modify upstream sources only;
+complete port-owned implementations live in `port/game/` and compile directly.
+The car audio implementation stays in the dynamically loaded car module.
+Generated trees under `build/` are disposable; edit the patch or port source instead.
+
 Resource modules share the main instance's memory. Browser modules use
 `SIDE_MODULE=2`. Cars, maps and simulation modules use `ASYNCIFY=0`; only the
 menu and main browser module retain Asyncify for presentation waits.

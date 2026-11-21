@@ -1,0 +1,23 @@
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -1,3 +1,4 @@
++#include "port/web/widescreen.h"
+ 
+ #include "tm4/compiler.h"
+ #include "tm4/gpu.h"
+@@ -1056,6 +1057,7 @@
+     if (RenderFramePhase != 0) {
+         return;
+     }
++    WebWidescreenBeginDraw();
+     if (RenderFirstView <= GameInfo.player_count - 1
+         && RenderFirstView + 2 > GameInfo.player_count - 1) {
+         ScreenDisplayOverlays(RenderDrawBuffer);
+@@ -1110,6 +1112,7 @@
+     }
+ #ifdef __psyz
+     WebSubpixelSelect(WEB_SUBPIXEL_NONE);
++    WebWidescreenEndDraw();
+ #endif
+ }
+ #endif

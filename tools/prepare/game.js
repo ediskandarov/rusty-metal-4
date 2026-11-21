@@ -2,10 +2,11 @@ import { mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
-import { $, Glob } from "bun";
+import { $ } from "bun";
 
 import { runCli, UsageError } from "../cli.js";
 import { buildPath, root } from "../common.js";
+import { readPatchSeries } from "./patches.js";
 await runCli(async () => {
   const { values } = parseArgs({
     strict: true,
@@ -25,10 +26,8 @@ await runCli(async () => {
   try {
     await $`git -C ${join(root, "game")} archive -o ${archive} HEAD src include config`.cwd(root);
     await $`tar -xf ${archive} -C ${output}`.cwd(root);
-    const patches = await Array.fromAsync(
-      new Glob("*.patch").scan({ cwd: join(root, "patches/game"), dot: true }),
-    );
-    for (const name of patches.sort()) {
+    const patches = await readPatchSeries(join(root, "patches/game"));
+    for (const name of patches) {
       const patch = join(root, "patches/game", name);
       await $`patch --batch --fuzz=0 -E -p1 -i ${patch}`.cwd(output);
     }

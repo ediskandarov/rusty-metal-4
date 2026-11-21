@@ -4,7 +4,8 @@ find_program(BUN_EXECUTABLE bun REQUIRED)
 set(TM4_GAME_ROOT "${CMAKE_CURRENT_BINARY_DIR}/game")
 file(GLOB TM4_GAME_PATCHES CONFIGURE_DEPENDS "${TM4_ROOT}/patches/game/*.patch")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
-    "${TM4_ROOT}/tools/prepare/game.js" ${TM4_GAME_PATCHES})
+    "${TM4_ROOT}/tools/prepare/game.js" "${TM4_ROOT}/tools/prepare/patches.js"
+    "${TM4_ROOT}/patches/game/series" ${TM4_GAME_PATCHES})
 execute_process(COMMAND "${BUN_EXECUTABLE}" "${TM4_ROOT}/tools/prepare/game.js"
     --output "${TM4_GAME_ROOT}" COMMAND_ERROR_IS_FATAL ANY)
 set(TM4_PSYZ_PROJECT "${CMAKE_CURRENT_BINARY_DIR}/psyz-project")
@@ -12,6 +13,7 @@ set(TM4_PSYZ_RUNTIME "${TM4_PSYZ_PROJECT}/src")
 file(GLOB TM4_PSYZ_PATCHES CONFIGURE_DEPENDS "${TM4_ROOT}/port/psyz/patches/*.patch")
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
     "${TM4_ROOT}/tools/prepare/psyz.js" "${TM4_ROOT}/tools/prepare/psyz-project.js"
+    "${TM4_ROOT}/tools/prepare/patches.js" "${TM4_ROOT}/port/psyz/patches/series"
     "${TM4_ROOT}/port/psyz/headless-cmake.patch" ${TM4_PSYZ_PATCHES})
 execute_process(COMMAND "${BUN_EXECUTABLE}" "${TM4_ROOT}/tools/prepare/psyz-project.js"
     --output "${TM4_PSYZ_PROJECT}" COMMAND_ERROR_IS_FATAL ANY)
@@ -57,14 +59,14 @@ add_library(tm4_core STATIC
     "${TM4_GAME_ROOT}/src/main/geometry/geometry.c"
     "${TM4_GAME_ROOT}/src/main/geometry/box.c"
     "${TM4_GAME_ROOT}/src/main/geometry/polyhedron.c"
-    "${TM4_GAME_ROOT}/src/main/math3d_native.c"
-    "${TM4_GAME_ROOT}/src/main/horizon.c"
+    "${TM4_ROOT}/port/game/math3d.c"
+    "${TM4_ROOT}/port/game/horizon.c"
     "${TM4_GAME_ROOT}/src/main/pause.c"
     "${TM4_GAME_ROOT}/src/main/render.c"
     "${TM4_GAME_ROOT}/src/main/sync.c"
-    "${TM4_GAME_ROOT}/src/main/render_scene.c"
+    "${TM4_ROOT}/port/game/render_scene.c"
     "${TM4_GAME_ROOT}/src/main/render_layout.c"
-    "${TM4_GAME_ROOT}/src/main/object/directory.c"
+    "${TM4_ROOT}/port/game/object_directory.c"
     "${TM4_GAME_ROOT}/src/main/object/classes.c"
     "${TM4_GAME_ROOT}/src/main/object/data.c"
     "${TM4_GAME_ROOT}/src/main/object/grid.c"
@@ -271,6 +273,8 @@ foreach(symbol SquareRoot0 Psyz_CdPullSamples InitCARD StartCARD StopCARD _card_
 endforeach()
 
 include("${TM4_ROOT}/cmake/native-exports.cmake")
+# This port-owned implementation belongs to the car image, not the main module.
+target_sources(tm4_module_car PRIVATE "${TM4_ROOT}/port/game/car_audio.c")
 
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/redbook.c" PROPERTIES COMPILE_DEFINITIONS
     "CdGetToc=WebMusicGetToc;CdControl=WebMusicControl;CdControlB=WebMusicControlB;CdReadyCallback=WebMusicReadyCallback")

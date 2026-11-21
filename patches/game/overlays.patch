@@ -355,8 +355,7 @@ diff --git a/src/modules/frag/display.c b/src/modules/frag/display.c
 +#include <LIBGTE.H>
  #include <INLINE_C.H>
  
--typedef char FragmentPrimitiveSizeCheck[sizeof(FragmentPrimitive) == 52 ? 1 : -1];
-+typedef char FragmentPrimitiveSizeCheck[sizeof(FragmentPrimitive) == sizeof(POLY_GT4) ? 1 : -1];
+ typedef char FragmentPrimitiveSizeCheck[sizeof(FragmentPrimitive) == sizeof(POLY_GT4) ? 1 : -1];
  typedef char FragmentPrimitiveOffsetCheck[offsetof(Fragment, primitive) == 0x8c ? 1 : -1];
  
  void FragmentDisplay(

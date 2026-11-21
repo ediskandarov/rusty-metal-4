@@ -52,23 +52,6 @@ diff --git a/src/modules/car/ai_control.c b/src/modules/car/ai_control.c
          --car->ai.target->ai.targeting_count;
      car->ai.target = target;
      car->ai.target_entry = entry;
-diff --git a/src/modules/car/audio.c b/src/modules/car/audio.c
---- /dev/null
-+++ b/src/modules/car/audio.c
-@@ -0,0 +1,13 @@
-+#include "tm4/fixed.h"
-+#include "tm4/modules/car.h"
-+#include "tm4/modules/sound.h"
-+
-+void CarUpdateEngineSound(Car* car)
-+{
-+    if (car->engine_sound) {
-+        s32 pitch = car->force_sum * 2;
-+        if (pitch > ONE)
-+            pitch = ONE;
-+        SoundEmitterSetPitchScale(car->engine_sound, pitch);
-+    }
-+}
 diff --git a/src/modules/car/camera.c b/src/modules/car/camera.c
 --- a/src/modules/car/camera.c
 +++ b/src/modules/car/camera.c
@@ -413,15 +396,3 @@ diff --git a/src/modules/car/weapon_launch.c b/src/modules/car/weapon_launch.c
      return 1;
  }
  
-diff --git a/src/modules/car/wheel_physics.c b/src/modules/car/wheel_physics.c
---- a/src/modules/car/wheel_physics.c
-+++ b/src/modules/car/wheel_physics.c
-@@ -460,7 +460,7 @@
-     shocks = 0;
-     ground = 0;
-     i = 0;
--    wheel_offset = (s32) & ((Car*)0)->wheels;
-+    wheel_offset = offsetof(Car, wheels);
-     ApplyMatrix(matrix, &local, displacement);
-     {
-         s32 x = translation[0];

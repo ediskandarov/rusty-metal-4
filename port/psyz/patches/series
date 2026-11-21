@@ -1,0 +1,10 @@
+browser-auto-scale.patch
+browser-escape.patch
+browser-vsync.patch
+browser-window-size.patch
+display-clock.patch
+display-position.patch
+gpu-mask.patch
+gte-checkpoint.patch
+subpixel-positions.patch
+screen-transform.patch
