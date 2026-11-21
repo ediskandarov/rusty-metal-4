@@ -67,3 +67,27 @@ diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflec
              xy_cursor++;
              gte_nop();
              gte_rtpt_b();
+diff --git a/src/modules/carprt/display.c b/src/modules/carprt/display.c
+--- a/src/modules/carprt/display.c
++++ b/src/modules/carprt/display.c
+@@ -84,7 +84,7 @@
+         screen = screen_batch->vertices;
+         local_vertex = object->local_vertices + frame->first_vertex;
+         for (i = frame->vertex_count; i > 0; i -= 3, local_vertex += 3, screen_batch++) {
+-            gte_ldv3c(local_vertex);
++            WebGteLoadVertexBatch(local_vertex, i);
+             gte_rtpt();
+             gte_stsxy3c(screen_batch->vertices);
+         }
+diff --git a/src/modules/power/display.c b/src/modules/power/display.c
+--- a/src/modules/power/display.c
++++ b/src/modules/power/display.c
+@@ -53,7 +53,7 @@
+     remaining = part->vertex_count;
+     scratch = (Tm4ScreenPoint*)(projected + 1);
+     while (remaining > 0) {
+-        gte_ldv3c(vertices);
++        WebGteLoadVertexBatch(vertices, remaining);
+         projected++;
+         gte_nop();
+         gte_rtpt_b();

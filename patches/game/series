@@ -6,7 +6,9 @@ car-fixes.patch
 car-platform.patch
 car-integration.patch
 menu.patch
-overlays.patch
+overlays-fixes.patch
+overlays-platform.patch
+overlays-integration.patch
 dynamic-modules.patch
 rendering-fixes.patch
 rendering-platform.patch

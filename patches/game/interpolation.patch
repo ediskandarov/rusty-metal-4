@@ -30,32 +30,6 @@ diff --git a/src/main/render.c b/src/main/render.c
      }
  #ifdef __psyz
      WebSubpixelSelect(WEB_SUBPIXEL_NONE);
-diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
---- a/src/modules/afc/display.c
-+++ b/src/modules/afc/display.c
-@@ -1,7 +1,9 @@
- 
- #include "private.h"
- #include "tm4/compiler.h"
--
-+#ifdef __psyz
-+#include "port/web/interpolation.h"
-+#endif
- #include "tm4/gpu.h"
- #include "tm4/gpu_packet.h"
- #include "tm4_scalar.h"
-@@ -59,7 +61,11 @@
-             maximum = Int32Max(dx, dz);
-             minimum = Int32Min(dx, dz);
-             object->rotation_angle = (maximum + minimum / 2) / 2;
-+#ifdef __psyz
-+        } else if (!GameInfo.pause_player && WebInterpolationAdvanceDisplay()) {
-+#else
-         } else if (!GameInfo.pause_player) {
-+#endif
-             object->rotation_angle += object->rotation_step;
-             object->rotation_angle %= ANGLE_FULL_TURN;
-         }
 diff --git a/src/modules/car/camera.c b/src/modules/car/camera.c
 --- a/src/modules/car/camera.c
 +++ b/src/modules/car/camera.c

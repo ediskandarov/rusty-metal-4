@@ -1,0 +1,50 @@
+diff --git a/src/modules/anim/resources.c b/src/modules/anim/resources.c
+--- a/src/modules/anim/resources.c
++++ b/src/modules/anim/resources.c
+@@ -191,7 +191,7 @@
+             AnimClassCount++;
+         } else {
+             char* alias = RegGetFileDataPS(entry, TextAlias);
+-            if (strlen(alias) > 0) {
++            if (alias && alias[0]) {
+                 resized = MemRealloc(AnimAliases, (AnimAliasCount + 1) * sizeof(*AnimAliases));
+                 if (!resized)
+                     return;
+diff --git a/src/modules/cars/treads.c b/src/modules/cars/treads.c
+--- a/src/modules/cars/treads.c
++++ b/src/modules/cars/treads.c
+@@ -78,6 +78,8 @@
+         MemFree(LeftTreadFaces);
+     if (RightTreadFaces)
+         MemFree(RightTreadFaces);
++    LeftTreadFaces = RightTreadFaces = NULL;
++    LeftTreadCount = RightTreadCount = 0;
+ }
+ 
+ /* The original face copy accepts byte-aligned serialized face records. */
+diff --git a/src/modules/levels/w_yard/crane.c b/src/modules/levels/w_yard/crane.c
+--- a/src/modules/levels/w_yard/crane.c
++++ b/src/modules/levels/w_yard/crane.c
+@@ -33,7 +33,9 @@
+ {
+     CraneControl* control = object->control;
+     CameraSetObjectFunction* setCamera;
+-    if (ObjectGetHeader(control)->owner && control->operator_car) {
++    /* The control may be destroyed first during whole-world teardown. */
++    if (control && ObjectValidObject(control) && ObjectGetHeader(control)->owner
++        && control->operator_car) {
+         setCamera = OSSymbolGetAddressAssert(CraneCameraSetName);
+         setCamera(GameInfo.players[control->operator_car->controller_index].camera,
+             control->operator_car);
+diff --git a/src/modules/levels/w_yard/process.c b/src/modules/levels/w_yard/process.c
+--- a/src/modules/levels/w_yard/process.c
++++ b/src/modules/levels/w_yard/process.c
+@@ -58,7 +58,7 @@
+         if (control->operator_car->health < control->saved_health
+             || control->operator_car->freeze_ticks > 0 || (pad->pressed_buttons & PADRup))
+             CraneReleaseControl(object);
+-        if (control->operator_car->health > control->saved_health)
++        else if (control->operator_car->health > control->saved_health)
+             control->saved_health = control->operator_car->health;
+     }
+     if (!control->operator_car)

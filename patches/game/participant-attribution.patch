@@ -1633,19 +1633,35 @@
              }
          }
      } else if (nearest && !beam->type->penetrate)
+diff --git a/src/modules/weap/bomb.c b/src/modules/weap/bomb.c
 --- a/src/modules/weap/bomb.c
 +++ b/src/modules/weap/bomb.c
-@@ -185,7 +185,8 @@
+@@ -1,3 +1,4 @@
++#include "port/web/module_import.h"
+ 
+ #include "private.h"
+ #include "tm4/gpu.h"
+@@ -15,9 +16,6 @@
+ #include <LIMITS.H>
+ #include <STDARG.H>
+ #include <STRINGS.H>
+-
+-/* Linker alias for WeapImports.interact_with_flammable_terrain_poly at +0x8c. */
+-extern InteractWithFlammableTerrainPolyFunction* WeapTerrainInteractionSlot;
+ 
+ WeaponBombType* WeaponFindBombType(char* name)
+ {
+@@ -188,7 +186,8 @@
          && WeapBombType->ignite_terrain
          && WorldTrackData[WeapWorldHit.surface.fields.material].flammable) {
          CopyVectorToShortVectorRoundedQ12(&WeapHitPosition, &WeapWorldHit.position);
--        WeapImports.interact_with_flammable_terrain_poly(WeapWorldHit.polygon, &WeapHitPosition);
-+        WebIgniteTerrain(
+-        WeapTerrainInteractionSlot(WeapWorldHit.polygon, &WeapHitPosition);
++        WEB_MODULE("interact", WebIgniteTerrain)(
 +            WeapWorldHit.polygon, &WeapHitPosition, WebParticipantObjectIdentity(bomb));
      }
      if (WeapBombType->explosion && strlen(WeapBombType->explosion) > 0)
          WeapImports.spawn_explosion(&WeapBombPosition, bomb->type->explosion, 0, 0, 0, -1);
-@@ -193,10 +194,12 @@
+@@ -196,10 +195,12 @@
      if (WeapBombType->shockwave && strlen(WeapBombType->shockwave) > 0) {
          owner = ObjectGetHeader(bomb)->owner;
          if (GameIsCarRegistered(owner))

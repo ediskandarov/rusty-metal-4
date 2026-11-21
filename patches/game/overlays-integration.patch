@@ -1,0 +1,78 @@
+diff --git a/src/modules/cars/c_crush/crush.c b/src/modules/cars/c_crush/crush.c
+--- a/src/modules/cars/c_crush/crush.c
++++ b/src/modules/cars/c_crush/crush.c
+@@ -17,6 +17,9 @@
+ 
+ void CarCrusherClassConstructor(RegistryDirectory* directory)
+ {
++    OSRegisterCarPhysics();
++    OSRegisterCarDisplay();
++    OSRegisterSoundEmitter();
+     SVECTOR lower, upper;
+     s32 velocity;
+     CrusherDamage = *(s32*)RegGetFileDataPS(directory, DamageKey);
+@@ -250,3 +253,6 @@
+     CompMatrix(&scratch->car_to_camera, rotation, rotation);
+     return rotation;
+ }
++
++/* Each original overlay owns its own tread tables. */
++#include "../treads.c"
+diff --git a/src/modules/cars/c_minion/minion.c b/src/modules/cars/c_minion/minion.c
+--- a/src/modules/cars/c_minion/minion.c
++++ b/src/modules/cars/c_minion/minion.c
+@@ -27,3 +27,6 @@
+     TreadPolysProcess(car);
+     return 1;
+ }
++
++/* Each original overlay owns its own tread tables. */
++#include "../treads.c"
+diff --git a/src/modules/cars/c_slam/slam.c b/src/modules/cars/c_slam/slam.c
+--- a/src/modules/cars/c_slam/slam.c
++++ b/src/modules/cars/c_slam/slam.c
+@@ -17,6 +17,9 @@
+ 
+ void CarSlamClassConstructor(RegistryDirectory* directory)
+ {
++    OSRegisterCarPhysics();
++    OSRegisterCarDisplay();
++    OSRegisterSoundEmitter();
+     s32 velocity;
+     SlamDamage = *(s32*)RegGetFileDataPS(directory, DamageKey);
+     SlamSlams = *(s32*)RegGetFileDataPS(directory, SlamsKey);
+diff --git a/src/modules/cars/c_tank/tank.c b/src/modules/cars/c_tank/tank.c
+--- a/src/modules/cars/c_tank/tank.c
++++ b/src/modules/cars/c_tank/tank.c
+@@ -27,3 +27,6 @@
+     TreadPolysProcess(car);
+     return 1;
+ }
++
++/* Each original overlay owns its own tread tables. */
++#include "../treads.c"
+diff --git a/src/modules/cars/c_trash/trash.c b/src/modules/cars/c_trash/trash.c
+--- a/src/modules/cars/c_trash/trash.c
++++ b/src/modules/cars/c_trash/trash.c
+@@ -17,6 +17,9 @@
+ 
+ void CarTrashClassConstructor(RegistryDirectory* directory)
+ {
++    OSRegisterCarPhysics();
++    OSRegisterCarDisplay();
++    OSRegisterSoundEmitter();
+     s32 velocity;
+     TrashDamage = *(s32*)RegGetFileDataPS(directory, DamageKey);
+     TrashSlams = *(s32*)RegGetFileDataPS(directory, SlamsKey);
+diff --git a/src/modules/levels/pathing.c b/src/modules/levels/pathing.c
+--- a/src/modules/levels/pathing.c
++++ b/src/modules/levels/pathing.c
+@@ -13,6 +13,8 @@
+ 
+ #include <LIMITS.H>
+ #include <STDDEF.H>
++
++char PathingPathKey[12] = "pathPoints";
+ 
+ SVECTOR* PathingGetPoint(PathingInfo* path, s32 index)
+ {

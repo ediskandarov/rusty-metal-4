@@ -39,7 +39,17 @@ diff --git a/src/modules/afc/afc.c b/src/modules/afc/afc.c
 diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
 --- a/src/modules/afc/display.c
 +++ b/src/modules/afc/display.c
-@@ -51,6 +51,7 @@
+@@ -1,6 +1,9 @@
+ 
+ #include "private.h"
+ #include "tm4/compiler.h"
++#ifdef __psyz
++#include "port/web/interpolation.h"
++#endif
+ #include "tm4/gpu.h"
+ #include "tm4/gpu_packet.h"
+ #include "tm4_scalar.h"
+@@ -48,6 +51,7 @@
          py = ObjectGetHeader(payload)->position.vy;
          pz = ObjectGetHeader(payload)->position.vz;
          object = payload;
@@ -47,25 +57,57 @@ diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
          /* A zero step selects distance-dependent rotation instead of animation. */
          if (!object->rotation_step) {
              s32 dx = px - GameInfo.active_view->camera_to_world.t[0];
-@@ -60,16 +61,15 @@
+@@ -57,26 +61,47 @@
              dz = Int32Abs(dz);
              maximum = Int32Max(dx, dz);
              minimum = Int32Min(dx, dz);
 -            object->rotation_angle = (maximum + minimum / 2) / 2;
--#ifdef __psyz
--        } else if (!GameInfo.pause_player && WebInterpolationAdvanceDisplay()) {
--#else
 +            angle = (maximum + minimum / 2) / 2;
 +#ifndef __psyz
 +            object->rotation_angle = angle;
          } else if (!GameInfo.pause_player) {
--#endif
              object->rotation_angle += object->rotation_step;
              object->rotation_angle %= ANGLE_FULL_TURN;
 +            angle = object->rotation_angle;
 +#endif
          }
--        s32 angle = object->rotation_angle;
-         SVECTOR* vertices = object->vertices;
- #ifdef __psyz
-         SVECTOR render_position;
++        SVECTOR* vertices = object->vertices;
++#ifdef __psyz
++        SVECTOR render_position;
++        Afc pose;
++        s16 size = object->size;
++        WebInterpolationObjectPosition(payload, &render_position);
++        WebInterpolationAfc(object, &angle, &size);
++        if (size != object->size) {
++            pose = *object;
++            pose.size = size;
++            AfcSetQuadSize(&pose);
++            vertices = pose.vertices;
++        }
++        px = render_position.vx;
++        py = render_position.vy;
++        pz = render_position.vz;
++#endif
+         SVECTOR position = { px, py, pz, 0 };
+         gte_ldv0(&position);
+         gte_rtv0tr();
+-        RotationMatrixZ(object->rotation_angle, &rotation);
++        RotationMatrixZ(angle, &rotation);
+         GteReadMACVector(x, y, z);
+         SetRotMatrix(&rotation);
+         gte_ldtr(x, y, z);
+-        gte_ldv0(&object->vertices[0]);
+-        gte_ldv1(&object->vertices[1]);
+-        gte_ldv2(&object->vertices[2]);
++        gte_ldv0(&vertices[0]);
++        gte_ldv1(&vertices[1]);
++        gte_ldv2(&vertices[2]);
+         gte_rtpt();
+         gte_stsxy0(&packet->words.vertices[0].xy);
+         gte_stsxy1(&packet->words.vertices[1].xy);
+         gte_stsxy2(&packet->words.vertices[2].xy);
+-        gte_ldv0(&object->vertices[3]);
++        gte_ldv0(&vertices[3]);
+         gte_rtps();
+         gte_stsxy(&packet->words.vertices[3].xy);
+         gte_stsz(&ordering_depth);

@@ -439,54 +439,6 @@ diff --git a/src/modules/anim/display.c b/src/modules/anim/display.c
      RotTrans(&world_position, (VECTOR*)billboard_to_camera.t, &flag);
      SetIdentityRotation(&billboard_to_camera);
      SetRotMatrix(&billboard_to_camera);
-diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
---- a/src/modules/afc/display.c
-+++ b/src/modules/afc/display.c
-@@ -69,21 +69,39 @@
-             object->rotation_angle += object->rotation_step;
-             object->rotation_angle %= ANGLE_FULL_TURN;
-         }
-+        s32 angle = object->rotation_angle;
-+        SVECTOR* vertices = object->vertices;
-+#ifdef __psyz
-+        SVECTOR render_position;
-+        Afc pose;
-+        s16 size = object->size;
-+        WebInterpolationObjectPosition(payload, &render_position);
-+        WebInterpolationAfc(object, &angle, &size);
-+        if (size != object->size) {
-+            pose = *object;
-+            pose.size = size;
-+            AfcSetQuadSize(&pose);
-+            vertices = pose.vertices;
-+        }
-+        px = render_position.vx;
-+        py = render_position.vy;
-+        pz = render_position.vz;
-+#endif
-         SVECTOR position = { px, py, pz, 0 };
-         gte_ldv0(&position);
-         gte_rtv0tr();
--        RotationMatrixZ(object->rotation_angle, &rotation);
-+        RotationMatrixZ(angle, &rotation);
-         GteReadMACVector(x, y, z);
-         SetRotMatrix(&rotation);
-         gte_ldtr(x, y, z);
--        gte_ldv0(&object->vertices[0]);
--        gte_ldv1(&object->vertices[1]);
--        gte_ldv2(&object->vertices[2]);
-+        gte_ldv0(&vertices[0]);
-+        gte_ldv1(&vertices[1]);
-+        gte_ldv2(&vertices[2]);
-         gte_rtpt();
-         gte_stsxy0(&packet->words.vertices[0].xy);
-         gte_stsxy1(&packet->words.vertices[1].xy);
-         gte_stsxy2(&packet->words.vertices[2].xy);
--        gte_ldv0(&object->vertices[3]);
-+        gte_ldv0(&vertices[3]);
-         gte_rtps();
-         gte_stsxy(&packet->words.vertices[3].xy);
-         gte_stsz(&ordering_depth);
 diff --git a/src/modules/expl/display.c b/src/modules/expl/display.c
 --- a/src/modules/expl/display.c
 +++ b/src/modules/expl/display.c
