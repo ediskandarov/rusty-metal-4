@@ -1,48 +1,3 @@
---- a/src/modules/car/ai.c
-+++ b/src/modules/car/ai.c
-@@ -165,7 +165,9 @@
-     car->ai.attacker_damage = MemAlloc(capacity * sizeof(*car->ai.attacker_damage));
-     if (!car->ai.attacker_damage)
-         return 0;
--    car->ai.nearby_records = MemAlloc(capacity * sizeof(*car->ai.nearby_records));
-+    car->ai.nearby_records = WebNetMatchActive()
-+        ? MemCalloc(capacity, sizeof(*car->ai.nearby_records))
-+        : MemAlloc(capacity * sizeof(*car->ai.nearby_records));
-     if (!car->ai.nearby_records) {
-         if (car->ai.attacker_damage)
-             MemFree(car->ai.attacker_damage);
-@@ -173,7 +173,9 @@
-         return 0;
-     }
-     car->control_kind = type;
--    car->ai.update_phase = car->ai.update_slot = car->index % 4;
-+    /* A respawn keeps the participant's phase; car-list compaction cannot move it. */
-+    car->ai.update_phase = car->ai.update_slot
-+        = (WebNetMatchActive() ? car->controller_index : car->index) % 4;
-     car->ai.recovery_phase = 0;
-     car->ai.recovery_delay = 40;
-     car->ai.probe_center.x = 0;
---- a/src/modules/car/car.c
-+++ b/src/modules/car/car.c
-@@ -174,6 +174,8 @@
-     car->turbo_fuel = car->maximum_turbo_fuel = turbo;
-     car->energy = car->maximum_energy = energy;
-     car->health = health;
-+    if (WebNetMatchActive())
-+        type = WebNetParticipantControlKind(index);
-     if (!CarWeaponConstructor(car, type) || !CarPhysicsConstructor(car, position, heading)
-         || !CarAiConstructor(car, type) || !CarDisplayConstructor(car)
-         || !CarPhysicsConstructorPostDisplayConstructor(car, 0)) {
---- a/src/modules/car/car.c
-+++ b/src/modules/car/car.c
-@@ -515,6 +515,7 @@
- void CarDestructor(void* payload)
- {
-     Car* car = payload;
-+    WebNetCarLeaving(car);
-     CarReleaseResources(car);
-     if (car->fire_effect)
-         ObjectDestroy(car->fire_effect);
 --- a/src/modules/interact/damage.c
 +++ b/src/modules/interact/damage.c
 @@ -1,5 +1,6 @@
@@ -91,16 +46,17 @@
  void CarAiSetTarget(Car* car, Car* target, CarAiNearbyCar* entry);
  
  /* ai_combat.c */
+diff --git a/src/modules/car/ai_control.c b/src/modules/car/ai_control.c
 --- a/src/modules/car/ai_control.c
 +++ b/src/modules/car/ai_control.c
-@@ -1,4 +1,6 @@
+@@ -1,4 +1,5 @@
  
 +#include "port/web/ffa.h"
-+#include "port/web/net_match.h"
+ #include "port/web/net_match.h"
  #include "private.h"
  #include "tm4_scalar.h"
- 
-@@ -89,14 +90,17 @@
+@@ -89,8 +90,9 @@ void CarAiAssignUpdateSlots(Car* excluded_car)
+ void CarAiReactToDamage(Car* car, Car* attacker, s32 damage)
  {
      s32 i;
 -    if (!aiWorldInfo.enabled || !GameIsCarRegistered(attacker)
@@ -111,19 +67,7 @@
          return;
      if (car->ai_state_callback != CarAiPatrol && car->ai_state_callback != CarAiFollowTargetRoute)
          return;
--    car->ai.attacker_damage[attacker->index] += damage;
-+    const s32 attacker_index = WebNetMatchActive() ? attacker->controller_index : attacker->index;
-+    car->ai.attacker_damage[attacker_index] += damage;
-     if (attacker->ai.targeting_count < attacker->ai.targeting_limit
--        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker->index]) {
--        for (i = GameInfo.entrant_count - 1; i >= 0; i--)
-+        && car->ai_config.retaliation_damage_threshold < car->ai.attacker_damage[attacker_index]) {
-+        for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0;
-+             i--)
-             car->ai.attacker_damage[i] = 0;
-         if (CarAiFindRouteToNode(car, attacker->ai.selected_node)) {
-             CarAiSetTarget(car, attacker, NULL);
-@@ -157,14 +161,17 @@
+@@ -160,14 +162,17 @@ void CarAiInteractedWithFire(Car* car)
          car->ai.extinguish_ticks = (u16)car->ai.extinguish_delay + (rand() % 60) / 4;
  }
  
@@ -143,15 +87,6 @@
              if (car->ai.targeting_count < car->ai.targeting_limit)
                  choices[count++] = car;
          } else if (car->control_kind == CAR_CONTROL_ALLY && !car->ai.targeting_count) {
-@@ -177,7 +184,7 @@
- void CarAiSetTarget(Car* car, Car* target, CarAiNearbyCar* entry)
- {
-     s32 i;
--    for (i = GameInfo.entrant_count - 1; i >= 0; i--)
-+    for (i = (WebNetMatchActive() ? WebNetSlotCapacity() : GameInfo.entrant_count) - 1; i >= 0; i--)
-         car->ai.attacker_damage[i] = 0;
-     /* The target can die before our next AI update or destructor; its storage may be reused. */
-     if (car->ai.target && GameIsCarRegistered(car->ai.target))
 --- a/src/modules/car/ai_combat.c
 +++ b/src/modules/car/ai_combat.c
 @@ -1,4 +1,5 @@
@@ -264,14 +199,3 @@
              projectile->homing_strength = (u32)projectile->homing_strength >> cpu_kind;
              projectile->seek_always = 0;
          }
---- a/src/modules/car/ai.c
-+++ b/src/modules/car/ai.c
-@@ -303,7 +303,7 @@
-         CarAiSetTarget(car, NULL, NULL);
-     else
-         car->ai.target = NULL;
--    if (GameIsCarRegistered(car))
-+    if (!WebNetMatchActive() && GameIsCarRegistered(car))
-         CarAiAssignUpdateSlots(car);
-     if (car->ai.attacker_damage)
-         MemFree(car->ai.attacker_damage);

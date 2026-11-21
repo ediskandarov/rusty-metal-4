@@ -44,7 +44,7 @@ upstream-candidates.patch
 module-imports.patch
 participant-respawn.patch
 ffa-policy.patch
-live-membership.patch
+network-ai.patch
 ffa-bots.patch
 prepared-model-pool.patch
 tournament.patch

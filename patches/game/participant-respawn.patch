@@ -96,32 +96,6 @@
  }
  #endif
 
---- a/src/modules/car/ai.c
-+++ b/src/modules/car/ai.c
-@@ -167,6 +167,7 @@
-     if (!car->ai.nearby_records) {
-         if (car->ai.attacker_damage)
-             MemFree(car->ai.attacker_damage);
-+        car->ai.attacker_damage = NULL;
-         return 0;
-     }
-     car->control_kind = type;
-@@ -291,8 +292,13 @@
-
- void CarAiDestructor(Car* car)
- {
--    CarAiSetTarget(car, NULL, NULL);
--    CarAiAssignUpdateSlots(car);
-+    /* Human weapon targeting borrows ai.target without acquiring an AI target count. */
-+    if (car->control_kind != CAR_CONTROL_PLAYER && car->ai.attacker_damage)
-+        CarAiSetTarget(car, NULL, NULL);
-+    else
-+        car->ai.target = NULL;
-+    if (GameIsCarRegistered(car))
-+        CarAiAssignUpdateSlots(car);
-     if (car->ai.attacker_damage)
-         MemFree(car->ai.attacker_damage);
-     if (car->ai.nearby_records)
 diff --git a/src/modules/car/car.c b/src/modules/car/car.c
 --- a/src/modules/car/car.c
 +++ b/src/modules/car/car.c
@@ -188,7 +162,7 @@ diff --git a/src/modules/car/car.c b/src/modules/car/car.c
      car->name = RegGetFileDataS(CarTextRealname);
      if (!car->name)
          car->name = car->character_name;
-@@ -153,109 +140,105 @@ s32 CarConstructor(Car* car, va_list args)
+@@ -153,109 +140,107 @@ s32 CarConstructor(Car* car, va_list args)
      if (!filename)
          filename = RegGetFileDataS(CarTextFilename);
      if (!filename)
@@ -273,6 +247,8 @@ diff --git a/src/modules/car/car.c b/src/modules/car/car.c
 -            / (GameInfo.players[controller].bindings[1].axes[1].full_scale
 -                - GameInfo.players[controller].bindings[1].axes[1].deadzone);
 -    }
++    if (WebNetMatchActive())
++        type = WebNetParticipantControlKind(index);
      if (!CarWeaponConstructor(car, type) || !CarPhysicsConstructor(car, position, heading)
          || !CarAiConstructor(car, type) || !CarDisplayConstructor(car)
          || !CarPhysicsConstructorPostDisplayConstructor(car, 0)) {
@@ -356,7 +332,7 @@ diff --git a/src/modules/car/car.c b/src/modules/car/car.c
  }
  
  void CarFreezeCar(Car* car)
-@@ -502,9 +485,8 @@ void CarClearFireEffect(void* object)
+@@ -502,9 +487,8 @@ void CarClearFireEffect(void* object)
      }
  }
  
@@ -367,7 +343,7 @@ diff --git a/src/modules/car/car.c b/src/modules/car/car.c
      void (*destructor)(Car*, void*);
      CarCollisionHistory *node, *next;
      CarAiDestructor(car);
-@@ -529,6 +511,12 @@ void CarDestructor(void* payload)
+@@ -529,6 +513,13 @@ void CarDestructor(void* payload)
          node = next;
      }
      car->collision_history = 0;
@@ -376,6 +352,7 @@ diff --git a/src/modules/car/car.c b/src/modules/car/car.c
 +void CarDestructor(void* payload)
 +{
 +    Car* car = payload;
++    WebNetCarLeaving(car);
 +    CarReleaseResources(car);
      if (car->fire_effect)
          ObjectDestroy(car->fire_effect);
