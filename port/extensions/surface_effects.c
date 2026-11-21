@@ -1,5 +1,5 @@
-#include "surface_effects_runtime.h"
 #include "port/psyz/sdk.h"
+#include "surface_effects_runtime.h"
 #include "tm4/fixed.h"
 #include "tm4/main/object.h"
 #include "tm4/main/os.h"
@@ -14,9 +14,14 @@ static const Rm4SurfaceEffects* effects;
 void WebSurfaceEffectsLoad(void)
 {
     effects = NULL;
-    char* name = RegGetFileDataS("/world/surfaceEffects");
-    if (!name)
+    RegistryFile* file = RegGetFilePtrS("/world/surfaceEffects");
+    if (!file)
         return;
+    if (RegGetFileTypeP(file) != REG_FILE_TYPE_STRING) {
+        fprintf(stderr, "world/surfaceEffects must be a symbol string\n");
+        abort();
+    }
+    char* name = RegGetFileDataP(file);
     const Rm4SurfaceEffects* candidate = (void*)OSSymbolGetAddress(name);
     if (!candidate || candidate->version != RM4_SURFACE_EFFECTS_VERSION
         || candidate->size != sizeof(*candidate)

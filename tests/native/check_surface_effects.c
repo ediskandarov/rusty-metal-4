@@ -1,7 +1,10 @@
 /* Registry/object fixtures drive the production adapter; GTE uses PsyZ. */
 #include "port/extensions/surface_effects_state.h"
 #include "port/web/net_state_fields.h"
+#include "src/modules/car/private.h"
 #include "tm4/main/os.h"
+#include "tm4/main/registry.h"
+#include "tm4/main/sound.h"
 #include "tm4/modules/car.h"
 #include <assert.h>
 #include <stdio.h>
@@ -14,6 +17,30 @@ static struct {
 } objects[4];
 static unsigned created, destroyed, steps, resets;
 static int enabled, fail_create, independent_process;
+static int file_type = REG_FILE_TYPE_STRING;
+static int landing_playing, landing_sounds, landing_vibrations;
+char CarSoundName[] = "soundEmitter";
+char CarSmallCollisionSound[] = "small", CarMediumCollisionSound[] = "medium";
+char CarCollisionVibration[] = "collision", CarLandingSound[] = "landing";
+char CarShockVibration[] = "shock";
+void CarCheckParticleContact(CarParticle* particle, Car* car)
+{
+    abort();
+}
+void GamePadVibrateTS(s32 player, char* name, s32 level)
+{
+    abort();
+}
+void GamePadVibrateS(s32 player, char* name)
+{
+    assert(player == 0 && !strcmp(name, "shock"));
+    ++landing_vibrations;
+}
+SoundEmitter* SoundPlaying(void* owner, char* name)
+{
+    assert(owner && !strcmp(name, "landing"));
+    return landing_playing ? (SoundEmitter*)1 : NULL;
+}
 static Rm4SurfaceFrame frame;
 static void* stepped;
 
@@ -28,7 +55,10 @@ static void reset(void* instance, Rm4SurfaceReset reason)
     assert(instance && reason == Rm4SurfaceRelocated);
     ++resets;
 }
-static void process(void* instance) { abort(); }
+static void process(void* instance)
+{
+    abort();
+}
 static Rm4SurfaceEffects provider = {
     .version = RM4_SURFACE_EFFECTS_VERSION,
     .size = sizeof(Rm4SurfaceEffects),
@@ -36,10 +66,19 @@ static Rm4SurfaceEffects provider = {
     .step = step,
     .reset = reset,
 };
-void* RegGetFileDataS(char* path)
+RegistryFile* RegGetFilePtrS(char* path)
 {
     assert(!strcmp(path, "/world/surfaceEffects"));
-    return enabled ? "TestSurface" : NULL;
+    return enabled ? (RegistryFile*)1 : NULL;
+}
+s32 RegGetFileTypeP(const RegistryFile* file)
+{
+    return file_type;
+}
+void* RegGetFileDataP(RegistryFile* file)
+{
+    assert(file_type == REG_FILE_TYPE_STRING); /* Never read non-string data as a name. */
+    return "TestSurface";
 }
 OSWord OSSymbolGetAddress(char* name)
 {
@@ -48,6 +87,10 @@ OSWord OSSymbolGetAddress(char* name)
 }
 void* ObjectCreate(char* name, u32 flags, ...)
 {
+    if (!strcmp(name, "soundEmitter")) {
+        ++landing_sounds;
+        return NULL;
+    }
     assert(!strcmp(name, "testSurface"));
     assert(flags == (OBJECT_HAS_OWNER | OBJECT_DESTROY_WITH_OWNER | OBJECT_FOLLOW_OWNER));
     if (fail_create)
@@ -68,7 +111,10 @@ void ObjectDestroy(void* instance)
     assert(instance);
     ++destroyed;
 }
-s32 ObjectValidObject(void* instance) { return instance != NULL; }
+s32 ObjectValidObject(void* instance)
+{
+    return instance != NULL;
+}
 
 static u32 digest(const Car* car)
 {
@@ -76,6 +122,48 @@ static u32 digest(const Car* car)
     NetStateOutput output = { .checksum = &hash };
     WebSurfaceEffectsWriteState(&output, &car->surface_effects);
     return hash;
+}
+
+/* Run the real integration/landing branch with static geometry. Collision traversal
+   is empty: this fixture isolates suspension compression from impact events. */
+static void check_landing(void)
+{
+    const SVECTOR positions[5] = {
+        { -100, 0, 100, 0 },
+        { 100, 0, 100, 0 },
+        { 100, 0, -100, 0 },
+        { -100, 0, -100, 0 },
+        { 0 },
+    };
+    for (int own_audio = 0; own_audio < 2; ++own_audio) {
+        provider.flags = own_audio ? RM4_SURFACE_REPLACE_CONTACT_AUDIO : 0;
+        for (int playing = 0; playing < 2; ++playing) {
+            Car car = { 0 };
+            car.surface_effects.instance = &objects[0].payload;
+            car.control_kind = CAR_CONTROL_PLAYER;
+            car.controller_index = 0;
+            car.contact_countdown = 7;
+            car.transform.m[0][0] = car.transform.m[1][1] = car.transform.m[2][2] = 4096;
+            car.particle_end = car.particles;
+            car.wheel_end = car.wheels + 3;
+            for (int i = 0; i < 5; ++i)
+                car.particles[i].position = positions[i];
+            for (int i = 0; i < 4; ++i) {
+                car.springs[i].first = &car.particles[4];
+                car.springs[i].second = &car.particles[i];
+                car.wheels[i].direction.fields.displacement = 40;
+                car.wheels[i].group = (CarRenderGroup*)1;
+            }
+            landing_playing = playing;
+            landing_sounds = landing_vibrations = 0;
+            CarIntegrateAndCollide(&car);
+            assert(car.transform.m[1][1] > 0);
+            assert(car.surface_effects.compression[0] >= 29);
+            assert(car.contact_countdown == (playing ? 6 : 30));
+            assert(landing_vibrations == !playing);
+            assert(landing_sounds == (!playing && !own_audio));
+        }
+    }
 }
 
 int main(int argc, char** argv)
@@ -92,6 +180,8 @@ int main(int argc, char** argv)
             provider.step = NULL;
         else if (!strcmp(argv[1], "reset"))
             provider.reset = NULL;
+        else if (!strcmp(argv[1], "type"))
+            file_type = REG_FILE_TYPE_LONG;
         else
             abort();
         WebSurfaceEffectsLoad();
@@ -177,8 +267,10 @@ int main(int argc, char** argv)
     WebSurfaceEffectsDetach(&car);
     assert(destroyed == 2); /* Partial construction/destruction can clean up twice. */
     WebSurfaceEffectsDetach(&other);
+    check_landing();
     WebSurfaceEffectsUnload();
     assert(destroyed == 3 && !WebSurfaceEffectsOwnsAudio(&other));
-    puts("PASS: surface lifecycle, audio opt-in, contact transitions, relocation and canonical state");
+    puts(
+        "PASS: surface lifecycle, audio opt-in, contact transitions, relocation and canonical state");
     return 0;
 }

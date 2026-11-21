@@ -92,15 +92,6 @@
          if (wheel->direction.fields.displacement - gap >= 29)
              shocks++;
          {
-@@ -511,7 +513,7 @@
-         }
-     }
-     if (shocks >= 4 && ground && car->transform.m[1][1] > 0
--        && !SoundPlaying(car, CarLandingSound)) {
-+        && (WebSurfaceEffectsOwnsAudio(car) || !SoundPlaying(car, CarLandingSound))) {
-         VECTOR* movement = &delta;
-         SVECTOR* normal = &skid_axis;
-         car->contact_countdown = 30;
 @@ -522,8 +524,9 @@
          volume = speed * ONE / 300;
          if (volume > ONE)

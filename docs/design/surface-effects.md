@@ -6,7 +6,9 @@ behaviour. An unresolved symbol or unsupported descriptor version fails loading.
 The provider applies to all cars on the map, independently of their special attacks.
 `RM4_SURFACE_REPLACE_CONTACT_AUDIO` explicitly replaces the engine's impact and
 suspension landing sounds. With no flags, visual effects retain TM4 audio.
-Unknown flags, an incompatible version or size, or missing callbacks fail loading.
+A non-string resource, unknown flags, an incompatible version or size, or missing
+callbacks fail loading. Audio replacement does not bypass the existing landing
+guard or change the vibration/countdown operations in that branch.
 
 ```mermaid
 flowchart LR
@@ -37,6 +39,10 @@ The field schema and checksum writer live together in
 [`surface_effects_state.c`](../../port/extensions/surface_effects_state.c).
 Restoring a snapshot restores the object graph, without rerunning provider attachment.
 Callbacks run during replay too, so all persistent effect state needs snapshot fields.
+Cosmetic randomness uses the engine effect stream (`randrand`), which is saved and
+restored with the session. It must not advance the gameplay stream (`rand`).
+Mod audio opts into the same stream with the `RM4_SOUND_EFFECT_RANDOM` constructor
+flag from `port/extensions/sound.h`; stock emitters keep their original RNG choice.
 
 The TM3 provider lives in `src/shared/world/surface.c` in the mod repository.
 Its `tm3WheelSurface` instance creates `tm3TireMark` and `tm3SurfaceParticle` objects.

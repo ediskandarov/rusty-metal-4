@@ -1,0 +1,28 @@
+--- a/src/modules/sound/sound.c
++++ b/src/modules/sound/sound.c
+@@ -1,5 +1,7 @@
+ 
+ #include "private.h"
++#include "port/extensions/sound.h"
++#include "tm4/main/system.h"
+ #include "port/web/net_match.h"
+ #include "tm4_scalar.h"
+ 
+@@ -41,6 +43,8 @@
+ {
+     SoundVagAttr attr;
+     s32 voice_index, random;
++    const s32 effect_random = flags & RM4_SOUND_EFFECT_RANDOM;
++    flags &= ~RM4_SOUND_EFFECT_RANDOM;
+     if (!name)
+         return 0;
+     emitter->program_id = SoundGetProgramId(name);
+@@ -81,7 +85,7 @@
+     CopyShortVectorXYZ(&emitter->previous_position, &emitter->position);
+     if (emitter->flags & SOUND_EMITTER_POSITION)
+         emitter->flags |= SOUND_EMITTER_POSITIONAL;
+-    random = rand() % (SOUND_SCALE_ONE + 1);
++    random = (effect_random ? randrand() : rand()) % (SOUND_SCALE_ONE + 1);
+     emitter->voice_count = SoundProgramIdGetNumVagAttrs(emitter->program_id);
+     if (emitter->voice_count <= 0)
+         return 0;
