@@ -94,6 +94,10 @@ if(TM4_WEB_TEST_HOOKS)
     target_link_options(tm4_web PRIVATE -Wl,--export=WebDynamicModuleExport
         -Wl,--export=WebNativeModuleLoaded -Wl,--export=RegAddReg -Wl,--export=RegRemoveReg -Wl,--export=free)
 endif()
+target_link_options(tm4_web PRIVATE
+    -Wl,--export=WebTeleportCar -Wl,--export=WebTeleportLoad
+    -Wl,--export=WebTeleportUnload -Wl,--export=WebTeleportAppearance
+    -Wl,--export=WebTeleportAttachAppearance)
 # Surface adapters are called by the dynamically loaded car module.
 target_link_options(tm4_web PRIVATE
     -Wl,--export=WebSurfaceEffectsLoad -Wl,--export=WebSurfaceEffectsUnload

@@ -1,0 +1,174 @@
+--- a/src/modules/interact/interact.c
++++ b/src/modules/interact/interact.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/extensions/teleport.h"
+ #include "tm4/fixed.h"
+ #include "tm4_scalar.h"
+ 
+@@ -89,32 +90,12 @@
+ }
+ void InteractCarWithTeleporter(Car* car, Teleporter* teleporter)
+ {
+-    MATRIX car_to_world;
+-    Camera* camera;
+-    s32 number;
+-    car_to_world.t[0] = teleporter->destination_world.vx;
+-    car_to_world.t[1] = teleporter->destination_world.vy;
+-    car_to_world.t[2] = teleporter->destination_world.vz;
+-    car_to_world.m[0][2] = (u16)teleporter->destination_forward_world.vx;
+-    car_to_world.m[1][2] = (u16)teleporter->destination_forward_world.vy;
+-    car_to_world.m[2][2] = (u16)teleporter->destination_forward_world.vz;
+-    car_to_world.m[0][0] = (u16)teleporter->destination_forward_world.vz;
+-    car_to_world.m[1][0] = 0;
+-    car_to_world.m[2][0] = -(u16)teleporter->destination_forward_world.vx;
+-    NormalizeMatrixWithBasis(&car_to_world, 2, 0);
+-    Import_CarOrientWithMatrix(car, &car_to_world);
+-    number = car->controller_index;
+-    if (WebNetMatchActive() ? WebNetSlotOccupied(number) : number < GameInfo.player_count) {
+-        camera = GameInfo.players[number].camera;
+-        if (camera->object == car)
+-            ((CarCameraState*)camera->data)->snap = 1;
+-    }
+-    Import_CarAiMovedThroughTeleporter(car);
+-    ObjectCreate(InteractNameSoundEmitter, 0, InteractNameTeleporter, SOUND_EMITTER_POSITION,
+-        car->position.vx, car->position.vy, car->position.vz);
+-    ObjectCreate(InteractNameSoundEmitter, 0, InteractNameTeleporter, SOUND_EMITTER_POSITION,
+-        teleporter->destination_world.vx, teleporter->destination_world.vy,
+-        teleporter->destination_world.vz);
++    Rm4TeleportRequest request = {
++        .destination = teleporter->destination_world,
++        .forward = teleporter->destination_forward_world,
++        .source = teleporter,
++    };
++    WebTeleportCar(car, &request);
+ }
+ 
+ void InteractCarWithJumppad(Car* car, Jumppad* pad)
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -11,6 +11,7 @@
+ #include "tm4/main/memory.h"
+ #include "tm4/main/object.h"
+ #include "tm4/main/os.h"
++#include "port/extensions/teleport_runtime.h"
+ #include "tm4/main/screen.h"
+ #include "tm4/main/sound.h"
+ #include "tm4/main/system.h"
+@@ -73,6 +74,7 @@
+ 
+ void CarClassConstructor(RegistryDirectory* registry)
+ {
++    WebTeleportLoad();
+     CarClassDirectory = registry;
+     CarAiClassConstructor();
+     AIConstructor();
+@@ -84,6 +86,7 @@
+ 
+ void CarClassDestructor(RegistryDirectory* registry)
+ {
++    WebTeleportUnload();
+     CarAiClassDestructor();
+     AIDestructor();
+     CarWeaponClassDestructor(registry);
+--- a/include/tm4/modules/tele.h
++++ b/include/tm4/modules/tele.h
+@@ -11,6 +11,7 @@
+     s16 billboard_size, texture_frame, billboard_roll, size_phase;
+     s32 animation_age_frames;
+     CVECTOR* color;
++    s32 render_portal;
+ } Teleporter;
+ 
+ #endif
+--- a/src/modules/tele/tele.c
++++ b/src/modules/tele/tele.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/extensions/teleport_runtime.h"
+ #ifdef __psyz
+ #include "port/web/interpolation.h"
+ #endif
+@@ -38,14 +39,12 @@
+ void TeleporterClassConstructor(RegistryDirectory* registry)
+ {
+     char path[32];
+-    CVECTOR color;
+     s32 size, radius, roll_step, amplitude, size_phase_step;
+     size = 256;
+     roll_step = 64;
+     radius = 300;
+     amplitude = 32;
+     size_phase_step = 128;
+-    color = TeleDefaultColor;
+     TeleTextureCount = 0;
+     do {
+         Tm4CardTexture* texture;
+@@ -59,12 +58,9 @@
+         if (TeleAppendTexture(TeleTextureCount, texture) >= TELE_TEXTURE_CAPACITY)
+             break;
+     } while (1);
+-    if (!TeleTextureCount)
+-        return;
+     TeleBaseSize = *(s32*)TeleGetOrDefault(registry, TeleSizeKey, &size);
+     TeleDefaultRadius = *(s32*)TeleGetOrDefault(registry, TeleRadiusKey, &radius);
+-    /* If absent, the original retains this local fallback address beyond the call. */
+-    TeleColorDefault = TeleGetOrDefault(registry, TeleColorKey, &color);
++    TeleColorDefault = TeleGetOrDefault(registry, TeleColorKey, &TeleDefaultColor);
+     TeleRotationStep = *(s32*)TeleGetOrDefault(registry, TeleRotationKey, &roll_step);
+     TeleSizeAmplitude = *(s32*)TeleGetOrDefault(registry, TeleFluctuationAmplitudeKey, &amplitude);
+     TeleSizePhaseStep
+@@ -98,6 +94,7 @@
+     object->billboard_roll = 0;
+     object->size_phase = 0;
+     object->color = color;
++    object->render_portal = 1;
+     return 1;
+ }
+ s32 TeleporterConstructor(Teleporter* object, va_list args)
+@@ -134,6 +131,25 @@
+         destination_world = &placement->world_position;
+         destination_forward_world = &placement->world_forward;
+     }
++    const char* custom;
++    s32 appearance = WebTeleportAppearance(registry, &custom);
++    if (appearance < 0 || (appearance && !TeleTextureCount))
++        return 0;
++    if (!appearance) {
++        s32 initialized = TeleInitialize(object, entrance_world, radius, destination_world,
++            destination_forward_world, &TeleDefaultColor);
++        if (!initialized)
++            return 0;
++        object->render_portal = 0;
++        Rm4TeleportAppearanceContext context = {
++            .registry = registry,
++            .position = *entrance_world,
++            .destination = *destination_world,
++            .forward = *destination_forward_world,
++            .radius = radius,
++        };
++        return WebTeleportAttachAppearance(object, custom, &context);
++    }
+     color = RegGetFileDataPS(registry, TeleColorKey);
+     if (!color)
+         color = TeleColorDefault;
+@@ -152,6 +168,8 @@
+     MATRIX* billboard_to_camera = &object->billboard_to_camera;
+     s32* source;
+     s32 phase_step, angle;
++    if (!object->render_portal || !TeleTextureCount)
++        return;
+     if ((++object->animation_age_frames & (TELE_TEXTURE_PERIOD_FRAMES - 1)) == 0
+         && !TeleAdvanceTextureFrame(object->texture_frame, object))
+         object->texture_frame = 0;
+@@ -179,6 +197,8 @@
+ void TeleporterDisplay(void* payload, Tm4OrderingTag* ordering, u8** buffer, u8* end, MATRIX* view)
+ {
+     Teleporter* object = payload;
++    if (!object->render_portal || !TeleTextureCount)
++        return;
+     /* The dispatcher owns the byte cursor; reinterpret only its current packet value. */
+     /* Preserve the original eight-byte margin beyond the GPU packet. */
+     if ((u32)((char*)*buffer + sizeof(POLY_FT4) + 8) < (u32)end) {

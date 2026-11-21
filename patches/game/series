@@ -50,6 +50,7 @@ ffa-policy.patch
 network-ai.patch
 ffa-bots.patch
 prepared-model-pool.patch
+teleport.patch
 widescreen.patch
 widescreen-hud.patch
 mouse-look.patch

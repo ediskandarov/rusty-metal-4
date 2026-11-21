@@ -105,6 +105,7 @@ static const SnapshotField teleporter_fields[] = {
     SNAP_POD(Teleporter, size_phase),
     SNAP_POD(Teleporter, animation_age_frames),
     SNAP_LOCAL(Teleporter, color),
+    SNAP_LOCAL(Teleporter, render_portal),
     { 0 },
 };
 
@@ -256,7 +257,8 @@ static int jumbotron_valid(const void* payload)
 const SnapshotType WebSnapshotSceneTypes[] = {
     { "powerup", sizeof(PowerupState), powerup_fields, powerup_valid, NULL, restore_powerup_type,
         .baseline_removable = 1 },
-    { "teleporter", sizeof(Teleporter), teleporter_fields, .needs_template = 1 },
+    { "teleporter", sizeof(Teleporter), teleporter_fields, .needs_template = 1,
+        .baseline_removable = 1 },
     { "camera", sizeof(Camera), camera_fields, NULL, capture_camera, restore_camera,
         .baseline_removable = 1, .release = release_camera },
     { "carJump", sizeof(CarJump), car_jump_fields, .custom = car_jump_class },

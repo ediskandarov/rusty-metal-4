@@ -36,6 +36,7 @@ endfunction()
 file(GLOB TM4_MENU_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/menu/*.c")
 file(GLOB TM4_CAR_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/car/*.c")
 add_library(tm4_core STATIC
+    "${TM4_ROOT}/port/extensions/teleport.c"
     "${TM4_ROOT}/port/extensions/surface_effects.c"
     "${TM4_ROOT}/port/extensions/surface_effects_state.c"
     "${TM4_WEB}/memory.c"
@@ -325,6 +326,21 @@ target_link_libraries(tm4_surface_effects_check PRIVATE psyz)
 target_compile_options(tm4_surface_effects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_surface_effects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_surface_effects_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_teleport_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_teleport.c"
+    "${TM4_GAME_ROOT}/src/modules/tele/tele.c"
+    "${TM4_GAME_ROOT}/src/modules/tele/data.c"
+    "${TM4_ROOT}/port/extensions/teleport.c"
+    "${TM4_GAME_ROOT}/src/main/geometry/geometry.c"
+    "${TM4_ROOT}/port/game/math3d.c")
+target_include_directories(tm4_teleport_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_teleport_check PRIVATE TM4_GEOMETRY_FUNCTION=0x80028498 PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_teleport_check PRIVATE psyz)
+target_compile_options(tm4_teleport_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_teleport_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_teleport_check PROPERTIES SUFFIX ".cjs")
 
 # Small asset-free test using the actual WebGL backend and VRAM readback.
 add_executable(tm4_gpu_mask_check EXCLUDE_FROM_ALL "${TM4_ROOT}/tests/native/check_gpu_mask.c")
