@@ -1,71 +1,37 @@
 diff --git a/src/main/screen.c b/src/main/screen.c
 --- a/src/main/screen.c
 +++ b/src/main/screen.c
-@@ -12,6 +12,9 @@
+@@ -12,6 +12,7 @@
  #include "tm4/main/render.h"
  #include "tm4/main/screen.h"
  #include "port/web/net_match.h"
-+#include "port/web/checkpoint.h"
-+#include <emscripten.h>
-+#include <string.h>
++#include "port/web/network_messages.h"
  
  #include "tm4_scalar.h"
  
-@@ -102,6 +105,53 @@ static char HudWeaponsTexturePath[];
+@@ -32,12 +33,6 @@
+ #include <STRINGS.H>
+ #include <libetc.h>
+ 
+-typedef struct ScreenMessageQueue {
+-    s32 count;
+-    s32 timer;
+-    char messages[3][64];
+-} ScreenMessageQueue;
+-
+ static s32 ScreenPowerupAngle = 0;
+ #ifdef __psyz
+ #include "port/web/interpolation.h"
+@@ -101,7 +96,7 @@ static PowerupScreenDisplayFunction* ScreenPowerupDisplayCallback;
+ static char HudWeaponsTexturePath[];
  static char HudPlayerTexturePath[];
  static char HudEnemyTexturePath[];
- static ScreenMessageQueue ScreenLocalMessages[4];
-+static struct {
-+    u32 tick;
-+    ScreenMessageQueue queue;
-+} NetworkMessages[2 * WebCheckpointHistoryTicks + 1];
-+static ScreenMessageQueue* NetworkMessageTick;
-+
-+void WebScreenBeginPredictedTick(u32 tick)
-+{
-+    size_t index = tick % ArrayCount(NetworkMessages);
-+    NetworkMessages[index].tick = tick;
-+    NetworkMessages[index].queue.count = 0;
-+    NetworkMessageTick = &NetworkMessages[index].queue;
-+}
-+
-+void WebScreenFinishPredictedTick(void)
-+{
-+    NetworkMessageTick = NULL;
-+}
-+
-+static void append_local_message(ScreenMessageQueue* queue)
-+{
-+    if (queue->count == ScreenLocalMessageLimit) {
-+        for (s32 i = 1; i < queue->count; ++i)
-+            strcpy(queue->messages[i - 1], queue->messages[i]);
-+        --queue->count;
-+        queue->timer = 60;
-+    } else if (!queue->count) {
-+        queue->timer = 60;
-+    }
-+}
-+
-+EMSCRIPTEN_KEEPALIVE int WebNetConfirmPresentationTick(u32 tick)
-+{
-+    if (!WebNetRenderedPrediction() || !tick || WebNetReplaying())
-+        return 0;
-+    size_t index = tick % ArrayCount(NetworkMessages);
-+    if (NetworkMessages[index].tick != tick)
-+        return 0;
-+    NetworkMessages[index].tick = 0;
-+    ScreenMessageQueue* confirmed = &NetworkMessages[index].queue;
-+    ScreenMessageQueue* visible = &ScreenLocalMessages[0];
-+    for (s32 i = 0; i < confirmed->count; ++i) {
-+        append_local_message(visible);
-+        strcpy(visible->messages[visible->count++], confirmed->messages[i]);
-+    }
-+    return confirmed->count;
-+}
+-static ScreenMessageQueue ScreenLocalMessages[4];
++static WebScreenMessageQueue ScreenLocalMessages[4];
  static char ScreenMessageFontName[];
  static char FontTextureDirectory[];
  static char ScreenPowerupDisplaySymbol[];
-@@ -398,22 +448,19 @@ void ScreenRemoveLocalMessage(s32 player)
+@@ -398,22 +393,11 @@ void ScreenRemoveLocalMessage(s32 player)
  #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002F8F0
  void ScreenLocalMessageRegisterV(s32 player, const char* format, va_list arguments)
  {
@@ -83,27 +49,19 @@ diff --git a/src/main/screen.c b/src/main/screen.c
 -        queue->timer = 60;
 -    } else if (queue->count == 0) {
 -        queue->timer = 60;
-+    ScreenMessageQueue* queue = &ScreenLocalMessages[player];
-+    if (WebNetRenderedPrediction()) {
-+        queue = NetworkMessageTick;
-+        if (!queue)
-+            return;
-     }
+-    }
 -    FormatStringV(
 -        ScreenLocalMessages[player].messages[ScreenLocalMessages[player].count], format, arguments);
 -    ScreenLocalMessages[player].count++;
-+    append_local_message(queue);
-+    FormatStringV(queue->messages[queue->count], format, arguments);
-+    ++queue->count;
++    WebScreenMessageRegisterV(&ScreenLocalMessages[player], format, arguments);
  }
  #endif
  
-@@ -494,6 +541,8 @@ void ScreenLoadFont(char* file, const char* name, s32 inputFirstCharacter)
- #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002FE64
- void ScreenInitialize(void)
- {
-+    memset(NetworkMessages, 0, sizeof(NetworkMessages));
-+    NetworkMessageTick = NULL;
-     s32 player;
-     const s32 queue_count = ArrayCount(ScreenLocalMessages);
- 
+@@ -508,6 +492,7 @@ void ScreenInitialize(void)
+         ScreenLocalMessageLimit = 1;
+         break;
+     }
++    WebScreenMessagesReset(&ScreenLocalMessages[0], ScreenLocalMessageLimit);
+     ScreenPowerupAngle = 0;
+     ScreenLoadFont(ScreenMediumFontFile, ScreenMediumFontName, 32);
+     ScreenLoadFont(ScreenLargeFontFile, ScreenLargeFontName, 32);

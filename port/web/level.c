@@ -12,6 +12,7 @@
 #include "mouse_look.h"
 #endif
 #include "net_match.h"
+#include "network_messages.h"
 #include "participant.h"
 #include "render_sync.h"
 #include "rollback_audio.h"
@@ -251,8 +252,6 @@ static void finish_session(void)
 
 u32 WebCheckpointGteCapture(void* output, u32 capacity);
 void WebCheckpointGteRestore(const void* input);
-void WebScreenBeginPredictedTick(u32 tick);
-void WebScreenFinishPredictedTick(void);
 
 static void process_level_step(void)
 {

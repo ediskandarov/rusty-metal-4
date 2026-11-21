@@ -15,7 +15,7 @@ diff --git a/src/main/image.c b/src/main/image.c
 diff --git a/src/main/screen.c b/src/main/screen.c
 --- a/src/main/screen.c
 +++ b/src/main/screen.c
-@@ -699,9 +699,7 @@
+@@ -718,9 +718,7 @@ void ScreenDisplayRadar(
                  object->radar_color.b);
              setXY0(&primitives->radar_dots[index], x + 35, y + 50);
          }

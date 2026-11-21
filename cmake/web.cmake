@@ -220,6 +220,7 @@ add_executable(tm4_web
     "${TM4_WEB}/snapshot_projectile.c"
     "${TM4_WEB}/snapshot_sound.c"
     "${TM4_WEB}/rollback_audio.c"
+    "${TM4_WEB}/network_messages.c"
     "${TM4_WEB}/net_state.c"
     "${TM4_WEB}/net_state_cars.c"
     "${TM4_WEB}/net_state_objects.c"
@@ -278,6 +279,16 @@ target_sources(tm4_module_car PRIVATE "${TM4_ROOT}/port/game/car_audio.c")
 
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/redbook.c" PROPERTIES COMPILE_DEFINITIONS
     "CdGetToc=WebMusicGetToc;CdControl=WebMusicControl;CdControlB=WebMusicControlB;CdReadyCallback=WebMusicReadyCallback")
+
+# Asset-free queue checks run in Node using the production Wasm implementation.
+add_executable(tm4_network_messages_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_network_messages.c"
+    "${TM4_WEB}/network_messages.c")
+target_include_directories(tm4_network_messages_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_options(tm4_network_messages_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_network_messages_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_network_messages_check PROPERTIES SUFFIX ".cjs")
 
 # Small asset-free test using the actual WebGL backend and VRAM readback.
 add_executable(tm4_gpu_mask_check EXCLUDE_FROM_ALL "${TM4_ROOT}/tests/native/check_gpu_mask.c")
