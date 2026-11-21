@@ -38,6 +38,7 @@ network-messages.patch
 snapshot-classes.patch
 fire-ring-lifetime.patch
 object-lifetime.patch
+projectile-impact.patch
 participant-attribution.patch
 powerup-snapshot-binding.patch
 sparse-gameplay-slots.patch
