@@ -1,0 +1,69 @@
+diff --git a/include/tm4/modules/car.h b/include/tm4/modules/car.h
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -406,6 +406,7 @@
+ void CarProcess(void* payload);
+ void CarDestructor(void* payload);
+ void InteractCarWithCar(void* first, void* second);
++void CarDisplay(Car* car, Tm4OrderingTag* ordering, u8** packets, u8* end, MATRIX* world_to_camera);
+ void CarAiDestructor(Car* car);
+ void CarWeaponDestructor(Car* car);
+ void CarPhysicsDestructor(Car* car);
+@@ -433,4 +434,6 @@
+ typedef void CarControlsFrozenFunction(void* object);
+ CarControlsFrozenFunction CarControlsFrozen;
+ 
++void CarUpdateEngineSound(Car* car);
++
+ #endif
+diff --git a/src/modules/car/car.c b/src/modules/car/car.c
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -477,12 +477,7 @@
+         }
+     }
+     ObjectSetPosition(car, car->position.vx, car->position.vy, car->position.vz);
+-    if (car->engine_sound) {
+-        s32 pitch = car->force_sum * 2;
+-        if (pitch > ONE)
+-            pitch = ONE;
+-        Import_Car_SoundEmitterSetPitchScale(car->engine_sound, pitch);
+-    }
++    CarUpdateEngineSound(car);
+ }
+ 
+ void CarClearFireEffect(void* object)
+diff --git a/src/modules/car/private.h b/src/modules/car/private.h
+--- a/src/modules/car/private.h
++++ b/src/modules/car/private.h
+@@ -564,4 +564,7 @@
+ extern CarAiHealthEntry CarHealthPickups[32];
+ extern char CarEmptySuffix[];
+ 
++void CarClassConstructor(RegistryDirectory* registry);
++s32 CarConstructor(Car* car, va_list args);
++
+ #endif
+diff --git a/src/modules/car/weapon_launch.c b/src/modules/car/weapon_launch.c
+--- a/src/modules/car/weapon_launch.c
++++ b/src/modules/car/weapon_launch.c
+@@ -75,13 +75,18 @@
+     return 1;
+ }
+ 
++static void launch_massive_on_timer(Car* car, CarWeaponInstance* weapon, s32 flag, s32 index)
++{
++    CarLaunchMassiveOnTimer(car, weapon, flag, index);
++}
++
+ s32 CarLaunchMassive(Car* car, void* target, CarWeaponInstance* weapon, s32 flag)
+ {
+     s32 i;
+     const s32 weapon_count = ArrayCount(CarMassiveWeaponTypes);
+     weapon->index = 0;
+     for (i = 0; i < weapon_count; i++)
+-        ObjectCreate(CarTextTimer, 0, i * 8, CarLaunchMassiveOnTimer, 4, car, weapon, flag, i);
++        ObjectCreate(CarTextTimer, 0, i * 8, launch_massive_on_timer, 4, car, weapon, flag, i);
+     return 1;
+ }
+ 

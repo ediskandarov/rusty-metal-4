@@ -1,0 +1,29 @@
+diff --git a/src/modules/car/ai.c b/src/modules/car/ai.c
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -348,7 +348,11 @@
+             || CarAiTraceEdges(car->ai.area, car->ai.spatial_node, &car->ai.position, &delta, NULL))
+             candidate = CAR_AI_NO_NODE;
+     }
+-    if (candidate < 0 && fallback_index >= 0
++    /* The original indexes this local list with a previous global node index.
++     * Reject an invalid fallback instead of reading unrelated heap contents. */
++    if (candidate < 0 && fallback_index >= 0 && fallback_index < segment->navigation_count
++        && segment->navigation_indices && fallback_index < aiWorldInfo.resource.node_count
++        && segment->navigation_indices[fallback_index] < aiWorldInfo.resource.node_count
+         && aiWorldInfo.resource.nodes[segment->navigation_indices[fallback_index]].enabled) {
+         delta.x = aiWorldInfo.resource.nodes[fallback_index].x - car->ai.position.x;
+         delta.z = aiWorldInfo.resource.nodes[fallback_index].z - car->ai.position.z;
+diff --git a/src/modules/car/ai_control.c b/src/modules/car/ai_control.c
+--- a/src/modules/car/ai_control.c
++++ b/src/modules/car/ai_control.c
+@@ -179,7 +179,8 @@
+     s32 i;
+     for (i = GameInfo.entrant_count - 1; i >= 0; i--)
+         car->ai.attacker_damage[i] = 0;
+-    if (car->ai.target)
++    /* The target can die before our next AI update or destructor; its storage may be reused. */
++    if (car->ai.target && GameIsCarRegistered(car->ai.target))
+         --car->ai.target->ai.targeting_count;
+     car->ai.target = target;
+     car->ai.target_entry = entry;

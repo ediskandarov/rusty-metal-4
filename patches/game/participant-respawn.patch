@@ -122,12 +122,13 @@
      if (car->ai.attacker_damage)
          MemFree(car->ai.attacker_damage);
      if (car->ai.nearby_records)
+diff --git a/src/modules/car/car.c b/src/modules/car/car.c
 --- a/src/modules/car/car.c
 +++ b/src/modules/car/car.c
-@@ -2,9 +2,9 @@
+@@ -3,9 +3,9 @@
  #include "private.h"
  #include "tm4_scalar.h"
-
+ 
 +#include "port/web/net_match.h"
  #include "tm4/fixed.h"
  #include "tm4/main/game.h"
@@ -135,10 +136,10 @@
  #include "tm4/main/math3d.h"
  #include "tm4/main/memory.h"
  #include "tm4/main/object.h"
-@@ -105,32 +105,20 @@
+@@ -106,33 +106,20 @@ OSWord CarFindNamedFunction(Car* car, char* format)
      return OSSymbolGetAddress(symbol);
  }
-
+ 
 -s32 CarConstructor(Car* car, va_list args)
 +s32 CarPrepareResources(
 +    Car* car, char* character, s32 player, s32 index, s32 type, SVECTOR* position, SVECTOR* heading)
@@ -153,6 +154,7 @@
      char* filename;
      s32* value;
      CVECTOR* color;
+-    s32 controller;
      s32* size;
 -    s32 (*constructor)(Car*, void*);
      if (CarInitializeScales) {
@@ -170,7 +172,7 @@
      MemSet(car, 0, sizeof(*car));
      directory = CarClassDirectory;
      car->index = player;
-@@ -138,12 +126,12 @@
+@@ -140,12 +127,12 @@ s32 CarConstructor(Car* car, va_list args)
      if (WebNetMatchActive())
          ObjectGetHeader(car)->participant = WebParticipantIdentity(index);
      if (RegChangeCurrentDirectoryPS(directory, CarTextCharacters) != 1)
@@ -186,7 +188,7 @@
      car->name = RegGetFileDataS(CarTextRealname);
      if (!car->name)
          car->name = car->character_name;
-@@ -151,27 +139,27 @@
+@@ -153,109 +140,105 @@ s32 CarConstructor(Car* car, va_list args)
      if (!filename)
          filename = RegGetFileDataS(CarTextFilename);
      if (!filename)
@@ -197,12 +199,25 @@
 -        strcpy(car->filename, filename);
 -        car->filename[0] = toupper((u8)car->filename[0]);
 -    }
+-    value = CarGetFileData(CarTextDigitalSteeringMaxSpeed);
+-    if (!value)
+-        return 0;
+-    car->controls.digital_steering_max_speed = *value;
+-    if (car->controls.digital_steering_max_speed < 0)
+-        car->controls.digital_steering_max_speed = 0;
+-    value = CarGetFileData(CarTextDigitalSteeringFullTurnTime);
+-    if (!value)
+-        return 0;
+-    car->controls.digital_steering_turn_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
+-    value = CarGetFileData(CarTextDigitalSteeringFullReturnTime);
+-    if (!value)
+-        return 0;
+-    car->controls.digital_steering_return_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
 +    if (!car->filename)
 +        goto failed;
 +    strcpy(car->filename, filename);
 +    car->filename[0] = toupper((u8)car->filename[0]);
-     if (!CarControlsConstructor(car, type))
--        return 0;
++    if (!CarControlsConstructor(car, type))
 +        goto failed;
      color = CarGetFileData(CarTextRadarDotColor);
      if (!color)
@@ -224,7 +239,40 @@
      car->maximum_health = *value;
      car->muzzle_records = RegGetFileDataS(CarTextMachineGuns);
      if (!car->muzzle_records)
-@@ -189,35 +177,66 @@
+         car->muzzle_count = 0;
+     else
+         car->muzzle_count = RegGetFileArraySizeS(CarTextMachineGuns);
+-    car->controls.brake_input = 15;
+-    car->controls.gear = CAR_GEAR_FIRST;
+-    car->controls.input_device = 65;
+-    car->controls.input_flags = 192;
+     turbo = CarTurboScale;
+     energy = CarEnergyScale;
+     health = car->maximum_health;
+-    car->controls.action = CarActionNone;
+-    car->controls.steering_input = 0;
+-    car->controls.throttle_input = 0;
+-    car->controls.machine_gun_active = 0;
+-    car->controls.turbo_active = 0;
+-    car->controls.turbo_tap_ticks = 0;
+-    car->controls.ebrake_active = 0;
+     car->muzzle_index = 0;
+     car->muzzle_cooldown = 0;
+     car->turbo_fuel = car->maximum_turbo_fuel = turbo;
+     car->energy = car->maximum_energy = energy;
+     car->health = health;
+-    if (type == CAR_CONTROL_PLAYER) {
+-        controller = car->controller_index;
+-        car->controls.analog_steering_scale = 0x10000000
+-            / (GameInfo.players[controller].bindings[1].axes[2].full_scale
+-                - GameInfo.players[controller].bindings[1].axes[2].deadzone);
+-        car->controls.analog_throttle_scale_3 = 0xf000
+-            / (GameInfo.players[controller].bindings[1].axes[0].full_scale
+-                - GameInfo.players[controller].bindings[1].axes[0].deadzone);
+-        car->controls.analog_throttle_scale_1 = 0xf000
+-            / (GameInfo.players[controller].bindings[1].axes[1].full_scale
+-                - GameInfo.players[controller].bindings[1].axes[1].deadzone);
+-    }
      if (!CarWeaponConstructor(car, type) || !CarPhysicsConstructor(car, position, heading)
          || !CarAiConstructor(car, type) || !CarDisplayConstructor(car)
          || !CarPhysicsConstructorPostDisplayConstructor(car, 0)) {
@@ -251,11 +299,15 @@
          car->callback_context = 0;
      }
 -    constructor = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarConstructorFormat);
-+    car->process_callback = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarProcessFormat);
-+    car->destructor_callback
-+        = (void (*)(Car*, void*))CarFindNamedFunction(car, CarDestructorFormat);
-+    car->collision_callback = (CarCollisionCallback)CarFindNamedFunction(car, CarInteractionFormat);
-+    return 1;
+-    if (constructor && constructor(car, car->callback_context) != 1) {
+-        CarDestructor(car);
+-        return 0;
+-    }
+     car->process_callback = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarProcessFormat);
+     car->destructor_callback
+         = (void (*)(Car*, void*))CarFindNamedFunction(car, CarDestructorFormat);
+     car->collision_callback = (CarCollisionCallback)CarFindNamedFunction(car, CarInteractionFormat);
+     return 1;
 +failed:
 +    CarReleaseResources(car);
 +    return 0;
@@ -285,16 +337,12 @@
 +    }
 +    s32 (*constructor)(Car*, void*)
 +        = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarConstructorFormat);
-     if (constructor && constructor(car, car->callback_context) != 1) {
++    if (constructor && constructor(car, car->callback_context) != 1) {
 +        /* A failed model constructor has not acquired its destructor-owned resources. */
 +        car->destructor_callback = NULL;
-         CarDestructor(car);
-         return 0;
-     }
--    car->process_callback = (s32(*)(Car*, void*))CarFindNamedFunction(car, CarProcessFormat);
--    car->destructor_callback
--        = (void (*)(Car*, void*))CarFindNamedFunction(car, CarDestructorFormat);
--    car->collision_callback = (CarCollisionCallback)CarFindNamedFunction(car, CarInteractionFormat);
++        CarDestructor(car);
++        return 0;
++    }
 +    if (WebNetMatchActive()) {
 +        if (SoundIsLooping(car->engine_sound_name))
 +            car->engine_sound = ObjectCreate(
@@ -304,13 +352,14 @@
 +            return 0;
 +        }
 +    }
-     return 1;
++    return 1;
  }
-
-@@ -465,9 +484,8 @@
+ 
+ void CarFreezeCar(Car* car)
+@@ -502,9 +485,8 @@ void CarClearFireEffect(void* object)
      }
  }
-
+ 
 -void CarDestructor(void* payload)
 +void CarReleaseResources(Car* car)
  {
@@ -318,7 +367,7 @@
      void (*destructor)(Car*, void*);
      CarCollisionHistory *node, *next;
      CarAiDestructor(car);
-@@ -492,6 +509,12 @@
+@@ -529,6 +511,12 @@ void CarDestructor(void* payload)
          node = next;
      }
      car->collision_history = 0;
@@ -354,19 +403,30 @@
  }
 
  static inline void load_physics_setting(RegistryDirectory* physics, char* name, s32* setting)
+diff --git a/src/modules/car/private.h b/src/modules/car/private.h
 --- a/src/modules/car/private.h
 +++ b/src/modules/car/private.h
-@@ -122,6 +122,7 @@
+@@ -42,6 +42,8 @@
+ void CarClearFireEffect(void* object);
+ 
+ /* input.c */
++void* CarGetFileData(char* path);
++s32 CarControlsConstructor(Car* car, s32 type);
+ void CarPlayerInput(Car* car);
+ 
+ /* ai.c */
+@@ -120,6 +122,7 @@
  /* physics.c */
  s32 CarPhysicsConstructor(Car* car, SVECTOR* position, SVECTOR* heading);
  s32 CarPhysicsConstructorPostDisplayConstructor(Car* car, s32 existing);
 +s32 CarPhysicsResourcesValid(const Car* car);
  void CarPhysicsClassConstructor(RegistryDirectory* directory);
  void CarPhysicsClassDestructor(RegistryDirectory* registry);
-
-@@ -570,3 +571,7 @@
+ 
+@@ -567,4 +570,8 @@
+ void CarClassConstructor(RegistryDirectory* registry);
  s32 CarConstructor(Car* car, va_list args);
-
+ 
 +/* Shared resource phase; it does not register a car or create runtime children. */
 +s32 CarPrepareResources(Car*, char*, s32, s32, s32, SVECTOR*, SVECTOR*);
 +void CarReleaseResources(Car*);
@@ -409,3 +469,57 @@
  }
 
  void CarWeaponProcess(Car* car)
+diff --git a/src/modules/car/input.c b/src/modules/car/input.c
+--- a/src/modules/car/input.c
++++ b/src/modules/car/input.c
+@@ -35,6 +35,50 @@
+     digital_brake = 16,
+     analog_brake = 32
+ };
++
++s32 CarControlsConstructor(Car* car, s32 type)
++{
++    s32* value;
++    s32 controller;
++    value = CarGetFileData(CarTextDigitalSteeringMaxSpeed);
++    if (!value)
++        return 0;
++    car->controls.digital_steering_max_speed = *value;
++    if (car->controls.digital_steering_max_speed < 0)
++        car->controls.digital_steering_max_speed = 0;
++    value = CarGetFileData(CarTextDigitalSteeringFullTurnTime);
++    if (!value)
++        return 0;
++    car->controls.digital_steering_turn_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
++    value = CarGetFileData(CarTextDigitalSteeringFullReturnTime);
++    if (!value)
++        return 0;
++    car->controls.digital_steering_return_step = 65536 / Q12MulRound(*value, SIMULATION_FPS);
++    car->controls.brake_input = 15;
++    car->controls.gear = CAR_GEAR_FIRST;
++    car->controls.input_device = 65;
++    car->controls.input_flags = 192;
++    car->controls.action = CarActionNone;
++    car->controls.steering_input = 0;
++    car->controls.throttle_input = 0;
++    car->controls.machine_gun_active = 0;
++    car->controls.turbo_active = 0;
++    car->controls.turbo_tap_ticks = 0;
++    car->controls.ebrake_active = 0;
++    if (type == CAR_CONTROL_PLAYER) {
++        controller = car->controller_index;
++        car->controls.analog_steering_scale = 0x10000000
++            / (GameInfo.players[controller].bindings[1].axes[2].full_scale
++                - GameInfo.players[controller].bindings[1].axes[2].deadzone);
++        car->controls.analog_throttle_scale_3 = 0xf000
++            / (GameInfo.players[controller].bindings[1].axes[0].full_scale
++                - GameInfo.players[controller].bindings[1].axes[0].deadzone);
++        car->controls.analog_throttle_scale_1 = 0xf000
++            / (GameInfo.players[controller].bindings[1].axes[1].full_scale
++                - GameInfo.players[controller].bindings[1].axes[1].deadzone);
++    }
++    return 1;
++}
+ 
+ void CarPlayerInput(Car* car)
+ {

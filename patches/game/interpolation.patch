@@ -61,22 +61,20 @@ diff --git a/src/modules/afc/display.c b/src/modules/afc/display.c
 diff --git a/src/modules/car/camera.c b/src/modules/car/camera.c
 --- a/src/modules/car/camera.c
 +++ b/src/modules/car/camera.c
-@@ -1,7 +1,9 @@
+@@ -1,6 +1,9 @@
  
  #include "tm4/modules/camera.h"
  #include "private.h"
--
 +#ifdef __psyz
 +#include "port/web/interpolation.h"
 +#endif
  #include "tm4/compiler.h"
  #include "tm4_scalar.h"
  
-@@ -309,7 +311,10 @@
+@@ -308,6 +311,10 @@
      look_button = GameInfo.players[((Car*)object)->controller_index]
                        .bindings[pad->has_analog]
                        .actions[GameControlLookBack];
--
 +#ifdef __psyz
 +    if (car_camera_state(data)->snap || ((pad->buttons ^ pad->previous_buttons) & look_button))
 +        WebInterpolationCutCamera(camera);
@@ -110,22 +108,20 @@ diff --git a/src/modules/car/display.c b/src/modules/car/display.c
 diff --git a/src/modules/car/orientation.c b/src/modules/car/orientation.c
 --- a/src/modules/car/orientation.c
 +++ b/src/modules/car/orientation.c
-@@ -1,7 +1,9 @@
+@@ -1,6 +1,9 @@
  
  #include "private.h"
  #include "tm4/compiler.h"
--
 +#ifdef __psyz
 +#include "port/web/interpolation.h"
 +#endif
  #include "tm4_scalar.h"
  
  #include "tm4/vector.h"
-@@ -92,7 +94,9 @@
+@@ -91,6 +94,9 @@
      s32 i;
      const s32 particle_count = ArrayCount(car->particles);
      const s32 wheel_count = ArrayCount(car->wheels);
--
 +#ifdef __psyz
 +    WebInterpolationCutCar(car);
 +#endif

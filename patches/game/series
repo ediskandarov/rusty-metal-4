@@ -2,7 +2,9 @@ runtime-fixes.patch
 runtime-platform.patch
 runtime-integration.patch
 browser-report.patch
-car.patch
+car-fixes.patch
+car-platform.patch
+car-integration.patch
 menu.patch
 overlays.patch
 dynamic-modules.patch

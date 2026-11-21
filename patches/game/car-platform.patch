@@ -1,0 +1,140 @@
+diff --git a/include/tm4/modules/car.h b/include/tm4/modules/car.h
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -1,6 +1,7 @@
+ #ifndef TM4_MODULES_CAR_H
+ #define TM4_MODULES_CAR_H
+ 
++#include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ #include "tm4_types.h"
+ 
+diff --git a/src/modules/car/car_display_gte.h b/src/modules/car/car_display_gte.h
+--- a/src/modules/car/car_display_gte.h
++++ b/src/modules/car/car_display_gte.h
+@@ -1,12 +1,5 @@
+ #ifndef TM4_CAR_DISPLAY_GTE_H
+ #define TM4_CAR_DISPLAY_GTE_H
+-
+-/* The fifth matrix word replaces the pointer after its last load. */
+-#define CarSetDisplayRotation(matrix)                                                              \
+-    __asm__ volatile("lw $3,0(%0);lw $4,4(%0);lw $5,8(%0);lw $6,12(%0);lw %0,16(%0);"              \
+-                     "ctc2 $3,$0;ctc2 $4,$1;ctc2 $5,$2;ctc2 $6,$3;ctc2 %0,$4"                      \
+-                     : "+r"(matrix)                                                                \
+-                     :                                                                             \
+-                     : "$3", "$4", "$5", "$6", "memory")
+-
++#include <libgte.h>
++#define CarSetDisplayRotation(matrix) SetRotMatrix(matrix)
+ #endif
+diff --git a/src/modules/car/car_shadow_gte.h b/src/modules/car/car_shadow_gte.h
+--- a/src/modules/car/car_shadow_gte.h
++++ b/src/modules/car/car_shadow_gte.h
+@@ -1,25 +1,9 @@
+ #ifndef TM4_CAR_SHADOW_GTE_H
+ #define TM4_CAR_SHADOW_GTE_H
+-
++#include <libgte.h>
+ #define CarSetShadowMatrix(matrix)                                                                 \
+-    __asm__ volatile("lw $3,0(%0);"                                                                \
+-                     "lw $4,4(%0);"                                                                \
+-                     "lw $5,8(%0);"                                                                \
+-                     "lw $6,12(%0);"                                                               \
+-                     "ctc2 $3,$0;"                                                                 \
+-                     "ctc2 $4,$1;"                                                                 \
+-                     "ctc2 $5,$2;"                                                                 \
+-                     "ctc2 $6,$3;"                                                                 \
+-                     "lw $3,16(%0);"                                                               \
+-                     "lw $4,20(%0);"                                                               \
+-                     "lw $5,24(%0);"                                                               \
+-                     "lw $6,28(%0);"                                                               \
+-                     "ctc2 $3,$4;"                                                                 \
+-                     "ctc2 $4,$5;"                                                                 \
+-                     "ctc2 $5,$6;"                                                                 \
+-                     "ctc2 $6,$7"                                                                  \
+-                     :                                                                             \
+-                     : "r"(matrix)                                                                 \
+-                     : "$3", "$4", "$5", "$6", "memory")
+-
++    do {                                                                                           \
++        SetRotMatrix(matrix);                                                                      \
++        SetTransMatrix(matrix);                                                                    \
++    } while (0)
+ #endif
+diff --git a/src/modules/car/car_trace_gte.h b/src/modules/car/car_trace_gte.h
+--- a/src/modules/car/car_trace_gte.h
++++ b/src/modules/car/car_trace_gte.h
+@@ -1,13 +1,14 @@
+ #ifndef TM4_CAR_TRACE_GTE_H
+ #define TM4_CAR_TRACE_GTE_H
++#include <psyz/gte.h>
+ 
+-#define CarTraceSetR11R12(value) __asm__ volatile("ctc2 %0,$0" : : "r"(value))
+-#define CarTraceSetR22R23(value) __asm__ volatile("ctc2 %0,$2" : : "r"(value))
+-#define CarTraceSetR33(value) __asm__ volatile("ctc2 %0,$4" : : "r"(value))
+-#define CarTraceSetIR1(value) __asm__ volatile("mtc2 %0,$9" : : "r"(value))
+-#define CarTraceSetIR2(value) __asm__ volatile("mtc2 %0,$10" : : "r"(value))
+-#define CarTraceSetIR3(value) __asm__ volatile("mtc2 %0,$11" : : "r"(value))
+-#define CarTraceReadMAC2(value) __asm__ volatile("mfc2 %0,$26" : "=r"(value))
+-#define CarTraceReadMAC1(value) __asm__ volatile("mfc2 %0,$25" : "=r"(value))
++#define CarTraceSetR11R12(value) Psyz_GteCtrlWrite(0, (value))
++#define CarTraceSetR22R23(value) Psyz_GteCtrlWrite(2, (value))
++#define CarTraceSetR33(value) Psyz_GteCtrlWrite(4, (value))
++#define CarTraceSetIR1(value) Psyz_GteDataWrite(9, (value))
++#define CarTraceSetIR2(value) Psyz_GteDataWrite(10, (value))
++#define CarTraceSetIR3(value) Psyz_GteDataWrite(11, (value))
++#define CarTraceReadMAC2(value) ((value) = (s32)Psyz_GteDataRead(26))
++#define CarTraceReadMAC1(value) ((value) = (s32)Psyz_GteDataRead(25))
+ 
+ #endif
+diff --git a/src/modules/car/input.c b/src/modules/car/input.c
+--- a/src/modules/car/input.c
++++ b/src/modules/car/input.c
+@@ -12,7 +12,7 @@
+ #include "tm4/main/screen.h"
+ #include "tm4/main/system.h"
+ 
+-#include <SYS/TYPES.H>
++#include <stddef.h>
+ 
+ static inline void report_empty_turbo(Car* car)
+ {
+diff --git a/src/modules/car/jump.c b/src/modules/car/jump.c
+--- a/src/modules/car/jump.c
++++ b/src/modules/car/jump.c
+@@ -56,10 +56,7 @@
+ }
+ 
+ /* Each GPU tag keeps its length byte when its ordering-table link is replaced. */
+-#define LINK_JUMP_PRIMITIVE(bucket, primitive, address_mask, length_mask)                          \
+-    (*(unsigned long*)(primitive)                                                                  \
+-        = (*(unsigned long*)(primitive) & (length_mask)) | (*(bucket) & (address_mask)),           \
+-        *(bucket) = (*(bucket) & (length_mask)) | ((unsigned long)(primitive) & (address_mask)))
++#define LINK_JUMP_PRIMITIVE(bucket, primitive, address_mask, length_mask) addPrim(bucket, primitive)
+ 
+ static inline void store_midpoint(SVECTOR* dest, s32 fixed, SVECTOR* tail, s32 x, s32 y, s32 z,
+     s16 jump_x, s16 jump_y, s16 jump_z)
+diff --git a/src/modules/car/private.h b/src/modules/car/private.h
+--- a/src/modules/car/private.h
++++ b/src/modules/car/private.h
+@@ -3,6 +3,7 @@
+ 
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
++#include <stdarg.h>
+ 
+ #include "tm4/main/game.h"
+ #include "tm4/main/math3d.h"
+diff --git a/src/modules/car/suspension.c b/src/modules/car/suspension.c
+--- a/src/modules/car/suspension.c
++++ b/src/modules/car/suspension.c
+@@ -380,8 +380,7 @@
+                 }
+                 for (; particle_index < particle_count; particle_index++) {
+                     CarParticle* current = (CarParticle*)((char*)car + particle_offset);
+-                    register const Tm4VectorComponent* velocity TM4_BIND_REGISTER("$4")
+-                        = &current->velocity_q12.vx;
++                    register const Tm4VectorComponent* velocity TM4_BIND_REGISTER("$4") = &current->velocity_q12.vx;
+                     register const s16* axis TM4_BIND_REGISTER("$5") = &direction_pointer->vx;
+                     particle_offset += sizeof(CarParticle);
+                     {
