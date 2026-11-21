@@ -1,12 +1,31 @@
 diff --git a/src/main/sound.c b/src/main/sound.c
 --- a/src/main/sound.c
 +++ b/src/main/sound.c
-@@ -743,9 +743,25 @@
+@@ -1,5 +1,7 @@
+ #include "tm4/main/sound.h"
+ #include "port/web/net_match.h"
++#include "port/web/rollback_audio.h"
++#include <emscripten.h>
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/integer.h"
+@@ -377,6 +379,12 @@ s32 SoundIsLooping(char* name)
+ void SoundStartVoice(
+     s32 program, s32 index, s32 offset_q12, s32 voice, s32 pitch, s32 left, s32 right)
+ {
++    if (WebNetRenderedPrediction())
++        EM_ASM({
++            tm4Port.predictionSoundStarts = (tm4Port.predictionSoundStarts || 0) + 1;
++            if ($0)
++                tm4Port.predictionReplaySoundStarts = (tm4Port.predictionReplaySoundStarts || 0) + 1;
++        }, WebNetReplaying());
+     SpuVoiceAttr attr;
+     u32 mask = SPU_KEYCH(voice);
+     SpuSetKey(SPU_OFF, mask);
+@@ -743,9 +751,23 @@ s32 SoundDopplerPitch(const Tm4Vector3 previous_listener_world, const Tm4Vector3
  }
  #endif
  
-+enum { PlaybackFinished = -2 };
-+
 +void WebNetSuppressReplayedSounds(void)
 +{
 +    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
@@ -14,7 +33,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
 +        SoundEmitter* emitter = ObjectGetPayload(object);
 +        for (s32 i = 0; i < emitter->voice_count; ++i)
 +            if (emitter->voices[i].duration_frames >= 0)
-+                emitter->voices[i].voice_id = PlaybackFinished;
++                emitter->voices[i].voice_id = WebAudioPlaybackFinished;
 +    }
 +}
 +
@@ -27,7 +46,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
      s32 voice;
      SoundEmitter* emitter;
      s32 index;
-@@ -774,7 +790,11 @@
+@@ -774,7 +796,11 @@ void SoundProcess(void)
                          SoundVoiceOwners[voice].emitter_voice_index = index;
                      } else {
                          SpuSetKey(SPU_OFF, SPU_KEYCH(voice));
@@ -35,21 +54,21 @@ diff --git a/src/main/sound.c b/src/main/sound.c
 +                        if (network) {
 +                            emitter->voices[index].voice_id =
 +                                emitter->voices[index].duration_frames < 0
-+                                ? SOUND_VOICE_UNASSIGNED : PlaybackFinished;
++                                ? SOUND_VOICE_UNASSIGNED : WebAudioPlaybackFinished;
 +                        } else if (SoundSamples[SoundPrograms[emitter->program_id]
                                               .attributes[emitter->voices[index].attribute_index]
                                               .sample]
                                  .loop) {
-@@ -831,6 +851,8 @@
+@@ -831,6 +857,8 @@ void SoundProcess(void)
              } else
                  distance = 0;
              for (index = 0; index < emitter->voice_count; index++) {
-+                if (network && emitter->voices[index].voice_id == PlaybackFinished)
++                if (network && emitter->voices[index].voice_id == WebAudioPlaybackFinished)
 +                    continue;
                  if (count < SOUND_HARDWARE_VOICES)
                      candidate = count++;
                  else {
-@@ -899,7 +921,7 @@
+@@ -899,7 +927,7 @@ void SoundProcess(void)
          emitter = SoundCandidates[candidate].emitter;
          for (index = 0; index < emitter->voice_count; index++) {
              voice = emitter->voices[index].voice_id;
@@ -58,6 +77,33 @@ diff --git a/src/main/sound.c b/src/main/sound.c
                  continue;
              voice = 0;
              while (active & SPU_VOICECH(voice))
+@@ -909,11 +937,12 @@ void SoundProcess(void)
+                 return;
+             }
+             emitter->voices[index].voice_id = voice;
+-            if (SoundVoiceOwners[voice].emitter)
+-                SoundVoiceOwners[voice]
+-                    .emitter->voices[SoundVoiceOwners[voice].emitter_voice_index]
+-                    .voice_id
+-                    = SOUND_VOICE_UNASSIGNED;
++            if (SoundVoiceOwners[voice].emitter) {
++                SoundEmitterVoice* previous = &SoundVoiceOwners[voice]
++                    .emitter->voices[SoundVoiceOwners[voice].emitter_voice_index];
++                previous->voice_id = network && previous->duration_frames >= 0
++                    ? WebAudioPlaybackFinished : SOUND_VOICE_UNASSIGNED;
++            }
+             if (!SoundCandidates[candidate].listener)
+                 SoundPanVolume(
+                     emitter->voices[index].pan, emitter->voices[index].volume * 129, &left, &right);
+@@ -938,6 +967,8 @@ void SoundProcess(void)
+                           emitter->voices[index].duration_frames)
+                     : 0,
+                 voice, pitch, left, right);
++            if (WebNetRenderedPrediction())
++                WebRollbackAudioStarted(emitter, index);
+             active |= SPU_VOICECH(voice);
+         }
+     }
 diff --git a/src/modules/sound/sound.c b/src/modules/sound/sound.c
 --- a/src/modules/sound/sound.c
 +++ b/src/modules/sound/sound.c

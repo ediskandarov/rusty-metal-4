@@ -1,0 +1,108 @@
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -12,6 +12,9 @@
+ #include "tm4/main/render.h"
+ #include "tm4/main/screen.h"
+ #include "port/web/net_match.h"
++#include "port/web/checkpoint.h"
++#include <emscripten.h>
++#include <string.h>
+
+ #include "tm4_scalar.h"
+
+@@ -102,6 +105,53 @@
+ static char HudPlayerTexturePath[];
+ static char HudEnemyTexturePath[];
+ static ScreenMessageQueue ScreenLocalMessages[4];
++static struct {
++    u32 tick;
++    ScreenMessageQueue queue;
++} NetworkMessages[2 * WebCheckpointHistoryTicks + 1];
++static ScreenMessageQueue* NetworkMessageTick;
++
++void WebScreenBeginPredictedTick(u32 tick)
++{
++    size_t index = tick % ArrayCount(NetworkMessages);
++    NetworkMessages[index].tick = tick;
++    NetworkMessages[index].queue.count = 0;
++    NetworkMessageTick = &NetworkMessages[index].queue;
++}
++
++void WebScreenFinishPredictedTick(void)
++{
++    NetworkMessageTick = NULL;
++}
++
++static void append_local_message(ScreenMessageQueue* queue)
++{
++    if (queue->count == ScreenLocalMessageLimit) {
++        for (s32 i = 1; i < queue->count; ++i)
++            strcpy(queue->messages[i - 1], queue->messages[i]);
++        --queue->count;
++        queue->timer = 60;
++    } else if (!queue->count) {
++        queue->timer = 60;
++    }
++}
++
++EMSCRIPTEN_KEEPALIVE int WebNetConfirmPresentationTick(u32 tick)
++{
++    if (!WebNetRenderedPrediction() || !tick || WebNetReplaying())
++        return 0;
++    size_t index = tick % ArrayCount(NetworkMessages);
++    if (NetworkMessages[index].tick != tick)
++        return 0;
++    NetworkMessages[index].tick = 0;
++    ScreenMessageQueue* confirmed = &NetworkMessages[index].queue;
++    ScreenMessageQueue* visible = &ScreenLocalMessages[0];
++    for (s32 i = 0; i < confirmed->count; ++i) {
++        append_local_message(visible);
++        strcpy(visible->messages[visible->count++], confirmed->messages[i]);
++    }
++    return confirmed->count;
++}
+ static char ScreenMessageFontName[];
+ static char FontTextureDirectory[];
+ static char ScreenPowerupDisplaySymbol[];
+@@ -398,23 +448,19 @@
+ #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002F8F0
+ void ScreenLocalMessageRegisterV(s32 player, const char* format, va_list arguments)
+ {
+-    ScreenMessageQueue* base;
+-    ScreenMessageQueue* queue;
+     const s32 queue_count = ArrayCount(ScreenLocalMessages);
+     player = WebNetLocalView(player);
+     if (player < 0 || player >= queue_count || player >= GameInfo.player_count)
+         return;
+-    base = ScreenLocalMessages;
+-    queue = &base[player];
+-    if (queue->count == ScreenLocalMessageLimit) {
+-        ScreenRemoveLocalMessage(player);
+-        queue->timer = 60;
+-    } else if (queue->count == 0) {
+-        queue->timer = 60;
+-    }
+-    FormatStringV(
+-        ScreenLocalMessages[player].messages[ScreenLocalMessages[player].count], format, arguments);
+-    ScreenLocalMessages[player].count++;
++    ScreenMessageQueue* queue = &ScreenLocalMessages[player];
++    if (WebNetRenderedPrediction()) {
++        queue = NetworkMessageTick;
++        if (!queue)
++            return;
++    }
++    append_local_message(queue);
++    FormatStringV(queue->messages[queue->count], format, arguments);
++    ++queue->count;
+ }
+ #endif
+
+@@ -495,6 +541,8 @@
+ #if !defined(TM4_SCREEN_FUNCTION) || TM4_SCREEN_FUNCTION == 0x8002FE64
+ void ScreenInitialize(void)
+ {
++    memset(NetworkMessages, 0, sizeof(NetworkMessages));
++    NetworkMessageTick = NULL;
+     s32 player;
+     const s32 queue_count = ArrayCount(ScreenLocalMessages);
+
