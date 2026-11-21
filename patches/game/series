@@ -5,7 +5,9 @@ browser-report.patch
 car-fixes.patch
 car-platform.patch
 car-integration.patch
-menu.patch
+menu-fixes.patch
+menu-platform.patch
+menu-integration.patch
 overlays-fixes.patch
 overlays-platform.patch
 overlays-integration.patch

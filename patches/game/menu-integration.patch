@@ -1,0 +1,12 @@
+diff --git a/src/modules/menu/model.c b/src/modules/menu/model.c
+--- a/src/modules/menu/model.c
++++ b/src/modules/menu/model.c
+@@ -121,7 +121,7 @@ static inline s32 MenuTexturePageRow(u32 page)
+     return ((page << 4) & 0x100) | ((page >> 2) & 0x200);
+ }
+ 
+-void CarRelocateBitStuff(RegistryDirectory* directory, u16 oldx, u16 oldy, u16 x, u16 y)
++void MenuRelocateCarTextures(RegistryDirectory* directory, u16 oldx, u16 oldy, u16 x, u16 y)
+ {
+     u32 ybits;
+     Tm4CardTexture* shadow;

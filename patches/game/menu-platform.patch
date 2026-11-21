@@ -1,0 +1,50 @@
+diff --git a/src/modules/menu/cheat_codes.c b/src/modules/menu/cheat_codes.c
+--- a/src/modules/menu/cheat_codes.c
++++ b/src/modules/menu/cheat_codes.c
+@@ -9,9 +9,6 @@
+ extern char MenuCheatCharacterDirectoryPath[24];
+ extern char MenuCheatWorldDirectoryPath[8];
+ 
+-extern s32 rand(void);
+-extern void srand(u32);
+-
+ void MenuGenerateSeededButtonSequence(u16* codes, u32 seed, s32 count)
+ {
+     s32 previous = randseed(), i, j;
+diff --git a/src/modules/menu/menu.c b/src/modules/menu/menu.c
+--- a/src/modules/menu/menu.c
++++ b/src/modules/menu/menu.c
+@@ -204,7 +204,6 @@ void MenuInitialize(u32 mode)
+     MenuResetCarPreviews();
+     ObjectConstructor();
+     ObjectStartupInstance();
+-    VB_StartSync();
+     MenuSetSoundVolume(16);
+     MenuSetMusicVolume(MenuGameState.music_volume);
+     MenuMusicEmitter = ObjectCreate(MenuSoundEmitterClass, 0, MenuMusicEmitterName, 0);
+diff --git a/src/modules/menu/private.h b/src/modules/menu/private.h
+--- a/src/modules/menu/private.h
++++ b/src/modules/menu/private.h
+@@ -2,6 +2,7 @@
+ #define TM4_MENU_PRIVATE_H
+ 
+ #include "tm4/compiler.h"
++#include "tm4/fixed.h"
+ #include "tm4/gpu.h"
+ #include "tm4_scalar.h"
+ 
+diff --git a/src/modules/menu/screen_input.c b/src/modules/menu/screen_input.c
+--- a/src/modules/menu/screen_input.c
++++ b/src/modules/menu/screen_input.c
+@@ -17,10 +17,7 @@ extern s32 MenuMode_1a8a8;
+ 
+ static inline MenuChoiceRecord* MenuInputChoice(MenuScreenEntry* screen, s32 index)
+ {
+-    /* Explicit byte offsets preserve PsyQ's address instruction order. */
+-    enum { choices_offset = offsetof(MenuScreenEntry, choices) };
+-    s32 offset = index * sizeof(MenuChoiceRecord);
+-    return (MenuChoiceRecord*)((char*)screen + offset + choices_offset);
++    return &screen->choices[index];
+ }
+ 
+ static inline s32 MenuCurrentChoiceAvailable(void)
