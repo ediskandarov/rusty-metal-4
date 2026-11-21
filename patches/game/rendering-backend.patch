@@ -1,0 +1,90 @@
+diff --git a/include/tm4/main/render.h b/include/tm4/main/render.h
+--- a/include/tm4/main/render.h
++++ b/include/tm4/main/render.h
+@@ -109,7 +109,12 @@
+ Tm4RenderBuffer* RenderGetDisplayBuffer(void);
+ void RenderBuildFrame(void);
+ void RenderPresent(s32 present);
+-/* Borrows the loaded horizon resource. Drawing updates its packet slots in place. */
++/* Loads a horizon resource; the native renderer copies its PS1 packets into writable packets. */
+ void RenderSetHorizon(Tm4HorizonResource* resource);
++void RenderDrawHorizon(Tm4OrderingTag* ordering_table, MATRIX* world_to_camera, u8 buffer);
++void RenderGetBackgroundColor(u8* red, u8* green, u8* blue);
++struct Camera;
++s32 RenderScene(Tm4OrderingTag* ordering_table, u8* primitive_start, s32 ordering_size,
++    u8* primitive_limit, s32 remaining, struct Camera* view);
+ 
+ #endif
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -30,6 +30,7 @@
+     Tm4RenderBuffer* buffers[2];
+ } Tm4RenderBufferPair;
+ 
++#ifndef __psyz
+ /* horiz.bin begins with this header, then its Gouraud, flat and textured record arrays. */
+ struct Tm4HorizonResource {
+     u8 gouraud_count;
+@@ -83,6 +84,8 @@
+ static const Tm4SceneCellOrder RenderSceneCellOrder[16] = {
+ #include "render_cell_order.inc"
+ };
++
++#endif
+ 
+ static Tm4RenderBufferPair RenderBuffers;
+ static Tm4RenderBuffer* RenderDrawBuffer = NULL;
+@@ -94,19 +97,21 @@
+ static s32 RenderMaximumFaceBudget = 0;
+ static s32 RenderFramePhase = 0;
+ u_long otSize = 0;
++#ifndef __psyz
+ static Tm4PsxHorizonTexturedRecord* RenderHorizonTexturedRecords = NULL;
+ static Tm4HorizonResource* RenderHorizon = NULL;
+ static Tm4PsxHorizonGouraudRecord* RenderHorizonGouraudRecords = NULL;
+ static u8* RenderHorizonRecordEnd = NULL;
+ static Tm4PsxHorizonFlatRecord* RenderHorizonFlatRecords = NULL;
+ static Tm4HorizonResource RenderDefaultHorizon;
++#endif
+ 
+ s32 RenderScene(Tm4OrderingTag*, u8*, s32, u8*, s32, Camera*);
+ void RenderInitializeTiles(Tm4RenderBuffer*);
+ void RenderGetBackgroundColor(u8*, u8*, u8*);
+ void RenderDrawHorizon(Tm4OrderingTag*, MATRIX*, u8);
+ 
+-#if !defined(TM4_RENDER_FUNCTION) || TM4_RENDER_FUNCTION == 0x8001E990
++#if !defined(__psyz) && (!defined(TM4_RENDER_FUNCTION) || TM4_RENDER_FUNCTION == 0x8001E990)
+ /* Assembly rationale: [evidence](../../docs/render-scene-assembly.md). */
+ #include "render_scene.s"
+ #endif
+@@ -1126,6 +1131,7 @@
+ }
+ #endif
+ 
++#ifndef __psyz
+ #if !defined(TM4_RENDER_FUNCTION) || TM4_RENDER_FUNCTION == 0x8001FFE8
+ void RenderSetHorizon(Tm4HorizonResource* resource)
+ {
+@@ -1251,12 +1257,12 @@
+ }
+ #endif
+ 
++#endif
++
+ static Tm4RenderBufferPair RenderBuffers = {
+     .buffers = { NULL, NULL },
+ };
+-/* Keep the layout tables between the two private states in the PS1 small-data section. */
+-#include "render_layout.c"
+-
++#ifndef __psyz
+ static Tm4HorizonResource RenderDefaultHorizon = {
+     .gouraud_count = 0,
+     .flat_count = 0,
+@@ -1264,3 +1270,5 @@
+     .reserved03 = 0,
+     .color = { 1, 1, 1, 0 },
+ };
++
++#endif

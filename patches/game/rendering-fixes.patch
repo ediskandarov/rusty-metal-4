@@ -1,0 +1,69 @@
+diff --git a/include/tm4/main/render_polygon.h b/include/tm4/main/render_polygon.h
+--- a/include/tm4/main/render_polygon.h
++++ b/include/tm4/main/render_polygon.h
+@@ -86,7 +86,7 @@
+ #define Tm4ProjectVertexTriple(vertices, source, remaining)                                        \
+     do {                                                                                           \
+         (vertices) = (source);                                                                     \
+-        gte_ldv3c(vertices);                                                                       \
++        WebGteLoadVertexBatch(vertices, remaining);                                                \
+         (remaining) -= 3;                                                                          \
+         (vertices) = (source) + 3;                                                                 \
+         gte_rtpt_b();                                                                              \
+diff --git a/src/main/card.c b/src/main/card.c
+--- a/src/main/card.c
++++ b/src/main/card.c
+@@ -57,7 +57,7 @@
+     value = Int32NegativePart(value);
+     count = value + capacity;
+     while (i > 0) {
+-        gte_ldv3c(vertices);
++        WebGteLoadVertexBatch(vertices, i);
+         destination++;
+         gte_nop();
+         gte_rtpt_b();
+diff --git a/src/main/world.c b/src/main/world.c
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -584,6 +584,8 @@
+ #if !defined(TM4_WORLD_FUNCTION) || TM4_WORLD_FUNCTION == 0x8001b67c
+ Tm4WorldSquare* WorldFindSquare(s32 x, s32 z)
+ {
++    if (!WorldSquares)
++        return NULL;
+     u16 index;
+     x = (x >> WORLD_CELL_SHIFT) + WORLD_GRID_ORIGIN;
+     z = (z >> WORLD_CELL_SHIFT) + WORLD_GRID_ORIGIN;
+diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
+--- a/src/modules/car/wheel_render.c
++++ b/src/modules/car/wheel_render.c
+@@ -180,7 +180,7 @@
+         {
+             vertex = vertices + frame->first_vertex;
+             for (v = frame->vertex_count; v > 0;) {
+-                gte_ldv3c(vertex);
++                WebGteLoadVertexBatch(vertex, v);
+                 screen_output++;
+                 gte_nop();
+                 gte_rtpt_b();
+@@ -616,7 +616,7 @@
+             {
+                 vertex = vertices + record.frame->first_vertex;
+                 for (v = record.frame->vertex_count; v > 0;) {
+-                    gte_ldv3c(vertex);
++                    WebGteLoadVertexBatch(vertex, v);
+                     screen_output++;
+                     gte_nop();
+                     gte_rtpt_b();
+diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflection.c
+--- a/src/modules/menu/model_reflection.c
++++ b/src/modules/menu/model_reflection.c
+@@ -80,7 +80,7 @@
+         }
+         vertex = vertices + frame->first_vertex;
+         for (vertex_count = frame->vertex_count; vertex_count > 0;) {
+-            gte_ldv3c(vertex);
++            WebGteLoadVertexBatch(vertex, vertex_count);
+             xy_cursor++;
+             gte_nop();
+             gte_rtpt_b();

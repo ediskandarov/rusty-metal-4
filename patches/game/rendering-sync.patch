@@ -1,0 +1,55 @@
+diff --git a/src/main/render.c b/src/main/render.c
+--- a/src/main/render.c
++++ b/src/main/render.c
+@@ -25,6 +25,10 @@
+ 
+ #include <INLINE_C.H>
+ #include <LIBAPI.H>
++
++#ifdef __psyz
++#include "port/web/render_sync.h"
++#endif
+ 
+ typedef struct Tm4RenderBufferPair {
+     Tm4RenderBuffer* buffers[2];
+@@ -1095,6 +1099,10 @@
+     if (RenderDrawBuffer == NULL) {
+         return;
+     }
++#ifdef __psyz
++    const unsigned int vblank_target = WebRenderWaitForFrame();
++#else
++    const unsigned int vblank_target = 2;
+     if (VB_IsSyncEnabled()) {
+         while (VB_DrawComplete[0] == 0 || VB_FrameVBlanks[0] < 2) { }
+     } else {
+@@ -1103,6 +1111,7 @@
+         VSync(2);
+         VB_FrameVBlanks[0] = 2;
+     }
++#endif
+     if (RenderFirstView == 0) {
+         PutDispEnv(&RenderDisplayBuffer->display_environment);
+     }
+@@ -1110,8 +1119,8 @@
+     if (RenderFramePhase == 0) {
+         VB_DrawComplete[0] = 0;
+     }
+-    if (VB_FrameVBlanks[0] > 2) {
+-        VB_FrameVBlanks[0] = 1;
++    if (VB_FrameVBlanks[0] > vblank_target) {
++        VB_FrameVBlanks[0] = vblank_target - 1;
+         late = 1;
+     } else {
+         VB_FrameVBlanks[0] = 0;
+@@ -1137,6 +1146,10 @@
+         DrawOTag(
+             &RenderDrawBuffer->ordering_table[ArrayCount(RenderDrawBuffer->ordering_table) - 1]);
+     }
++#ifdef __psyz
++    WebRenderReportFrame(
++        RenderFramePhase, late, RenderFaceBudget, RenderMinimumFaceBudget, RenderMaximumFaceBudget);
++#endif
+ }
+ #endif
+ 

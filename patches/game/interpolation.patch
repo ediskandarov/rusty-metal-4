@@ -9,11 +9,10 @@ diff --git a/src/main/render.c b/src/main/render.c
  #include "port/web/render_sync.h"
  #include "port/web/subpixel.h"
  #endif
-@@ -1076,7 +1077,10 @@
+@@ -1076,6 +1077,10 @@
          primitives += RenderPrimitiveCount;
          view_state = (Tm4GameInfo*)((u8*)&GameInfo + view * sizeof(Tm4GamePlayer));
          camera = view_state->players[0].camera;
--
 +#ifdef __psyz
 +        Camera pose;
 +        camera = WebInterpolationCamera(camera, &pose);
@@ -21,11 +20,10 @@ diff --git a/src/main/render.c b/src/main/render.c
          GameInfo.active_view = camera;
          SetRotMatrix(&camera->world_to_camera);
          SetTransMatrix(&GameInfo.active_view->world_to_camera);
-@@ -1098,7 +1102,9 @@
+@@ -1097,6 +1102,9 @@
              *(u8*)&RenderDrawBuffer->buffer_index + (view % 2) * 2);
          setaddr(&RenderDisplayBuffer->players[view].world_environment, getaddr(ordering));
          setaddr(ordering, &RenderDisplayBuffer->players[view].world_environment);
--
 +#ifdef __psyz
 +        GameInfo.active_view = view_state->players[0].camera;
 +#endif

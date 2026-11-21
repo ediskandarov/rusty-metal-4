@@ -8,7 +8,11 @@ car-integration.patch
 menu.patch
 overlays.patch
 dynamic-modules.patch
-rendering.patch
+rendering-fixes.patch
+rendering-platform.patch
+rendering-backend.patch
+rendering-distance.patch
+rendering-sync.patch
 subpixel.patch
 interpolation.patch
 network.patch

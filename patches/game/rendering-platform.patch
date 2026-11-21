@@ -1,0 +1,84 @@
+diff --git a/include/tm4/main/render_polygon.h b/include/tm4/main/render_polygon.h
+--- a/include/tm4/main/render_polygon.h
++++ b/include/tm4/main/render_polygon.h
+@@ -3,7 +3,6 @@
+ 
+ #include "tm4/gte.h"
+ #include "tm4/main/render_scratch.h"
+-
+ #include <INLINE_C.H>
+ 
+ static __inline__ Tm4GteWord Tm4ProjectedScreenAtIndex(
+diff --git a/src/main/screen.c b/src/main/screen.c
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -29,6 +29,7 @@
+ 
+ #include <LIBGPU.H>
+ #include <STRINGS.H>
++#include <libetc.h>
+ 
+ typedef struct ScreenMessageQueue {
+     s32 count;
+@@ -552,11 +553,7 @@
+         ScreenPowerupAngle = (ScreenPowerupAngle + 68) & 4095;
+         angle = (ScreenPulseAngle + 384) & 4095;
+         ScreenPulseAngle = angle;
+-        if (angle >= 0) {
+-            register s32* table TM4_BIND_REGISTER("v1") = rcossin_tbl;
+-            level = Q12PackedSine(table[angle]) + ONE;
+-        } else
+-            level = -Q12PackedSine(rcossin_tbl[-angle]) + ONE;
++        level = Q12Sin(angle) + ONE;
+         brightness = level / 2;
+         ScreenPulseBrightness = brightness;
+         for (player = 0; player < GameInfo.player_count; player++) {
+@@ -579,7 +576,7 @@
+     s32 slot, view;
+ 
+     GameDisplayMode(buffer);
+-    if ((((u32)VB_VBlankCount[0] >> 6) & 1) && GameInfo.mode == GAME_MODE_DEMO) {
++    if ((((u32)VSync(-1) >> 6) & 1) && GameInfo.mode == GAME_MODE_DEMO) {
+         FontPrint(ScreenDemoPrompt, ScreenMediumFontName, 160, 108, &buffer->font_prims,
+             buffer->ordering_table, FONT_PRINT_COLOR | FONT_PRINT_CENTER | FONT_PRINT_SHADOW,
+             ScreenDemoColor->r, ScreenDemoColor->g, ScreenDemoColor->b, 3, 2);
+@@ -753,7 +750,7 @@
+     percent = car->health * 99 / car->maximum_health;
+     if (!percent)
+         percent = 1;
+-    if (percent >= 26 || (((u32)VB_VBlankCount[0] >> 5) & 1)) {
++    if (percent >= 26 || (((u32)VSync(-1) >> 5) & 1)) {
+         sprintf(text, HudDecimalFormat, percent);
+         FontPrint(text, ScreenMessageFontName, 28, RenderViewHeight - 40, statusFont, orderingTable,
+             FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, ScreenAbbrHealthColor->r,
+@@ -803,7 +800,7 @@
+         name = target->name;
+         if (!percent)
+             percent = 1;
+-        if (percent >= 26 || (((u32)VB_VBlankCount[0] >> 5) & 1)) {
++        if (percent >= 26 || (((u32)VSync(-1) >> 5) & 1)) {
+             sprintf(text, HudDecimalFormat, percent);
+             FontPrint(text, ScreenMessageFontName, 28, 32, &buffer->font_prims, orderingTable,
+                 FONT_PRINT_COLOR | FONT_PRINT_RIGHT | FONT_PRINT_SHADOW, ScreenAbbrHealthColor->r,
+diff --git a/src/modules/menu/model_display.c b/src/modules/menu/model_display.c
+--- a/src/modules/menu/model_display.c
++++ b/src/modules/menu/model_display.c
+@@ -11,6 +11,7 @@
+ #include "tm4/main/geometry.h"
+ #include "tm4/main/math3d.h"
+ 
++#include "tm4/gte.h"
+ #include <GTEMAC.H>
+ #include <INLINE_C.H>
+ 
+diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflection.c
+--- a/src/modules/menu/model_reflection.c
++++ b/src/modules/menu/model_reflection.c
+@@ -11,6 +11,7 @@
+ #include "tm4/main/math3d.h"
+ #include "tm4/main/render.h"
+ 
++#include "tm4/gte.h"
+ #include <INLINE_C.H>
+ #include <LIBETC.H>
+ 

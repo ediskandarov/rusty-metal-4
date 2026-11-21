@@ -9,58 +9,58 @@ diff --git a/src/main/render.c b/src/main/render.c
  #endif
  
  typedef struct Tm4RenderBufferPair {
-@@ -916,7 +917,9 @@
+@@ -916,6 +917,9 @@
          }
          RenderInitializeTiles(buffer);
          ClearOTagR(buffer->ordering_table, ArrayCount(buffer->ordering_table));
--
 +#ifdef __psyz
 +        WebSubpixelBegin(WEB_SUBPIXEL_GAME_0 + buffer_index);
 +#endif
      }
  }
  #endif
-@@ -1005,7 +1008,9 @@
+@@ -1004,6 +1008,9 @@
          RenderDrawBuffer = display->alternate_buffer;
          FontPrimsReset(&RenderDrawBuffer->font_prims);
          ClearOTagR(RenderDrawBuffer->ordering_table, ArrayCount(RenderDrawBuffer->ordering_table));
--
 +#ifdef __psyz
 +        WebSubpixelBegin(WEB_SUBPIXEL_GAME_0 + RenderDrawBuffer->buffer_index);
 +#endif
      }
  
      if (RenderFramePhase == mode) {
-@@ -1053,7 +1058,9 @@
+@@ -1051,6 +1058,9 @@
          ScreenDisplayOverlays(RenderDrawBuffer);
          addPrim(RenderDrawBuffer->ordering_table, &RenderDisplayBuffer->drawing_environment);
      }
--
 +#ifdef __psyz
 +    WebSubpixelSelect(WEB_SUBPIXEL_GAME_0 + RenderDrawBuffer->buffer_index);
 +#endif
      ordering = RenderDrawBuffer->ordering_table - 1;
      primitives = RenderDrawBuffer->world_primitives;
      first = RenderFirstView;
-@@ -1093,7 +1100,9 @@
+@@ -1088,6 +1098,9 @@
+         setaddr(&RenderDisplayBuffer->players[view].world_environment, getaddr(ordering));
          setaddr(ordering, &RenderDisplayBuffer->players[view].world_environment);
- 
      }
--
 +#ifdef __psyz
 +    WebSubpixelSelect(WEB_SUBPIXEL_NONE);
 +#endif
  }
  #endif
  
-@@ -1151,7 +1160,11 @@
+@@ -1143,8 +1156,13 @@
+         }
+     }
      if (RenderFramePhase != 2 && present) {
-         Tm4OrderingTag* ordering
-             = &RenderDrawBuffer->ordering_table[ArrayCount(RenderDrawBuffer->ordering_table) - 1];
+-        DrawOTag(
+-            &RenderDrawBuffer->ordering_table[ArrayCount(RenderDrawBuffer->ordering_table) - 1]);
++        Tm4OrderingTag* ordering
++            = &RenderDrawBuffer->ordering_table[ArrayCount(RenderDrawBuffer->ordering_table) - 1];
 +#ifdef __psyz
 +        WebSubpixelDraw(WEB_SUBPIXEL_GAME_0 + RenderDrawBuffer->buffer_index, ordering);
 +#else
-         DrawOTag(ordering);
++        DrawOTag(ordering);
 +#endif
      }
  #ifdef __psyz
@@ -68,22 +68,20 @@ diff --git a/src/main/render.c b/src/main/render.c
 diff --git a/src/main/world.c b/src/main/world.c
 --- a/src/main/world.c
 +++ b/src/main/world.c
-@@ -16,7 +16,9 @@
+@@ -16,6 +16,9 @@
  #include "tm4/main/object.h"
  #include "tm4/main/registry.h"
  #include "tm4/main/render.h"
--
 +#ifdef __psyz
 +#include "port/web/subpixel.h"
 +#endif
  
  #include <SYS/TYPES.H>
  #include <LIBGTE.H>
-@@ -284,7 +286,16 @@
+@@ -283,6 +286,17 @@
  extern const Tm4NeighborOffsets WorldNeighborOffsets[];
  #endif
  
--
 +#ifdef __psyz
 +static void WorldRecordSplitPacket(
 +    const void* packet, const PsyzSubpixelPosition* precise, const u_long* row, int count)
@@ -94,14 +92,14 @@ diff --git a/src/main/world.c b/src/main/world.c
 +    WebSubpixelPacket(packet, precise, indices, count);
 +}
 +#endif
- 
++
  #if !defined(TM4_WORLD_FUNCTION) || TM4_WORLD_FUNCTION == 0x8001a8f0
  u8* WorldBuildGouraudSubdividedQuad(const Tm4GouraudQuadFaceView* face, const SVECTOR* vertices,
-@@ -352,7 +363,15 @@
+     u8* cursor, Tm4OrderingTag* ordering_tag)
+@@ -349,6 +363,15 @@
      split[3].screen = scratch->projected[index3].screen.packed;
      gte_stsxy0(&split[7].screen);
      gte_stsxy1(&split[8].screen);
--
 +#ifdef __psyz
 +    const SVECTOR* points[9]
 +        = { point0, point1, point2, point3, middle01, middle23, center, middle02, middle13 };
@@ -114,33 +112,30 @@ diff --git a/src/main/world.c b/src/main/world.c
  
      split[0].uv.packed = texture->pairs.uv0;
      split[1].uv.packed = texture->pairs.uv1;
-@@ -414,7 +433,9 @@
+@@ -410,6 +433,9 @@
          quad->words.vertices[3].color = last_color;
          quad->quad.tpage = texture->pairs.tpage;
          quad->quad.clut = texture->pairs.clut;
--
 +#ifdef __psyz
 +        WorldRecordSplitPacket(&quad->quad, precise, row, 4);
 +#endif
          GpuLinkPacketSized(ordering_tag, &quad->quad, sizeof(quad->quad));
          cursor = (u8*)(&quad->quad + 1);
      }
-@@ -440,7 +461,9 @@
+@@ -435,6 +461,9 @@
          triangle->words.vertices[2].color = last_color;
          triangle->triangle.tpage = texture->pairs.tpage;
          triangle->triangle.clut = texture->pairs.clut;
--
 +#ifdef __psyz
 +        WorldRecordSplitPacket(&triangle->triangle, precise, row, 3);
 +#endif
          GpuLinkPacketSized(ordering_tag, &triangle->triangle, sizeof(triangle->triangle));
          cursor = (u8*)(&triangle->triangle + 1);
      }
-@@ -516,7 +539,15 @@
+@@ -510,6 +539,15 @@
      split[3].screen = scratch->projected[index3].screen.packed;
      gte_stsxy0(&split[7].screen);
      gte_stsxy1(&split[8].screen);
--
 +#ifdef __psyz
 +    const SVECTOR* points[9]
 +        = { point0, point1, point2, point3, middle01, middle23, center, middle02, middle13 };
@@ -153,44 +148,40 @@ diff --git a/src/main/world.c b/src/main/world.c
  
      split[0].uv.packed = texture->pairs.uv0;
      split[1].uv.packed = texture->pairs.uv1;
-@@ -557,7 +588,9 @@
+@@ -550,6 +588,9 @@
          quad->words.vertices[3].xy = last_screen;
          quad->quad.tpage = texture->pairs.tpage;
          quad->quad.clut = texture->pairs.clut;
--
 +#ifdef __psyz
 +        WorldRecordSplitPacket(&quad->quad, precise, row, 4);
 +#endif
          GpuLinkPacketSized(ordering_tag, &quad->quad, sizeof(quad->quad));
          cursor = (u8*)(&quad->quad + 1);
      }
-@@ -581,7 +614,9 @@
+@@ -573,6 +614,9 @@
          triangle->words.vertices[2].xy = last_screen;
          triangle->triangle.tpage = texture->pairs.tpage;
          triangle->triangle.clut = texture->pairs.clut;
--
 +#ifdef __psyz
 +        WorldRecordSplitPacket(&triangle->triangle, precise, row, 3);
 +#endif
          GpuLinkPacketSized(ordering_tag, &triangle->triangle, sizeof(triangle->triangle));
          cursor = (u8*)(&triangle->triangle + 1);
      }
-@@ -1364,7 +1399,9 @@
+@@ -1355,6 +1399,9 @@
      register SVECTOR* vertex TM4_BIND_REGISTER("$4");
      RenderScratch* scratch;
      Tm4ProjectedVertex* batch;
--
 +#ifdef __psyz
 +    PsyzSubpixelPosition precise[RENDER_SCRATCH_PROJECTED_COUNT];
 +#endif
      register u8* clipped TM4_BIND_REGISTER("$19");
      u8* clip_batch;
      register const u8* face_payload TM4_BIND_REGISTER("$16");
-@@ -1424,14 +1461,19 @@
+@@ -1414,18 +1461,28 @@
      vertices = source_vertices + vertex_groups->ranges[lod].first;
      Tm4ProjectVertexTriple(vertex, vertices, vertex_count);
      GteStoreProjectedTriple(batch);
--
 +#ifdef __psyz
 +    WebSubpixelCaptureTriple(precise, vertices, vertex_count < 0 ? vertex_count + 3 : 3);
 +#endif
@@ -200,7 +191,6 @@ diff --git a/src/main/world.c b/src/main/world.c
          clip_batch += 3;
          batch += 3;
          GteStoreProjectedTriple(batch);
--
 +#ifdef __psyz
 +        WebSubpixelCaptureTriple(precise + (batch - scratch->projected), vertex - 3,
 +            vertex_count < 0 ? vertex_count + 3 : 3);
@@ -208,11 +198,19 @@ diff --git a/src/main/world.c b/src/main/world.c
      }
      WorldMarkClippedTriple(clip_batch, batch);
      if (count > 0) {
-@@ -1649,7 +1691,9 @@
+         face_payload = (const u8*)face + sizeof(Tm4DisplayFaceHeader);
+         for (; count > 0; --count) {
+             s32 code = Tm4DisplayFaceFromPayload(face_payload)->header.color0.components.cd;
++#ifdef __psyz
++            const u8* indices = Tm4DisplayFaceFromPayload(face_payload)->header.vertex;
++#endif
+             s32 i0;
+             register s32 i1 TM4_BIND_REGISTER("$5");
+             register s32 i2 TM4_BIND_REGISTER("$6");
+@@ -1633,6 +1690,9 @@
                  /* Original failure leaves the pushed matrix and output slot unchanged. */
                  return 0;
              }
--
 +#ifdef __psyz
 +            WebSubpixelPacket(cursor, precise, indices, code & 8 ? 4 : 3);
 +#endif
@@ -230,11 +228,10 @@ diff --git a/src/modules/car/display.c b/src/modules/car/display.c
  #endif
  #include "tm4/gte.h"
  #include "tm4/main/card.h"
-@@ -226,7 +227,11 @@
+@@ -226,6 +227,11 @@
      uv1_page = car->shadow_texture->packed.uv1_page;
      packet->quad.code = 0x2f;
      GpuSetFlatTextureBox(packet, uv0_clut, uv1_page);
--
 +#ifdef __psyz
 +    const SVECTOR* corners[4]
 +        = { &world_corners[0], &world_corners[1], &world_corners[3], &world_corners[2] };
@@ -246,22 +243,20 @@ diff --git a/src/modules/car/display.c b/src/modules/car/display.c
 diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 --- a/src/modules/car/wheel_render.c
 +++ b/src/modules/car/wheel_render.c
-@@ -8,7 +8,9 @@
+@@ -8,6 +8,9 @@
  #include "tm4/modules/car_scratch.h"
  
  #include "../reflection_gte.h"
--
 +#ifdef __psyz
 +#include "port/web/subpixel.h"
 +#endif
  
  #include "tm4/gpu_packet.h"
  #include "tm4/gte.h"
-@@ -72,7 +74,10 @@
+@@ -71,6 +74,10 @@
      Tm4ScreenPoint* screen_xy;
      CVECTOR* destination;
      Tm4ProjectionBatch* screen_output;
--
 +#ifdef __psyz
 +    /* Face indices are bytes; allow space for the last padded GTE triple. */
 +    PsyzSubpixelPosition precise[258];
@@ -269,11 +264,10 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
      Tm4PackedColor* lit;
      u16* reflections;
      u16* reflection;
-@@ -187,7 +192,12 @@
+@@ -184,6 +191,12 @@
                  screen_output++;
                  gte_nop();
                  gte_rtpt_b();
--
 +#ifdef __psyz
 +                int first = (screen_output - (Tm4ProjectionBatch*)screen_xy) * 3;
 +                if (first < 256)
@@ -283,55 +277,50 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
                  v -= 3;
                  vertex += 3;
                  gte_stsxy3c(screen_output->vertices);
-@@ -321,7 +331,9 @@
+@@ -315,6 +328,9 @@
                              layer->packed.uv2 = uv2;
                          }
  
--
 +#ifdef __psyz
 +                        WebSubpixelPacket(&layer->triangle, precise, face->vertices, 3);
 +#endif
                          GpuLinkPacketFullWord(
                              ordering, &layer->triangle.tag, sizeof(layer->triangle));
                          packet += sizeof(layer->triangle);
-@@ -350,7 +362,9 @@
+@@ -343,6 +359,9 @@
                              polygon->words.vertices[1].color = color1;
                              polygon->words.vertices[2].color = color2;
                          }
--
 +#ifdef __psyz
 +                        WebSubpixelPacket(&polygon->triangle, precise, face->vertices, 3);
 +#endif
                          GpuLinkPacketFullWord(
                              ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
                          packet += sizeof(polygon->triangle);
-@@ -435,7 +449,9 @@
+@@ -426,6 +445,9 @@
                              layer->packed.uv3_pad.uv = uv3;
                          }
  
--
 +#ifdef __psyz
 +                        WebSubpixelPacket(&layer->quad, precise, face->vertices, 4);
 +#endif
                          GpuLinkPacketFullWord(ordering, &layer->quad.tag, sizeof(layer->quad));
                          packet += sizeof(layer->quad);
                      }
-@@ -468,7 +484,9 @@
+@@ -458,6 +480,9 @@
                              polygon->words.vertices[2].color = color2;
                              polygon->words.vertices[3].color = color3;
                          }
--
 +#ifdef __psyz
 +                        WebSubpixelPacket(&polygon->quad, precise, face->vertices, 4);
 +#endif
                          GpuLinkPacketFullWord(ordering, &polygon->quad.tag, sizeof(polygon->quad));
                          packet += sizeof(polygon->quad);
                      }
-@@ -508,7 +526,10 @@
+@@ -497,6 +522,10 @@
      Tm4ScreenPoint* screen_xy;
      CVECTOR* destination;
      Tm4ProjectionBatch* screen_output;
--
 +#ifdef __psyz
 +    /* Face indices are bytes; allow space for the last padded GTE triple. */
 +    PsyzSubpixelPosition precise[258];
@@ -339,11 +328,10 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
      Tm4PackedColor* lit;
      u16* reflections;
      u16* reflection;
-@@ -633,7 +654,12 @@
+@@ -620,6 +649,12 @@
                      screen_output++;
                      gte_nop();
                      gte_rtpt_b();
--
 +#ifdef __psyz
 +                    int first = (screen_output - (Tm4ProjectionBatch*)screen_xy) * 3;
 +                    if (first < 256)
@@ -353,66 +341,60 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
                      v -= 3;
                      vertex += 3;
                      gte_stsxy3c(screen_output->vertices);
-@@ -773,7 +799,9 @@
+@@ -757,6 +792,9 @@
                                  layer->packed.uv2 = uv2;
                              }
  
--
 +#ifdef __psyz
 +                            WebSubpixelPacket(&layer->triangle, precise, face->vertices, 3);
 +#endif
                              GpuLinkPacketFullWord(
                                  ordering, &layer->triangle.tag, sizeof(layer->triangle));
                          }
-@@ -787,7 +815,9 @@
+@@ -770,6 +808,9 @@
                              setRGB0(tint, 0, alpha, alpha);
                              setRGB1(tint, 0, 0, alpha);
                              setRGB2(tint, 0, alpha, alpha);
--
 +#ifdef __psyz
 +                            WebSubpixelPacket(tint, precise, face->vertices, 3);
 +#endif
                              GpuLinkPacketFullWord(ordering, &colors->words.tag, sizeof(*tint));
                              packet += sizeof(*tint);
                          }
-@@ -815,7 +845,9 @@
+@@ -797,6 +838,9 @@
                                  polygon->words.vertices[1].color = color1;
                                  polygon->words.vertices[2].color = color2;
                              }
--
 +#ifdef __psyz
 +                            WebSubpixelPacket(&polygon->triangle, precise, face->vertices, 3);
 +#endif
                              GpuLinkPacketFullWord(
                                  ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
                              packet += sizeof(polygon->triangle);
-@@ -908,7 +940,9 @@
+@@ -888,6 +932,9 @@
                                  layer->packed.uv3_pad.uv = uv3;
                              }
  
--
 +#ifdef __psyz
 +                            WebSubpixelPacket(&layer->quad, precise, face->vertices, 4);
 +#endif
                              GpuLinkPacketFullWord(ordering, &layer->quad.tag, sizeof(layer->quad));
                          }
                          {
-@@ -923,7 +957,9 @@
+@@ -902,6 +949,9 @@
                              setRGB1(tint, 0, 0, alpha);
                              setRGB2(tint, 0, alpha, alpha);
                              setRGB3(tint, alpha, alpha, alpha);
--
 +#ifdef __psyz
 +                            WebSubpixelPacket(tint, precise, face->vertices, 4);
 +#endif
                              GpuLinkPacketFullWord(ordering, &colors->words.tag, sizeof(*tint));
                              packet += sizeof(*tint);
                          }
-@@ -956,7 +992,9 @@
+@@ -934,6 +984,9 @@
                                  polygon->words.vertices[2].color = color2;
                                  polygon->words.vertices[3].color = color3;
                              }
--
 +#ifdef __psyz
 +                            WebSubpixelPacket(&polygon->quad, precise, face->vertices, 4);
 +#endif
@@ -422,22 +404,20 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 diff --git a/src/modules/menu/model_display.c b/src/modules/menu/model_display.c
 --- a/src/modules/menu/model_display.c
 +++ b/src/modules/menu/model_display.c
-@@ -4,7 +4,9 @@
+@@ -4,6 +4,9 @@
  #include "tm4/fixed.h"
  #include "tm4/gpu.h"
  #include "tm4/gpu_packet.h"
--
 +#ifdef __psyz
 +#include "port/web/subpixel.h"
 +#endif
  #include "tm4_scalar.h"
  #include "tm4_types.h"
  
-@@ -143,7 +145,10 @@
+@@ -142,6 +145,10 @@
      uv1_page = model->shadow_texture->packed.uv1_page;
      packet->quad.code = 0x2f;
      GpuSetFlatTextureBox(packet, uv0_clut, uv1_page);
--
 +#ifdef __psyz
 +    const SVECTOR* corners[4] = { &vertices[0], &vertices[1], &vertices[3], &vertices[2] };
 +    WebSubpixelPacketQuad(&packet->quad, corners);
@@ -448,22 +428,20 @@ diff --git a/src/modules/menu/model_display.c b/src/modules/menu/model_display.c
 diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflection.c
 --- a/src/modules/menu/model_reflection.c
 +++ b/src/modules/menu/model_reflection.c
-@@ -5,7 +5,9 @@
+@@ -5,6 +5,9 @@
  #include "tm4_scalar.h"
  
  #include "../reflection_gte.h"
--
 +#ifdef __psyz
 +#include "port/web/subpixel.h"
 +#endif
  
  #include "tm4/gpu_packet.h"
  #include "tm4/gte.h"
-@@ -65,7 +67,10 @@
+@@ -63,6 +66,10 @@
      const CarRenderNormal* normals = model->normals;
      register CVECTOR* model_colors TM4_BIND_REGISTER("$23") = model->colors;
      CarRenderGroupEntry* parts = model->parts;
--
 +#ifdef __psyz
 +    /* Face indices are bytes; allow space for the last padded GTE triple. */
 +    PsyzSubpixelPosition precise[258];
@@ -471,11 +449,10 @@ diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflec
  
      for (count = *list; count > 0; count--) {
          /* Each write cursor advances from the preceding word group before the GTE store. */
-@@ -88,7 +93,12 @@
+@@ -85,6 +92,12 @@
              xy_cursor++;
              gte_nop();
              gte_rtpt_b();
--
 +#ifdef __psyz
 +            int first = (xy_cursor - (Tm4ProjectionBatch*)projected) * 3;
 +            if (first < 256)
@@ -485,44 +462,40 @@ diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflec
              vertex_count -= 3;
              vertex += 3;
              gte_stsxy3c(xy_cursor->vertices);
-@@ -178,7 +188,9 @@
+@@ -174,6 +187,9 @@
                      triangle->packed.uv1_page.uv
                          = reflection[polygon->normals[1]].packed + uv0_clut_base;
                      triangle->packed.uv2 = reflection[polygon->normals[2]].packed + uv0_clut_base;
--
 +#ifdef __psyz
 +                    WebSubpixelPacket(&triangle->triangle, precise, polygon->vertices, 3);
 +#endif
                      GpuLinkPacketSized(ot, &triangle->triangle.tag, sizeof(triangle->triangle));
                      packet += sizeof(triangle->triangle);
                  }
-@@ -199,7 +211,9 @@
+@@ -194,6 +210,9 @@
                      = colors[polygon->normals[0]].packed | 0x34000000u;
                  shaded_triangle->words.vertices[1].color = colors[polygon->normals[1]].packed;
                  shaded_triangle->words.vertices[2].color = colors[polygon->normals[2]].packed;
--
 +#ifdef __psyz
 +                WebSubpixelPacket(&shaded_triangle->triangle, precise, polygon->vertices, 3);
 +#endif
                  GpuLinkPacketSized(
                      ot, &shaded_triangle->triangle.tag, sizeof(shaded_triangle->triangle));
                  packet += sizeof(shaded_triangle->triangle);
-@@ -244,7 +258,9 @@
+@@ -238,6 +257,9 @@
                      quad->packed.uv2 = reflection[polygon->normals[2]].packed + uv0_clut_base;
                      quad->packed.uv3_pad.uv
                          = reflection[polygon->normals[3]].packed + uv0_clut_base;
--
 +#ifdef __psyz
 +                    WebSubpixelPacket(&quad->quad, precise, polygon->vertices, 4);
 +#endif
                      GpuLinkPacketSized(ot, &quad->quad.tag, sizeof(quad->quad));
                      packet += sizeof(quad->quad);
                  }
-@@ -268,7 +284,9 @@
+@@ -261,6 +283,9 @@
                  shaded_quad->words.vertices[1].color = colors[polygon->normals[1]].packed;
                  shaded_quad->words.vertices[2].color = colors[polygon->normals[2]].packed;
                  shaded_quad->words.vertices[3].color = colors[polygon->normals[3]].packed;
--
 +#ifdef __psyz
 +                WebSubpixelPacket(&shaded_quad->quad, precise, polygon->vertices, 4);
 +#endif
@@ -532,33 +505,30 @@ diff --git a/src/modules/menu/model_reflection.c b/src/modules/menu/model_reflec
 diff --git a/src/modules/weap/display.c b/src/modules/weap/display.c
 --- a/src/modules/weap/display.c
 +++ b/src/modules/weap/display.c
-@@ -9,7 +9,9 @@
+@@ -9,6 +9,9 @@
  #include "tm4/main/render.h"
  #include "tm4/main/render_polygon.h"
  #include "tm4/main/render_scratch.h"
--
 +#ifdef __psyz
 +#include "port/web/subpixel.h"
 +#endif
  
  #include <INLINE_C.H>
  #include <LIBETC.H>
-@@ -137,7 +139,9 @@
+@@ -136,6 +139,9 @@
      register Tm4ProjectedVertex* projection_scratch TM4_BIND_REGISTER("t6");
      Tm4ProjectedVertex* projected_vertices;
      Tm4ProjectedVertex* projection_output;
--
 +#ifdef __psyz
 +    PsyzSubpixelPosition precise[258];
 +#endif
  
      Tm4TexturedPolygonPacket* packet;
      s32 packet_size;
-@@ -159,12 +163,20 @@
+@@ -157,10 +163,20 @@
      projection_output = projection_scratch;
      Tm4ProjectNextVertexTriple(vertices, vertices_remaining);
      GteStoreProjectedTriple(projection_output);
--
 +#ifdef __psyz
 +    WebSubpixelCaptureTriple(
 +        precise, first_vertex, vertices_remaining < 0 ? vertices_remaining + 3 : 3);
@@ -567,7 +537,6 @@ diff --git a/src/modules/weap/display.c b/src/modules/weap/display.c
          Tm4ProjectNextVertexTriple(vertices, vertices_remaining);
          projection_output += 3;
          GteStoreProjectedTriple(projection_output);
--
 +#ifdef __psyz
 +        int first = projection_output - projection_scratch;
 +        if (first < 256)
@@ -577,11 +546,20 @@ diff --git a/src/modules/weap/display.c b/src/modules/weap/display.c
      }
  
      if (faces_remaining > 0) {
-@@ -331,7 +343,9 @@
+@@ -168,6 +184,9 @@
+         face_payload = (const u8*)face + sizeof(Tm4DisplayFaceHeader);
+         for (; faces_remaining > 0; --faces_remaining) {
+             s32 face_code = Tm4DisplayFaceFromPayload(face_payload)->header.color0.components.cd;
++#ifdef __psyz
++            const u8* indices = Tm4DisplayFaceFromPayload(face_payload)->header.vertex;
++#endif
+ 
+             const Tm4CardQuadTexture* texture;
+             s32 i0, i1, i2, i3;
+@@ -324,6 +343,9 @@
                  return 0;
              }
  
--
 +#ifdef __psyz
 +            WebSubpixelPacket(packet, precise, indices, face_code & 8 ? 4 : 3);
 +#endif
