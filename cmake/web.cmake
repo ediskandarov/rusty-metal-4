@@ -275,7 +275,9 @@ endforeach()
 
 include("${TM4_ROOT}/cmake/native-exports.cmake")
 # This port-owned implementation belongs to the car image, not the main module.
-target_sources(tm4_module_car PRIVATE "${TM4_ROOT}/port/game/car_audio.c")
+target_sources(tm4_module_car PRIVATE
+    "${TM4_ROOT}/port/game/car_audio.c"
+    "${TM4_ROOT}/port/game/car_controls.c")
 
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/redbook.c" PROPERTIES COMPILE_DEFINITIONS
     "CdGetToc=WebMusicGetToc;CdControl=WebMusicControl;CdControlB=WebMusicControlB;CdReadyCallback=WebMusicReadyCallback")
@@ -299,6 +301,16 @@ target_include_directories(tm4_rollback_audio_check PRIVATE
 target_compile_options(tm4_rollback_audio_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_rollback_audio_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_rollback_audio_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_car_controls_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_car_controls.c"
+    "${TM4_ROOT}/port/game/car_controls.c")
+target_include_directories(tm4_car_controls_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}"
+    "${TM4_ROOT}/external/psyz/psyz/include")
+target_compile_options(tm4_car_controls_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_car_controls_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_car_controls_check PROPERTIES SUFFIX ".cjs")
 
 # Small asset-free test using the actual WebGL backend and VRAM readback.
 add_executable(tm4_gpu_mask_check EXCLUDE_FROM_ALL "${TM4_ROOT}/tests/native/check_gpu_mask.c")
