@@ -49,7 +49,6 @@ ffa-policy.patch
 network-ai.patch
 ffa-bots.patch
 prepared-model-pool.patch
-tournament.patch
 widescreen.patch
 widescreen-hud.patch
 mouse-look.patch
