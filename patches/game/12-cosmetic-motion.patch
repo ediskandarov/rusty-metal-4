@@ -119,5 +119,5 @@ diff --git a/src/main/screen.c b/src/main/screen.c
 +            coordinateZ = target->vz;
 +#endif
              positionX = originPosition.vx;
-             positionY = (u16)position->vy;
+             positionY = position->vy;
              deltaX = coordinateX - positionX;

@@ -37,8 +37,8 @@ diff --git a/src/main/object/object.c b/src/main/object/object.c
 +        if (!WebNetMatchActive())
 +            ObjectNextSerial++;
      }
-     routing_scratch = ObjectCreateStackRouteState;
-     if ((s32)routing_scratch == -1)
+     payload_size = ObjectCreateStackRouteState;
+     if ((s32)payload_size == -1)
 diff --git a/src/main/world.c b/src/main/world.c
 --- a/src/main/world.c
 +++ b/src/main/world.c

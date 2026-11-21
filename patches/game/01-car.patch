@@ -424,4 +424,4 @@ diff --git a/src/modules/car/wheel_physics.c b/src/modules/car/wheel_physics.c
 +    wheel_offset = offsetof(Car, wheels);
      ApplyMatrix(matrix, &local, displacement);
      {
-         s32 x = car->transform.t[0];
+         s32 x = translation[0];

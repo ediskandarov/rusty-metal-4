@@ -373,7 +373,7 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 @@ -72,7 +74,10 @@
      Tm4ScreenPoint* screen_xy;
      CVECTOR* destination;
-     register Tm4ProjectionBatch* screen_output TM4_BIND_REGISTER("$3");
+     Tm4ProjectionBatch* screen_output;
 -
 +#ifdef __psyz
 +    /* Face indices are bytes; allow space for the last padded GTE triple. */
@@ -391,13 +391,13 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 +                int first = (screen_output - (Tm4ProjectionBatch*)screen_xy) * 3;
 +                if (first < 256)
 +                    WebSubpixelCaptureTriple(
-+                        precise + first, vertex, remaining < 3 ? remaining : 3);
++                        precise + first, vertex, v < 3 ? v : 3);
 +#endif
-                 remaining -= 3;
+                 v -= 3;
                  vertex += 3;
                  gte_stsxy3c(screen_output->vertices);
 @@ -321,7 +331,9 @@
-                             layer->packed.uv2 = uv2 + uv0_clut_base;
+                             layer->packed.uv2 = uv2;
                          }
  
 -
@@ -419,7 +419,7 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
                              ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
                          packet += sizeof(polygon->triangle);
 @@ -435,7 +449,9 @@
-                             layer->packed.uv3_pad.uv = uv3 + uv0_clut_base;
+                             layer->packed.uv3_pad.uv = uv3;
                          }
  
 -
@@ -443,7 +443,7 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 @@ -508,7 +526,10 @@
      Tm4ScreenPoint* screen_xy;
      CVECTOR* destination;
-     register Tm4ProjectionBatch* screen_output TM4_BIND_REGISTER("$3");
+     Tm4ProjectionBatch* screen_output;
 -
 +#ifdef __psyz
 +    /* Face indices are bytes; allow space for the last padded GTE triple. */
@@ -461,13 +461,13 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 +                    int first = (screen_output - (Tm4ProjectionBatch*)screen_xy) * 3;
 +                    if (first < 256)
 +                        WebSubpixelCaptureTriple(
-+                            precise + first, vertex, remaining < 3 ? remaining : 3);
++                            precise + first, vertex, v < 3 ? v : 3);
 +#endif
-                     remaining -= 3;
+                     v -= 3;
                      vertex += 3;
                      gte_stsxy3c(screen_output->vertices);
 @@ -773,7 +799,9 @@
-                                 layer->packed.uv2 = uv2 + uv0_clut_base;
+                                 layer->packed.uv2 = uv2;
                              }
  
 -
@@ -500,7 +500,7 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
                                  ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
                              packet += sizeof(polygon->triangle);
 @@ -908,7 +940,9 @@
-                                 layer->packed.uv3_pad.uv = uv3 + uv0_clut_base;
+                                 layer->packed.uv3_pad.uv = uv3;
                              }
  
 -

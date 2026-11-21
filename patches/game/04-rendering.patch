@@ -1046,26 +1046,25 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 @@ -71,6 +72,7 @@
      Tm4ScreenPoint* screen_xy;
      CVECTOR* destination;
-     register Tm4ProjectionBatch* screen_output TM4_BIND_REGISTER("$3");
+     Tm4ProjectionBatch* screen_output;
 +
      Tm4PackedColor* lit;
      u16* reflections;
      u16* reflection;
-@@ -181,10 +183,11 @@
-             s32 remaining;
+@@ -181,9 +183,10 @@
              vertex = vertices + frame->first_vertex;
-             for (remaining = frame->vertex_count; remaining > 0;) {
+             for (v = frame->vertex_count; v > 0;) {
 -                gte_ldv3c(vertex);
-+                WebGteLoadVertexBatch(vertex, remaining);
++                WebGteLoadVertexBatch(vertex, v);
                  screen_output++;
                  gte_nop();
                  gte_rtpt_b();
 +
-                 remaining -= 3;
+                 v -= 3;
                  vertex += 3;
                  gte_stsxy3c(screen_output->vertices);
 @@ -318,6 +321,7 @@
-                             layer->packed.uv2 = uv2 + uv0_clut_base;
+                             layer->packed.uv2 = uv2;
                          }
  
 +
@@ -1081,7 +1080,7 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
                              ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
                          packet += sizeof(polygon->triangle);
 @@ -430,6 +435,7 @@
-                             layer->packed.uv3_pad.uv = uv3 + uv0_clut_base;
+                             layer->packed.uv3_pad.uv = uv3;
                          }
  
 +
@@ -1099,26 +1098,25 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
 @@ -501,6 +508,7 @@
      Tm4ScreenPoint* screen_xy;
      CVECTOR* destination;
-     register Tm4ProjectionBatch* screen_output TM4_BIND_REGISTER("$3");
+     Tm4ProjectionBatch* screen_output;
 +
      Tm4PackedColor* lit;
      u16* reflections;
      u16* reflection;
-@@ -621,10 +629,11 @@
-                 s32 remaining;
+@@ -621,9 +629,10 @@
                  vertex = vertices + record.frame->first_vertex;
-                 for (remaining = record.frame->vertex_count; remaining > 0;) {
+                 for (v = record.frame->vertex_count; v > 0;) {
 -                    gte_ldv3c(vertex);
-+                    WebGteLoadVertexBatch(vertex, remaining);
++                    WebGteLoadVertexBatch(vertex, v);
                      screen_output++;
                      gte_nop();
                      gte_rtpt_b();
 +
-                     remaining -= 3;
+                     v -= 3;
                      vertex += 3;
                      gte_stsxy3c(screen_output->vertices);
 @@ -764,6 +773,7 @@
-                                 layer->packed.uv2 = uv2 + uv0_clut_base;
+                                 layer->packed.uv2 = uv2;
                              }
  
 +
@@ -1142,7 +1140,7 @@ diff --git a/src/modules/car/wheel_render.c b/src/modules/car/wheel_render.c
                                  ordering, &polygon->triangle.tag, sizeof(polygon->triangle));
                              packet += sizeof(polygon->triangle);
 @@ -896,6 +908,7 @@
-                                 layer->packed.uv3_pad.uv = uv3 + uv0_clut_base;
+                                 layer->packed.uv3_pad.uv = uv3;
                              }
  
 +

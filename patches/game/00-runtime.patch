@@ -923,7 +923,7 @@ diff --git a/src/main/object/classes.c b/src/main/object/classes.c
      if (upper < lower) {
          s32 swap = lower;
          lower = upper;
-@@ -154,60 +156,6 @@
+@@ -154,58 +156,6 @@
          }
      }
      return 0;
@@ -971,12 +971,10 @@ diff --git a/src/main/object/classes.c b/src/main/object/classes.c
 -        return 0;
 -    StackGetPointer(stack);
 -    if (StackIsScratchpad(stack)) {
--        register void* alternate TM4_BIND_REGISTER("$7") = MainSavedStack;
 -        ObjectDirectorySavedStack = (void*)stack;
--        StackSetPointer(alternate);
+-        StackSetPointer(MainSavedStack);
 -        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
--        alternate = ObjectDirectorySavedStack;
--        StackSetPointer(alternate);
+-        StackSetPointer(ObjectDirectorySavedStack);
 -    } else {
 -        ObjectVisitDirectory(OBJECT_EMPTY_PATH, directory, visitor);
 -    }

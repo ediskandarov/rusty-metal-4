@@ -14,9 +14,8 @@ diff --git a/src/modules/menu/car_design.c b/src/modules/menu/car_design.c
 diff --git a/src/modules/car/effects.c b/src/modules/car/effects.c
 --- a/src/modules/car/effects.c
 +++ b/src/modules/car/effects.c
-@@ -126,13 +126,13 @@
+@@ -126,12 +126,12 @@
      s32 side;
-     register s32 target_bucket TM4_BIND_REGISTER("$3");
  
 -    if ((u8*)packet + 3 * sizeof(*packet) >= end)
 -        return;
