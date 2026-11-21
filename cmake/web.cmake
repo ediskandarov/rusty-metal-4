@@ -290,6 +290,16 @@ target_compile_options(tm4_network_messages_check PRIVATE -UNDEBUG -Wno-nonporta
 target_link_options(tm4_network_messages_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_network_messages_check PROPERTIES SUFFIX ".cjs")
 
+add_executable(tm4_rollback_audio_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_rollback_audio.c"
+    "${TM4_WEB}/rollback_audio.c")
+target_include_directories(tm4_rollback_audio_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}"
+    "${TM4_ROOT}/external/psyz/psyz/include")
+target_compile_options(tm4_rollback_audio_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_rollback_audio_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_rollback_audio_check PROPERTIES SUFFIX ".cjs")
+
 # Small asset-free test using the actual WebGL backend and VRAM readback.
 add_executable(tm4_gpu_mask_check EXCLUDE_FROM_ALL "${TM4_ROOT}/tests/native/check_gpu_mask.c")
 target_include_directories(tm4_gpu_mask_check PRIVATE "${TM4_ROOT}")

@@ -44,7 +44,6 @@ int WebNetLocalCheckpointSupported(void);
 const char* WebNetCapturePortableInto(
     unsigned char* output, unsigned int capacity, unsigned int* length);
 const char* WebNetRestorePortableFrom(const unsigned char* input, unsigned int length);
-void WebNetSuppressReplayedSounds(void);
 int WebNetMatchViewSlot(void);
 void WebNetMatchPollInput(void);
 void WebNetMatchSeed(void);

@@ -30,6 +30,29 @@ void WebRollbackAudioReset(void)
     next_heard = 0;
 }
 
+void WebRollbackAudioSuppressReplay(void)
+{
+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
+         object = object->next) {
+        SoundEmitter* emitter = ObjectGetPayload(object);
+        for (s32 i = 0; i < emitter->voice_count; ++i)
+            if (emitter->voices[i].duration_frames >= 0)
+                emitter->voices[i].voice_id = WebAudioPlaybackFinished;
+    }
+}
+
+void WebRollbackAudioReportVoiceStart(void)
+{
+    if (WebNetRenderedPrediction())
+        EM_ASM(
+            {
+                tm4Port.predictionSoundStarts = (tm4Port.predictionSoundStarts || 0) + 1;
+                if ($0)
+                    tm4Port.predictionReplaySoundStarts = (tm4Port.predictionReplaySoundStarts || 0) + 1;
+            },
+            WebNetReplaying());
+}
+
 static Voice voice_key(const Tm4ObjectHeader* object, const SoundEmitter* emitter, s32 index, u32 tick)
 {
     const SoundEmitterVoice* voice = &emitter->voices[index];

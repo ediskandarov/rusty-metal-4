@@ -846,7 +846,7 @@ EMSCRIPTEN_KEEPALIVE int WebTestRestartNetworkReplay(void)
 EMSCRIPTEN_KEEPALIVE void WebNetEndReplay(void)
 {
     if (match.replaying)
-        WebNetSuppressReplayedSounds();
+        WebRollbackAudioSuppressReplay();
     match.replaying = 0;
 }
 

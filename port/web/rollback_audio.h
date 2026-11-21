@@ -6,6 +6,8 @@ typedef struct SoundEmitter SoundEmitter;
 enum { WebAudioPlaybackFinished = -2 };
 
 void WebRollbackAudioReset(void);
+void WebRollbackAudioSuppressReplay(void);
+void WebRollbackAudioReportVoiceStart(void);
 void WebRollbackAudioStarted(const SoundEmitter* emitter, int index);
 void WebRollbackAudioRemember(void);
 void WebRollbackAudioDetach(void);

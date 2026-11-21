@@ -1,15 +1,14 @@
 diff --git a/src/main/sound.c b/src/main/sound.c
 --- a/src/main/sound.c
 +++ b/src/main/sound.c
-@@ -1,4 +1,7 @@
+@@ -1,4 +1,6 @@
  #include "tm4/main/sound.h"
 +#include "port/web/net_match.h"
 +#include "port/web/rollback_audio.h"
-+#include <emscripten.h>
  
  #include "tm4/fixed.h"
  #include "tm4/integer.h"
-@@ -166,7 +169,8 @@ s32 SoundUploadSample(u8* data, s32 size)
+@@ -166,7 +168,8 @@ s32 SoundUploadSample(u8* data, s32 size)
      SoundSampleCount++;
      attempts = 0;
      do {
@@ -19,34 +18,15 @@ diff --git a/src/main/sound.c b/src/main/sound.c
          attempts++;
          if (attempts >= 181)
              break;
-@@ -375,6 +379,12 @@ s32 SoundIsLooping(char* name)
+@@ -375,6 +378,7 @@ s32 SoundIsLooping(char* name)
  void SoundStartVoice(
      s32 program, s32 index, s32 offset_q12, s32 voice, s32 pitch, s32 left, s32 right)
  {
-+    if (WebNetRenderedPrediction())
-+        EM_ASM({
-+            tm4Port.predictionSoundStarts = (tm4Port.predictionSoundStarts || 0) + 1;
-+            if ($0)
-+                tm4Port.predictionReplaySoundStarts = (tm4Port.predictionReplaySoundStarts || 0) + 1;
-+        }, WebNetReplaying());
++    WebRollbackAudioReportVoiceStart();
      SpuVoiceAttr attr;
      u32 mask = SPU_KEYCH(voice);
      SpuSetKey(SPU_OFF, mask);
-@@ -741,9 +751,23 @@ s32 SoundDopplerPitch(const Tm4Vector3 previous_listener_world, const Tm4Vector3
- }
- #endif
- 
-+void WebNetSuppressReplayedSounds(void)
-+{
-+    for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
-+         object = object->next) {
-+        SoundEmitter* emitter = ObjectGetPayload(object);
-+        for (s32 i = 0; i < emitter->voice_count; ++i)
-+            if (emitter->voices[i].duration_frames >= 0)
-+                emitter->voices[i].voice_id = WebAudioPlaybackFinished;
-+    }
-+}
-+
+@@ -744,6 +748,9 @@ s32 SoundDopplerPitch(const Tm4Vector3 previous_listener_world, const Tm4Vector3
  #if !defined(TM4_SOUND_FUNCTION) || TM4_SOUND_FUNCTION == 0x800237C0
  void SoundProcess(void)
  {
@@ -56,7 +36,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
      s32 voice;
      SoundEmitter* emitter;
      s32 index;
-@@ -772,7 +796,11 @@ void SoundProcess(void)
+@@ -772,7 +779,11 @@ void SoundProcess(void)
                          SoundVoiceOwners[voice].emitter_voice_index = index;
                      } else {
                          SpuSetKey(SPU_OFF, SPU_KEYCH(voice));
@@ -69,7 +49,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
                                               .attributes[emitter->voices[index].attribute_index]
                                               .sample]
                                  .loop) {
-@@ -801,13 +829,13 @@ void SoundProcess(void)
+@@ -801,13 +812,13 @@ void SoundProcess(void)
              if (emitter->flags & SOUND_EMITTER_POSITIONAL) {
                  s32 i;
                  distance = 0x7FFFFFFF;
@@ -85,7 +65,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
                          s32 x = position->vx, y = position->vy, z = position->vz;
                          x -= listener_position_world[0];
                          y -= listener_position_world[1];
-@@ -816,7 +844,7 @@ void SoundProcess(void)
+@@ -816,7 +827,7 @@ void SoundProcess(void)
                      }
                      value = DistanceApprox3d(offset_world.vx, offset_world.vy, offset_world.vz);
                      if (value < distance) {
@@ -94,7 +74,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
                          distance = value;
                          {
                              VECTOR* input = &offset_world;
-@@ -829,6 +857,8 @@ void SoundProcess(void)
+@@ -829,6 +840,8 @@ void SoundProcess(void)
              } else
                  distance = 0;
              for (index = 0; index < emitter->voice_count; index++) {
@@ -103,7 +83,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
                  if (count < SOUND_HARDWARE_VOICES)
                      candidate = count++;
                  else {
-@@ -897,7 +927,7 @@ void SoundProcess(void)
+@@ -897,7 +910,7 @@ void SoundProcess(void)
          emitter = SoundCandidates[candidate].emitter;
          for (index = 0; index < emitter->voice_count; index++) {
              voice = emitter->voices[index].voice_id;
@@ -112,7 +92,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
                  continue;
              voice = 0;
              while (active & SPU_VOICECH(voice))
-@@ -907,11 +937,12 @@ void SoundProcess(void)
+@@ -907,11 +920,12 @@ void SoundProcess(void)
                  return;
              }
              emitter->voices[index].voice_id = voice;
@@ -130,7 +110,7 @@ diff --git a/src/main/sound.c b/src/main/sound.c
              if (!SoundCandidates[candidate].listener)
                  SoundPanVolume(
                      emitter->voices[index].pan, emitter->voices[index].volume * 129, &left, &right);
-@@ -936,6 +967,8 @@ void SoundProcess(void)
+@@ -936,6 +950,8 @@ void SoundProcess(void)
                            emitter->voices[index].duration_frames)
                      : 0,
                  voice, pitch, left, right);
