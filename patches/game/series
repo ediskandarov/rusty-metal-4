@@ -17,7 +17,6 @@ rendering-distance.patch
 rendering-sync.patch
 subpixel.patch
 interpolation.patch
-network.patch
 world-motion.patch
 bullet-motion.patch
 network-session.patch

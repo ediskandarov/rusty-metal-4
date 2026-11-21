@@ -67,7 +67,7 @@ diff --git a/src/main/game.c b/src/main/game.c
 -    if (car->index < game->player_car_count) {
 +    if (player_car) {
          ++game->active_player_count;
--        if (game->players[car->controller_index].camera) {
+-        if (car->controller_index < GameInfo.player_count) {
 -            CameraSetObjectFunction* attach;
 +        if (camera)
              game->players[car->controller_index].car = car;
@@ -81,16 +81,31 @@ diff --git a/src/main/game.c b/src/main/game.c
  }
  #endif
  
-@@ -561,7 +580,7 @@ void GameUnregisterCar(Car* incoming_car)
+@@ -561,10 +580,11 @@ void GameUnregisterCar(Car* incoming_car)
          if (GameInfo.cars[index] == car)
              break;
      }
 -    if (GameInfo.cars[index] != car)
 +    if (index == GameInfo.car_count)
          return;
-     for (player = 0; player < ArrayCount(GameInfo.players); ++player) {
-         Camera* camera = GameInfo.players[player].camera;
-@@ -599,6 +618,7 @@ void GameUnregisterCar(Car* incoming_car)
+-    for (player = 0; player < GameInfo.player_count; ++player) {
+-        if (car == GameInfo.players[player].camera->object) {
++    for (player = 0; player < ArrayCount(GameInfo.players); ++player) {
++        Camera* camera = GameInfo.players[player].camera;
++        if (camera && car == camera->object) {
+             CameraSetObjectFunction* attach;
+             if (!player && GameInfo.mode == GAME_MODE_DEMO) {
+                 attach = OSSymbolGetAddressAssert(GAME_CAMERA_SET_OBJECT);
+@@ -584,7 +604,7 @@ void GameUnregisterCar(Car* incoming_car)
+     --GameInfo.car_count;
+     if (car->index < GameInfo.player_car_count) {
+         --GameInfo.active_player_count;
+-        if (car->controller_index < GameInfo.player_count) {
++        if (GameInfo.players[car->controller_index].camera) {
+             CameraSetObjectFunction* attach;
+             if (GameInfo.mode == GAME_MODE_DEMO) {
+                 GameInfo.players[0].car = GameInfo.cars[0];
+@@ -598,6 +618,7 @@ void GameUnregisterCar(Car* incoming_car)
          }
      } else
          --GameInfo.active_computer_count;
