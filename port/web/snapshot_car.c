@@ -238,12 +238,14 @@ static const SnapshotField spring_fields[] = {
 static const SnapshotArray springs = { spring_fields, sizeof(CarSpring), spring_count, 10 };
 
 static const SnapshotField weapon_fields[] = {
+    SNAP_POD(CarWeaponInstance, profile_key),
     SNAP_POD(CarWeaponInstance, amount),
     SNAP_LOCAL(CarWeaponInstance, count),
     SNAP_POD(CarWeaponInstance, index),
     SNAP_POD(CarWeaponInstance, active),
     SNAP_POD(CarWeaponInstance, next_time),
     SNAP_LOCAL(CarWeaponInstance, launchers),
+    SNAP_LOCAL(CarWeaponInstance, ai_weights),
     SNAP_LOCAL(CarWeaponInstance, descriptor),
     { 0 },
 };
@@ -251,7 +253,7 @@ static const SnapshotArray weapons = {
     weapon_fields,
     sizeof(CarWeaponInstance),
     weapon_count,
-    64,
+    CAR_ARSENAL_LIMIT,
 };
 
 static const SnapshotField contact_fields[] = {
@@ -707,6 +709,7 @@ static int car_valid(const void* payload)
         : WEB_MODULE("car", CarAiUpdateControls);
     if ((car->control_kind != CAR_CONTROL_PLAYER && car->control_kind != CAR_CONTROL_ENEMY)
         || !WEB_MODULE("car", CarPhysicsResourcesValid)(car) || !car->weapons
+        || !WEB_MODULE("car", CarWeaponInventoryValid)(car)
         || !car->character_name || !turbo_resources_valid(car)
         || !((car->ai_input_callback == driver && !car->ai_saved_input_callback)
             || (!car->ai_input_callback && car->ai_saved_input_callback == driver))

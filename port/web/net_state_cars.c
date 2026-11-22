@@ -149,7 +149,8 @@ static void car_state(NetStateOutput* hash, const Car* car)
     controls(hash, &car->controls);
     for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         const CarWeaponInstance* weapon = &car->weapons[i];
-        key(hash, weapon->descriptor->name);
+        key(hash, weapon->descriptor->id);
+        VALUE(weapon->profile_key);
         VALUE(weapon->amount);
         VALUE(weapon->count);
         VALUE(weapon->index);

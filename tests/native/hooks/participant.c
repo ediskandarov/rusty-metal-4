@@ -366,7 +366,7 @@ EMSCRIPTEN_KEEPALIVE u32 WebTestCrusherRespawnAllocationBytes(s32 index)
     case 1:
         return strlen(car->filename) + 1;
     case 2:
-        return ArrayCount(WEB_MODULE("car", CarWeaponDescriptors)) * sizeof(CarWeaponInstance);
+        return WEB_MODULE("car", CarWeaponCount) * sizeof(CarWeaponInstance);
     case 3:
         return sizeof(*car->weapons[0].descriptor);
     case 4:

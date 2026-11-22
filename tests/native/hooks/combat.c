@@ -104,7 +104,7 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestSupplyProximity(void)
     if (!car)
         return 0;
     WEB_MODULE("car", AddInventoryToCar)(car, "Proximity", 2);
-    for (s32 i = 0; i < 20; ++i) {
+    for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         CarWeaponInstance* weapon = &car->weapons[i];
         if (weapon->descriptor->name && !strcasecmp(weapon->descriptor->name, "Proximity"))
             return weapon->amount;
@@ -616,7 +616,7 @@ EMSCRIPTEN_KEEPALIVE void WebTestReadEnergyActions(void)
             test_weapon_target->transform.t[2], test_weapon_target->collision_box.center.vy,
             ObjectGetHeader(test_weapon_target)->position.vy);
     }
-    for (s32 i = 0; i < 20; ++i) {
+    for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         CarWeaponInstance* weapon = &car->weapons[i];
         EM_ASM(
             { tm4Port.energyAction.weapons.push({ amount : $0, nextTime : $1 }); }, weapon->amount,

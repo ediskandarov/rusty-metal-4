@@ -91,7 +91,7 @@ function(tm4_dynamic_module module image_name)
 endfunction()
 target_link_options(tm4_web PRIVATE -sMAIN_MODULE=2)
 if(TM4_WEB_TEST_HOOKS)
-    target_link_options(tm4_web PRIVATE -Wl,--export=randseed -Wl,--export=WebDynamicModuleExport
+    target_link_options(tm4_web PRIVATE -Wl,--export=WebCheckpointArenaSelect -Wl,--export=randseed -Wl,--export=WebDynamicModuleExport
         -Wl,--export=WebNativeModuleLoaded -Wl,--export=RegAddReg -Wl,--export=RegRemoveReg -Wl,--export=free)
 endif()
 target_link_options(tm4_web PRIVATE

@@ -1,0 +1,492 @@
+--- a/include/tm4/modules/car_ai.h
++++ b/include/tm4/modules/car_ai.h
+@@ -204,7 +204,6 @@
+ } CarAiNearbyCar;
+ typedef struct CarAiWeightedSector {
+     s32 probability;
+-    u8 weapon_probabilities[20];
+ } CarAiWeightedSector;
+ enum { CAR_AI_PATH_CAPACITY = 100 };
+ 
+--- a/include/tm4/modules/car_weapon.h
++++ b/include/tm4/modules/car_weapon.h
+@@ -1,6 +1,8 @@
+ #ifndef TM4_MODULES_CAR_WEAPON_H
+ #define TM4_MODULES_CAR_WEAPON_H
+ 
++#include "port/extensions/weapon_profiles.h"
++#include "tm4/main/registry.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/modules/car.h"
+@@ -12,11 +14,20 @@
+     s16 initial, maximum, delay;
+     u8 detonate, repeat;
+     CarWeaponLaunch launch;
++    const char* id;
++    const char* model;
++    RegistryDirectory* resource;
++    const void* launch_data;
++    const CarWeaponAiCategory* ai_category;
++    u32 profile_key;
++    CarWeaponRole role;
+ } CarWeaponDescriptor;
+ struct CarWeaponInstance {
++    u32 profile_key;
+     s16 amount, count, index, active;
+     u32 next_time;
+     CarMount* launchers;
++    const u8* ai_weights;
+     CarWeaponDescriptor* descriptor;
+ };
+ typedef struct CarDetonationNode {
+@@ -42,4 +53,5 @@
+ typedef void AddInventoryToCarFunction(Car* car, char* name, s32 amount);
+ AddInventoryToCarFunction AddInventoryToCar;
+ 
++
+ #endif
+--- a/src/main/screen.c
++++ b/src/main/screen.c
+@@ -924,9 +924,10 @@
+ #ifdef __psyz
+         render_angle = WebInterpolationAngle(PreviousScreenPowerupAngle, ScreenPowerupAngle);
+ #endif
+-        ScreenPowerupDisplayCallback(weapon->descriptor->name, render_angle,
+-            RenderViewWidth - 37, RenderViewHeight - 39, 2048, orderingTable, &primitive,
+-            primitives->weapon_model + sizeof(primitives->weapon_model));
++        ScreenPowerupDisplayCallback(
++            weapon->descriptor->model ? weapon->descriptor->model : weapon->descriptor->name,
++            render_angle, RenderViewWidth - 37, RenderViewHeight - 39, 2048, orderingTable,
++            &primitive, primitives->weapon_model + sizeof(primitives->weapon_model));
+     }
+     FontPrint(name, ScreenMessageFontName, RenderViewWidth - 39, RenderViewHeight - 22,
+         &buffer->font_prims, orderingTable, FONT_PRINT_COLOR | FONT_PRINT_CENTER,
+--- a/src/modules/car/ai.c
++++ b/src/modules/car/ai.c
+@@ -69,15 +69,10 @@
+     RegistryDirectory* fallback;
+     RegistryDirectory* sector;
+     void* value;
+-    enum {
+-        sector_capacity = (s32)(sizeof(car->ai.sectors) / sizeof(car->ai.sectors[0])),
+-        weapons_per_sector = (s32)(sizeof(car->ai.sectors[0].weapon_probabilities)
+-            / sizeof(car->ai.sectors[0].weapon_probabilities[0]))
+-    };
++    enum { sector_capacity = (s32)(sizeof(car->ai.sectors) / sizeof(car->ai.sectors[0])) };
+     s32 weight_index;
+     s32 sector_index;
+-    s32 weapon_index;
+-    s32 sector_count, default_count, sum, total, weighted;
++    s32 sector_count, default_count, total, weighted;
+     s32* order;
+     CarAiSpatialNode* spatial;
+ 
+@@ -212,17 +207,6 @@
+             * aiWorldInfo.sectors[weight_index].probability / 100;
+         car->ai.sectors[weight_index].probability = weighted;
+         total += weighted;
+-        sum = 0;
+-        for (weapon_index = 0; weapon_index < weapons_per_sector; weapon_index++) {
+-            car->ai.sectors[weight_index].weapon_probabilities[weapon_index]
+-                = car->ai_config.sectors[weight_index].weapon_probabilities[weapon_index]
+-                * aiWorldInfo.sectors[weight_index].weapon_probabilities[weapon_index] / 100;
+-            sum += car->ai.sectors[weight_index].weapon_probabilities[weapon_index];
+-        }
+-        if (sum)
+-            for (weapon_index = 0; weapon_index < weapons_per_sector; weapon_index++)
+-                car->ai.sectors[weight_index].weapon_probabilities[weapon_index]
+-                    = 100 * car->ai.sectors[weight_index].weapon_probabilities[weapon_index] / sum;
+     }
+     if (total) {
+         for (weight_index = 0; weight_index < sector_capacity; weight_index++)
+--- a/src/modules/car/ai_combat.c
++++ b/src/modules/car/ai_combat.c
+@@ -202,7 +202,7 @@
+     s32 total, i, distance, threshold, sum, choice, sector;
+     VECTOR position, delta;
+     const s32 sector_count = ArrayCount(sectors);
+-    const s32 weapon_count = ArrayCount(CarWeaponDescriptors);
++    const s32 weapon_count = CarWeaponCount;
+     for (i = sector_count - 1; i >= 0; i--)
+         sectors[i] = 0;
+     nearby = car->ai.nearby_list;
+@@ -343,18 +343,33 @@
+                 }
+             }
+         }
++        s32 weights[CAR_ARSENAL_LIMIT];
+         sum = 0;
+-        choice = rand() % 100;
+-        total = sum;
+-        for (i = weapon_count - 1; i >= 0; i--) {
+-            sum += car->ai.sectors[sector].weapon_probabilities[i];
+-            if (sum >= choice) {
++        for (i = 0; i < weapon_count; ++i) {
++            weights[i] = CarWeaponAiWeight(car, i, sector);
++            sum += weights[i];
++        }
++        if (!sum)
++            return;
++        /* Preserve the original integer normalization before sampling. */
++        s32 normalized_sum = 0;
++        for (i = 0; i < weapon_count; ++i) {
++            weights[i] = 100 * weights[i] / sum;
++            normalized_sum += weights[i];
++        }
++        if (!normalized_sum)
++            return;
++        choice = rand() % normalized_sum;
++        total = 0;
++        for (i = weapon_count - 1; i >= 0; --i) {
++            if (choice < weights[i]) {
+                 total = i;
+                 break;
+             }
++            choice -= weights[i];
+         }
+         car->controls.selected_weapon = total;
+-        if (car->weapons[i].descriptor->repeat) {
++        if (car->weapons[total].descriptor->repeat) {
+             car->controls.weapon_held = 1;
+             car->ai.weapon_press_ticks = 15;
+         } else if (sector < 6)
+--- a/src/modules/car/inventory.c
++++ b/src/modules/car/inventory.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include <stdint.h>
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/vector.h"
+@@ -103,13 +104,15 @@
+ void AddInventoryToCar(Car* car, char* name, s32 amount)
+ {
+     s32 i;
+-    const s32 weapon_count = ArrayCount(CarWeaponDescriptors);
++    const s32 weapon_count = CarWeaponCount;
+     for (i = 0; i < weapon_count; i++) {
+         if (!car->weapons[i].descriptor->name || strcmpi(car->weapons[i].descriptor->name, name))
+             continue;
+-        car->weapons[i].amount += amount;
+-        if (car->weapons[i].amount > car->weapons[i].descriptor->maximum)
+-            car->weapons[i].amount = car->weapons[i].descriptor->maximum;
++        if (car->weapons[i].amount < 0)
++            break;
++        int64_t total = (int64_t)car->weapons[i].amount + amount;
++        s32 maximum = car->weapons[i].descriptor->maximum;
++        car->weapons[i].amount = total < 0 ? 0 : total > maximum ? maximum : (s16)total;
+         break;
+     }
+ }
+--- a/src/modules/car/private.h
++++ b/src/modules/car/private.h
+@@ -502,7 +502,6 @@
+ extern char CarNameMassive[];
+ extern char CarNameLevel3[];
+ extern char CarNameLevel4[];
+-extern char* CarWeaponNames[21];
+ extern CarMount CarDefaultLaunchMount;
+ extern char CarNameMirvBaby[];
+ extern char* CarMassiveWeaponTypes[6];
+@@ -543,10 +542,9 @@
+ extern s32 CarEnergyScale;
+ extern s32 CarTurboScale;
+ extern CarDetonationNode* CarDetonationDevices;
+-extern s32* CarWeaponMap;
+ extern RegistryDirectory* CarWeaponDirectory;
+ extern s32 CarWeaponCount;
+-extern CarWeaponDescriptor CarWeaponDescriptors[20];
++extern CarWeaponDescriptor CarWeaponDescriptors[CAR_ARSENAL_LIMIT];
+ 
+ extern VECTOR CarCollisionImpulse;
+ extern Car* CarCollisionCars[2];
+--- a/src/modules/car/state.c
++++ b/src/modules/car/state.c
+@@ -107,10 +107,6 @@
+ BulletProjectileConstructorFunction* Import_Weapon_BulletProjectileConstructor = NULL;
+ BulletProjectileProcessFunction* Import_Weapon_BulletProjectileProcess = NULL;
+ BulletProjectileDestructorFunction* Import_Weapon_BulletProjectileDestructor = NULL;
+-char* CarWeaponNames[21] = { CarNameSpecial, CarTextFire, CarTextPower, CarTextHoming,
+-    CarTextNapalm, CarTextMortar, CarTextSpeed, CarTextRain, CarNameRemote, CarTextRicochet,
+-    CarTextMIRV, CarNameLightning, CarNameProximity, CarTextFreeze, CarTextAutolob,
+-    CarNameFreezeRemote, CarNameMassive, CarTextRain2, CarNameLevel3, CarNameLevel4, NULL };
+ CarMount CarDefaultLaunchMount = {
+     .position = { 0, -50, 140, 0 },
+     .direction = { 0, -2896, 2896, 0 },
+@@ -286,8 +282,7 @@
+ s32 CarEnergyScale = 0;
+ s32 CarTurboScale = 0;
+ CarDetonationNode* CarDetonationDevices = NULL;
+-s32* CarWeaponMap = NULL;
+-CarWeaponDescriptor CarWeaponDescriptors[20] = { 0 };
++CarWeaponDescriptor CarWeaponDescriptors[CAR_ARSENAL_LIMIT] = { 0 };
+ RegistryDirectory* CarWeaponDirectory = NULL;
+ s32 CarWeaponCount = 0;
+ VECTOR CarCollisionImpulse = { 0 };
+--- a/src/modules/car/weapon.c
++++ b/src/modules/car/weapon.c
+@@ -1,249 +1,2 @@
+-
+-#include "private.h"
+-#include "tm4_scalar.h"
+-
+-#include "tm4/fixed.h"
+-#include "tm4/main/easteregg.h"
+-#include "tm4/main/memory.h"
+-#include "tm4/main/os.h"
+-#include "tm4/main/screen.h"
+-#include "tm4/main/system.h"
+-
+-#include <STDIO.H>
+-#include <STRINGS.H>
+-
+-void* CarWeaponGetFileData(char* name, char* directory)
+-{
+-    char path[strlen(directory) + strlen(name) + 2];
+-    void* result = RegGetFileDataS(name);
+-    if (!result) {
+-        sprintf(path, CarResourcePathFormatWeapon, directory, name);
+-        result = RegGetFileDataPS(CarClassDirectory, path);
+-    }
+-    return result;
+-}
+-
+-void CarWeaponClassConstructor(RegistryDirectory* directory)
+-{
+-    s32 i, j;
+-    char* name;
+-    char symbol[32];
+-    CarWeaponDescriptor* weapon;
+-    RegChangeCurrentDirectoryPS(directory, CarTextWeaponList);
+-    CarWeaponDirectory = RegGetCurrentDirectoryPtr();
+-    CarWeaponCount = RegGetNumberOfDirectoriesP(CarWeaponDirectory);
+-    MemSet(CarWeaponDescriptors, 0, sizeof(CarWeaponDescriptors));
+-    CarWeaponMap = MemAlloc(CarWeaponCount * sizeof(*CarWeaponMap));
+-    for (i = 0; i < CarWeaponCount; i++) {
+-        RegChangeCurrentDirectoryPN(CarWeaponDirectory, i);
+-        name = RegGetDirectoryNamePN(CarWeaponDirectory, i);
+-        for (j = 0; CarWeaponNames[j]; j++) {
+-            if (!strcmpi(name, CarWeaponNames[j])) {
+-                weapon = &CarWeaponDescriptors[j];
+-                weapon->name = name;
+-                weapon->hud_name = RegGetFileDataS(CarTextHudName);
+-                if (!weapon->hud_name)
+-                    weapon->hud_name = weapon->name;
+-                weapon->initial = *(s16*)CarWeaponGetFileData(CarTextInitial, CarTextWeaponDefault);
+-                weapon->maximum = *(s16*)CarWeaponGetFileData(CarTextMax, CarTextWeaponDefault);
+-                weapon->delay = Q12MulRound(
+-                    *(s32*)CarWeaponGetFileData(CarTextDelay, CarTextWeaponDefault), 30);
+-                weapon->detonate
+-                    = *(u8*)CarWeaponGetFileData(CarTextDetonate, CarTextWeaponDefault);
+-                weapon->repeat = *(u8*)CarWeaponGetFileData(CarTextRepeat, CarTextWeaponDefault);
+-                sprintf(symbol, CarWeaponLaunchSymbolFormat, CarTextCarLaunch, name);
+-                weapon->launch = (CarWeaponLaunch)OSSymbolGetAddressAssert(symbol);
+-                break;
+-            }
+-        }
+-        CarWeaponMap[i] = j;
+-    }
+-    CarDetonationDevices = NULL;
+-}
+-
+-void CarWeaponClassDestructor(RegistryDirectory* registry)
+-{
+-    MemFree(CarWeaponMap);
+-    CarFreeDetonationDevices();
+-}
+-
+-CarWeaponInstance* CarGetWeaponToFire(Car* car, s32* flag)
+-{
+-    CarWeaponInstance* result = NULL;
+-    CarAction action = car->controls.action;
+-    if (action == CarActionRearAttack) {
+-        s32 index = car->controls.selected_weapon;
+-        CarWeaponInstance* weapons = car->weapons;
+-        *flag = 1;
+-        result = &weapons[index];
+-    } else if (action == CarActionFreezeAttack) {
+-        result = &car->weapons[13];
+-    } else if (action == CarActionRearFreezeAttack) {
+-        CarWeaponInstance* weapons = car->weapons;
+-        *flag = 1;
+-        result = &weapons[13];
+-    } else if (action == CarActionMassiveAttack) {
+-        result = &car->weapons[16];
+-    } else if (action == CarActionRearMassiveAttack) {
+-        CarWeaponInstance* weapons = car->weapons;
+-        *flag = 1;
+-        result = &weapons[16];
+-    }
+-    return result;
+-}
+-
+-s32 CarWeaponConstructor(Car* car, s32 type)
+-{
+-    s32 i;
+-    s16 selected;
+-    s32* map;
+-    RegistryDirectory *saved, *directory;
+-    char* launch_name;
+-    s16* regen;
+-    const s32 weapon_count = ArrayCount(CarWeaponDescriptors);
+-    map = CarWeaponMap;
+-    car->controls.weapon_held = 0;
+-    car->controls.weapon_pressed = 0;
+-    car->controls.selected_weapon_slot = 0;
+-    selected = *map;
+-    car->special_regeneration_ticks = 0;
+-    car->special_regeneration_interval = 300;
+-    car->controls.selected_weapon = selected;
+-    car->weapons = MemCalloc(weapon_count, sizeof(*car->weapons));
+-    if (!car->weapons)
+-        return 0;
+-    for (i = 0; i < weapon_count; i++) {
+-        if (i <= 0) {
+-            char symbol[strlen(car->filename) + sizeof(CAR_SPECIAL_CONSTRUCTOR_FORMAT)];
+-            car->weapons[i].descriptor = MemAlloc(sizeof(*car->weapons[i].descriptor));
+-            if (!car->weapons[i].descriptor) {
+-                return 0;
+-            } else {
+-                saved = RegGetCurrentDirectoryPtr();
+-                RegChangeCurrentDirectoryS(CarTextSpecial);
+-                car->weapons[i].descriptor->name
+-                    = CarWeaponGetFileData(CarTextName, CarTextWeaponDefault);
+-                car->weapons[i].descriptor->hud_name = RegGetFileDataS(CarTextHudName);
+-                if (!car->weapons[i].descriptor->hud_name)
+-                    car->weapons[i].descriptor->hud_name = car->weapons[i].descriptor->name;
+-                car->weapons[i].descriptor->initial
+-                    = *(s16*)CarWeaponGetFileData(CarTextInitial, CarTextWeaponDefault);
+-                car->weapons[i].descriptor->maximum
+-                    = *(s16*)CarWeaponGetFileData(CarTextMax, CarTextWeaponDefault);
+-                car->weapons[i].descriptor->delay = Q12MulRound(
+-                    *(s32*)CarWeaponGetFileData(CarTextDelay, CarTextWeaponDefault), 30);
+-                car->weapons[i].descriptor->detonate
+-                    = *(u8*)CarWeaponGetFileData(CarTextDetonate, CarTextWeaponDefault);
+-                car->weapons[i].descriptor->repeat
+-                    = *(u8*)CarWeaponGetFileData(CarTextRepeat, CarTextWeaponDefault);
+-                launch_name = RegGetFileDataS(CarTextLaunchFunc);
+-                if (!launch_name || !strlen(launch_name)) {
+-                    sprintf(symbol, CarSpecialConstructorFormat, car->filename);
+-                    launch_name = symbol;
+-                }
+-                car->weapons[i].descriptor->launch
+-                    = (CarWeaponLaunch)OSSymbolGetAddress(launch_name);
+-                if (!car->weapons[i].descriptor->launch)
+-                    car->weapons[i].descriptor->launch = CarLaunchSpecial;
+-                regen = RegGetFileDataS(CarTextRegen);
+-                if (regen)
+-                    car->special_regeneration_interval = *regen * SIMULATION_FPS;
+-                if (EasterEggAccessible(5))
+-                    car->special_regeneration_interval = 120;
+-                RegChangeCurrentDirectoryP(saved);
+-            }
+-        } else {
+-            car->weapons[i].descriptor = &CarWeaponDescriptors[i];
+-        }
+-        if (type == 1) {
+-            car->weapons[i].amount = car->weapons[i].descriptor->initial;
+-            if ((EasterEggAccessible(3) && i == 16) || (EasterEggAccessible(2) && i == 13))
+-                car->weapons[i].amount = 99;
+-            if (EasterEggAccessible(1) && i != 16 && i != 13)
+-                car->weapons[i].amount = 99;
+-        } else
+-            car->weapons[i].amount = -1;
+-        car->weapons[i].next_time = 0;
+-        car->weapons[i].active = 0;
+-        car->weapons[i].index = 0;
+-        if (!car->weapons[i].descriptor->name) {
+-            car->weapons[i].launchers = &CarDefaultLaunchMount;
+-            car->weapons[i].count = 1;
+-        } else {
+-            if ((car->weapons[i].launchers = RegGetFileDataS(car->weapons[i].descriptor->name))) {
+-                car->weapons[i].count = RegGetFileArraySizeS(car->weapons[i].descriptor->name);
+-            } else {
+-                directory
+-                    = RegGetDirectoryPtrPS(CarWeaponDirectory, car->weapons[i].descriptor->name);
+-                if (!directory) {
+-                    car->weapons[i].launchers = &CarDefaultLaunchMount;
+-                    car->weapons[i].count = 1;
+-                } else {
+-                    car->weapons[i].launchers = RegGetFileDataPS(directory, CarTextLauncher);
+-                    if (!car->weapons[i].launchers) {
+-                        car->weapons[i].launchers = &CarDefaultLaunchMount;
+-                        car->weapons[i].count = 1;
+-                    }
+-                    car->weapons[i].count = RegGetFileArraySizePS(directory, CarTextLauncher);
+-                }
+-            }
+-        }
+-    }
+-    return 1;
+-}
+-
+-void CarWeaponDestructor(Car* car)
+-{
+-    s32 i;
+-    const s32 weapon_count = ArrayCount(CarWeaponDescriptors);
+-    if (!car->weapons)
+-        return;
+-    for (i = 0; i < weapon_count; i++) {
+-        if (car->weapons[i].descriptor && car->weapons[i].descriptor->detonate
+-            && car->weapons[i].active)
+-            CarDetonateWeaponDevices(&car->weapons[i]);
+-    }
+-    for (i = 0; i <= 0; i++)
+-        MemFree(car->weapons[i].descriptor);
+-    MemFree(car->weapons);
+-    car->weapons = NULL;
+-}
+-
+-void CarWeaponProcess(Car* car)
+-{
+-    CarWeaponInstance* special;
+-    s32 flag = 0, pending;
+-    u32 now;
+-    CarWeaponInstance *selected = &car->weapons[car->controls.selected_weapon], *override;
+-    if (!(selected->descriptor->detonate && selected->active) && !selected->amount)
+-        CarSelectNextUsableWeapon(car, 1);
+-    override = CarGetWeaponToFire(car, &flag);
+-    if (override)
+-        selected = override;
+-    pending = selected->descriptor->detonate && selected->active != 0;
+-    now = GetCurrentTime();
+-    if (selected->next_time < now
+-        && (car->controls.weapon_pressed || override
+-            || (car->controls.weapon_held && selected->descriptor->repeat))
+-        && selected->descriptor->launch && !car->freeze_ticks) {
+-        if (car->control_kind == CAR_CONTROL_PLAYER && !selected->amount && !pending && !override) {
+-            ScreenLocalMessageRegister(car->controller_index, CarEmptyInventoryMessage);
+-        } else {
+-            selected->next_time = now + selected->descriptor->delay;
+-            if (pending)
+-                CarDetonateWeaponDevices(selected);
+-            else if (selected->descriptor->launch(car, car->callback_context, selected, flag) == 1)
+-                CarDecrementAmmo(&selected->amount);
+-        }
+-        car->controls.weapon_pressed = 0;
+-    }
+-    special = car->weapons;
+-    if (special->amount >= special->descriptor->maximum)
+-        return;
+-    if (car->special_regeneration_ticks < car->special_regeneration_interval)
+-        car->special_regeneration_ticks++;
+-    else {
+-        special->amount++;
+-        car->special_regeneration_ticks = 0;
+-    }
+-}
++#include "port/game/car_weapons.c"
++#include "port/extensions/weapon_profiles.c"
+--- a/src/modules/car/weapon_targeting.c
++++ b/src/modules/car/weapon_targeting.c
+@@ -81,7 +81,7 @@
+         car->controls.selected_weapon_slot = 0;
+     else if (car->controls.selected_weapon_slot < 0)
+         car->controls.selected_weapon_slot = CarWeaponCount - 1;
+-    car->controls.selected_weapon = CarWeaponMap[car->controls.selected_weapon_slot];
++    car->controls.selected_weapon = car->controls.selected_weapon_slot;
+ }
+ 
+ void CarDecrementAmmo(s16* amount)

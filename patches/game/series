@@ -56,3 +56,5 @@ widescreen-hud.patch
 mouse-look.patch
 surface-effects.patch
 sound-effect-random.patch
+registry-load-order.patch
+weapon-profiles.patch
