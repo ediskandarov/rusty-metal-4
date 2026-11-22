@@ -1,0 +1,12 @@
+--- a/src/main/loadfiles.c
++++ b/src/main/loadfiles.c
+@@ -384,6 +384,8 @@
+     LoadFilesAdd(LoadingGameImageFilename, NULL, LoadFilesProcessGameImage);
++    /* Registry precedence: game defaults, world overrides, then individual cars.
++       Image and sound uploads keep their original order. */
++    LoadFilesAdd(LoadingGameRegistryFilename, NULL, LoadFilesProcessGameRegistry);
+     if (filename)
+         LoadFilesAddWithExtension(
+             filename, LoadingRegistryExtension, NULL, LoadFilesProcessWorldRegistry);
+-    LoadFilesAdd(LoadingGameRegistryFilename, NULL, LoadFilesProcessGameRegistry);
+     LoadFilesCarVramSlotCount = 0;

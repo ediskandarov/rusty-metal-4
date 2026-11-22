@@ -36,7 +36,20 @@ endfunction()
 file(GLOB TM4_MENU_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/menu/*.c")
 file(GLOB TM4_CAR_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/car/*.c")
 add_library(tm4_core STATIC
+    "${TM4_ROOT}/port/extensions/car_profile.c"
+    "${TM4_ROOT}/port/extensions/car_effects.c"
+    "${TM4_ROOT}/port/extensions/car_attacks.c"
+    "${TM4_ROOT}/port/extensions/fragment_effects.c"
+    "${TM4_ROOT}/port/extensions/screen_objects.c"
+    "${TM4_ROOT}/port/extensions/map_settings.c"
+    "${TM4_ROOT}/port/extensions/turbo.c"
+    "${TM4_ROOT}/port/extensions/teleport.c"
+    "${TM4_ROOT}/port/extensions/surface_effects.c"
+    "${TM4_ROOT}/port/extensions/surface_effects_state.c"
     "${TM4_WEB}/memory.c"
+    "${TM4_ROOT}/port/game/sound_samples.c"
+    "${TM4_WEB}/texture_bank.c"
+    "${TM4_WEB}/world_texture.c"
     "${TM4_WEB}/participant.c"
     "${TM4_WEB}/ffa.c"
     "${TM4_WEB}/match_mode.c"
@@ -154,7 +167,7 @@ function(tm4_add_overlay name)
     set_source_files_properties(${sources} PROPERTIES COMPILE_DEFINITIONS "${bindings}")
     target_sources(tm4_core PRIVATE ${sources})
 endfunction()
-target_sources(tm4_core PRIVATE "${TM4_GAME_ROOT}/src/main/card.c")
+target_sources(tm4_core PRIVATE "${TM4_GAME_ROOT}/src/main/card.c" "${TM4_WEB}/card_quad.c")
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/card.c" PROPERTIES COMPILE_DEFINITIONS "TM4_CARD_FUNCTION=0x80039AE8")
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/sprintf.c" PROPERTIES COMPILE_DEFINITIONS "TM4_SPRINTF_FUNCTION=0x80034674")
 tm4_add_overlay(weap)
@@ -251,6 +264,7 @@ if(TM4_WEB_TEST_HOOKS)
         "${TM4_ROOT}/tests/native/hooks/participant.c"
         "${TM4_ROOT}/tests/native/hooks/snapshot_padding.c"
         "${TM4_ROOT}/tests/native/hooks/world.c"
+        "${TM4_ROOT}/tests/native/hooks/objects.c"
         "${TM4_ROOT}/tests/native/hooks/presentation.c"
         "${TM4_ROOT}/tests/native/hooks/match.c")
     target_compile_definitions(tm4_web PRIVATE TM4_WEB_TEST_HOOKS=1)
@@ -311,6 +325,66 @@ target_include_directories(tm4_car_controls_check PRIVATE
 target_compile_options(tm4_car_controls_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_car_controls_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_car_controls_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_surface_effects_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/port/psyz/math.c"
+    "${TM4_ROOT}/tests/native/check_surface_effects.c"
+    "${TM4_GAME_ROOT}/src/modules/car/wheel_physics.c"
+    "${TM4_GAME_ROOT}/src/main/geometry/geometry.c"
+    "${TM4_ROOT}/port/game/math3d.c"
+    "${TM4_ROOT}/port/extensions/surface_effects.c"
+    "${TM4_ROOT}/port/extensions/surface_effects_state.c")
+target_include_directories(tm4_surface_effects_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_surface_effects_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_surface_effects_check PRIVATE psyz)
+target_compile_options(tm4_surface_effects_check PRIVATE
+    "$<TARGET_PROPERTY:tm4_core,COMPILE_OPTIONS>" -UNDEBUG)
+target_link_options(tm4_surface_effects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_surface_effects_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_teleport_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_teleport.c"
+    "${TM4_GAME_ROOT}/src/modules/tele/tele.c"
+    "${TM4_GAME_ROOT}/src/modules/tele/data.c"
+    "${TM4_ROOT}/port/extensions/teleport.c"
+    "${TM4_GAME_ROOT}/src/main/geometry/geometry.c"
+    "${TM4_ROOT}/port/game/math3d.c")
+target_include_directories(tm4_teleport_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_teleport_check PRIVATE TM4_GEOMETRY_FUNCTION=0x80028498 PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_teleport_check PRIVATE psyz)
+target_compile_options(tm4_teleport_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_teleport_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_teleport_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_sound_samples_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_sound_samples.c")
+target_include_directories(tm4_sound_samples_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_sound_samples_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_sound_samples_check PRIVATE psyz)
+target_compile_options(tm4_sound_samples_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_sound_samples_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_sound_samples_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_registry_resource_size_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_registry_resource_size.c")
+target_include_directories(tm4_registry_resource_size_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_options(tm4_registry_resource_size_check PRIVATE -UNDEBUG -Wno-nonportable-include-path -sUSE_ZLIB=1)
+target_link_options(tm4_registry_resource_size_check PRIVATE -sUSE_ZLIB=1 -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_registry_resource_size_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_world_textures_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_world_textures.c")
+target_include_directories(tm4_world_textures_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_world_textures_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_world_textures_check PRIVATE psyz)
+target_compile_options(tm4_world_textures_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_world_textures_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_world_textures_check PROPERTIES SUFFIX ".cjs")
 
 # Small asset-free test using the actual WebGL backend and VRAM readback.
 add_executable(tm4_gpu_mask_check EXCLUDE_FROM_ALL "${TM4_ROOT}/tests/native/check_gpu_mask.c")
@@ -377,3 +451,67 @@ if(TM4_STANDALONE)
     target_link_options(tm4_web PRIVATE --no-entry -sPURE_WASI=1 -sALLOW_TABLE_GROWTH=1 "-sEXPORTED_FUNCTIONS=${exports}")
     set_target_properties(tm4_web PROPERTIES OUTPUT_NAME tm4_standalone SUFFIX ".wasm")
 endif()
+
+add_executable(tm4_object_classes_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_object_classes.c")
+target_include_directories(tm4_object_classes_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_object_classes_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_object_classes_check PRIVATE psyz)
+target_compile_options(tm4_object_classes_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_object_classes_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_object_classes_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_fragment_effects_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_fragment_effects.c")
+target_include_directories(tm4_fragment_effects_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_fragment_effects_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_fragment_effects_check PRIVATE psyz)
+target_compile_options(tm4_fragment_effects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_fragment_effects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_fragment_effects_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_screen_objects_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_screen_objects.c")
+target_include_directories(tm4_screen_objects_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_screen_objects_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_screen_objects_check PRIVATE psyz)
+target_compile_options(tm4_screen_objects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_screen_objects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_screen_objects_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_map_settings_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_map_settings.c")
+target_include_directories(tm4_map_settings_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_map_settings_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_map_settings_check PRIVATE psyz)
+target_compile_options(tm4_map_settings_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_map_settings_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_map_settings_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_turbo_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_turbo.c"
+    "${TM4_ROOT}/port/extensions/turbo.c")
+target_include_directories(tm4_turbo_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_turbo_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_turbo_check PRIVATE psyz)
+target_compile_options(tm4_turbo_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_turbo_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_turbo_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_car_effects_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_car_effects.c"
+    "${TM4_ROOT}/port/extensions/car_profile.c"
+    "${TM4_ROOT}/port/extensions/car_effects.c"
+    "${TM4_ROOT}/port/extensions/car_attacks.c")
+target_include_directories(tm4_car_effects_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_car_effects_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_car_effects_check PRIVATE psyz)
+target_compile_options(tm4_car_effects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_car_effects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_car_effects_check PROPERTIES SUFFIX ".cjs")

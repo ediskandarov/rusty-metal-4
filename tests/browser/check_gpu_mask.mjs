@@ -13,7 +13,7 @@ try {
   await page.waitForFunction(() => window.tm4GpuMaskResult, null, { timeout: 30000 });
   assert.deepEqual(errors, []);
   assert.equal((await page.evaluate(() => tm4GpuMaskResult)).failures, 0);
-  console.log("PASS real WebGL GPU mask/dither packets and VRAM readback");
+  console.log("PASS real WebGL GPU mask/dither packets, texture banks and VRAM readback");
 } finally {
   await browser.close();
 }

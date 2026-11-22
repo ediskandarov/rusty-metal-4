@@ -1,0 +1,38 @@
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -19,6 +19,7 @@
+ #ifdef __psyz
+ #include "port/web/subpixel.h"
+ #include "port/web/checkpoint.h"
++#include "port/web/world_texture.h"
+ #endif
+ 
+ #include <SYS/TYPES.H>
+@@ -2189,6 +2190,7 @@
+     s32 red_green_max;
+     s32 maximum;
+ 
++    WebWorldTextureInitialize();
+     WorldCollisionIndices = RegGetFileDataPS(directory, WORLD_KEY_COLLISION_INDICES);
+     WorldCollisionPolygons = RegGetFileDataPS(directory, WORLD_KEY_COLLISION_FACES);
+     if (WorldCollisionIndices == NULL || WorldCollisionPolygons == NULL
+@@ -2219,7 +2221,8 @@
+     }
+     WorldTrackData = RegGetFileDataPS(directory, WORLD_KEY_TRACK_DATA);
+     WorldDisplayFaces = RegGetFileDataPS(directory, WORLD_KEY_DISPLAY_FACES);
+-    WorldDisplayShaders = RegGetFileDataPS(directory, WORLD_KEY_DISPLAY_SHADERS);
++    WorldDisplayShaders =
++        WebWorldTextureShaders(RegGetFileDataPS(directory, WORLD_KEY_DISPLAY_SHADERS));
+     face = WorldDisplayFaces;
+     if (RegGetFileDataPS(directory, WORLD_KEY_DISPLAY_FACE_COUNT) == NULL) {
+         count = 0;
+@@ -2332,7 +2335,8 @@
+         WorldReflectionTextureChrome.uv.tpage = page;
+     }
+     WorldTextureResources = RegGetFileDataPS(directory, WORLD_KEY_TEXTURES);
+-    RenderSetHorizon(RegGetFileDataPS(directory, WORLD_KEY_HORIZON));
++    WebWorldTextureBindReflections();
++    RenderSetHorizon(WebWorldTextureHorizon(RegGetFileDataPS(directory, WORLD_KEY_HORIZON)));
+     WorldGlobalLightDirection = RegGetFileDataPS(directory, WORLD_KEY_LIGHT_DIRECTION);
+     if (WorldGlobalLightDirection == NULL) {
+         WorldGlobalLightDirection = WorldDefaultLightDirections.directions;

@@ -1,0 +1,14 @@
+--- a/src/main/world.c
++++ b/src/main/world.c
+@@ -1,3 +1,4 @@
+ #include "tm4/main/world.h"
++#include "port/extensions/map_settings.h"
+ #include "tm4/compiler.h"
+ #include "tm4/fixed.h"
+@@ -2354,5 +2355,5 @@
+     WorldGlobalLightColor->b = WorldGlobalLightColor->b * 255 / maximum;
+     ObjectDirectoryRecurse(WorldRegisterObjectInfo);
+-    WorldSettings = &WorldDefaultSettings;
++    WorldSettings = WebMapSettingsLoad(directory, &WorldDefaultSettings);
+ }
+ 

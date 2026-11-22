@@ -21,3 +21,13 @@ diff --git a/src/main/object/classes.c b/src/main/object/classes.c
      last = index;
      i = 0;
      if (last >= 0) {
+@@ -355,6 +361,9 @@
+         ObjectClasses = NULL;
+         ObjectClassCount = 0;
+     }
++#ifdef __EMSCRIPTEN__
++    WebSnapshotResetClasses();
++#endif
+     if (ObjectInteractionPairs != NULL) {
+         MemFree(ObjectInteractionPairs);
+         ObjectInteractionPairs = NULL;

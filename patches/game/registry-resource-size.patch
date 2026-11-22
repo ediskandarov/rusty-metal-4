@@ -1,0 +1,73 @@
+--- a/src/main/registry.c
++++ b/src/main/registry.c
+@@ -14,6 +14,8 @@
+ 
+ #include <STRING.H>
+ #include <zlib.h>
++#include <stdio.h>
++#include <stdlib.h>
+ 
+ /* Layouts follow the original loads/stores; names here are inferred.
+  * array_size < 0 denotes a scalar to RegGetFileArraySize*, which returns one.
+@@ -25,6 +27,7 @@
+     s8 registration;
+     u8 type;
+     s16 array_size;
++    u32 data_size;
+     struct RegistryFile* next;
+     char name[1];
+ };
+@@ -415,7 +418,11 @@
+         if (expandedSize > 0) {
+             size = expandedSize;
+             scratch = MemAllocTail(expandedSize);
+-            uncompress(scratch, &size, data, storedSize);
++            if (uncompress(scratch, &size, data, storedSize) != Z_OK
++                || size != (unsigned long)expandedSize) {
++                fprintf(stderr, "Registry: %s: invalid compressed payload or expanded size\n", name);
++                abort();
++            }
+             data = scratch;
+             storedSize = expandedSize;
+         }
+@@ -441,7 +448,11 @@
+         s32 offset;
+         file = MemAlloc(nameSize + allocationSize);
+         offset = nameSize + offsetof(RegistryFile, name);
+-        uncompress((u8*)file + offset, &size, data, storedSize);
++        if (uncompress((u8*)file + offset, &size, data, storedSize) != Z_OK
++            || size != (unsigned long)expandedSize) {
++            fprintf(stderr, "Registry: %s: invalid compressed payload or expanded size\n", name);
++            abort();
++        }
+     } else {
+         s32 allocationSize = storedSize + offsetof(RegistryFile, name);
+         s32 offset;
+@@ -452,6 +463,7 @@
+     strcpy(file->name, name);
+     file->type = type;
+     file->array_size = arraySize;
++    file->data_size = expandedSize > 0 ? expandedSize : storedSize;
+     file->registration = registration;
+     scratch = NULL;
+     if (directory->files == NULL) {
+@@ -2098,3 +2110,8 @@
+     return 0;
+ }
+ #endif
++
++u32 RegGetFileByteSizeP(const RegistryFile* file)
++{
++    return file ? file->data_size : 0;
++}
+--- a/include/tm4/main/registry.h
++++ b/include/tm4/main/registry.h
+@@ -45,6 +45,8 @@
+ s32 RegGetFileTypePS(RegistryDirectory* directory, char* path);
+ s32 RegGetFileArraySizeS(char* path);
+ s32 RegGetFileArraySizeP(const RegistryFile* file);
++/* Actual payload bytes, independent of array metadata and allocator padding. */
++u32 RegGetFileByteSizeP(const RegistryFile* file);
+ s32 RegGetFileArraySizePS(RegistryDirectory* directory, char* path);
+ void* RegGetFileDataS(char* path);
+ void* RegGetFileDataP(RegistryFile* file);

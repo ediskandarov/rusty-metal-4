@@ -1,0 +1,60 @@
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -1,6 +1,8 @@
+ #ifndef TM4_MODULES_CAR_H
+ #define TM4_MODULES_CAR_H
+ 
++#include "port/extensions/car_effects_runtime.h"
++#include "port/extensions/car_attacks.h"
+ #include "port/extensions/surface_effects_runtime.h"
+ #include "port/web/participant.h"
+ #include "tm4/gpu.h"
+@@ -398,6 +400,8 @@
+     s32 (*process_callback)(Car*, void*);
+     CarCollisionCallback collision_callback;
+     void (*destructor_callback)(Car*, void*);
++    Rm4CarEffectProfile freeze_effect, invisibility_effect;
++    s32 (*freeze_launch)(Car*, void*, struct CarWeaponInstance*, s32);
+     s32 turbo_thrust_applied;
+     struct RegistryDirectory* turbo_profile;
+     SVECTOR turbo_position;
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -153,6 +153,8 @@
+     strcpy(car->filename, filename);
+     car->filename[0] = toupper((u8)car->filename[0]);
+     if (!WebTurboLoad(car))
++        goto failed;
++    if (!WebCarEffectsLoad(car) || !WebCarAttacksLoad(car))
+         goto failed;
+     if (!CarControlsConstructor(car, type))
+         goto failed;
+@@ -307,6 +309,8 @@
+     if (car->freeze_ticks) {
+         if (--car->freeze_ticks == 0)
+             CarDisplayFreezeDestructor(car);
++        else if (car->freeze_effect.resource)
++            WebCarEffectLoop(car, RM4_CAR_FREEZE);
+         else if (!car->freeze_sound)
+             car->freeze_sound
+                 = ObjectCreate(CarSoundEmitterClassName, OBJECT_FOLLOW_OWNER, car, "frozenLoop", 0);
+@@ -325,6 +329,8 @@
+     if (car->invisibility_ticks) {
+         if (--car->invisibility_ticks == 0)
+             CarDisplayInvisibilityDestructor(car);
++        else if (car->invisibility_effect.resource)
++            WebCarEffectLoop(car, RM4_CAR_INVISIBILITY);
+         else if (!car->invisibility_sound)
+             car->invisibility_sound = ObjectCreate(
+                 CarSoundEmitterClassName, OBJECT_FOLLOW_OWNER, car, "invisibilityLoop", 0);
+--- a/src/modules/car/weapon_launch.c
++++ b/src/modules/car/weapon_launch.c
+@@ -25,6 +25,8 @@
+ 
+ s32 CarLaunchFreeze(Car* car, void* target, CarWeaponInstance* weapon, s32 flag)
+ {
++    if (car->freeze_launch)
++        return car->freeze_launch(car, target, weapon, flag);
+     return CarLaunchProjectile(CarTextFreeze, car, weapon, flag) != NULL;
+ }
+ 

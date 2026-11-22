@@ -101,6 +101,20 @@ const SnapshotType* WebNativeSnapshotType(const char* name)
     return NULL;
 }
 
+const SnapshotType* WebNativeCarSnapshotType(const struct Car* car)
+{
+    for (NativeModule* module = modules; module; module = module->next) {
+        if (!module->lookup || !WebNativeModuleLoaded(module->image))
+            continue;
+        const SnapshotType* (*describe)(const struct Car*)
+            = (void*)module->lookup("__rm4_car_snapshot_type");
+        const SnapshotType* type = describe ? describe(car) : NULL;
+        if (type)
+            return type;
+    }
+    return NULL;
+}
+
 void WebNativeModulesSweep(void)
 {
     for (NativeModule* module = modules; module; module = module->next) {

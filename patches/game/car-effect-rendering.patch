@@ -1,0 +1,196 @@
+--- a/src/modules/car/model_effects.c
++++ b/src/modules/car/model_effects.c
+@@ -145,6 +145,10 @@
+ {
+     Car* car = car_arg;
+     s32 result;
++    if (car->invisibility_effect.resource) {
++        car->invisibility_hidden = 1;
++        return 1;
++    }
+     if (car->shield_ticks > 0 && car->original_faces)
+         return 1;
+     result = CarCopyDisplayFaces(car, 0);
+@@ -166,17 +170,21 @@
+ 
+ void CarDisplayInvisibilityDestructor(Car* car)
+ {
++    if (car->invisibility_effect.resource) {
++        car->invisibility_hidden = 0;
++        return;
++    }
+     if (car->shield_ticks <= 0) {
+         CarSetColorCommand(car, 0);
+         CarRestoreOriginalColors(car);
+-        if (car->freeze_ticks <= 0)
++        if (car->freeze_ticks <= 0 || car->freeze_effect.resource)
+             CarRestoreOriginalFaces(car);
+     }
+ }
+ 
+ s32 CarDisplayShieldConstructor(Car* car)
+ {
+-    if (car->invisibility_ticks > 0 && car->original_faces)
++    if (!car->invisibility_effect.resource && car->invisibility_ticks > 0 && car->original_faces)
+         CarDisplayInvisibilityDestructor(car);
+     return CarCopyDisplayFaces(car, 255);
+ }
+@@ -184,12 +192,16 @@
+ void CarDisplayShieldDestructor(Car* car)
+ {
+     CarRestoreOriginalFaces(car);
+-    if (car->invisibility_ticks > 0)
++    if (!car->invisibility_effect.resource && car->invisibility_ticks > 0)
+         CarDisplayInvisibilityConstructor(car);
++    else if (!car->freeze_effect.resource && car->freeze_ticks > 0)
++        CarDisplayFreezeConstructor(car);
+ }
+ 
+ s32 CarDisplayFreezeConstructor(Car* car)
+ {
++    if (car->freeze_effect.resource)
++        return 1;
+     if (car->invisibility_ticks > 0 && car->original_faces)
+         return 1;
+     return CarCopyDisplayFaces(car, 254);
+@@ -197,6 +209,7 @@
+ 
+ void CarDisplayFreezeDestructor(Car* car)
+ {
+-    if (car->invisibility_ticks <= 0)
++    if (!car->freeze_effect.resource && car->shield_ticks <= 0
++        && (car->invisibility_ticks <= 0 || car->invisibility_effect.resource))
+         CarRestoreOriginalFaces(car);
+ }
+--- a/src/modules/car/display.c
++++ b/src/modules/car/display.c
+@@ -118,6 +118,8 @@
+     else {
+         ClampOTDepth(bucket);
+     }
++    if (WebCarEffectBodyHidden(car) && !car->freeze_ticks)
++        return;
+     if (car->muzzle_emitted)
+         CarMuzzleDisplay(car, ordering, car_sort_depth, bucket, packets, context.packet_end,
+             context.world_to_camera);
+@@ -158,7 +160,9 @@
+     }
+     PushMatrix();
+     CompMatrix(context.world_to_camera, &car->transform, &scratch->car_to_camera);
+-    draw = !car->freeze_ticks ? CarDrawWheelPolygons : CarDrawTintedWheelPolygons;
++    draw = car->freeze_ticks || (car->invisibility_effect.resource && car->invisibility_ticks)
++        ? CarDrawTintedWheelPolygons
++        : CarDrawWheelPolygons;
+     list_offset = level * sizeof(*list);
+     list = (CarRenderList*)(list_offset + (unsigned long)car->display_lists);
+     if (list->group_count < 2)
+--- a/src/modules/car/wheel_render.c
++++ b/src/modules/car/wheel_render.c
+@@ -532,11 +532,13 @@
+     s32 selected, wheel, frame_index, i, u, v;
+ 
+     s32 limited_alpha;
+-
+-    if (packet
+-            + (list->face_count * (sizeof(POLY_FT4) + sizeof(POLY_G4) + sizeof(POLY_GT4))
+-                + sizeof(DR_TPAGE))
+-        >= end)
++    const int draw_reflection = !WebCarEffectBodyHidden(car);
++    const size_t effect_budget = sizeof(POLY_FT4) + sizeof(POLY_G4) + sizeof(POLY_GT4)
++        + ((car->freeze_effect.resource || car->invisibility_effect.resource)
++                ? sizeof(POLY_G4) + 4 * sizeof(DR_TPAGE)
++                : 0);
++
++    if (packet + (list->face_count * effect_budget + sizeof(DR_TPAGE)) >= end)
+         return;
+     limited_alpha = Int32Min(car->light_level, 127);
+     faces = car->faces;
+@@ -757,10 +759,16 @@
+                             xy1 = screen1->packed;
+                             xy2 = screen2->packed;
+                         }
++                        u8* effect_end = packet + effect_budget;
++                        Rm4CarEffectFace effect_face = { car, face, screen_xy, precise, ordering,
++                            &packet,
++                            effect_end - sizeof(POLY_FT4) - sizeof(POLY_G4) - sizeof(POLY_GT4),
++                            car->invisibility_ticks > 0 };
++                        WebCarEffectOverlay(car, &effect_face);
+                         na = face->normals[0];
+                         nb = face->normals[1];
+                         nc = face->normals[2];
+-                        if (face->reflection) {
++                        if (draw_reflection && face->reflection) {
+                             intensity = face->reflection;
+                             layer = (Tm4FlatTexturedPacket*)packet;
+                             shade = (intensity << 16) | (intensity << 8) | intensity;
+@@ -798,7 +806,7 @@
+                             GpuLinkPacketFullWord(
+                                 ordering, &layer->triangle.tag, sizeof(layer->triangle));
+                         }
+-                        {
++                        if (car->freeze_ticks && !car->freeze_effect.resource) {
+                             Tm4GouraudPacket* colors = (Tm4GouraudPacket*)packet;
+                             POLY_G3* tint = &colors->triangle;
+                             setcode(tint, 0x32);
+@@ -814,7 +822,8 @@
+                             GpuLinkPacketFullWord(ordering, &colors->words.tag, sizeof(*tint));
+                             packet += sizeof(*tint);
+                         }
+-                        {
++                        effect_face.end = effect_end;
++                        if (!WebCarEffectBody(car, &effect_face)) {
+                             Tm4GouraudTexturedPacket* polygon = (Tm4GouraudTexturedPacket*)packet;
+ 
+                             polygon->words.vertices[0].xy = xy0;
+@@ -892,11 +901,17 @@
+                             xy2 = screen2->packed;
+                             xy3 = screen3->packed;
+                         }
++                        u8* effect_end = packet + effect_budget;
++                        Rm4CarEffectFace effect_face = { car, face, screen_xy, precise, ordering,
++                            &packet,
++                            effect_end - sizeof(POLY_FT4) - sizeof(POLY_G4) - sizeof(POLY_GT4),
++                            car->invisibility_ticks > 0 };
++                        WebCarEffectOverlay(car, &effect_face);
+                         na = face->normals[0];
+                         nb = face->normals[1];
+                         nc = face->normals[2];
+                         nd = face->normals[3];
+-                        if (face->reflection) {
++                        if (draw_reflection && face->reflection) {
+                             intensity = face->reflection;
+                             layer = (Tm4FlatTexturedPacket*)packet;
+                             shade = (intensity << 16) | (intensity << 8) | intensity;
+@@ -937,7 +952,7 @@
+ #endif
+                             GpuLinkPacketFullWord(ordering, &layer->quad.tag, sizeof(layer->quad));
+                         }
+-                        {
++                        if (car->freeze_ticks && !car->freeze_effect.resource) {
+                             Tm4GouraudPacket* colors = (Tm4GouraudPacket*)packet;
+                             POLY_G4* tint = &colors->quad;
+                             setcode(tint, 0x3a);
+@@ -955,7 +970,8 @@
+                             GpuLinkPacketFullWord(ordering, &colors->words.tag, sizeof(*tint));
+                             packet += sizeof(*tint);
+                         }
+-                        {
++                        effect_face.end = effect_end;
++                        if (!WebCarEffectBody(car, &effect_face)) {
+                             Tm4GouraudTexturedPacket* polygon = (Tm4GouraudTexturedPacket*)packet;
+ 
+                             polygon->words.vertices[0].xy = xy0;
+--- a/src/modules/car/lighting.c
++++ b/src/modules/car/lighting.c
+@@ -95,8 +95,9 @@
+     light = light * 255 / 60;
+     base = Q12MulRound(light, (ONE / 2));
+     light = base + Q12MulRound(car->light_boost, base);
+-    if (light < 64)
+-        light = 64;
++    u32 minimum = WebCarEffectsMinimumLight(car);
++    if (light < minimum)
++        light = minimum;
+     else if (light > 140)
+         light = 140;
+     car->light_level = light;

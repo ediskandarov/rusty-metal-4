@@ -1,0 +1,82 @@
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -402,4 +402,6 @@
+     s32 turbo_thrust_applied;
++    struct RegistryDirectory* turbo_profile;
++    SVECTOR turbo_position;
+     Rm4SurfaceBinding surface_effects;
+ };
+ 
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -4,3 +4,4 @@
+-#include "private.h"
+-#include "tm4_scalar.h"
+-
++#include "port/extensions/turbo_runtime.h"
++#include "private.h"
++#include "tm4_scalar.h"
++
+@@ -161,3 +162,5 @@
+-    if (!CarControlsConstructor(car, type))
+-        goto failed;
+-    color = CarGetFileData(CarTextRadarDotColor);
++    if (!WebTurboLoad(car))
++        goto failed;
++    if (!CarControlsConstructor(car, type))
++        goto failed;
++    color = CarGetFileData(CarTextRadarDotColor);
+@@ -252,7 +255,7 @@
+             return 0;
+         }
+     }
+-    if (!WebSurfaceEffectsAttach(car)) {
++    if (!WebSurfaceEffectsAttach(car) || !WebTurboAttach(car)) {
+         CarDestructor(car);
+         return 0;
+     }
+--- a/src/modules/car/model.c
++++ b/src/modules/car/model.c
+@@ -279,7 +279,7 @@
+     if (!car->shadow_texture)
+         return 0;
+     car->turbo_light = NULL;
+-    extra = RegGetDirectoryPtrS(CarDisplayTurboName);
++    extra = car->turbo_profile ? NULL : RegGetDirectoryPtrS(CarDisplayTurboName);
+     if (!extra) {
+         car->turbo_emitter_count = 0;
+         car->turbo_light_offset = NULL;
+--- a/src/modules/car/jump.c
++++ b/src/modules/car/jump.c
+@@ -198,7 +198,7 @@
+     SVECTOR position;
+     LightEmitter* light;
+     CarUpdateLighting(car);
+-    if (car->controls.turbo_active && car->turbo_fuel > 0) {
++    if (!car->turbo_profile && car->controls.turbo_active && car->turbo_fuel > 0) {
+         car->turbo_amount = 8;
+         if (car->turbo_light_offset) {
+             CarLocalPosToWorldPos(car, car->turbo_light_offset, &position);
+--- a/src/modules/car/display.c
++++ b/src/modules/car/display.c
+@@ -124,7 +124,8 @@
+     if (car->muzzle_emitted)
+         CarMuzzleDisplay(car, ordering, car_sort_depth, bucket, packets, context.packet_end,
+             context.world_to_camera);
+-    if ((car->controls.turbo_active && car->turbo_fuel > 0) || car->turbo_amount > 0)
++    if (!car->turbo_profile
++        && ((car->controls.turbo_active && car->turbo_fuel > 0) || car->turbo_amount > 0))
+         CarTurboDisplay(car, ordering, car_sort_depth, bucket, packets, context.packet_end,
+             context.world_to_camera);
+     if (car->invisibility_ticks && car->invisibility_hidden && !car->freeze_ticks
+--- a/src/modules/car/suspension.c
++++ b/src/modules/car/suspension.c
+@@ -406,7 +406,7 @@
+                     }
+                 }
+             }
+-            if (!car->turbo_sound)
++            if (!car->turbo_profile && !car->turbo_sound)
+                 car->turbo_sound
+                     = ObjectCreate(CarSoundName, OBJECT_FOLLOW_OWNER, car, CarTurboSound, 0);
+             if (car->control_kind == CAR_CONTROL_PLAYER)

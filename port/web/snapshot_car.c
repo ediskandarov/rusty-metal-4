@@ -1,4 +1,5 @@
 #include "overlays.h"
+#include "port/extensions/surface_effects_state.h"
 #include "port/web/module_import.h"
 #include "snapshot_types.h"
 
@@ -110,6 +111,8 @@ static OSWord callback_address(const CarCallbackSpec* spec, const char* name)
     return name ? WebNativeModuleExport(spec->module, name) : 0;
 }
 
+OSWord CarFindNamedFunction(Car* car, char* format);
+
 static int find_callbacks(const Car* car, CarCallbackBinding* output)
 {
     for (u32 i = 0; i < ArrayCount(callback_types); ++i) {
@@ -132,6 +135,19 @@ static int find_callbacks(const Car* car, CarCallbackBinding* output)
             *output = binding;
             return 1;
         }
+    }
+    const SnapshotType* type = WebNativeCarSnapshotType(car);
+    if (type && type->name && *type->name && (car->callback_context != NULL) == (type->size != 0)) {
+        /* Use the same size export as CarPrepareResources, before reading any fields. */
+        const s32* size = (void*)WEB_MODULE("car", CarFindNamedFunction)(
+            (Car*)car, WEB_MODULE("car", CarSizeofFormat));
+        if ((size && *size < 0) || type->size != (size ? (size_t)*size : 0))
+            return 0;
+        *output = (CarCallbackBinding) { .type = type,
+            .process = car->process_callback,
+            .collision = car->collision_callback,
+            .destroy = car->destructor_callback };
+        return 1;
     }
     return 0;
 }
@@ -237,12 +253,14 @@ static const SnapshotField spring_fields[] = {
 static const SnapshotArray springs = { spring_fields, sizeof(CarSpring), spring_count, 10 };
 
 static const SnapshotField weapon_fields[] = {
+    SNAP_POD(CarWeaponInstance, profile_key),
     SNAP_POD(CarWeaponInstance, amount),
     SNAP_LOCAL(CarWeaponInstance, count),
     SNAP_POD(CarWeaponInstance, index),
     SNAP_POD(CarWeaponInstance, active),
     SNAP_POD(CarWeaponInstance, next_time),
     SNAP_LOCAL(CarWeaponInstance, launchers),
+    SNAP_LOCAL(CarWeaponInstance, ai_weights),
     SNAP_LOCAL(CarWeaponInstance, descriptor),
     { 0 },
 };
@@ -250,7 +268,7 @@ static const SnapshotArray weapons = {
     weapon_fields,
     sizeof(CarWeaponInstance),
     weapon_count,
-    64,
+    CAR_ARSENAL_LIMIT,
 };
 
 static const SnapshotField contact_fields[] = {
@@ -657,6 +675,13 @@ static const SnapshotField car_fields[] = {
     SNAP_LOCAL(Car, process_callback),
     SNAP_LOCAL(Car, collision_callback),
     SNAP_LOCAL(Car, destructor_callback),
+    SNAP_LOCAL(Car, freeze_effect),
+    SNAP_LOCAL(Car, invisibility_effect),
+    SNAP_LOCAL(Car, freeze_launch),
+    SNAP_POD(Car, turbo_thrust_applied),
+    SNAP_LOCAL(Car, turbo_profile),
+    SNAP_LOCAL(Car, turbo_position),
+    SNAP_GROUP(Car, surface_effects, &WebSurfaceEffectsSnapshot),
     { 0 },
 };
 
@@ -705,6 +730,7 @@ static int car_valid(const void* payload)
         : WEB_MODULE("car", CarAiUpdateControls);
     if ((car->control_kind != CAR_CONTROL_PLAYER && car->control_kind != CAR_CONTROL_ENEMY)
         || !WEB_MODULE("car", CarPhysicsResourcesValid)(car) || !car->weapons
+        || !WEB_MODULE("car", CarWeaponInventoryValid)(car)
         || !car->character_name || !turbo_resources_valid(car)
         || !((car->ai_input_callback == driver && !car->ai_saved_input_callback)
             || (!car->ai_input_callback && car->ai_saved_input_callback == driver))

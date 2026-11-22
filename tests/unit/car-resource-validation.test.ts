@@ -70,6 +70,7 @@ test("car display validation has no source-art, fixed-atlas or wheel-count depen
   expect(result.maxScratchBytes).toBe(30);
   expect(result.warnings.some((message) => message.includes("external VRAM"))).toBe(false);
   expect(result.warnings.some((message) => message.includes("One LOD"))).toBe(true);
+  expect(result.warnings.some((message) => message.includes("four default wheel"))).toBe(false);
   expect(result.warnings.some((message) => message.includes("damage art"))).toBe(true);
 });
 
@@ -165,4 +166,18 @@ test("a recomputed wheel pivot is reported without guessing intended dimensions"
 
 test("invalid MR containers produce a failing report", async () => {
   expect((await validateCarMr(new Uint8Array([0x67]))).errors[0]).toContain("MR container");
+});
+
+test("preserved F4 records are undrawn and do not reference textures", () => {
+  const f = fixture();
+  f.face.setUint8(0, 0x28);
+  for (let i = 4; i < 16; ++i) f.face.setUint8(i, 0xcd);
+  f.face.setUint8(19, 0);
+  f.face.setUint8(23, 0);
+  const result = validateCarDisplay(f.root, { strictAssociations: true });
+  expect(result.errors).toEqual([]);
+  expect(result.undrawnFaces).toBe(1);
+  expect(result.warnings.join(" ")).not.toContain("external VRAM");
+  f.face.setUint8(19, 3);
+  expect(validateCarDisplay(f.root).errors.join(" ")).toContain("face vertex out of range");
 });

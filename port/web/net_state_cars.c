@@ -1,5 +1,6 @@
 #include "net_match.h"
 #include "net_state_fields.h"
+#include "port/extensions/surface_effects_state.h"
 #include "port/web/module_import.h"
 #include "snapshot_types.h"
 #include "src/modules/car/private.h"
@@ -43,6 +44,8 @@ static void car_state(NetStateOutput* hash, const Car* car)
     VALUE(car->energy);
     VALUE(car->turbo_fuel);
     VALUE(car->turbo_amount);
+    VALUE(car->turbo_thrust_applied);
+    WebSurfaceEffectsWriteState(hash, &car->surface_effects);
     VALUE(car->fire_ticks);
     VALUE(car->burn_source.low);
     VALUE(car->burn_source.high);
@@ -147,7 +150,8 @@ static void car_state(NetStateOutput* hash, const Car* car)
     controls(hash, &car->controls);
     for (s32 i = 0; i < WEB_MODULE("car", CarWeaponCount); ++i) {
         const CarWeaponInstance* weapon = &car->weapons[i];
-        key(hash, weapon->descriptor->name);
+        key(hash, weapon->descriptor->id);
+        VALUE(weapon->profile_key);
         VALUE(weapon->amount);
         VALUE(weapon->count);
         VALUE(weapon->index);

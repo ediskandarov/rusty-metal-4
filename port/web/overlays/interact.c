@@ -36,10 +36,10 @@ static void car_teleporter(void* object, void* portal)
     Car* car = object;
     Teleporter* teleporter = portal;
     InteractCarWithTeleporter(car, teleporter);
-    Camera* camera = (WebNetMatchActive() ? WebNetSlotOccupied(car->controller_index)
-                                          : car->controller_index < GameInfo.player_count)
-        ? GameInfo.players[car->controller_index].camera
-        : NULL;
+    s32 slot = car->controller_index;
+    Camera* camera = slot >= 0 && slot < ArrayCount(GameInfo.players)
+            && (WebNetMatchActive() ? WebNetSlotOccupied(slot) : slot < GameInfo.player_count)
+        ? GameInfo.players[slot].camera : NULL;
     WEB_BROWSER_REPORT(
         {
             tm4Port.teleports = (tm4Port.teleports || 0) + 1;
@@ -53,7 +53,7 @@ static void car_teleporter(void* object, void* portal)
         car->transform.t[0], car->transform.t[1], car->transform.t[2],
         teleporter->destination_world.vx, teleporter->destination_world.vy,
         teleporter->destination_world.vz,
-        camera && camera->object == car ? ((CarCameraState*)camera->data)->snap : -1,
+        camera && camera->data && camera->object == car ? ((CarCameraState*)camera->data)->snap : -1,
         car == GameInfo.players[0].car);
 }
 static void car_jumppad(void* object, void* pad)

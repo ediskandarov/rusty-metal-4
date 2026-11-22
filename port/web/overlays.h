@@ -4,6 +4,8 @@
 void WebNativeModulesInitialize(void);
 void WebNativeModulesSweep(void);
 struct SnapshotType;
+struct Car;
+const struct SnapshotType* WebNativeCarSnapshotType(const struct Car* car);
 const struct SnapshotType* WebNativeSnapshotType(const char* name);
 OSWord WebDynamicModuleExport(const char* image_name, const char* name);
 int WebNativeModuleLoaded(const char* image_name);

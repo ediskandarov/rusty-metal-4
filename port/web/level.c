@@ -1,4 +1,3 @@
-#include "widescreen.h"
 #include <libgte.h>
 #include "level.h"
 #include "car.h"
@@ -8,6 +7,9 @@
 #include "loading.h"
 #include "match_mode.h"
 #include "movie.h"
+#include "port/extensions/fragment_effects_runtime.h"
+#include "widescreen.h"
+#include "world_texture.h"
 #ifndef TM4_STANDALONE
 #include "mouse_look.h"
 #endif
@@ -115,6 +117,7 @@ void WebLevelStart(void)
     GameInfo.mode = GameInfo.next_mode;
     GameInfo.next_mode = 0;
     LoadGameFiles();
+    WebFragmentEffectsLoad();
     s32 squares = *(s32*)require_resource("/world/squares/numSquares");
     s32 faces = *(s32*)require_resource("/world/displayPolys/numWorldFaces");
     s32 vertices = *(s32*)require_resource("/world/displayPolys/numWorldVertices");
@@ -212,6 +215,9 @@ int WebLevelCheckpointActive(void)
 
 void WebLevelStop(void)
 {
+#ifdef TM4_WEB_TEST_HOOKS
+    WebTestResetCombatTarget();
+#endif
 #ifndef TM4_STANDALONE
     WebMouseLookReset();
 #endif
@@ -223,11 +229,14 @@ void WebLevelStop(void)
     SoundStopSounds();
     WebCheckpointArenaSelect(checkpoint_arena);
     ObjectDestructor();
+    WebFragmentEffectsUnload();
     WebCheckpointArenaSelect(0);
     RenderDestructor();
+    WebWorldTextureClose();
+    /* Unwind MR registrations in reverse order so shared directories are removed. */
     RegRemoveReg("cars");
-    RegRemoveReg("game");
     RegRemoveReg("world");
+    RegRemoveReg("game");
     WorldSquares = NULL;
     WorldCells = NULL;
     SoundDestructor();
@@ -271,7 +280,7 @@ static void process_level_step(void)
         if (!WebNetReplaying() && WebCheckpointGteCapture(gte, sizeof(gte))) {
             WebCheckpointArenaSelect(0);
             SoundProcess();
-            WorldAnimateTextures();
+            WebWorldAnimateTextures();
             ScreenProcess();
             WebCheckpointGteRestore(gte);
             WebCheckpointArenaSelect(1);
@@ -279,7 +288,7 @@ static void process_level_step(void)
     } else {
         SoundProcess();
         if (!checkpoint_arena) {
-            WorldAnimateTextures();
+            WebWorldAnimateTextures();
             ScreenProcess();
         }
     }
