@@ -1,7 +1,5 @@
-#include "widescreen.h"
 #include <libgte.h>
 #include "level.h"
-#include "world_texture.h"
 #include "car.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
@@ -9,6 +7,9 @@
 #include "loading.h"
 #include "match_mode.h"
 #include "movie.h"
+#include "port/extensions/fragment_effects_runtime.h"
+#include "widescreen.h"
+#include "world_texture.h"
 #ifndef TM4_STANDALONE
 #include "mouse_look.h"
 #endif
@@ -116,6 +117,7 @@ void WebLevelStart(void)
     GameInfo.mode = GameInfo.next_mode;
     GameInfo.next_mode = 0;
     LoadGameFiles();
+    WebFragmentEffectsLoad();
     s32 squares = *(s32*)require_resource("/world/squares/numSquares");
     s32 faces = *(s32*)require_resource("/world/displayPolys/numWorldFaces");
     s32 vertices = *(s32*)require_resource("/world/displayPolys/numWorldVertices");
@@ -224,6 +226,7 @@ void WebLevelStop(void)
     SoundStopSounds();
     WebCheckpointArenaSelect(checkpoint_arena);
     ObjectDestructor();
+    WebFragmentEffectsUnload();
     WebCheckpointArenaSelect(0);
     RenderDestructor();
     WebWorldTextureClose();

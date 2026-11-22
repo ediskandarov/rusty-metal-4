@@ -55,6 +55,7 @@ sound-banks.patch
 registry-resource-size.patch
 world-texture.patch
 teleport.patch
+fragment-effects.patch
 widescreen.patch
 widescreen-hud.patch
 mouse-look.patch

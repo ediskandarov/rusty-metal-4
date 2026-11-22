@@ -1,6 +1,12 @@
+#include "port/web/checkpoint_memory.h"
+#include "port/web/net_match.h"
 #include "port/web/overlays.h"
 #include "port/web/snapshot_types.h"
 #include "src/main/object/private.h"
+#include "tm4/main/game.h"
+#include "tm4/main/system.h"
+#include "tm4/main/world.h"
+#include "tm4/modules/car.h"
 #include <emscripten.h>
 
 EMSCRIPTEN_KEEPALIVE void WebTestObjectRegistry(const char* module)
@@ -40,4 +46,23 @@ EMSCRIPTEN_KEEPALIVE void WebTestObjectRegistry(const char* module)
                     ObjectClasses[j].name, ObjectClasses[i].name, pair->reversed);
         }
     }
+}
+
+/* Real fragment physics and collision; create the fixture before capturing a snapshot. */
+EMSCRIPTEN_KEEPALIVE int WebTestDropFragments(void)
+{
+    Car* car = GameInfo.players[0].car;
+    const Tm4DisplayFace* face = RegGetFileDataS("/world/displayPolys/faceData");
+    const SVECTOR* vertices = RegGetFileDataS("/world/displayPolys/vertexData");
+    if (!car || !face || !vertices || !WebNetMatchActive())
+        return 0;
+    SVECTOR position = { car->position.vx, car->position.vy - 200, car->position.vz, 0 };
+    VECTOR velocity = { 0 };
+    WebCheckpointArenaSelect(1);
+    int count = 0;
+    for (int i = 0; i < 8; ++i)
+        count += ObjectCreate("fragment", 0, face, vertices, &position, &velocity, NULL) != NULL;
+    WebCheckpointArenaSelect(0);
+    srandrand(0);
+    return count;
 }

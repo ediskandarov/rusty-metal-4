@@ -1,0 +1,20 @@
+--- a/src/modules/frag/frag.c
++++ b/src/modules/frag/frag.c
+@@ -1,5 +1,6 @@
+ 
+ #include "private.h"
++#include "port/extensions/fragment_effects_runtime.h"
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/vector.h"
+@@ -207,7 +208,9 @@
+             SVECTOR* impact = &impact_world;
+             CopyVectorToShortVectorRoundedQ12(impact, &hit.position);
+             radius = s->radius << 1;
+-            if (rand() % 3 == 0) {
++            if (!WebFragmentEffectsImpact(impact, radius, hit.surface.fields.material,
++                    WorldTrackData[hit.surface.fields.material].kind)
++                && rand() % 3 == 0) {
+                 s32 sound_volume_scale;
+                 if (!(rand() & 1))
+                     sound_volume_scale = ANIM_SOUND_DEFAULT;
