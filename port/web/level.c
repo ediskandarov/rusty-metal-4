@@ -1,6 +1,7 @@
 #include "widescreen.h"
 #include <libgte.h>
 #include "level.h"
+#include "world_texture.h"
 #include "car.h"
 #include "checkpoint.h"
 #include "checkpoint_memory.h"
@@ -225,6 +226,7 @@ void WebLevelStop(void)
     ObjectDestructor();
     WebCheckpointArenaSelect(0);
     RenderDestructor();
+    WebWorldTextureClose();
     RegRemoveReg("cars");
     RegRemoveReg("game");
     RegRemoveReg("world");
@@ -271,7 +273,7 @@ static void process_level_step(void)
         if (!WebNetReplaying() && WebCheckpointGteCapture(gte, sizeof(gte))) {
             WebCheckpointArenaSelect(0);
             SoundProcess();
-            WorldAnimateTextures();
+            WebWorldAnimateTextures();
             ScreenProcess();
             WebCheckpointGteRestore(gte);
             WebCheckpointArenaSelect(1);
@@ -279,7 +281,7 @@ static void process_level_step(void)
     } else {
         SoundProcess();
         if (!checkpoint_arena) {
-            WorldAnimateTextures();
+            WebWorldAnimateTextures();
             ScreenProcess();
         }
     }

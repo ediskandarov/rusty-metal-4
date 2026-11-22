@@ -1,14 +1,14 @@
 --- a/platform/sdl3_draw.h
 +++ b/platform/sdl3_draw.h
-@@ -41,6 +41,7 @@
- #define TPAGE_NOTEXTURE 0x8000 // flag untextured poly
- #define TPAGE_DITHER 0x4000    // flag a dithered primitive
- #define TPAGE_POLYGON 0x2000   // flag a polygon to sample at PS1 integer coords
-+#define TPAGE_TRANSFORMED_SPRITE 0x1000 // sprite UVs follow scaled screen geometry
+@@ -34,6 +34,7 @@
+     unsigned int twin;
+ #ifdef PSYZ_FLOAT_VERTEX_POSITION
+     float inv_depth;
++    float transformed_sprite;
+ #endif
+ } Vertex;
  
- #define VRGBA(p) (*(unsigned int*)(&((p).r)))
- #define SET_TC(p, tpage, clut)                                                 \
-@@ -79,10 +80,30 @@
+@@ -79,10 +80,31 @@
          Draw_FlushBuffer();
      }
  }
@@ -27,12 +27,13 @@
      assert(n_indices + indices <= MAX_INDEX_COUNT);
  
 +#ifdef PSYZ_FLOAT_VERTEX_POSITION
-+    if (screen_scale != 1.0f || screen_x != 0.0f || screen_y != 0.0f) {
-+        for (int i = 0; i < vertices; ++i) {
++    for (int i = 0; i < vertices; ++i) {
++        vertex_cur[i].transformed_sprite = 0.0f;
++        if (screen_scale != 1.0f || screen_x != 0.0f || screen_y != 0.0f) {
 +            vertex_cur[i].x = vertex_cur[i].x * screen_scale + screen_x;
 +            vertex_cur[i].y = vertex_cur[i].y * screen_scale + screen_y;
 +            if (!(vertex_cur[i].t & (TPAGE_POLYGON | TPAGE_NOTEXTURE)))
-+                vertex_cur[i].t |= TPAGE_TRANSFORMED_SPRITE;
++                vertex_cur[i].transformed_sprite = 1.0f;
 +        }
 +    }
 +#endif
@@ -41,15 +42,31 @@
      n_vertices += vertices;
 --- a/platform/sdl3_gl.c
 +++ b/platform/sdl3_gl.c
-@@ -86,7 +86,10 @@
-     "    uint texWord = uint(tex.w);\n"
+@@ -54,6 +54,7 @@
+     "layout(location = 2) in vec4 color;\n"
+     "layout(location = 3) in vec4 twin;\n"
+     "layout(location = 4) in float invDepth;\n"
++    "layout(location = 5) in float transformedSprite;\n"
+     "uniform vec2 resolution;\n"
+     "uniform vec2 drawOffset, halfPixel, targetSize;\n"
+     "out vec4 vertexColor;\n"
+@@ -89,7 +90,9 @@
      "    tpage = texWord & 0x1FFu;\n"
+     "    textureBank = (texWord >> 9u) & 15u;\n"
      "    dither = (texWord & 0x4000u) != 0u ? 1u : 0u;\n"
 -    "    rawUV = tex.xy + shift - halfPixel;\n"
-+    // Transformed sprites map their UV rectangle to the new screen rectangle.
-+    // The 1:1 half-pixel bias can otherwise sample outside the sprite atlas tile.
-+    "    vec2 uvBias = (texWord & 0x1000u) != 0u ? vec2(0.0) : halfPixel;\n"
++    // Keep the sprite flag separate from TPAGE texture-bank bits.
++    "    vec2 uvBias = transformedSprite != 0.0 ? vec2(0.0) : halfPixel;\n"
 +    "    rawUV = tex.xy + shift - uvBias;\n"
      // Keep clip W at 1 so coverage and Gouraud colors stay unchanged.
      // Screen-space interpolation of (uv/z, 1/z) corrects UVs alone.
      "    weightedUV = vec3(rawUV * invDepth, invDepth);\n"
+@@ -1387,5 +1390,8 @@
+     glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
+                           (void*)offsetof(Vertex, inv_depth));
+     glEnableVertexAttribArray(4);
++    glVertexAttribPointer(5, 1, GL_FLOAT, GL_FALSE, sizeof(Vertex),
++                          (void*)offsetof(Vertex, transformed_sprite));
++    glEnableVertexAttribArray(5);
+     glBindVertexArray(0);
+ }

@@ -105,6 +105,8 @@ target_link_options(tm4_web PRIVATE
     -Wl,--export=WebSurfaceEffectsImpact -Wl,--export=WebSurfaceEffectsCompression -Wl,--export=WebSurfaceEffectsAttach
     -Wl,--export=WebSurfaceEffectsDetach -Wl,--export=WebSurfaceEffectsBegin
     -Wl,--export=WebSurfaceEffectsStep -Wl,--export=WebSurfaceEffectsReset)
+# Independent texture banks are owned by the module that creates them.
+target_link_options(tm4_web PRIVATE -Wl,--export=WebTextureBankCreate -Wl,--export=WebTextureBankDestroy)
 include("${TM4_EXPORT_DIRECTORY}/sources.cmake")
 get_property(TM4_GENERATED_EXPORT_SOURCES GLOBAL PROPERTY TM4_GENERATED_EXPORT_SOURCES)
 list(REMOVE_ITEM TM4_CORE_SOURCES ${TM4_EXPORT_INPUTS})

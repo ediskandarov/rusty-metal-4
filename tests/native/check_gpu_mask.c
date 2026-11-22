@@ -1,7 +1,7 @@
+#include "port/psyz/subpixel.h"
 #include <emscripten.h>
 #include <libgpu.h>
 #include <stdio.h>
-#include "port/psyz/subpixel.h"
 
 /* Exercise real packets and VRAM readback, independently of game assets. */
 static int failures;
@@ -90,7 +90,9 @@ static void check_perspective(void)
     triangle.tpage = GetTPage(2, 0, 384, 0);
     u_long* payload = (u_long*)((char*)&triangle + sizeof(OT_TYPE));
     PsyzSubpixelPosition positions[] = {
-        { 100, 6, 1.0f }, { 116, 6, 0.5f }, { 100, 22, 0.25f },
+        { 100, 6, 1.0f },
+        { 116, 6, 0.5f },
+        { 100, 22, 0.25f },
     };
 
     Psyz_DrawPushPrimWithPositions(payload, getlen(&triangle), positions, 0);
@@ -107,6 +109,61 @@ static void check_perspective(void)
     Psyz_DrawPushPrimWithPositions(
         payload, getlen(&triangle), positions, PSYZ_PERSPECTIVE_TEXTURES);
     expect(104, 0x7fef, "one invalid depth selects affine for the whole polygon");
+}
+
+/* Exercise all bank bits, real shader sampling, animation uploads and slot reuse. */
+extern int Rm4TextureBankCreate(const unsigned short* pixels);
+extern void Rm4TextureBankDestroy(unsigned bank);
+extern unsigned Rm4TextureBankSelectUpload(unsigned bank);
+static unsigned short bank_pixels[1024 * 512];
+
+static void sample_bank(unsigned bank, int indexed, unsigned short expected, const char* label)
+{
+    POLY_FT4 quad;
+    setPolyFT4(&quad);
+    setXY4(&quad, 200, 10, 202, 10, 200, 12, 202, 12);
+    setUV4(&quad, 0, 0, 2, 0, 0, 2, 2, 2);
+    setRGB0(&quad, 128, 128, 128);
+    quad.clut = GetClut(0, 4);
+    quad.tpage = GetTPage(indexed ? 0 : 2, 0, 640, 0) | (bank << 9);
+    DrawPrim(&quad);
+    expect(200, expected, label);
+}
+
+static void check_texture_banks(void)
+{
+    RECT rect = { 640, 0, 2, 2 };
+    u_long red[2] = { 0x001f001f, 0x001f001f };
+    LoadImage(&rect, red);
+    for (unsigned i = 0; i < 1024 * 512; ++i)
+        bank_pixels[i] = 0x03e0;
+    for (unsigned bank = 1; bank <= 15; ++bank) {
+        failures += Rm4TextureBankCreate(bank_pixels) != bank;
+        sample_bank(bank, 0, 0x03e0, "bank samples its own pixels");
+    }
+    failures += Rm4TextureBankCreate(bank_pixels) != 0;
+    sample_bank(0, 0, 0x001f, "bank allocation preserves stock VRAM");
+    unsigned previous = Rm4TextureBankSelectUpload(15);
+    failures += previous != 0;
+    u_long blue[2] = { 0x7c007c00, 0x7c007c00 };
+    LoadImage(&rect, blue);
+    failures += Rm4TextureBankSelectUpload(previous) != 15;
+    sample_bank(15, 0, 0x7c00, "animation upload reaches bank 15");
+    sample_bank(1, 0, 0x03e0, "animation leaves other banks untouched");
+    sample_bank(0, 0, 0x001f, "animation leaves stock VRAM untouched");
+    Rm4TextureBankDestroy(4);
+    for (unsigned i = 0; i < 1024 * 512; ++i)
+        bank_pixels[i] = 0x1111;
+    bank_pixels[4 * 1024 + 1] = 0x7fff;
+    failures += Rm4TextureBankCreate(bank_pixels) != 4;
+    sample_bank(4, 1, 0x7fff, "reused bank samples its own indexed CLUT");
+    sample_bank(15, 0, 0x7c00, "slot reuse preserves another bank's animation");
+    for (unsigned bank = 1; bank <= 15; ++bank)
+        Rm4TextureBankDestroy(bank);
+    sample_bank(0, 0, 0x001f, "releasing all banks preserves stock VRAM");
+    failures += Rm4TextureBankCreate(bank_pixels) != 1;
+    sample_bank(1, 1, 0x7fff, "pool can be reused after releasing all banks");
+    Rm4TextureBankDestroy(1);
 }
 
 int main(void)
@@ -218,6 +275,7 @@ int main(void)
     check_dithering(1);
     check_dithering(0);
     check_perspective();
+    check_texture_banks();
     EM_ASM({ window.tm4GpuMaskResult = { failures : $0 }; }, failures);
     return 0;
 }

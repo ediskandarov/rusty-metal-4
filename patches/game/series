@@ -50,6 +50,8 @@ ffa-policy.patch
 network-ai.patch
 ffa-bots.patch
 prepared-model-pool.patch
+registry-resource-size.patch
+world-texture.patch
 teleport.patch
 widescreen.patch
 widescreen-hud.patch

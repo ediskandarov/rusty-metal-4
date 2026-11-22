@@ -1,0 +1,109 @@
+--- a/platform/sdl3_gl.c
++++ b/platform/sdl3_gl.c
+@@ -45,7 +45,8 @@
+     "#version 300 es\n"
+     "precision highp float;\n"
+     "precision highp int;\n"
+-    "precision highp sampler2D;\n"};
++    "precision highp sampler2D;\n"
++    "precision highp sampler2DArray;\n"};
+ 
+ static const char vertex_shader_body[] = {
+     "layout(location = 0) in vec2 pos;\n"
+@@ -60,6 +61,7 @@
+     "out vec3 weightedUV;\n"
+     "flat out uint tpage;\n"
+     "flat out uint clut;\n"
++    "flat out uint textureBank;\n"
+     // Pre-computed pixel shader parameters
+     "flat out uint textureMode;\n"  // 0=untextured, 1=16-bit, 2=indexed
+     "flat out uint subPixelMask;\n" // Sub-pixel mask (8-bit:1, 4-bit:3)
+@@ -85,6 +87,7 @@
+     "    clut = uint(tex.z);\n"
+     "    uint texWord = uint(tex.w);\n"
+     "    tpage = texWord & 0x1FFu;\n"
++    "    textureBank = (texWord >> 9u) & 15u;\n"
+     "    dither = (texWord & 0x4000u) != 0u ? 1u : 0u;\n"
+     "    rawUV = tex.xy + shift - halfPixel;\n"
+     // Keep clip W at 1 so coverage and Gouraud colors stay unchanged.
+@@ -126,6 +129,7 @@
+     "in vec3 weightedUV;\n"
+     "out vec4 FragColor;\n"
+     "flat in uint clut;\n"
++    "flat in uint textureBank;\n"
+     "flat in uint tpage;\n"
+     "flat in uint textureMode;\n"
+     "flat in uint subPixelMask;\n"
+@@ -136,6 +140,11 @@
+     "flat in ivec2 pageBase;\n"
+     "flat in uvec4 texWindow;\n"
+     "uniform sampler2D texVram;\n"
++    "uniform highp sampler2DArray texBanks;\n"
++    "vec4 readTextureWord(ivec2 position) {\n"
++    "    if (textureBank == 0u) return texelFetch(texVram, position, 0);\n"
++    "    return texelFetch(texBanks, ivec3(position, int(textureBank - 1u)), 0);\n"
++    "}\n"
+     "uniform sampler2D maskSnapshot;\n"
+     "uniform bool maskPass, forceMask, checkMask;\n"
+     "\n"
+@@ -175,17 +184,16 @@
+     "        texColor = vec4(1, 1, 1, 2);\n"
+     "    } else if (textureMode == 1u) {\n" // 16-bit bitmap
+     "        texColor =\n"
+-    "            texelFetch(texVram, pageBase + ivec2(resolveTexel()), 0);\n"
++    "            readTextureWord(pageBase + ivec2(resolveTexel()));\n"
+     "    } else {\n" // indexed
+     "        ivec2 texel = ivec2(resolveTexel());\n"
+     "        uint subPixel = uint(texel.x) & subPixelMask;\n"
+     "        ivec2 texelPos =\n"
+     "            pageBase + ivec2(texel.x >> texelShift, texel.y);\n"
+-    "        uint word16 = rgb5551ToU16(texelFetch(texVram, texelPos, 0));\n"
++    "        uint word16 = rgb5551ToU16(readTextureWord(texelPos));\n"
+     "        uint colorIdx = (word16 >> (subPixel * indexShift)) & indexMask;\n"
+     "        ivec2 clutBase = ivec2((clut % 64u) * 16u, clut / 64u);\n"
+-    "        texColor = texelFetch(texVram, clutBase + ivec2(colorIdx, 0), "
+-    "0);\n"
++    "        texColor = readTextureWord(clutBase + ivec2(colorIdx, 0));\n"
+     "    }\n"
+     // check for full transparency
+     "    if (texColor == vec4(0, 0, 0, 0)) {\n"
+@@ -257,6 +265,7 @@
+ static GLint uniform_mask_pass, uniform_force_mask, uniform_check_mask;
+ static GLuint mask_snapshot_texture;
+ static GLuint vram_texture;
++#include "texture_banks.h"
+ static GLuint vram_fbo = 0;
+ static GLuint scratch_texture = 0;
+ static GLuint scratch_fbo = 0;
+@@ -460,6 +469,8 @@
+     uniform_target_size = glGetUniformLocation(shader_program, "targetSize");
+ 
+     glUniform1i(uniform_tex_vram, 0);
++    glUniform1i(glGetUniformLocation(shader_program, "texBanks"), 2);
++    Rm4InitializeTextureBanks();
+     glUniform1i(glGetUniformLocation(shader_program, "maskSnapshot"), 1);
+     uniform_mask_pass = glGetUniformLocation(shader_program, "maskPass");
+     uniform_force_mask = glGetUniformLocation(shader_program, "forceMask");
+@@ -1068,6 +1079,7 @@
+     }
+     ReleaseCanvases();
+     internal_res = 1;
++    Rm4DestroyTextureBanks();
+     glDeleteTextures(1, &rgb24_texture);
+     rgb24_texture = 0;
+     rgb24_dirty = true;
+@@ -1660,4 +1660,6 @@
+ void Draw_LoadImage(PS1_RECT* rect, u_long* p) {
++    if (Rm4TextureBankUpload(rect, (const u16*)p))
++        return;
+     if (rect->w <= 0 || rect->h <= 0) {
+         return;
+     }
+@@ -2088,6 +2100,7 @@
+         fb_index >= 0 ? canvas_size : (PsyzSize){VRAM_W, VRAM_H};
+ 
+     glUseProgram(shader_program);
++    Rm4BindTextureBanks();
+     glBindVertexArray(VAO);
+     glBindBuffer(GL_ARRAY_BUFFER, VBO);
+     glBufferSubData(

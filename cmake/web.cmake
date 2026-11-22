@@ -40,6 +40,8 @@ add_library(tm4_core STATIC
     "${TM4_ROOT}/port/extensions/surface_effects.c"
     "${TM4_ROOT}/port/extensions/surface_effects_state.c"
     "${TM4_WEB}/memory.c"
+    "${TM4_WEB}/texture_bank.c"
+    "${TM4_WEB}/world_texture.c"
     "${TM4_WEB}/participant.c"
     "${TM4_WEB}/ffa.c"
     "${TM4_WEB}/match_mode.c"
@@ -346,6 +348,24 @@ target_link_libraries(tm4_teleport_check PRIVATE psyz)
 target_compile_options(tm4_teleport_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_teleport_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_teleport_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_registry_resource_size_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_registry_resource_size.c")
+target_include_directories(tm4_registry_resource_size_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_options(tm4_registry_resource_size_check PRIVATE -UNDEBUG -Wno-nonportable-include-path -sUSE_ZLIB=1)
+target_link_options(tm4_registry_resource_size_check PRIVATE -sUSE_ZLIB=1 -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_registry_resource_size_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_world_textures_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_world_textures.c")
+target_include_directories(tm4_world_textures_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_world_textures_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_world_textures_check PRIVATE psyz)
+target_compile_options(tm4_world_textures_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_world_textures_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_world_textures_check PROPERTIES SUFFIX ".cjs")
 
 # Small asset-free test using the actual WebGL backend and VRAM readback.
 add_executable(tm4_gpu_mask_check EXCLUDE_FROM_ALL "${TM4_ROOT}/tests/native/check_gpu_mask.c")
