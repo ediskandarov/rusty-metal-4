@@ -1,0 +1,91 @@
+--- a/include/tm4/main/object.h
++++ b/include/tm4/main/object.h
+@@ -45,6 +45,19 @@
+ typedef void (*Tm4ObjectInteractionCallback)(void* first, void* second);
+ typedef void (*Tm4ObjectClassCallback)(RegistryDirectory* directory);
+ typedef s32 (*Tm4DirectoryVisitor)(char* name, RegistryDirectory* directory);
++
++typedef s32 (*Tm4PackedConstructor)(void*, va_list);
++typedef s32 (*Tm4InstanceConstructor)(void*, RegistryDirectory*);
++
++/* Classes and interaction pairs live until ObjectDestructor. Register them
++ * during class construction, before simulation and snapshot capture begin.
++ * The class name is copied; directories and callbacks remain caller-owned. */
++s32 ObjectFindClassIndex(char* name);
++s32 ObjectRegisterClass(char* name, size_t size, RegistryDirectory* directory,
++    Tm4PackedConstructor constructor, Tm4InstanceConstructor instance_constructor,
++    Tm4ObjectCallback process, Tm4ObjectDisplayCallback display, Tm4ObjectCallback destructor);
++s32 ObjectRegisterInteractionCallback(
++    char* first, char* second, Tm4ObjectInteractionCallback callback);
+ 
+ /* The engine header immediately precedes the class-specific payload. */
+ typedef struct Tm4ObjectHeader {
+--- a/src/main/object/private.h
++++ b/src/main/object/private.h
+@@ -19,9 +19,6 @@
+ #define OBJECT_CLASS_NAME_CAPACITY 64
+ #define OBJECT_SYMBOL_NAME_CAPACITY 128
+ #define OBJECT_DESTRUCTOR_PASS_LIMIT 4
+-
+-typedef s32 (*Tm4PackedConstructor)(void*, va_list);
+-typedef s32 (*Tm4InstanceConstructor)(void*, RegistryDirectory*);
+ 
+ typedef struct Tm4ObjectClass {
+     char* name;
+@@ -72,7 +69,6 @@
+ 
+ void ObjectListInsert(Tm4ObjectHeader* node, Tm4ObjectHeader** head, Tm4ObjectHeader* predecessor);
+ void ObjectListRemove(Tm4ObjectHeader* node, Tm4ObjectHeader** head);
+-s32 ObjectFindClassIndex(char* name);
+ Tm4ObjectInteractionCallback ObjectFindInteractionCallback(char* first, char* second);
+ void ObjectRemoveFromGrid(Tm4ObjectHeader* header);
+ void ObjectInsertIntoGrid(Tm4ObjectHeader* header);
+@@ -84,7 +80,4 @@
+ #define OBJECT_EMPTY_PATH ""
+ #define OBJECT_INTERACTION_EXTENDER_NAME "interaction extender"
+ 
+-s32 ObjectRegisterInteractionCallback(
+-    char* first, char* second, Tm4ObjectInteractionCallback callback);
+-
+ #endif
+--- a/src/main/object/classes.c
++++ b/src/main/object/classes.c
+@@ -28,11 +28,6 @@
+ #define OBJECT_STARTUP_NAME "startup"
+ #define OBJECT_STARTUP_PATH_PREFIX "startup/"
+ 
+-s32 ObjectRegisterClass(char* name, size_t size, RegistryDirectory* directory,
+-    Tm4PackedConstructor constructor, Tm4InstanceConstructor instance_constructor,
+-    Tm4ObjectCallback process, Tm4ObjectDisplayCallback display, Tm4ObjectCallback destructor);
+-s32 ObjectRegisterInteractionCallback(
+-    char* first, char* second, Tm4ObjectInteractionCallback callback);
+ void ObjectVisitDirectory(char* prefix, RegistryDirectory* directory, Tm4DirectoryVisitor visitor);
+ s32 ObjectRegisterDirectoryClass(char* name, RegistryDirectory* directory);
+ s32 ObjectCallDirectoryClassCallback(char* name, RegistryDirectory* directory, char* suffix);
+@@ -70,8 +65,8 @@
+ #endif
+ 
+ #if !defined(TM4_OBJECT_FUNCTION) || TM4_OBJECT_FUNCTION == 0x8001823c
+-/* Descriptor and triangular pair table grow together. Original rollback and
+- * allocation failure behavior are retained, including assigning resize results. */
++/* Publish the class only after all allocations succeed. Keep an enlarged class
++ * table on failure: a second, shrinking realloc could also fail and lose it. */
+ s32 ObjectRegisterClass(char* name, size_t size, RegistryDirectory* directory,
+     Tm4PackedConstructor constructor, Tm4InstanceConstructor instance_constructor,
+     Tm4ObjectCallback process, Tm4ObjectDisplayCallback display, Tm4ObjectCallback destructor)
+@@ -95,7 +90,6 @@
+     current_classes = ObjectClasses;
+     current_classes[index].name = copied_name;
+     if (copied_name == NULL) {
+-        ObjectClasses = MemRealloc(current_classes, ObjectClassCount * sizeof(Tm4ObjectClass));
+         return 0;
+     }
+ 
+@@ -103,7 +97,6 @@
+         (ObjectClassCount + 1) * (ObjectClassCount + 2) / 2 * sizeof(Tm4ObjectPair));
+     if (pairs == NULL) {
+         MemFree(ObjectClasses[index].name);
+-        ObjectClasses = MemRealloc(ObjectClasses, ObjectClassCount * sizeof(Tm4ObjectClass));
+         return 0;
+     }
+     strcpy(ObjectClasses[index].name, name);

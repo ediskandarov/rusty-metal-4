@@ -37,6 +37,7 @@ network-sound.patch
 network-state.patch
 network-messages.patch
 snapshot-classes.patch
+object-api.patch
 fire-ring-lifetime.patch
 object-lifetime.patch
 projectile-impact.patch

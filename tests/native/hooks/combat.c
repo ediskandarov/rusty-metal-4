@@ -1,3 +1,4 @@
+#include "port/extensions/weapon_profiles.h"
 #include "port/web/checkpoint_memory.h"
 #include "port/web/module_import.h"
 #include "port/web/net_match.h"
@@ -345,6 +346,23 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPlaceEnergyTarget(s32 rear)
     WEB_MODULE("car", BuildMatrix)(&placement, &direction);
     WEB_MODULE("car", CarOrientWithMatrix)(player, &placement);
     return health;
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestEquipWeapon(s32 index)
+{
+    Car* car = GameInfo.players[0].car;
+    if (!car || index < 0 || index >= WEB_MODULE("car", CarWeaponCount))
+        return 0;
+    car->controls.selected_weapon_slot = index;
+    car->controls.selected_weapon = index;
+    CarWeaponInstance* weapon = &car->weapons[index];
+    WEB_MODULE("car", AddInventoryToCar)(car, weapon->descriptor->name, 99);
+    return weapon->amount;
+}
+
+EMSCRIPTEN_KEEPALIVE s32 WebTestEquipWeaponProfile(const char* id)
+{
+    return WebTestEquipWeapon(WEB_MODULE("car", CarWeaponFindProfile)(id));
 }
 
 EMSCRIPTEN_KEEPALIVE s32 WebTestWeaponTargetHealth(void)

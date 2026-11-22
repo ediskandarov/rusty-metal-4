@@ -25,6 +25,11 @@ const SnapshotType* WebSnapshotTypeByName(const char* name)
     return WebNativeSnapshotType(name);
 }
 
+void WebSnapshotResetClasses(void)
+{
+    memset(registered, 0, sizeof(registered));
+}
+
 void WebSnapshotUnregisterTypes(const SnapshotType* types)
 {
     if (!types)

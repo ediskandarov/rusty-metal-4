@@ -160,7 +160,7 @@ function(tm4_add_overlay name)
     set_source_files_properties(${sources} PROPERTIES COMPILE_DEFINITIONS "${bindings}")
     target_sources(tm4_core PRIVATE ${sources})
 endfunction()
-target_sources(tm4_core PRIVATE "${TM4_GAME_ROOT}/src/main/card.c")
+target_sources(tm4_core PRIVATE "${TM4_GAME_ROOT}/src/main/card.c" "${TM4_WEB}/card_quad.c")
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/card.c" PROPERTIES COMPILE_DEFINITIONS "TM4_CARD_FUNCTION=0x80039AE8")
 set_source_files_properties("${TM4_GAME_ROOT}/src/main/sprintf.c" PROPERTIES COMPILE_DEFINITIONS "TM4_SPRINTF_FUNCTION=0x80034674")
 tm4_add_overlay(weap)
@@ -257,6 +257,7 @@ if(TM4_WEB_TEST_HOOKS)
         "${TM4_ROOT}/tests/native/hooks/participant.c"
         "${TM4_ROOT}/tests/native/hooks/snapshot_padding.c"
         "${TM4_ROOT}/tests/native/hooks/world.c"
+        "${TM4_ROOT}/tests/native/hooks/objects.c"
         "${TM4_ROOT}/tests/native/hooks/presentation.c"
         "${TM4_ROOT}/tests/native/hooks/match.c")
     target_compile_definitions(tm4_web PRIVATE TM4_WEB_TEST_HOOKS=1)
@@ -443,3 +444,13 @@ if(TM4_STANDALONE)
     target_link_options(tm4_web PRIVATE --no-entry -sPURE_WASI=1 -sALLOW_TABLE_GROWTH=1 "-sEXPORTED_FUNCTIONS=${exports}")
     set_target_properties(tm4_web PROPERTIES OUTPUT_NAME tm4_standalone SUFFIX ".wasm")
 endif()
+
+add_executable(tm4_object_classes_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_object_classes.c")
+target_include_directories(tm4_object_classes_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_object_classes_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_object_classes_check PRIVATE psyz)
+target_compile_options(tm4_object_classes_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_object_classes_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_object_classes_check PROPERTIES SUFFIX ".cjs")

@@ -67,7 +67,8 @@ function(tm4_dynamic_module module image_name)
     target_include_directories(tm4_module_${module_id} PRIVATE "$<TARGET_PROPERTY:tm4_core,INCLUDE_DIRECTORIES>")
     target_compile_definitions(tm4_module_${module_id} PRIVATE "$<TARGET_PROPERTY:tm4_core,COMPILE_DEFINITIONS>")
     target_compile_options(tm4_module_${module_id} PRIVATE "$<TARGET_PROPERTY:tm4_core,COMPILE_OPTIONS>" -fPIC -fvisibility=hidden)
-    # Menu previews and loading callbacks wait for presentation; simulation modules never suspend.
+    # Menu previews and archive progress callbacks wait for presentation.
+    # Registry calls may suspend while loading or releasing dynamic modules.
     set(asyncify 0)
     if(module STREQUAL "menu" AND NOT TM4_STANDALONE)
         set(asyncify 1)
@@ -107,6 +108,17 @@ target_link_options(tm4_web PRIVATE
     -Wl,--export=WebSurfaceEffectsStep -Wl,--export=WebSurfaceEffectsReset)
 # Independent texture banks are owned by the module that creates them.
 target_link_options(tm4_web PRIVATE -Wl,--export=WebTextureBankCreate -Wl,--export=WebTextureBankDestroy)
+# Resource modules use the original object lifecycle and snapshot descriptions.
+target_link_options(tm4_web PRIVATE
+    -Wl,--export=ObjectRegisterClass -Wl,--export=ObjectFindClassIndex
+    -Wl,--export=ObjectRegisterInteractionCallback -Wl,--export=ObjectLists
+    -Wl,--export=WebSnapshotInteractionHistory)
+# Rendering, geometry and audio services used by resource modules.
+target_link_options(tm4_web PRIVATE
+    -Wl,--export=CardDisplayTexturedQuad -Wl,--export=CardDisplayGouraudQuad
+    -Wl,--export=RotTransPers -Wl,--export=RotTransPers3
+    -Wl,--export=WorldGetHeight -Wl,--export=WorldSetDisplayFaces
+    -Wl,--export=SoundConstructor -Wl,--export=snprintf)
 include("${TM4_EXPORT_DIRECTORY}/sources.cmake")
 get_property(TM4_GENERATED_EXPORT_SOURCES GLOBAL PROPERTY TM4_GENERATED_EXPORT_SOURCES)
 list(REMOVE_ITEM TM4_CORE_SOURCES ${TM4_EXPORT_INPUTS})

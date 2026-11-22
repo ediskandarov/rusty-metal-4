@@ -227,9 +227,10 @@ void WebLevelStop(void)
     WebCheckpointArenaSelect(0);
     RenderDestructor();
     WebWorldTextureClose();
+    /* Unwind MR registrations in reverse order so shared directories are removed. */
     RegRemoveReg("cars");
-    RegRemoveReg("game");
     RegRemoveReg("world");
+    RegRemoveReg("game");
     WorldSquares = NULL;
     WorldCells = NULL;
     SoundDestructor();
