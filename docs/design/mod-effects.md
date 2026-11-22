@@ -32,6 +32,12 @@ Class registration, resource lifetime and snapshot exports are specified in the
 object contract; do not serialize raw module pointers. Cosmetic randomness must
 not consume the gameplay random stream.
 
+## Car turbo presentation
+
+[Turbo profiles](turbo.md) bind a shared MR profile to each car. The profile selects
+an ordinary mod object class; the engine reports actual applied thrust and retains
+fuel/physics. The object owns visuals and sound.
+
 ## Proposed car presentation split
 
 This section is a design target, not a usable MR contract. The experimental combined
@@ -43,7 +49,6 @@ profiles below would replace it; they are not currently implemented resource fie
 | `shieldEffect` | Activation, energy cost, duration and protection | Materials, visuals and sounds |
 | `freezeEffect` | Freeze duration, control restrictions and thawing | Frozen-car appearance and sounds |
 | `invisibilityEffect` | Timing, targeting and per-camera visibility rules | Appearance of the parts permitted to remain visible |
-| `turboEffect` | Fuel, acceleration and extinguishing rules | Exhaust presentation using actual turbo activity |
 | `freezeProjectileEffect` | Energy cost, projectile motion and freeze impact | Projectile model, trail and impact presentation |
 | `engineSoundEffect` | Engine simulation | Pitch and volume presentation |
 

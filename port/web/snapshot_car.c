@@ -660,6 +660,9 @@ static const SnapshotField car_fields[] = {
     SNAP_LOCAL(Car, process_callback),
     SNAP_LOCAL(Car, collision_callback),
     SNAP_LOCAL(Car, destructor_callback),
+    SNAP_POD(Car, turbo_thrust_applied),
+    SNAP_LOCAL(Car, turbo_profile),
+    SNAP_LOCAL(Car, turbo_position),
     SNAP_GROUP(Car, surface_effects, &WebSurfaceEffectsSnapshot),
     { 0 },
 };

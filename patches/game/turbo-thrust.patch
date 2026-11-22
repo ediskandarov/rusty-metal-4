@@ -1,0 +1,31 @@
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -399,3 +399,4 @@
+-};
+-
+-typedef struct CarCameraState {
++    s32 turbo_thrust_applied;
++};
++
++typedef struct CarCameraState {
+--- a/src/modules/car/car.c
++++ b/src/modules/car/car.c
+@@ -301,5 +301,6 @@
+     s32 (*process)(Car*, void*);
+     const s32 particle_count = ArrayCount(car->particles);
+ 
++    car->turbo_thrust_applied = 0;
+     CarAiProcess(car);
+     if (car->freeze_ticks) {
+--- a/src/modules/car/suspension.c
++++ b/src/modules/car/suspension.c
+@@ -347,7 +347,9 @@
+             car->turbo_fuel = 0;
+             ScreenLocalMessageRegister(car->controller_index, CarTurboEmptyMessage);
+         } else {
++            car->turbo_thrust_applied = 1;
+             CarClearFireEffect(car);
++            car->fire_ticks = 0;
+             car->axle_torque = mul64s(car->axle_torque_limit, car->turbo_engine_multiplier, 12);
+             if (!(car->particles[0].contact_state & 1) && !(car->particles[1].contact_state & 1)
+                 && !(car->particles[2].contact_state & 1)

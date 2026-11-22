@@ -107,6 +107,8 @@ target_link_options(tm4_web PRIVATE
     -Wl,--export=WebSurfaceEffectsDetach -Wl,--export=WebSurfaceEffectsBegin
     -Wl,--export=WebSurfaceEffectsStep -Wl,--export=WebSurfaceEffectsReset)
 target_link_options(tm4_web PRIVATE -Wl,--export=WebFragmentEffectsImpact)
+target_link_options(tm4_web PRIVATE
+    -Wl,--export=WebTurboLoad -Wl,--export=WebTurboAttach -Wl,--export=RegGetFileByteSizeP)
 target_link_options(tm4_web PRIVATE -Wl,--export=Rm4ScreenObjectRegister -Wl,--export=Rm4ScreenAllocate)
 # Independent texture banks are owned by the module that creates them.
 target_link_options(tm4_web PRIVATE -Wl,--export=WebTextureBankCreate -Wl,--export=WebTextureBankDestroy)

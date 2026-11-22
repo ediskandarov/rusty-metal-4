@@ -56,6 +56,7 @@ registry-resource-size.patch
 world-texture.patch
 teleport.patch
 fragment-effects.patch
+turbo-thrust.patch
 widescreen.patch
 widescreen-hud.patch
 mouse-look.patch
@@ -65,3 +66,4 @@ registry-load-order.patch
 weapon-profiles.patch
 screen-objects.patch
 map-settings.patch
+turbo-appearance.patch
