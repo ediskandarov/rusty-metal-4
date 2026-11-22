@@ -36,6 +36,9 @@ endfunction()
 file(GLOB TM4_MENU_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/menu/*.c")
 file(GLOB TM4_CAR_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/car/*.c")
 add_library(tm4_core STATIC
+    "${TM4_ROOT}/port/extensions/car_profile.c"
+    "${TM4_ROOT}/port/extensions/car_effects.c"
+    "${TM4_ROOT}/port/extensions/car_attacks.c"
     "${TM4_ROOT}/port/extensions/fragment_effects.c"
     "${TM4_ROOT}/port/extensions/screen_objects.c"
     "${TM4_ROOT}/port/extensions/map_settings.c"
@@ -499,3 +502,16 @@ target_link_libraries(tm4_turbo_check PRIVATE psyz)
 target_compile_options(tm4_turbo_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_turbo_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_turbo_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_car_effects_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_car_effects.c"
+    "${TM4_ROOT}/port/extensions/car_profile.c"
+    "${TM4_ROOT}/port/extensions/car_effects.c"
+    "${TM4_ROOT}/port/extensions/car_attacks.c")
+target_include_directories(tm4_car_effects_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_car_effects_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_car_effects_check PRIVATE psyz)
+target_compile_options(tm4_car_effects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_car_effects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_car_effects_check PROPERTIES SUFFIX ".cjs")

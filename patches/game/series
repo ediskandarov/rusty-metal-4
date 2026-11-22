@@ -67,3 +67,5 @@ weapon-profiles.patch
 screen-objects.patch
 map-settings.patch
 turbo-appearance.patch
+car-effect-profiles.patch
+car-effect-rendering.patch

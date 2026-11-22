@@ -2,8 +2,7 @@
 
 MR stores resources and symbolic bindings. Mods own their gameplay objects and
 effects; the port supplies shared lifecycle, rendering and snapshot integration.
-The contracts linked below describe implemented interfaces. The final section is
-an unimplemented proposal for separating car presentation from gameplay.
+The contracts linked below describe implemented interfaces.
 
 ## Implemented map interfaces
 
@@ -38,22 +37,13 @@ not consume the gameplay random stream.
 an ordinary mod object class; the engine reports actual applied thrust and retains
 fuel/physics. The object owns visuals and sound.
 
-## Proposed car presentation split
+## Car status presentation
 
-This section is a design target, not a usable MR contract. The experimental combined
-`statusEffects` descriptor still mixes presentation with gameplay settings. Separate
-profiles below would replace it; they are not currently implemented resource fields.
+[Car effect profiles](car-effects.md) independently select frozen-car and
+own-camera invisibility presentation. A separate binding supplies the energy-freeze
+launcher; durations stay in TM4 mechanics. The port owns visibility, timer expiry,
+sound lifecycle and restoration; callbacks render the existing mesh without
+changing simulation state.
 
-| Proposed binding | Engine retains | Mod supplies |
-| --- | --- | --- |
-| `shieldEffect` | Activation, energy cost, duration and protection | Materials, visuals and sounds |
-| `freezeEffect` | Freeze duration, control restrictions and thawing | Frozen-car appearance and sounds |
-| `invisibilityEffect` | Timing, targeting and per-camera visibility rules | Appearance of the parts permitted to remain visible |
-| `freezeProjectileEffect` | Energy cost, projectile motion and freeze impact | Projectile model, trail and impact presentation |
-| `engineSoundEffect` | Engine simulation | Pitch and volume presentation |
-
-Each proposed profile would be independent and fall back to TM4 presentation when
-omitted. Explicit invalid bindings would fail loading. Effect instances would follow
-car removal, effect expiry and snapshot restoration without duplicated activation
-sounds. These guarantees require implementation and tests before exposing the fields.
-`tm3Engine` remains mod-owned data, not an engine key.
+Shield presentation remains stock. Engine-sound presentation remains in the mod;
+`tm3Engine` is mod-owned data, not an engine key.
