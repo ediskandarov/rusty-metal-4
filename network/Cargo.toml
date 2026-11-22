@@ -52,7 +52,7 @@ anyhow = { version = "1", optional = true }
 sha2 = { version = "0.10", optional = true }
 base64 = { version = "0.22", optional = true }
 wasmtime = { version = "=47.0.1", default-features = false, features = ["cranelift", "runtime", "std", "anyhow"], optional = true }
-wasmtime-dylink = { version = "=0.2.3", features = ["emscripten"], optional = true }
+wasmtime-dylink = { version = "=0.2.4", features = ["emscripten"], optional = true }
 wasmtime-wasi = { version = "=47.0.1", default-features = false, features = ["p1"], optional = true }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
