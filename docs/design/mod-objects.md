@@ -29,3 +29,12 @@ then are resource registrations removed in reverse load order: cars, world, game
 Modules retained by another registration stay loaded, but their level classes must
 be registered again on the next load. Raw callback pointers must not outlive the
 registration that owns their module.
+
+Screen-space effects use `port/extensions/screen_objects.h`. Register the object's
+screen callback after its ordinary class; leave world display NULL for purely
+screen-space objects. Process and snapshot fields own the effect's lifetime and
+colour. Screen drawing only emits packets into frame-owned storage and never
+advances state. The pass covers the complete output, including widescreen and
+split-screen, above scene/HUD and below global messages and view borders. It keeps
+stock TM4 overlays intact. Registrations reset with object classes before modules
+unload; restored instances reuse their class's callback without storing pointers.

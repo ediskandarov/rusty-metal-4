@@ -37,6 +37,7 @@ file(GLOB TM4_MENU_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/menu/
 file(GLOB TM4_CAR_SOURCES CONFIGURE_DEPENDS "${TM4_GAME_ROOT}/src/modules/car/*.c")
 add_library(tm4_core STATIC
     "${TM4_ROOT}/port/extensions/fragment_effects.c"
+    "${TM4_ROOT}/port/extensions/screen_objects.c"
     "${TM4_ROOT}/port/extensions/teleport.c"
     "${TM4_ROOT}/port/extensions/surface_effects.c"
     "${TM4_ROOT}/port/extensions/surface_effects_state.c"
@@ -465,3 +466,13 @@ target_link_libraries(tm4_fragment_effects_check PRIVATE psyz)
 target_compile_options(tm4_fragment_effects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_fragment_effects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_fragment_effects_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_screen_objects_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_screen_objects.c")
+target_include_directories(tm4_screen_objects_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}")
+target_compile_definitions(tm4_screen_objects_check PRIVATE PLATFORM_WEB=1 __psyz)
+target_link_libraries(tm4_screen_objects_check PRIVATE psyz)
+target_compile_options(tm4_screen_objects_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_screen_objects_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_screen_objects_check PROPERTIES SUFFIX ".cjs")
