@@ -9,6 +9,9 @@ canonical parity, local replay, portable transfer, and missing-host-capability c
 See [the development environment](docs/dev-environment.md) for TypeScript workspace
 layout and development commands.
 
+The [mod effects overview](docs/design/mod-effects.md) links implemented map contracts
+and separates them from the proposed car presentation interfaces.
+
 ## License
 
 Original code written for this port, including its web interface and tooling,

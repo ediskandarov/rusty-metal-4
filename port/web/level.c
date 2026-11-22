@@ -215,6 +215,9 @@ int WebLevelCheckpointActive(void)
 
 void WebLevelStop(void)
 {
+#ifdef TM4_WEB_TEST_HOOKS
+    WebTestResetCombatTarget();
+#endif
 #ifndef TM4_STANDALONE
     WebMouseLookReset();
 #endif

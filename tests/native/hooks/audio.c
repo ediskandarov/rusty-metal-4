@@ -22,6 +22,22 @@ EMSCRIPTEN_KEEPALIVE int WebTestNetworkPlaybackVoices(void)
     return count;
 }
 
+/* Counts emitter voice records, including pending playback; not hardware activity. */
+EMSCRIPTEN_KEEPALIVE int WebTestCountSoundVoices(char* name, s32 pitch, int attached)
+{
+    s32 program = SoundGetProgramId(name);
+    int count = 0;
+    for (Tm4ObjectHeader* h = ObjectLists[OBJECT_LIST_SOUND].first; h; h = h->next) {
+        SoundEmitter* e = ObjectGetPayload(h);
+        if (e->program_id != program || (!!h->owner) != attached)
+            continue;
+        for (s32 i = 0; i < e->voice_count; ++i)
+            if (e->voices[i].pitch == pitch)
+                ++count;
+    }
+    return count;
+}
+
 static SoundEmitter* test_portable_emitter(int loop)
 {
     for (Tm4ObjectHeader* object = ObjectLists[OBJECT_LIST_SOUND].first; object;
