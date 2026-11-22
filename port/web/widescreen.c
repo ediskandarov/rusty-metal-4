@@ -2,6 +2,7 @@
 #include "widescreen.h"
 #include "level.h"
 #include "tm4/main/game.h"
+#include "tm4/main/render.h"
 #include <emscripten.h>
 #include <libgpu.h>
 #include <stdint.h>
@@ -57,8 +58,26 @@ void WebWidescreenUpdate(void)
 
 PsyzRect WebWidescreenDrawArea(void) { return draw_area; }
 
+/* SetDrawEnv appends an optional background TILE after its six GPU state
+ * commands. Its clip expands in PsyZ's native canvas, but the TILE does not. */
+static void update_view_background(DR_ENV* environment)
+{
+    if (getlen(environment) != 9 || (environment->code[6] >> 24) != 0x60)
+        return;
+    environment->code[7] = (u16)draw_area.sx | ((u32)(u16)draw_area.sy << 16);
+    environment->code[8]
+        = (u16)(draw_area.ex - draw_area.sx) | ((u32)(u16)(draw_area.ey - draw_area.sy) << 16);
+}
+
 void WebWidescreenBeginDraw(void)
 {
+    if (GameInfo.player_count == 1) {
+        Tm4RenderBuffer* buffer = RenderGetDisplayBuffer();
+        if (buffer) {
+            update_view_background(&buffer->players[0].world_environment);
+            update_view_background(&buffer->players[0].overlay_environment);
+        }
+    }
     drawing = active;
     if (!drawing)
         return;

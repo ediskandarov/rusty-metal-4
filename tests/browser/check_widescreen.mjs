@@ -61,7 +61,9 @@ async function observeHud(page) {
           if (
             vertices[1].xy[1] === y &&
             vertices[2].xy[0] === x &&
-            vertices[3].xy[0] === vertices[1].xy[0]
+            vertices[3].xy[0] === vertices[1].xy[0] &&
+            (!probe.size ||
+              (vertices[1].xy[0] - x === probe.size[0] && vertices[2].xy[1] - y === probe.size[1]))
           )
             probe.found[id] = vertices;
         }
@@ -118,7 +120,7 @@ async function sampleHud(page, baseline, width = 320, height = 240) {
   return found;
 }
 
-async function checkPauseBackdrop(page, width = 320, height = 240) {
+async function checkBackdrop(page, width = 320, height = 240, pause = true) {
   const scale = Math.max(1, Math.min(Math.floor(width / 320), Math.floor(height / 240)));
   // PsyZ rounds the canvas to eight game pixels and centres the original frame.
   const w = Math.ceil(Math.floor(width / scale) / 8) * 8;
@@ -126,10 +128,10 @@ async function checkPauseBackdrop(page, width = 320, height = 240) {
   const x = (320 - w) / 2;
   const y = (240 - h) / 2;
   await page.evaluate(
-    (origin) => {
-      globalThis.hudProbe = { expected: [origin], found: [null], pause: true };
+    ({ origin, size, pause }) => {
+      globalThis.hudProbe = { expected: [origin], found: [null], size, pause };
     },
-    [x, y],
+    { origin: [x, y], size: [w, h], pause },
   );
   await page.waitForFunction(() => globalThis.hudProbe.found[0]);
   const vertices = await page.evaluate(() => {
@@ -188,11 +190,13 @@ try {
     await press("x");
     await page.waitForFunction(() => globalThis.tm4Port.levelFrames > 30, null, { timeout: 60000 });
     assert.equal(await wide(), false, "windowed battle stays 4:3");
+    await checkBackdrop(page, 320, 240, false);
     const baseline = await sampleHud(page);
     await page.screenshot({ path: `build/checks/windowed-battle-${height}.png` });
     await fullscreen();
     await page.waitForFunction(() => globalThis.tm4Port.widescreen);
     await sampleHud(page, baseline, width, height);
+    await checkBackdrop(page, width, height, false);
     await page.screenshot({ path: `build/checks/fullscreen-battle-${height}.png` });
     await setPanelOpen(page, "render-settings", true);
     await page.locator("#subpixel-vertices").uncheck();
@@ -209,6 +213,7 @@ try {
     await sampleHud(page, baseline, width, height);
     await press("Escape");
     await page.waitForFunction(() => !document.fullscreenElement && !globalThis.tm4Port.widescreen);
+    await checkBackdrop(page, 320, 240, false);
     assert.deepEqual(
       await sampleHud(page),
       baseline,
@@ -221,6 +226,11 @@ try {
     await fullscreen();
     await page.waitForFunction(() => globalThis.tm4Port.widescreen);
     await sampleHud(page, baseline, width, height);
+    await page.evaluate(() => globalThis.Module._WebTestDamagePlayer());
+    await page.waitForFunction(() => !globalThis.tm4Port.carAlive);
+    await checkBackdrop(page, width, height, false);
+    await page.screenshot({ path: `build/checks/fullscreen-death-${height}.png` });
+    await page.waitForFunction(() => globalThis.tm4Port.carAlive, null, { timeout: 20000 });
     await page.keyboard.down("x");
     await page.keyboard.down("ArrowRight");
     await page.waitForTimeout(2500);
@@ -228,14 +238,14 @@ try {
     await page.keyboard.up("x");
     await press("Enter");
     await page.waitForFunction(() => globalThis.tm4Port.paused);
-    await checkPauseBackdrop(page, width, height);
+    await checkBackdrop(page, width, height);
     await page.screenshot({ path: `build/checks/fullscreen-pause-${height}.png` });
     await page.evaluate(() => document.exitFullscreen());
     await page.waitForFunction(() => !globalThis.tm4Port.widescreen && globalThis.tm4Port.paused);
-    await checkPauseBackdrop(page);
+    await checkBackdrop(page);
     await fullscreen();
     await page.waitForFunction(() => globalThis.tm4Port.widescreen && globalThis.tm4Port.paused);
-    await checkPauseBackdrop(page, width, height);
+    await checkBackdrop(page, width, height);
     await press("ArrowUp");
     await press("x");
     await press("ArrowUp");
@@ -245,7 +255,7 @@ try {
     assert(await page.evaluate(() => !!document.fullscreenElement));
     assert.deepEqual(errors, []);
     console.log(
-      `PASS ${width}x${height}: HUD anchors/scale/UVs, vertex correction on/off, abbreviated HUD, fullscreen transitions and pause`,
+      `PASS ${width}x${height}: HUD anchors/scale/UVs, vertex correction on/off, abbreviated HUD, fullscreen transitions, death backdrop and pause`,
     );
     await context.close();
   }
