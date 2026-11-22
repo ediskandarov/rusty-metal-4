@@ -7,5 +7,6 @@ display-position.patch
 gpu-mask.patch
 gte-checkpoint.patch
 subpixel-positions.patch
+spu-sample-banks.patch
 texture-banks.patch
 screen-transform.patch

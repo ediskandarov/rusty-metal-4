@@ -1,0 +1,67 @@
+--- a/psyz/psyz_spu.c
++++ b/psyz/psyz_spu.c
+@@ -34,6 +34,8 @@
+     unsigned reverb_ticks[2];
+ 
+     VoiceState voice[PSYZ_SPU_NUM_VOICES];
++    const u8* voice_bank[PSYZ_SPU_NUM_VOICES];
++    const u8* next_voice_bank[PSYZ_SPU_NUM_VOICES];
+ 
+     // CD audio ring buffer, refilled by Psyz_CdPullSamples
+     short cd_ring[CD_RING_FRAMES * N_CHANNELS];
+@@ -120,13 +122,45 @@
+     }
+ }
+ 
++/* Each key-on consumes its bank selection. Ordinary PsyQ voices use SPU RAM. */
++void WebSpuSetNextVoiceBank(int voice, const unsigned char* bank) {
++    if ((unsigned)voice >= PSYZ_SPU_NUM_VOICES) {
++        WARNF("Sample bank: invalid voice %d", voice);
++        return;
++    }
++    Psyz_AudioLock();
++    spu.next_voice_bank[voice] = bank;
++    Psyz_AudioUnlock();
++}
++
++void WebSpuReleaseVoiceBanks(void) {
++    Psyz_AudioLock();
++    for (int i = 0; i < PSYZ_SPU_NUM_VOICES; ++i) {
++        if (spu.voice_bank[i]) {
++            memset(&spu.voice[i], 0, sizeof(spu.voice[i]));
++            _spu_RXX->rxx.voice[i].volumex = 0;
++        }
++        spu.voice_bank[i] = NULL;
++        spu.next_voice_bank[i] = NULL;
++    }
++    Psyz_AudioUnlock();
++}
++
++static const u8* voice_ram(int voice) {
++    return spu.voice_bank[voice] ? spu.voice_bank[voice] : spu.ram;
++}
++
+ static void spu_key_on_voice(int v) {
++    Psyz_AudioLock();
+     VoiceState* vs = &spu.voice[v];
+     unsigned wait = spu.ticks & 1;
+-    spu_voice_key_on(vs, &_spu_RXX->rxx.voice[v], spu.ram);
++    spu.voice_bank[v] = spu.next_voice_bank[v];
++    spu.next_voice_bank[v] = NULL;
++    spu_voice_key_on(vs, &_spu_RXX->rxx.voice[v], voice_ram(v));
+     vs->hold_ticks += wait;
+     vs->delay_ticks += wait;
+     vs->env_counter = spu.ticks + ENV_CLOCK_PHASE;
++    Psyz_AudioUnlock();
+ }
+ 
+ static void spu_key_off_voice(int v) {
+@@ -346,7 +380,7 @@
+         if (spu.voice[v].key_off_wait && !--spu.voice[v].key_off_wait) {
+             spu.voice[v].key_off = 1;
+         }
+-        short s = spu_voice_step(&spu.voice[v], rxx->voice[v].pitch, spu.ram);
++        short s = spu_voice_step(&spu.voice[v], rxx->voice[v].pitch, voice_ram(v));
+         int env = spu_voice_envelope_step(&spu.voice[v]);
+         rxx->voice[v].volumex = (unsigned short)spu.voice[v].env_vol;
+         s = (short)(((int)s * env) >> 15);

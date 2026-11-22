@@ -1,0 +1,119 @@
+--- a/src/main/sound.c
++++ b/src/main/sound.c
+@@ -1,6 +1,8 @@
+ #include "tm4/main/sound.h"
+ #include "port/web/net_match.h"
+ #include "port/web/rollback_audio.h"
++#include "port/game/sound_samples.h"
++#include "port/psyz/spu_banks.h"
+ 
+ #include "tm4/fixed.h"
+ #include "tm4/integer.h"
+@@ -41,7 +43,8 @@
+ #define SOUND_MUSIC_VOLUME_FULL 0x3FFF
+ 
+ typedef struct SoundProgramAttribute {
+-    u8 sample, volume, pan, center_note, center_fine, pitch_range_semitones;
++    u16 sample;
++    u8 volume, pan, center_note, center_fine, pitch_range_semitones;
+     s16 pitch_base, pitch_delta;
+     u8 pitch_mode, reserved;
+     u16 adsr1, adsr2;
+@@ -53,6 +56,7 @@
+ } SoundProgramEntry;
+ typedef struct SoundSampleEntry {
+     unsigned long address;
++    const u8* bank;
+     s32 loop, size_8bytes;
+ } SoundSampleEntry;
+ static SoundEmitterControlFunction* SoundEmitterVolumeFade = NULL;
+@@ -144,21 +148,17 @@
+     s32 attempts;
+     char* marker;
+     SoundSampleEntry* samples;
+-    if (!SoundSampleCount)
+-        address = SOUND_SAMPLE_RAM_BASE;
+-    else
+-        address = SoundSamples[SoundSampleCount - 1].address
+-            + (SoundSamples[SoundSampleCount - 1].size_8bytes << 3);
+-    if (address + size > SOUND_SPU_RAM_BYTES)
++    const u8* bank;
++    if (!data || size < 16 || size > SOUND_SPU_RAM_BYTES || (size & 7) || SoundSampleCount >= 0xffff)
+         return -1;
+-    SpuSetTransferMode(SPU_TRANSFER_BY_DMA);
+-    SpuSetTransferStartAddr(address);
+-    SpuWrite(data, size);
+     samples = MemRealloc(SoundSamples, (SoundSampleCount + 1) * sizeof(SoundSampleEntry));
+     if (!samples)
+         return -1;
++    SoundSamples = samples;
++    if (!WebSoundSampleStore(data, size, &address, &bank))
++        return -1;
+     marker = (char*)data + (size - 15);
+-    SoundSamples = samples;
++    SoundSamples[SoundSampleCount].bank = bank;
+     SoundSamples[SoundSampleCount].address = address;
+     if (!strncmp(marker, SoundLoopEnd, 15) || !strncmp(marker, SoundLoopStart, 15))
+         SoundSamples[SoundSampleCount].loop = 0;
+@@ -166,6 +166,8 @@
+         SoundSamples[SoundSampleCount].loop = 1;
+     SoundSamples[SoundSampleCount].size_8bytes = size / 8;
+     SoundSampleCount++;
++    if (bank || SpuIsTransferCompleted(SPU_TRANSFER_PEEK))
++        return SoundSampleCount - 1;
+     attempts = 0;
+     do {
+         if (!WebNetMatchActive())
+@@ -209,7 +211,7 @@
+     s32 pitch_mode, s32 pitch_range_semitones, u16 adsr1, u16 adsr2)
+ {
+     SoundProgramAttribute *attributes, *attr;
+-    if (program >= SoundProgramCount)
++    if (program < 0 || program >= SoundProgramCount || sample < 0 || sample >= SoundSampleCount)
+         return 0;
+     attributes = MemRealloc(SoundPrograms[program].attributes,
+         (SoundPrograms[program].attribute_count + 1) * sizeof(SoundProgramAttribute));
+@@ -220,7 +222,7 @@
+     /* Incoming word arguments supply the record's low bytes on the PS1. */
+     attr->center_note = *(u8*)&note;
+     attr->center_fine = *(u8*)&fine;
+-    attr->sample = *(u8*)&sample;
++    attr->sample = sample;
+     attr->volume = volume;
+     attr->pan = pan;
+     attr->pitch_range_semitones = *(u8*)&pitch_range_semitones;
+@@ -266,6 +268,7 @@
+         SoundPrograms = NULL;
+     }
+     SoundProgramCount = 0;
++    WebSoundSamplesReset();
+     if (SoundSamples) {
+         MemFree(SoundSamples);
+         SoundSamples = NULL;
+@@ -378,6 +381,9 @@
+ void SoundStartVoice(
+     s32 program, s32 index, s32 offset_q12, s32 voice, s32 pitch, s32 left, s32 right)
+ {
++    if ((u32)voice >= 24 || program < 0 || program >= SoundProgramCount || index < 0
++        || index >= SoundPrograms[program].attribute_count)
++        return;
+     WebRollbackAudioReportVoiceStart();
+     SpuVoiceAttr attr;
+     u32 mask = SPU_KEYCH(voice);
+@@ -390,6 +396,7 @@
+     attr.adsr2 = SoundPrograms[program].attributes[index].adsr2;
+     {
+         s32 sample = SoundPrograms[program].attributes[index].sample;
++        WebSpuSetNextVoiceBank(voice, SoundSamples[sample].bank);
+         attr.addr = SoundSamples[sample].address
+             + (Q12MulRound(SoundSamples[sample].size_8bytes, offset_q12) << 3);
+     }
+@@ -568,7 +575,7 @@
+                     do {
+                         VagAtr* attr = &tone_base[tone];
+                         s32 sample = sample_table[attr->vag - 1];
+-                        if (sample != -1) {
++                        if (sample != 0xffff) {
+                             s32 v = attr->vol;
+                             s32 mode;
+                             v *= volume;
