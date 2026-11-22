@@ -343,6 +343,23 @@ EMSCRIPTEN_KEEPALIVE s32 WebTestPrepareNetworkDuel(s32 distance)
     return 1;
 }
 
+void InteractCarWithCar(void*, void*);
+
+EMSCRIPTEN_KEEPALIVE int WebTestInteractCars(s32 first_slot, s32 second_slot)
+{
+    if ((u32)first_slot >= ArrayCount(GameInfo.players)
+        || (u32)second_slot >= ArrayCount(GameInfo.players) || first_slot == second_slot)
+        return 0;
+    Car* first = GameInfo.players[first_slot].car;
+    Car* second = GameInfo.players[second_slot].car;
+    if (!first || !second)
+        return 0;
+    WebCheckpointArenaSelect(1);
+    WEB_MODULE("car", InteractCarWithCar)(first, second);
+    WebCheckpointArenaSelect(0);
+    return 1;
+}
+
 EMSCRIPTEN_KEEPALIVE s32 WebTestNetworkCarContact(void)
 {
     Car* player = GameInfo.players[0].car;

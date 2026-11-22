@@ -1,0 +1,52 @@
+--- a/include/tm4/modules/car.h
++++ b/include/tm4/modules/car.h
+@@ -153,7 +153,10 @@
+ typedef MATRIX* (*CarRenderCallback)(Car*, s32, CarRenderGroup*, MATRIX*, void*);
+ enum CarCollisionResponseFlags {
+     CAR_COLLISION_SKIP_OTHER_IMPULSE = 1,
+-    CAR_COLLISION_SKIP_OWN_IMPULSE = 2
++    CAR_COLLISION_SKIP_OWN_IMPULSE = 2,
++    /* Required if a callback destroys either car: stop before the other callback,
++       history, impulses or ordinary collision damage can touch it. */
++    CAR_COLLISION_END_CONTACT = 4
+ };
+ 
+ typedef u32 (*CarCollisionCallback)(Car*, void*, Car*);
+--- a/src/modules/car/collision.c
++++ b/src/modules/car/collision.c
+@@ -57,7 +57,7 @@
+     }
+ }
+ 
+-static inline void run_collision_callbacks(void)
++static inline int run_collision_callbacks(void)
+ {
+     u32 suppressed_impulses;
+     register s32 callback_other TM4_BIND_REGISTER("$21") = 1;
+@@ -74,6 +74,8 @@
+                 callback_car, callback_car->callback_context, cars[callback_other]);
+         else
+             suppressed_impulses = 0;
++        if (suppressed_impulses & CAR_COLLISION_END_CONTACT)
++            return 0;
+         if (suppressed_impulses & CAR_COLLISION_SKIP_OWN_IMPULSE)
+             *callback_flags = 0;
+         if (suppressed_impulses & CAR_COLLISION_SKIP_OTHER_IMPULSE)
+@@ -82,6 +84,7 @@
+         ++callback_cursor;
+         ++callback_flags;
+     } while (more_collision_flags(callback_flags, flag_base));
++    return 1;
+ }
+ 
+ static inline void negate_impulse(VECTOR* impulse)
+@@ -269,7 +272,8 @@
+         CarCollisionFlags[1] = 1;
+         setVector(impulse, ax + x, ay + y, az + z);
+     }
+-    run_collision_callbacks();
++    if (!run_collision_callbacks())
++        return;
+     created = update_collision_history_and_forces(CarCollisionCars);
+     name_index = 0;
+     if (created) {

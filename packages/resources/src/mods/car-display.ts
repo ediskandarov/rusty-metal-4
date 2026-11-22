@@ -4,6 +4,7 @@ export interface CarDisplayReport {
   errors: string[];
   warnings: string[];
   faces: number;
+  undrawnFaces: number;
   vertices: number;
   normals: number;
   groups: number;
@@ -24,6 +25,7 @@ function report(): CarDisplayReport {
     errors: [],
     warnings: [],
     faces: 0,
+    undrawnFaces: 0,
     vertices: 0,
     normals: 0,
     groups: 0,
@@ -169,9 +171,15 @@ export function validateCarDisplay(
       const offset = face * 24;
       const code = faces.getUint8(offset);
       requireValue(
-        code === 0x24 || code === 0x2c,
+        code === 0x24 || code === 0x28 || code === 0x2c,
         `Face ${face}: unsupported car polygon opcode 0x${code.toString(16)}`,
       );
+      // The recovered normal and tinted car renderers intentionally ignore F4.
+      // Preserve such records, but do not treat their unused bytes as a texture.
+      if (code === 0x28) {
+        result.undrawnFaces++;
+        continue;
+      }
       const degree = code === 0x24 ? 3 : 4;
       const uvOffsets = [4, 8, 12, 14].slice(0, degree);
       const uv = uvOffsets.map((i) => [faces.getUint8(offset + i), faces.getUint8(offset + i + 1)]);
@@ -192,7 +200,6 @@ export function validateCarDisplay(
       requireValue(resolution.folders.has(`r${i}`), "LOD directories must be contiguous from r0");
     result.lods = levels.length;
     let allFramesAliased = true;
-    const usedWheelKinds = new Set<number>();
     let previousDistance: number | undefined;
     for (let lodIndex = 0; lodIndex < levels.length; lodIndex++) {
       const lodName = `r${lodIndex}`;
@@ -230,7 +237,6 @@ export function validateCarDisplay(
         const data = view(entry.bytes);
         const wheel = wheelPrefixes.findIndex((prefix) => name.startsWith(prefix));
         if (wheel >= 0) {
-          usedWheelKinds.add(wheel);
           if (data.getUint8(30) === 0)
             warn(
               `${label}: wheel center is recomputed by the loader; its authored pivot is not fixed.`,
@@ -343,10 +349,8 @@ export function validateCarDisplay(
     if (levels.length === 1) warn("One LOD only; distance-detail authoring is absent.");
     if (allFramesAliased)
       warn("Intact and damaged frame ranges alias; separate damage art is absent.");
-    if (usedWheelKinds.size < 4)
-      warn(
-        "Fewer than four default wheel mappings were found; custom mappings/callbacks are not evaluated.",
-      );
+    // Visual wheels are optional: CarPhysicsConstructorPostDisplayConstructor
+    // derives missing radii from the available pair, or uses 22 with no meshes.
     if (externalTextureReferences)
       warn(
         `${externalTextureReferences} texture/CLUT references lie outside car.bit; external VRAM contents are unverified.`,

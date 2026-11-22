@@ -51,6 +51,7 @@ ffa-policy.patch
 network-ai.patch
 ffa-bots.patch
 prepared-model-pool.patch
+contact-lifetime.patch
 sound-banks.patch
 registry-resource-size.patch
 world-texture.patch

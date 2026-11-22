@@ -111,6 +111,8 @@ static OSWord callback_address(const CarCallbackSpec* spec, const char* name)
     return name ? WebNativeModuleExport(spec->module, name) : 0;
 }
 
+OSWord CarFindNamedFunction(Car* car, char* format);
+
 static int find_callbacks(const Car* car, CarCallbackBinding* output)
 {
     for (u32 i = 0; i < ArrayCount(callback_types); ++i) {
@@ -133,6 +135,19 @@ static int find_callbacks(const Car* car, CarCallbackBinding* output)
             *output = binding;
             return 1;
         }
+    }
+    const SnapshotType* type = WebNativeCarSnapshotType(car);
+    if (type && type->name && *type->name && (car->callback_context != NULL) == (type->size != 0)) {
+        /* Use the same size export as CarPrepareResources, before reading any fields. */
+        const s32* size = (void*)WEB_MODULE("car", CarFindNamedFunction)(
+            (Car*)car, WEB_MODULE("car", CarSizeofFormat));
+        if ((size && *size < 0) || type->size != (size ? (size_t)*size : 0))
+            return 0;
+        *output = (CarCallbackBinding) { .type = type,
+            .process = car->process_callback,
+            .collision = car->collision_callback,
+            .destroy = car->destructor_callback };
+        return 1;
     }
     return 0;
 }

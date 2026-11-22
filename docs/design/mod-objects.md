@@ -23,6 +23,21 @@ Snapshot-capable classes export a matching `SnapshotType` through the module's
 serialize module addresses. Missing or size-mismatched descriptions block snapshots.
 Class registration and resource loading are not replayed by rollback.
 
+Car behavior modules describe their callback context through
+`const SnapshotType* describe(const Car*)`, exported as `__rm4_car_snapshot_type`.
+Return NULL for other cars; identify the complete callback combination, including
+rendering. The descriptor must remain valid while the module is loaded. Its size
+must equal the behavior's `Car<Name>Sizeof` allocation (zero if absent), and its
+name must be nonempty and stable. Describe mutable fields and object references;
+raw module pointers are never snapshot data. Resources are prepared before fields
+are restored; the gameplay constructor is not rerun. The context contributes to
+both snapshots and simulation checksums.
+
+A car collision callback returning `CAR_COLLISION_END_CONTACT` ends the entire
+pair interaction, including the other callback, contact history, impulses and
+ordinary collision damage. Return it immediately if either car was destroyed;
+impulse-suppression flags alone do not protect destroyed objects.
+
 Level teardown discards checkpoints, destroys instances, invokes MR class destructors,
 then releases class tables, interaction pairs and class-to-snapshot bindings. Only
 then are resource registrations removed in reverse load order: cars, world, game.
