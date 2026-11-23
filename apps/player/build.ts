@@ -11,10 +11,18 @@ export type PlayerMode = "release" | "dev" | "diagnostic";
 const root = resolve(import.meta.dir, "../..");
 
 // Bundle the player independently of the CMake and Cargo runtime builds.
-export async function buildPlayer({ mode, site }: { mode: PlayerMode; site: string }) {
+export async function buildPlayer({
+  mode,
+  site,
+  modLibrary = false,
+}: {
+  mode: PlayerMode;
+  site: string;
+  modLibrary?: boolean;
+}) {
   const diagnostic = mode === "diagnostic";
   await mkdir(site, { recursive: true });
-  await buildSite("player", mode, site);
+  await buildSite("player", mode, site, { modLibrary });
   // Remove artifacts from the former handwritten HTML/Bun bundle.
   await rm(join(site, "web.js"), { force: true });
   await rm(join(site, "web.js.map"), { force: true });

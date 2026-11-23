@@ -1,0 +1,142 @@
+--- a/src/modules/menu/car_design.c
++++ b/src/modules/menu/car_design.c
+@@ -4,6 +4,7 @@
+ #include "tm4_scalar.h"
+ 
+ #include "tm4/integer.h"
++#include "tm4/main/cd.h"
+ #include "tm4/main/easteregg.h"
+ #include "tm4/main/game.h"
+ #include "tm4/main/math3d.h"
+@@ -87,6 +88,26 @@
+     return MenuStockCarEntries[MenuFindCarByDirectoryName(name)].boss;
+ }
+ 
++char* MenuCharacterLabel(char* name)
++{
++    if (!name || !*name)
++        return name;
++    RegistryDirectory* entry = GameGetCharacterNameDirectoryPtr(name);
++    char* label = entry ? RegGetFileDataPS(entry, "realname") : NULL;
++    return label ? label : name;
++}
++
++s32 MenuCharacterHasInfo(char* name)
++{
++    RegistryDirectory* entry = GameGetCharacterNameDirectoryPtr(name);
++    const char* filename = entry ? RegGetFileDataPS(entry, MenuFilenameKey) : NULL;
++    char path[64];
++    if (!filename || strlen(filename) >= 12 || MenuIsBossCarName(name))
++        return 0;
++    snprintf(path, sizeof(path), "/DATA/MENU/%s.TIM", filename);
++    return CDFileExists(path);
++}
++
+ s32 MenuGetBossCarCount(void)
+ {
+     return 9;
+@@ -215,7 +236,8 @@
+         MenuDrawRotatingCarPreview(
+             graphics, 0, position->vx, position->vy, 250, MenuPreviewRotationAngle);
+     } else {
+-        MenuDrawChoiceCaption(graphics, MenuGameState.character_names[player], item, 0);
++        MenuDrawChoiceCaption(
++            graphics, MenuCharacterLabel(MenuGameState.character_names[player]), item, 0);
+         MenuDrawRotatingCarPreview(
+             graphics, 0, position->vx, position->vy, 250, MenuPreviewRotationAngle);
+     }
+@@ -391,7 +413,7 @@
+ 
+     } else if (MenuReadPadButtons(MenuPadPort, PADRright, MENU_PAD_PRESSED, 0)) {
+         if (!MenuUsingCreatedCar
+-            && !MenuIsBossCarName(MenuGameState.character_names[MenuCurrentPlayer])) {
++            && MenuCharacterHasInfo(MenuGameState.character_names[MenuCurrentPlayer])) {
+             MenuSetCharacterInfoScreen();
+             MenuSwitchScreen(&MenuScreenTempData, 2);
+             MenuPlayBioTrack();
+@@ -404,7 +426,7 @@
+             if (next && next != &MenuScreenTempName)
+                 next->parent = &MenuScreenAlly;
+             if (!MenuUsingCreatedCar
+-                && !MenuIsBossCarName(MenuGameState.character_names[MenuCurrentPlayer])) {
++                && MenuCharacterHasInfo(MenuGameState.character_names[MenuCurrentPlayer])) {
+                 if (!MenuCurrentScreen->selected)
+                     MenuScreenAlly.choices[index].hints = &MenuChangeWithInfoHints;
+                 else
+@@ -551,7 +573,7 @@
+         }
+     } else if (MenuReadPadButtons(MenuPadPort, PADRright, MENU_PAD_PRESSED, 0)) {
+         if (!MenuUsingCreatedCar
+-            && !MenuIsBossCarName(MenuGameState.character_names[MenuCurrentPlayer])) {
++            && MenuCharacterHasInfo(MenuGameState.character_names[MenuCurrentPlayer])) {
+             MenuSetCharacterInfoScreen();
+             MenuSwitchScreen(&MenuScreenTempData, 2);
+             MenuPlayBioTrack();
+@@ -564,7 +586,7 @@
+             if (next && next != &MenuScreenTempName)
+                 next->parent = &MenuScreenOpponent;
+             if (!MenuUsingCreatedCar
+-                && !MenuIsBossCarName(MenuGameState.character_names[MenuCurrentPlayer])) {
++                && MenuCharacterHasInfo(MenuGameState.character_names[MenuCurrentPlayer])) {
+                 if (!MenuCurrentScreen->selected)
+                     MenuScreenOpponent.choices[index].hints = &MenuChangeWithInfoHints;
+                 else
+--- a/src/modules/menu/garage.c
++++ b/src/modules/menu/garage.c
+@@ -376,19 +376,23 @@
+         MenuPrintTextAtScreenPosition(graphics, MenuPlayerOnePositionKey, MenuTextPlayer1,
+             MenuMediumFont, FONT_PRINT_COLOR | FONT_PRINT_CENTER, 1, 1, 1);
+         MenuPrintTextAtScreenPosition(graphics, MenuPlayerOneNamePositionKey,
+-            MenuSelectedRoster().cars[0].name, MenuSmallFont, FONT_PRINT_COLOR | FONT_PRINT_CENTER,
+-            1, 1, 1);
++            MenuSelectedRoster().cars[0].active ? MenuSelectedRoster().cars[0].name
++                                              : MenuCharacterLabel(MenuSelectedRoster().cars[0].name),
++            MenuSmallFont, FONT_PRINT_COLOR | FONT_PRINT_CENTER, 1, 1, 1);
++        CarSelection* second_car = &MenuSelectedRoster().cars[1];
++        char* second_name
++            = second_car->active ? second_car->name : MenuCharacterLabel(second_car->name);
+         if (MenuSelectedRoster().player_count >= 2) {
+             MenuPrintTextAtScreenPosition(graphics, MenuPlayerTwoPositionKey, MenuTextPlayer2,
+                 MenuMediumFont, FONT_PRINT_COLOR | FONT_PRINT_CENTER, 1, 1, 1);
+             MenuPrintTextAtScreenPosition(graphics, MenuPlayerTwoNamePositionKey,
+-                MenuSelectedRoster().cars[1].name, MenuSmallFont,
++                second_name, MenuSmallFont,
+                 FONT_PRINT_COLOR | FONT_PRINT_CENTER, 1, 1, 1);
+         } else if (MenuSelectedRoster().ally_count > 0) {
+             MenuPrintTextAtScreenPosition(graphics, MenuPlayerTwoPositionKey, MenuTextAlly,
+                 MenuMediumFont, FONT_PRINT_COLOR | FONT_PRINT_CENTER, 1, 1, 1);
+             MenuPrintTextAtScreenPosition(graphics, MenuPlayerTwoNamePositionKey,
+-                MenuSelectedRoster().cars[1].name, MenuSmallFont,
++                second_name, MenuSmallFont,
+                 FONT_PRINT_COLOR | FONT_PRINT_CENTER, 1, 1, 1);
+         }
+     } else if (!MenuCardUnformatted && !MenuNoMemoryCard
+@@ -627,7 +631,7 @@
+         MenuSwitchScreen(&MenuScreenPlayerSettings, 2);
+     else if (MenuReadPadButtons(MenuPadPort, PADRright, MENU_PAD_PRESSED, 0)) {
+         if (!MenuUsingCreatedCar
+-            && !MenuIsBossCarName(MenuGameState.character_names[MenuCurrentPlayer])) {
++            && MenuCharacterHasInfo(MenuGameState.character_names[MenuCurrentPlayer])) {
+             MenuSetCharacterInfoScreen();
+             MenuSwitchScreen(&MenuScreenTempData, 2);
+             MenuPlayBioTrack();
+@@ -639,7 +643,7 @@
+             if (next && next != &MenuScreenTempName)
+                 next->parent = &MenuScreenPlayerCar;
+             if (!MenuUsingCreatedCar
+-                && !MenuIsBossCarName(MenuGameState.character_names[MenuCurrentPlayer])) {
++                && MenuCharacterHasInfo(MenuGameState.character_names[MenuCurrentPlayer])) {
+                 if (!MenuCurrentScreen->selected)
+                     MenuScreenPlayerCar.choices[index].hints = &MenuChangeWithConfigAndInfoHints;
+                 else
+--- a/src/modules/menu/private.h
++++ b/src/modules/menu/private.h
+@@ -674,6 +674,8 @@
+ void MenuDrawCurrentPlayerCarChoice(MenuGraphics* graphics, s32 a, s32 b, s32 item);
+ void MenuProcessPlayerCarChooseCarChoice(void);
+ void MenuDrawPlayerCarChooseCarChoice(MenuGraphics* graphics, s32 a, s32 b, s32 item);
++char* MenuCharacterLabel(char* name);
++s32 MenuCharacterHasInfo(char* name);
+ void MenuSetCharacterInfoScreen(void);
+ void MenuPlayBioTrack(void);
+ void MenuProcessAllyScreen(void);

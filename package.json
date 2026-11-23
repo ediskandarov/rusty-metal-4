@@ -19,7 +19,6 @@
     "test:player": "bun tests/browser/check_player_ui.mjs",
     "test:pages": "bun tests/browser/check_pages.mjs",
     "test:server": "bun tests/browser/check_server.mjs",
-    "build:mod": "bun tools/mods/build.ts",
     "build:simulation": "bun tools/headless/build.ts",
     "test:simulation:record": "bun tools/headless/record-browser.mjs",
     "test:simulation": "bun tools/headless/test.ts",
@@ -53,6 +52,7 @@
     "@types/ws": "8.18.1",
     "astro": "7.4.11",
     "coi-serviceworker": "0.1.7",
+    "fflate": "0.8.3",
     "miniflare": "5.20261110.1-beta",
     "playwright": "1.56.1",
     "prettier": "3.10.1",
@@ -66,6 +66,7 @@
     "packages/*"
   ],
   "dependencies": {
+    "@tm4/mods": "workspace:*",
     "@tm4/game-runtime": "workspace:*",
     "@tm4/resources": "workspace:*",
     "@tm4/rooms-client": "workspace:*",

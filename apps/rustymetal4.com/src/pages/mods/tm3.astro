@@ -1,0 +1,43 @@
+---
+import Page from "../../layouts/Page.astro";
+---
+
+<Page title="TM3 mod">
+  <p>
+    <a href="/mods/">← Mods</a>
+  </p>
+  <h1>TM3</h1>
+  <section aria-labelledby="build-title">
+    <h2 id="build-title">Build from discs</h2>
+    <p>
+      Choose folders containing TM3 (USA, v1.1) and TM4 disc images. The browser builds and enables
+      the mod locally.
+    </p>
+    <form id="tm3-build">
+      <label for="tm3-disc">
+        TM3 disc folder
+        <input id="tm3-disc" type="file" webkitdirectory multiple required />
+      </label>
+      <label for="tm4-disc">
+        TM4 disc folder
+        <input id="tm4-disc" type="file" webkitdirectory multiple required />
+      </label>
+      <button id="build-mod" type="submit" disabled>
+        Build and enable
+      </button>
+      <button id="cancel-build" class="button-secondary" type="button" hidden>
+        Cancel
+      </button>
+    </form>
+    <p id="mod-build-status" role="status">
+      Checking converter availability…
+    </p>
+    <p id="mod-build-error" class="error" role="alert" hidden></p>
+    <a id="mod-play" href="/play/" hidden>
+      Play with TM3
+    </a>
+  </section>
+</Page>
+<script>
+  import "../../tm3-installer.ts";
+</script>

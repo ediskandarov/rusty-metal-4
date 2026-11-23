@@ -1,0 +1,21 @@
+{
+  "name": "@tm4/mods",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/package.ts",
+    "./assembly": "./src/assembly.ts",
+    "./library": "./src/library.ts",
+    "./recipe": "./src/recipe.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tm4/mr-preparation": "workspace:*",
+    "@tm4/resources": "workspace:*",
+    "fflate": "0.8.3",
+    "zod": "4.6.7",
+    "zustand": "5.1.0"
+  }
+}

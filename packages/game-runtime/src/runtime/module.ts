@@ -41,6 +41,7 @@ export interface GameModule extends GameExports {
     mkdirTree(path: string): void;
     writeFile(path: string, data: Uint8Array<ArrayBuffer>, options?: { canOwn: boolean }): void;
   };
+  _WebRequireModuleApproval?(this: void): void;
   callMain(args?: string[]): void;
 }
 
@@ -48,6 +49,7 @@ export interface ModuleOptions {
   canvas: HTMLCanvasElement;
   tm4ResourceMods?: number;
   tm4LocalCheckpoint?: boolean;
+  tm4ApproveModule?(name: string, bytes: Uint8Array): boolean;
   onCapturedFrame?(this: void, width: number, height: number, rgb: Uint8Array): void;
   noInitialRun: boolean;
   print(text: string): void;

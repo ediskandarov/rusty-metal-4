@@ -11,6 +11,7 @@ export async function buildSite(
   app: "player" | "server" | "rustymetal4.com",
   mode: "release" | "dev" | "diagnostic",
   site: string,
+  { modLibrary = false } = {},
 ) {
   await buildPreparation();
   const commit = (await $`git rev-parse HEAD`.cwd(root).text()).trim();
@@ -25,6 +26,8 @@ export async function buildSite(
     vite: {
       define: {
         TM4_DEV: JSON.stringify(mode !== "release"),
+        TM4_MOD_LIBRARY: JSON.stringify(modLibrary),
+        "import.meta.env.PUBLIC_MOD_LIBRARY": JSON.stringify(modLibrary),
         "import.meta.env.PUBLIC_BUILD_COMMIT": JSON.stringify(commit),
       },
       build: { target: "esnext", sourcemap: mode === "diagnostic", minify: mode !== "diagnostic" },

@@ -218,6 +218,29 @@ to compare accepted live inputs and all subsystem digests in Node.
 Combat placement and obstacle recovery are controlled simulation fixtures; navigation,
 weapon choice and driving still execute through the original C AI.
 
+## TM3 mod installer
+
+Build the browser converter in the [TM3 mod repository](https://github.com/ediskandarov/rusty-metal-4-tm3-mod)
+against the player build you intend to serve. The converter release contains JavaScript,
+precompiled behavior modules and a file manifest. It can be built without either game disc.
+
+In this repository, set `TM4_TM3_CONVERTER` to the generated release directory for
+`bun run dev:rustymetal4.com`, `bun run build:rustymetal4.com` or `bun run deploy`.
+Publishing requires the converter directory so an ordinary deployment cannot drop the installer.
+The site checks all release hashes and the exact runtime ID before writing the pin.
+Keep the release directory to reuse it when rebuilding the site against the same runtime.
+A changed runtime ID requires a converter release built against that runtime.
+
+Open `/mods/tm3/` in the preview. The converter reads both selected disc folders
+in a browser worker. The installed package stays in that browser's mod library.
+Play Disk subsequently needs only the base disc. The browser loader checks executable
+modules against the engine and pinned converter releases before linking them.
+
+To verify the flow against a built site, set `TM3_DISC` and `TM4_DISC` to local disc
+folders and run `bun tests/browser/check_tm3_install.mjs`. For the save-and-load
+check, build the site and converter against the diagnostic runtime and set
+`TM4_MOD_TEST_SAVES=1`.
+
 ## 200 Challenge hosting
 
 `main` owns the `/200-challenge` page, trusted leaderboard and delivery of an already

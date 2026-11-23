@@ -1,5 +1,13 @@
 {
   "extends": ["../../tsconfig.base.json", "astro/tsconfigs/strict"],
   "compilerOptions": { "lib": ["ESNext", "DOM", "DOM.Iterable"], "types": [], "allowJs": false },
-  "include": ["src/client.ts", "src/protocol.ts", "src/**/*.astro", ".astro/types.d.ts"]
+  "include": [
+    "src/client.ts",
+    "src/env.d.ts",
+    "src/mod-library.ts",
+    "src/mod-converter.worker.ts",
+    "src/tm3-installer.ts",
+    "src/**/*.astro",
+    ".astro/types.d.ts"
+  ]
 }

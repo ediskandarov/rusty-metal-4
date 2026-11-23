@@ -1,0 +1,31 @@
+---
+import Page from "../../layouts/Page.astro";
+---
+
+<Page title="Mods">
+  <h1>Mods</h1>
+  <section aria-labelledby="catalog-title">
+    <h2 id="catalog-title">Discover</h2>
+    <h3>
+      <a href="/mods/tm3/">TM3</a>
+    </h3>
+    <p>Build a pack of cars and maps from your TM3 and TM4 discs.</p>
+    <a class="button" href="/mods/tm3/">
+      Build from discs
+    </a>
+  </section>
+  <section aria-labelledby="library-title">
+    <h2 id="library-title">Installed mods</h2>
+    <label for="mod-import">
+      Import a .tm4mod package
+      <input id="mod-import" type="file" accept=".tm4mod" disabled />
+    </label>
+    <p id="mod-library-status" role="status"></p>
+    <p id="mod-library-error" class="error" role="alert" hidden></p>
+    <div id="mod-library"></div>
+    <a href="/play/">Play Disk</a>
+  </section>
+</Page>
+<script>
+  import "../../mod-library.ts";
+</script>

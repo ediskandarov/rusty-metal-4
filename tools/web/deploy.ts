@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 
 import { $ } from "bun";
 
-import { runCli } from "../cli.js";
+import { runCli, UsageError } from "../cli.js";
 import { root } from "../common.js";
 
 await runCli(async () => {
@@ -20,6 +20,8 @@ await runCli(async () => {
     console.log("bun run deploy:prepare — build and check the release without publishing");
     console.log("bun run deploy — build, check and publish rustymetal4.com");
   } else {
+    if (!values["prepare-only"] && !process.env.TM4_TM3_CONVERTER)
+      throw new UsageError("Set TM4_TM3_CONVERTER to the TM3 converter release before publishing.");
     if (!values["prepare-only"]) await $`docker info > /dev/null`;
     await $`bun run build`.cwd(root);
     await $`bun run test:pages`.cwd(root);

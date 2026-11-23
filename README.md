@@ -12,6 +12,9 @@ layout and development commands.
 The [mod effects overview](docs/design/mod-effects.md) links implemented map contracts
 and separates them from the proposed car presentation interfaces.
 
+The [mod library design](docs/design/mod-library.md) proposes discovery, local
+installation from discs and exact content requirements for solo and network sessions.
+
 ## License
 
 Original code written for this port, including its web interface and tooling,

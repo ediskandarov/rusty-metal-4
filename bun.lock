@@ -8,6 +8,7 @@
         "@tm4/dev-server-client": "workspace:*",
         "@tm4/game-runtime": "workspace:*",
         "@tm4/lightyear-client": "workspace:*",
+        "@tm4/mods": "workspace:*",
         "@tm4/mr-preparation": "workspace:*",
         "@tm4/resources": "workspace:*",
         "@tm4/room-player-protocol": "workspace:*",
@@ -21,6 +22,7 @@
         "@types/ws": "8.18.1",
         "astro": "7.4.11",
         "coi-serviceworker": "0.1.7",
+        "fflate": "0.8.3",
         "miniflare": "5.20261110.1-beta",
         "playwright": "1.56.1",
         "prettier": "3.10.1",
@@ -34,6 +36,8 @@
       "name": "@tm4/player",
       "dependencies": {
         "@tm4/game-runtime": "workspace:*",
+        "@tm4/mods": "workspace:*",
+        "@tm4/mr-preparation": "workspace:*",
         "@tm4/resources": "workspace:*",
         "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
@@ -45,6 +49,7 @@
       "name": "@tm4/rustymetal4.com",
       "dependencies": {
         "@tm4/lightyear-client": "workspace:*",
+        "@tm4/mods": "workspace:*",
         "@tm4/mr-preparation": "workspace:*",
         "@tm4/room-player-protocol": "workspace:*",
         "@tm4/rooms-client": "workspace:*",
@@ -78,6 +83,16 @@
       "name": "@tm4/lightyear-client",
       "dependencies": {
         "zod": "4.6.7",
+      },
+    },
+    "packages/mods": {
+      "name": "@tm4/mods",
+      "dependencies": {
+        "@tm4/mr-preparation": "workspace:*",
+        "@tm4/resources": "workspace:*",
+        "fflate": "0.8.3",
+        "zod": "4.6.7",
+        "zustand": "5.1.0",
       },
     },
     "packages/mr-preparation": {
@@ -425,6 +440,8 @@
     "@tm4/game-runtime": ["@tm4/game-runtime@workspace:packages/game-runtime"],
 
     "@tm4/lightyear-client": ["@tm4/lightyear-client@workspace:packages/lightyear-client"],
+
+    "@tm4/mods": ["@tm4/mods@workspace:packages/mods"],
 
     "@tm4/mr-preparation": ["@tm4/mr-preparation@workspace:packages/mr-preparation"],
 

@@ -46,6 +46,12 @@ typedef struct NativeModule {
 } NativeModule;
 static NativeModule* modules;
 
+#ifndef TM4_STANDALONE
+static int require_module_approval;
+
+EMSCRIPTEN_KEEPALIVE void WebRequireModuleApproval(void) { require_module_approval = 1; }
+#endif
+
 #ifdef TM4_STANDALONE
 __attribute__((import_module("env"), import_name("rm4_validate_module"))) extern void
 validate_module(const char* path, const void* bytes, unsigned size);
@@ -146,6 +152,13 @@ static s32 install_module(char* path, s32 type, s32 size, void* data, char* regi
         abort();
     }
     if (!module) {
+#ifndef TM4_STANDALONE
+        if (require_module_approval
+            && !EM_ASM_INT({
+                   return Module.tm4ApproveModule?.(UTF8ToString($0), HEAPU8.subarray($1, $1 + $2));
+               }, image, data, size))
+            abort();
+#endif
         module = calloc(1, sizeof(*module));
         if (!module)
             abort();

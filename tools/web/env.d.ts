@@ -8,4 +8,5 @@ declare namespace astroHTML.JSX {
 
 interface ImportMetaEnv {
   readonly PUBLIC_BUILD_COMMIT: string;
+  readonly PUBLIC_MOD_LIBRARY: boolean;
 }

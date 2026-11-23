@@ -7,6 +7,8 @@
     "typecheck": "bun --bun astro check"
   },
   "dependencies": {
+    "@tm4/mods": "workspace:*",
+    "@tm4/mr-preparation": "workspace:*",
     "@tm4/game-runtime": "workspace:*",
     "@tm4/resources": "workspace:*",
     "@tm4/room-player-protocol": "workspace:*",

@@ -8,7 +8,6 @@ From the repository root:
 
 ```sh
 python3 mods/evelyn/tools/build.py
-bun run build:mod mods/evelyn/mod.json build/mods/evelyn.tm4mod
 ```
 
 Drop the package on the website or select it under **Mods** before starting the game. A package with the same ID replaces the saved version. Restart the game to apply changes during a session.
@@ -54,4 +53,4 @@ Version 2 requires these car resources.
 | `engineSample` | One looping mono PS1 ADPCM sample. The loader builds the engine sound bank and gives it a session name derived from the mod ID. |
 | `info.tim` | Required authored 320×240, 16-bit direct-color TIM. The game displays it from the standard Car Selection Info button. |
 
-Version 2 cars share the game's common systems. Their Info screen shows the authored page without a disc narration track. Version 1 packages with a `base` field continue to load with inherited car resources. Both versions are limited to 4 MiB per package and 16 installed cars per session. The accepted fields, types and bounds are in [the package validator](../../packages/resources/src/mods/package.ts) and [the independent car resource validator](../../packages/resources/src/mods/independent-car.ts).
+The Evelyn source and generated MR are kept here. A release for the new mod library has not been packaged.
