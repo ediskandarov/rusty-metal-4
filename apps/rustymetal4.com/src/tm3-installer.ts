@@ -1,4 +1,4 @@
-import { installMod } from "@tm4/mods/library";
+import { createModLibraryStore, installMod, sessionReleases } from "@tm4/mods/library";
 import { type ConverterReply, type ConverterRequest, loadTm3Converter } from "@tm4/mods/recipe";
 
 const form = document.querySelector<HTMLFormElement>("#tm3-build")!;
@@ -9,6 +9,27 @@ const cancel = document.querySelector<HTMLButtonElement>("#cancel-build")!;
 const status = document.querySelector<HTMLElement>("#mod-build-status")!;
 const error = document.querySelector<HTMLElement>("#mod-build-error")!;
 const play = document.querySelector<HTMLAnchorElement>("#mod-play")!;
+
+const challenge = document.querySelector<HTMLAnchorElement>("#tm3-challenge")!;
+const installed = document.querySelector<HTMLElement>("#tm3-installed-status")!;
+const libraryStore = createModLibraryStore();
+
+function showInstallation({ library, error }: ReturnType<typeof libraryStore.getState>) {
+  const enabled = sessionReleases(library).find(({ manifest }) => manifest.id === "tm3");
+  const release = enabled ?? library.releases.find(({ manifest }) => manifest.id === "tm3");
+  installed.textContent =
+    error ||
+    (release
+      ? `TM3 ${release.manifest.version} is installed and ${enabled ? "enabled" : "disabled"}.`
+      : "");
+  installed.hidden = !installed.textContent;
+  play.hidden = challenge.hidden = !enabled;
+}
+libraryStore.subscribe(showInstallation);
+showInstallation(libraryStore.getState());
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) void libraryStore.refresh();
+});
 
 let available: Pick<ConverterRequest, "converter" | "runtime" | "version"> | undefined;
 let active: Worker | undefined;
@@ -35,7 +56,7 @@ form.onsubmit = (event) => {
   active = worker;
   modDisc.disabled = baseDisc.disabled = build.disabled = true;
   cancel.hidden = false;
-  error.hidden = play.hidden = true;
+  error.hidden = true;
   status.textContent = "Starting converter…";
   worker.onerror = () => {
     if (active === worker) finish("", "The converter stopped unexpectedly.");
@@ -52,8 +73,8 @@ form.onsubmit = (event) => {
       void installMod(new Blob([data.bytes]), true)
         .then(() => {
           modDisc.value = baseDisc.value = "";
-          finish("TM3 installed and enabled.");
-          play.hidden = false;
+          finish();
+          void libraryStore.refresh();
           void navigator.storage?.persist().catch(() => undefined);
         })
         .catch((error: unknown) =>

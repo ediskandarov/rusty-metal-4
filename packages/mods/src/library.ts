@@ -187,6 +187,7 @@ export function createModLibraryStore() {
   libraryChanges()?.addEventListener("message", () => void refresh());
   void refresh().finally(() => store.setState({ busy: false }));
   return Object.assign(store, {
+    refresh,
     async run(action: () => Promise<unknown>) {
       if (store.getState().busy) return;
       store.setState({ busy: true, error: "" });

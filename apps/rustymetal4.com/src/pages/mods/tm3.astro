@@ -7,6 +7,9 @@ import Page from "../../layouts/Page.astro";
     <a href="/mods/">← Mods</a>
   </p>
   <h1>TM3</h1>
+  <p id="tm3-installed-status" role="status" hidden></p>
+  <a id="mod-play" href="/play/" hidden>Play with TM3</a>
+  <a id="tm3-challenge" href="/200-challenge/" hidden>Play 200 Challenge</a>
   <section aria-labelledby="build-title">
     <h2 id="build-title">Build from discs</h2>
     <p>
@@ -33,9 +36,6 @@ import Page from "../../layouts/Page.astro";
       Checking converter availability…
     </p>
     <p id="mod-build-error" class="error" role="alert" hidden></p>
-    <a id="mod-play" href="/play/" hidden>
-      Play with TM3
-    </a>
   </section>
 </Page>
 <script>

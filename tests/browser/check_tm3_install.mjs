@@ -66,18 +66,32 @@ try {
     timeout: 120_000,
   });
   assert.equal(await page.locator("#mod-build-error").textContent(), "");
-  assert.equal(await page.locator("#mod-build-status").textContent(), "TM3 installed and enabled.");
+  await page.reload();
+  await page.getByRole("link", { name: "Play 200 Challenge" }).waitFor();
+  assert.match(
+    await page.locator("#tm3-installed-status").innerText(),
+    /TM3 .* is installed and enabled/,
+  );
 
   // An already open library must observe the installation in the other tab.
+  const challenge = await context.newPage();
+  await challenge.goto(new URL("200-challenge/", server.url).href);
+  const tm3 = challenge.locator("#challenge-tm3");
+  await tm3.getByText("TM3 enabled · 16 cars and 10 arenas.").waitFor();
   await library.bringToFront();
   await library.getByRole("button", { name: "Disable" }).waitFor();
   await library.reload();
   await library.getByRole("button", { name: "Disable" }).waitFor();
   assert.match(await library.locator("#mod-library").textContent(), /TM3.*Enabled/s);
   await library.getByRole("button", { name: "Disable" }).click();
+  await tm3.getByRole("link", { name: "Enable TM3" }).waitFor();
+  await page.locator("#mod-play").waitFor({ state: "hidden" });
+  assert.match(await page.locator("#tm3-installed-status").innerText(), /installed and disabled/);
   await library.getByRole("button", { name: "Enable", exact: true }).click();
   await library.getByRole("button", { name: "Disable" }).waitFor();
 
+  await tm3.getByText("TM3 enabled · 16 cars and 10 arenas.").waitFor();
+  await challenge.close();
   await page.bringToFront();
   let buildRequests = 0;
   page.on("request", (request) => {
