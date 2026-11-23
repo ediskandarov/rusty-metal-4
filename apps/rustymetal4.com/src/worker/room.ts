@@ -168,10 +168,15 @@ export class Room extends DurableObject<Env> {
     await this.publish();
   }
 
-  private server(path: string, init?: RequestInit): Promise<Response> {
+  private matchServer(matchId: string) {
     const state = this.state!;
-    const match = state.match!;
-    return this.env.SERVER.getByName(state.id + ":" + match.id).fetch(
+    return this.env.SERVER.getByName(state.id + ":" + matchId, {
+      locationHint: state.preferredRegion,
+    });
+  }
+
+  private server(path: string, init?: RequestInit): Promise<Response> {
+    return this.matchServer(this.state!.match!.id).fetch(
       new Request("https://server" + path, {
         ...init,
         signal:
@@ -387,9 +392,7 @@ export class Room extends DurableObject<Env> {
         (!state.journal || id !== state.journal.matchId || state.journal.expiresAt <= Date.now())
       )
         throw new RoomError(404, "This match journal is no longer available.");
-      const response = await this.env.SERVER.getByName(state.id + ":" + id).fetch(
-        "https://server/_server/journal",
-      );
+      const response = await this.matchServer(id!).fetch("https://server/_server/journal");
       if (!response.ok) {
         await response.body?.cancel();
         throw new RoomError(

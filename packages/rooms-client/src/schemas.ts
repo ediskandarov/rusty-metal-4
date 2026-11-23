@@ -109,7 +109,23 @@ export const roomResultSchema = z.object({
     .max(8),
 });
 export type RoomResult = z.infer<typeof roomResultSchema>;
+export const roomRegionLabels = {
+  weur: "Western Europe",
+  eeur: "Eastern Europe",
+  enam: "Eastern North America",
+  wnam: "Western North America",
+  sam: "South America",
+  apac: "Asia Pacific",
+  "apac-ne": "Asia Pacific Northeast",
+  "apac-se": "Asia Pacific Southeast",
+  oc: "Oceania",
+  me: "Middle East",
+  afr: "Africa",
+} as const;
+export type RoomRegion = keyof typeof roomRegionLabels;
+export const roomRegionSchema = z.enum(Object.keys(roomRegionLabels) as RoomRegion[]);
 export const roomSnapshotSchema = roomSummarySchema.extend({
+  preferredRegion: roomRegionSchema.optional(),
   version: count,
   hostId: z.string().uuid().nullable(),
   you: z.string().uuid().nullable(),
@@ -147,6 +163,7 @@ export const catalogSchema = z.object({
   modes: z.array(z.object({ id: z.string(), label: z.string() })),
 });
 export const createRoomSchema = z.object({
+  preferredRegion: roomRegionSchema.optional(),
   name: text(48),
   playerName: text(24),
   requestId: z.string().regex(/^\d{13}\.[a-f0-9-]{36}$/),

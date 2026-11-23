@@ -5,7 +5,7 @@ import pinnedChallenge from "../../../../config/challenge-release.json";
 import { frontend, isolated } from "../assets.ts";
 import { challengeVersion, releasePath } from "../challenge.ts";
 import { digest, failure, json, readJson } from "../http.ts";
-import { object, RoomError, text } from "../room-state.ts";
+import { object, preferredRegion, RoomError, text } from "../room-state.ts";
 import type { ChallengeLeaderboard } from "./challenge.ts";
 import type { RoomDirectory } from "./directory.ts";
 import type { Room } from "./room.ts";
@@ -163,9 +163,11 @@ export default {
       }
       let id: string;
       let path: string;
+      let locationHint: DurableObjectLocationHint | undefined;
       let body: string | ReadableStream<Uint8Array> | null | undefined;
       if (url.pathname === "/api/rooms" && request.method === "POST") {
         const input = object(await readJson(request));
+        locationHint = preferredRegion(input.preferredRegion);
         text(input.name, "Room name", 48);
         text(input.playerName, "Player name", 24);
         if (typeof input.requestId !== "string" || !/^\d{13}\.[a-f0-9-]{36}$/.test(input.requestId))
@@ -195,7 +197,7 @@ export default {
       headers.delete("cookie");
       headers.set("x-room-session", key);
       headers.set("x-room-id", id);
-      return await env.ROOMS.getByName(id).fetch(
+      return await env.ROOMS.getByName(id, { locationHint }).fetch(
         new Request(`https://room${path}`, {
           method: request.method,
           headers,

@@ -1,4 +1,5 @@
 ---
+import { roomRegionLabels } from "@tm4/rooms-client/schemas";
 import Page from "../layouts/Page.astro";
 import { Content as Intro } from "../content/intro.md";
 import { Content as RoomHelp } from "../content/rooms.md";
@@ -71,6 +72,15 @@ import { Content as RoomHelp } from "../content/rooms.md";
       <label for="create-name">
         Room name
         <input id="create-name" name="name" maxlength="48" required />
+      </label>
+      <label for="create-region">
+        Preferred server region
+        <select id="create-region" name="preferredRegion">
+          <option value="">Automatic</option>
+          {Object.entries(roomRegionLabels).map(([value, label]) => (
+            <option value={value}>{label}</option>
+          ))}
+        </select>
       </label>
       <p id="create-error" class="error" role="alert" hidden></p>
       <button type="submit">Create room</button>

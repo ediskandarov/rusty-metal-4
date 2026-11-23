@@ -25,7 +25,9 @@ try {
   await a.locator("#create-player").fill("Ada");
   await a.locator("#create-name").fill("Night shift");
   assert.equal(await a.locator("#create-form input").count(), 2);
-  assert.equal(await a.locator("#create-form select").count(), 0);
+  const region = a.getByLabel("Preferred server region");
+  assert.equal(await region.inputValue(), "");
+  await region.selectOption("weur");
   const creationRequest = a.waitForRequest(
     (request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/rooms",
   );
@@ -33,10 +35,12 @@ try {
   assert.deepEqual(Object.keys((await creationRequest).postDataJSON()).sort(), [
     "name",
     "playerName",
+    "preferredRegion",
     "requestId",
   ]);
   await a.waitForURL(/\/rooms\/[a-f0-9]{32}$/);
   await a.locator("#settings-panel").waitFor();
+  await a.locator("#server-region").filter({ hasText: "Requested · Western Europe" }).waitFor();
   await a.getByText("Ada (you)", { exact: true }).waitFor();
   assert.deepEqual(
     await a

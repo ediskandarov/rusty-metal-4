@@ -4,6 +4,8 @@ import {
   modeLabel,
   roomBots,
   roomHumanLimit,
+  roomRegionLabels,
+  roomRegionSchema,
   roomSettingsSchema,
   type RoomSummary,
 } from "@tm4/rooms-client/schemas";
@@ -139,7 +141,9 @@ async function directory(): Promise<void> {
       /* Optional retry persistence. */
     }
     try {
+      const region = element<HTMLSelectElement>("create-region").value;
       const room = await rooms.create({
+        preferredRegion: region ? roomRegionSchema.parse(region) : undefined,
         name: element<HTMLInputElement>("create-name").value,
         playerName: rememberName(form),
         requestId,
@@ -203,9 +207,13 @@ async function room(): Promise<void> {
     document.title = `${room.name} · Rusty Metal 4`;
     element("room-mode").textContent = modeLabel(room.modeId);
     element("room-map").textContent = room.match?.world ?? mapLabel(room.mapId);
-    element("server-region").textContent = room.match
+    element("server-region").textContent = room.match?.location
       ? serverLocationLabel(room.match.location)
-      : "Not allocated";
+      : room.preferredRegion
+        ? `Requested · ${roomRegionLabels[room.preferredRegion]}`
+        : room.match
+          ? "Unknown"
+          : "Not allocated";
     element("room-capacity").textContent =
       `${room.participants.length} / ${roomHumanLimit(room)} humans · ${roomBots(room).length} bots`;
     element("member-count").textContent = String(room.participantCount);

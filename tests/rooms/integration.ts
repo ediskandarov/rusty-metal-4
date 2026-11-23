@@ -11,6 +11,7 @@ const sockets: { close(): void }[] = [];
 const options = {
   name: "Integration crew",
   playerName: "Host",
+  preferredRegion: "enam",
   requestId: `${Date.now()}.${crypto.randomUUID()}`,
 };
 function browser() {
@@ -44,6 +45,7 @@ try {
   assert(a.cookie.length > 60);
   assert.equal((await a.request("rooms", options, { Origin: "https://other.test" })).status, 403);
   assert.equal((await a.request("rooms", { ...options, name: "" })).status, 400);
+  assert.equal((await a.request("rooms", { ...options, preferredRegion: "moon" })).status, 400);
   const [first, retry] = await Promise.all([
     a.request("rooms", options),
     a.request("rooms", options),
@@ -56,6 +58,7 @@ try {
     initial.id,
     "creation retry is idempotent",
   );
+  assert.equal(initial.preferredRegion, "enam");
   assert.equal(initial.modeId, "ffa");
   assert.equal(initial.mapId, "construction-yard");
   assert.equal(initial.capacity, 8);

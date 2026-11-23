@@ -9,6 +9,8 @@ import {
   roomBots,
   roomHumanLimit,
   roomModeCapacity,
+  type RoomRegion,
+  roomRegionSchema,
   type RoomResult,
   roomResultSchema,
   type RoomSettings,
@@ -51,6 +53,11 @@ export function text(value: unknown, label: string, max: number): string {
   )
     throw new RoomError(400, `${label} must contain 1–${max} printable characters.`);
   return trimmed;
+}
+export function preferredRegion(value: unknown): RoomRegion | undefined {
+  const parsed = roomRegionSchema.optional().safeParse(value);
+  if (!parsed.success) throw new RoomError(400, "Choose a supported server region.");
+  return parsed.data;
 }
 export function settings(value: unknown): RoomSettings {
   const input = object(value);
@@ -99,6 +106,7 @@ export interface Member {
   disconnectedUntil: number | null;
 }
 export interface RoomState {
+  preferredRegion?: RoomRegion;
   id: string;
   match: RoomMatch | null;
   result?: RoomResult;
@@ -128,6 +136,7 @@ export function createState(id: string, key: string, value: unknown, now: number
   };
   return {
     id,
+    preferredRegion: preferredRegion(input.preferredRegion),
     creatorKey: key,
     match: null,
     notice: "",
@@ -261,6 +270,7 @@ export function summary(state: RoomState): RoomSummary {
 export function snapshot(state: RoomState, key: string): RoomSnapshot {
   return {
     ...summary(state),
+    preferredRegion: state.preferredRegion,
     version: state.version,
     hostId: state.hostId,
     you: memberFor(state, key)?.id ?? null,
