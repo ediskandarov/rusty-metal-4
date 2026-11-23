@@ -1,6 +1,6 @@
 # Network implementation audit
 
-Updated 2026-11-13 for the experimental networking implementation.
+Updated 2026-11-23 for the experimental networking implementation.
 The [v0.1 requirements](network-requirements-v0.1.md) remain the acceptance contract;
 this page records actual coverage and limitations, not revised requirements.
 
@@ -10,9 +10,9 @@ C owns gameplay, including physics, weapons and scoring. The Rust server embeds
 Wasmtime 47.0.1 and runs that same wasm32 C simulation as a WASI reactor. Lightyear
 selects accepted inputs and advances it synchronously on its 30 Hz timeline. There
 is no server browser, JavaScript runtime, Python host, or simulation subprocess.
-Clients agree on a start tick before prediction begins. A delay over 250 ms
-fails the session explicitly. After initial readiness, clients cannot gate the
-authority.
+Clients agree on a start tick before prediction begins. An authority scheduling
+overrun over 250 ms fails the session explicitly; this is not an RTT limit. After
+initial readiness, clients cannot gate the authority.
 
 Both browser and server run Lightyear 0.30.1 / Bevy 0.19. The browser Rust/Wasm module
 is separate from Emscripten. wasm-bindgen copies owned strings at the JS boundary;
@@ -197,8 +197,11 @@ forwards the checkpoint in acknowledged 8 KiB chunks. An attempt allows up to
 bounded block waits until its frontier exists, avoiding serial partial-block
 round trips. Resume preparation installs Lightyear's prediction manager with
 rollback disabled so accepted native input is retained instead of drained.
-The existing `PredictionWindowWait` also bounds this phase against the actual
-input frontier; C prediction and checkpoint history remain inactive.
+Once all human input streams have an authoritative frontier, the existing
+`PredictionWindowWait` bounds this phase against it. Before those streams arrive,
+clock synchronization remains free to advance: no C prediction or checkpoint
+history exists yet. A whole-tick shift after accepted history arrives abandons the
+transfer and requests a fresh snapshot rather than reusing retimed input rows.
 
 If an offer arrives beyond the 12-tick rollback window, the client may retarget
 at most twice using the current native timeline. Catch-up extends from the
@@ -271,11 +274,30 @@ after confirmation. Audible voices keep a stable emitter/attribute identity.
 Corrected one-shots still alive at the new head may play once if they were
 unheard. Effects that begin and end entirely during replay are skipped.
 
-Lightyear can adjust its clock speed during play. At the 12-tick accepted-input
-boundary it pauses the fixed clock and resumes when two ticks of headroom
-return. This covers temporary gaps and startup clock lead. A whole-tick clock
-resync, excess confirmation backlog, or unsupported gameplay state closes that
-client session. The authority and other clients keep running.
+Lightyear owns clock pacing. The `SyncConfig` keeps the existing 48-tick
+resynchronization threshold and scales its speedup factor to preserve the default
+correction per tick of error. Raising the threshold alone had weakened that
+correction by 4.8 times. Its native
+`InputDelayConfig` uses a minimum of zero, up to three ticks of input delay before
+prediction, and a maximum prediction budget of 12 ticks. At 250 ms RTT the current
+policy delays local input by three ticks (100 ms at 30 Hz), leaving more room for
+jitter in the C checkpoint history. Lightyear 0.30.1 recalculates input delay when
+configuring or resynchronizing the timeline, not on every RTT update. The policy
+can add more input delay at higher RTT; it does not promise a zero-delay response
+on low-latency links. The adapter refuses delays beyond the command buffer's safe
+capacity instead of evicting commands still needed for rollback.
+
+The command adapter assigns each sample to the native delayed tick, materializes
+new gaps using the preceding held input, and never rewrites commands already
+queued when delay shrinks. Button edges wait until the next unused tick. Native
+rollback history and the C checkpoint window share the same 12-tick bound:
+Lightyear also uses `maximum_predicted_ticks` to limit rollback history, so reducing
+that setting alone would discard inputs still required by C.
+
+At the 12-tick accepted-input boundary, `PredictionWindowWait` pauses the fixed
+clock and resumes when two ticks of headroom return. Whole-tick clock resync and
+expired history request a fresh snapshot for the same participant; actual
+simulation divergence remains fatal. The authority and other clients keep running.
 The two-player cases verified for portable reconnect also passed rendered
 rollback. With the previous Chromium authority, eight rendered clients passed baseline and 30-second combat native
 rollback at 72±12 ms, followed by seven-player disconnect survival on
@@ -339,6 +361,22 @@ arrive. Start a new match server after the match has been played. The test
 embedded Rust match server. Supply its endpoint; the browser reference consumes
 accepted Frame records only and never sends simulation results to the server. It conditions client receive traffic
 at 72±12 ms by default and uses real keyboard input in both rendered clients.
+Run `TM4_MATCH_ENDPOINT=ws://127.0.0.1:8122 bun tests/browser/check_input_latency.mjs`
+with a fresh two-human server to check held gas and release at 250 ms RTT for over
+one minute, while the other client forces rollbacks. `TM4_WEB_URL` selects the site;
+release builds also need `TM4_DISC_DIR`. `TM4_INPUT_DELAY_MS` sets the delay in
+**each** direction (125 ms by default). `TM4_INPUT_STALL_MS` defaults to 200 ms:
+from seconds 20–60, the proxy holds downstream packets every five seconds and
+releases them in wire order. Set it to zero for the constant-RTT baseline. The
+check rejects prolonged gaps in accepted gas and verifies release, continued
+confirmations and rollback, then disconnects the delayed client and verifies gas
+and release again after snapshot recovery. Samples and failure diagnostics are saved in
+`build/checks/input-latency.json`. Client journals also retain one transport sample
+per second, including clock pacing, command sequence/tick and rollback counters.
+IO packet/byte counters measure handoff to the socket layer, not server acknowledgement;
+they do not include the browser's internal WebSocket send backlog. Server health
+also splits rejected input by slot and reason (`late`, `future`, `full`,
+`duplicate`), preserving the aggregate counter.
 Run `bun tests/browser/check_prediction_start.mjs` with a fresh server to
 exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.mjs`
 with a fresh server to exercise the embedded authority and both clients' default

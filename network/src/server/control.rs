@@ -202,11 +202,11 @@ pub(super) fn accept_native_inputs(
                             command.tick,
                             command.input,
                         );
-                        if queued.is_err() {
+                        if let Err(reason) = queued {
                             health
                                 .lock()
                                 .unwrap()
-                                .event("rustymetal4_input_rejected_total");
+                                .input_rejected(usize::from(identity.slot), reason);
                         }
                     }
                 }

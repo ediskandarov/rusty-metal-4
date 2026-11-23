@@ -285,6 +285,38 @@ export const diagnosticsSchema = z.object({
   jitterMs: count.nullable(),
   queuedPackets: count.nullable(),
   nativeTick: count,
+  io: z
+    .object({
+      packetsSent: count,
+      bytesSent: count,
+      packetsReceived: count,
+      bytesReceived: count,
+      queuedSendPackets: count,
+      queuedReceivePackets: count,
+    })
+    .nullable(),
+  clock: z.object({
+    synced: z.boolean(),
+    interpolationSynced: z.boolean(),
+    errorTicks: z.number().nullable(),
+    requestedSpeed: count,
+    appliedSpeed: count,
+    inputDelayTicks: u32,
+    lastServerTick: u32.nullable(),
+  }),
+  localCommands: z
+    .array(
+      z.object({
+        identity: controllerIdentitySchema,
+        latest: z
+          .object({
+            nativeTick: u32,
+            command: z.object({ epoch: u32, sequence: u32, tick: u32, input: inputSchema }),
+          })
+          .nullable(),
+      }),
+    )
+    .max(8),
   nativeRoster: z
     .array(
       z.object({

@@ -244,6 +244,37 @@ for (const reason of ["clock_shift", "history_expired"] as const) {
   });
 }
 
+test("a clock shift during snapshot recovery abandons the replay and retries the same player", async () => {
+  const { first, engine, port, statuses } = await setup();
+  first.onerror(new NetworkConnectionError("connection lost"));
+  const next = await nextConnection();
+  await downloadSnapshot(next);
+  const end = mock(() => {});
+  engine._WebNetEndReplay = end;
+  next.onmessage({
+    type: "prediction_recovery_required",
+    reason: "clock_shift",
+    message: "Clock shifted while receiving accepted history",
+  });
+  expect(next.readyState).toBe(WebSocket.CLOSED);
+  expect(end).toHaveBeenCalledTimes(1);
+  expect(next.sent.some((message) => message.type === "resume_live_ack")).toBe(false);
+
+  await Bun.sleep(1100);
+  expect(connections).toHaveLength(3);
+  const third = connections[2]!;
+  third.onopen();
+  expect(third.sent[0]).toEqual({ type: "resume", token, compatibility });
+  await restore(third);
+  expect(port.netConfirmedTick).toBe(20);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+  expect(clientJournal()?.export().stopped).toBeNull();
+  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 });
+  next.onerror(new Error("abandoned recovery"));
+  expect(third.readyState).toBe(WebSocket.OPEN);
+  expect(statuses.at(-1)?.[0]).toBe("playing");
+});
+
 test("switching focus between visible windows leaves both players connected", async () => {
   const { window, first } = await setup();
   window.dispatchEvent(new Event("blur"));

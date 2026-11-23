@@ -13,6 +13,7 @@ export class ClientJournal {
   private metadata: Record<string, unknown> = {};
   private stopped: string | null = null;
   private dropped = 0;
+  private nextTransportSample = 0;
   readonly createdAt = new Date().toISOString();
 
   identify(metadata: Record<string, unknown>) {
@@ -42,6 +43,12 @@ export class ClientJournal {
       this.bytes -= this.entries.shift()!.bytes;
       this.dropped++;
     }
+  }
+  recordTransport(tick: number | null, diagnostics: unknown) {
+    const now = performance.now();
+    if (now < this.nextTransportSample) return;
+    this.nextTransportSample = now + 1000;
+    this.record("transport", tick, diagnostics);
   }
   freeze(reason: string, diagnostics: unknown) {
     if (this.stopped) return;

@@ -4,6 +4,7 @@ use crate::input::{ControllerCommand, Input};
 use crate::live_prediction::{self, LivePrediction};
 use bevy_app::{App, Update};
 use bevy_ecs::prelude::*;
+use lightyear::core::tick::TickDuration;
 use lightyear::prelude::client::*;
 use lightyear::prelude::input::native::{ActionState, InputMarker, NativeBuffer};
 use lightyear::prelude::*;
@@ -297,6 +298,51 @@ impl NetworkClient {
     pub fn diagnostics(&mut self) -> String {
         let world = self.app.world_mut();
         let roster: Vec<_> = world.query::<(&ControllerIdentity, Has<InputMarker<ControllerCommand>>, &NativeBuffer<Input>)>().iter(world).map(|(identity, local, buffer)| serde_json::json!({"identity": identity, "local": local, "acceptedThrough": buffer.last_remote_tick.map(|tick| tick.0)})).collect();
+        let commands: Vec<_> = world
+            .query_filtered::<(&ControllerIdentity, &NativeBuffer<ControllerCommand>), With<InputMarker<ControllerCommand>>>()
+            .iter(world)
+            .map(|(identity, buffer)| serde_json::json!({
+                "identity": identity,
+                "latest": buffer.get_last_with_tick().map(|(tick, command)| serde_json::json!({
+                    "nativeTick": tick.0,
+                    "command": command.0,
+                })),
+            }))
+            .collect();
+        // Each NetworkClient owns its own App and one underlying IO session.
+        // These counters measure handoff to IO, not delivery acknowledged by the server.
+        let io = world
+            .query::<&aeronet_io::Session>()
+            .single(world)
+            .ok()
+            .map(|session| {
+                serde_json::json!({
+                    "packetsSent": session.stats.packets_sent.0,
+                    "bytesSent": session.stats.bytes_sent.0,
+                    "packetsReceived": session.stats.packets_recv.0,
+                    "bytesReceived": session.stats.bytes_recv.0,
+                    "queuedSendPackets": session.send.len(),
+                    "queuedReceivePackets": session.recv.len(),
+                })
+            });
+        let clock = world.resource::<LocalTimelineSync>();
+        let remote = world.get::<RemoteTimeline>(self.connection);
+        let clock_error =
+            remote
+                .zip(world.get::<PingManager>(self.connection))
+                .map(|(remote, ping)| {
+                    let target = clock.sync_objective(
+                        remote,
+                        world.resource::<InputTimelineConfig>(),
+                        ping,
+                        world.resource::<TickDuration>().0,
+                    );
+                    (world
+                        .resource::<LocalTimeline>()
+                        .instant(world.resource::<bevy_time::Time<bevy_time::Fixed>>())
+                        - target)
+                        .to_f32()
+                });
         let link = world.get::<Link>(self.connection);
         let rtt_samples = world
             .get::<PingManager>(self.connection)
@@ -311,6 +357,17 @@ impl NetworkClient {
             "queuedPackets": link.map(|l| l.recv.len() + l.send.len()),
             "nativeTick": world.resource::<LocalTimeline>().tick().0,
             "nativeRoster": roster,
+            "io": io,
+            "localCommands": commands,
+            "clock": {
+                "synced": clock.is_synced(),
+                "interpolationSynced": world.resource::<InterpolationTimeline>().is_synced(),
+                "errorTicks": clock_error,
+                "requestedSpeed": clock.relative_speed(),
+                "appliedSpeed": world.resource::<bevy_time::Time<bevy_time::Virtual>>().relative_speed(),
+                "inputDelayTicks": clock.input_delay(),
+                "lastServerTick": remote.and_then(|remote| remote.last_received_tick()).map(|tick| tick.0),
+            },
             "prediction": world.resource::<LivePrediction>()
                 .diagnostics(world.resource::<PredictionWindowWait>()),
         })

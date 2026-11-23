@@ -18,6 +18,7 @@ import { initializeTroubleshoot } from ${JSON.stringify(resolve(root, "apps/play
 const journal = startClientJournal();
 journal.identify({ roomId: "a".repeat(32), matchId: "11111111-1111-4111-8111-111111111111", world: "Road Rage", compatibility: {build: "test"} });
 journal.record("step", 42, { digest: 123 });
+journal.recordTransport(42, { rttMs: 250, clock: { errorTicks: -3 }, localCommands: [{ latest: { command: { sequence: 43, tick: 42 } } }] });
 globalThis.Module = { _WebCaptureFrame() {
   if (globalThis.failFrame) return 0;
   Module.onCapturedFrame(2, 2, new Uint8Array([255,0,0, 0,255,0, 0,0,255, 255,255,255]));
@@ -95,7 +96,13 @@ try {
   assert.equal(report.artifacts.server.savedAt, 1234);
   assert.equal(report.artifacts.client.head, 42);
   assert.equal(report.build.commit, "a".repeat(40));
-  assert.equal(JSON.parse(strFromU8(archive["client.json"])).head, 42);
+  const clientJournal = JSON.parse(strFromU8(archive["client.json"]));
+  assert.equal(clientJournal.head, 42);
+  assert.deepEqual(clientJournal.events.find(({ kind }) => kind === "transport").data, {
+    rttMs: 250,
+    clock: { errorTicks: -3 },
+    localCommands: [{ latest: { command: { sequence: 43, tick: 42 } } }],
+  });
   const image = await page.evaluate(
     async (png) => {
       const bitmap = await createImageBitmap(

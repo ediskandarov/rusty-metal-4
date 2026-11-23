@@ -237,6 +237,17 @@ test("Lightyear bridge schemas reject malformed envelopes and accept disconnecte
     queuedPackets: null,
     nativeTick: 0,
     nativeRoster: [],
+    io: null,
+    clock: {
+      synced: false,
+      interpolationSynced: false,
+      errorTicks: null,
+      requestedSpeed: 1,
+      appliedSpeed: 1,
+      inputDelayTicks: 0,
+      lastServerTick: null,
+    },
+    localCommands: [],
     prediction: {
       head: 0,
       confirmed: 0,

@@ -107,6 +107,7 @@ export async function joinMatch(
       diagnostics.transport = socket.diagnostics();
       diagnostics.transportSampledAt = performance.now();
       delete diagnostics.transportError;
+      journal.recordTransport(port.netMatch?.tick ?? null, diagnostics.transport);
     } catch (error) {
       diagnostics.transportError = error instanceof Error ? error.message : String(error);
     }

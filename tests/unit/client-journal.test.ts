@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 
 import { ClientJournal } from "../../packages/game-runtime/src/network/journal.ts";
 import { attachLivePrediction } from "../../packages/game-runtime/src/network/livePrediction.ts";
@@ -36,6 +36,34 @@ describe("client diagnostic journal", () => {
     expect(j.export().events).toEqual(before);
     expect(j.export().stopped).toBe("desync");
     expect(before.at(-1)!.kind).toBe("stop");
+  });
+  test("samples transport during play without flooding or retaining mutable state", () => {
+    let now = 0;
+    const clock = spyOn(performance, "now").mockImplementation(() => now);
+    try {
+      const journal = new ClientJournal();
+      const diagnostics = { rttMs: 250, sequence: 1 };
+      journal.recordTransport(1, diagnostics);
+      diagnostics.sequence = 2;
+      for (now = 1; now < 1000; now++) journal.recordTransport(2, diagnostics);
+      journal.recordTransport(31, diagnostics);
+      expect(journal.export().events.map(({ kind, tick, data }) => ({ kind, tick, data }))).toEqual(
+        [
+          { kind: "transport", tick: 1, data: { rttMs: 250, sequence: 1 } },
+          { kind: "transport", tick: 31, data: { rttMs: 250, sequence: 2 } },
+        ],
+      );
+      // Network samples use the same tick window as gameplay, including replay.
+      now = 2000;
+      journal.recordTransport(331, diagnostics);
+      expect(journal.export().events.map(({ tick }) => tick)).toEqual([331]);
+      journal.freeze("closed", {});
+      now = 3000;
+      journal.recordTransport(400, diagnostics);
+      expect(journal.export().events.at(-1)?.kind).toBe("stop");
+    } finally {
+      clock.mockRestore();
+    }
   });
   test("bridge records authority, applied inputs, execution and rollback without replacing history", () => {
     const journal = new ClientJournal();

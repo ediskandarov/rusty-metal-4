@@ -1,5 +1,5 @@
 use crate::input::{ControllerCommand, Input};
-use crate::prediction_input::LocalInputs;
+use crate::prediction_input::{CommandWriter, LocalInputs};
 use crate::protocol::{
     ControllerIdentity, MembershipChange, Message, PREDICTION_DEPTH, ParticipantId,
     valid_membership,
@@ -128,6 +128,7 @@ pub struct LivePrediction {
     pending_resume_rollback: Option<Tick>,
     held: Input,
     local_inputs: LocalInputs,
+    command_writer: CommandWriter,
     edges: VecDeque<Input>,
     checksums: VecDeque<VerifiedRow>,
     confirmations: VecDeque<Message>,
@@ -248,16 +249,19 @@ impl LivePrediction {
             state.dynamic_membership = true;
             state.plans.insert(tick, changes.clone());
         }
-        let session = world.resource::<Self>().session;
-        let Some(session) = session else {
-            return Ok(inbox);
-        };
         if let Some(error) = inbox
             .iter()
             .find(|message| matches!(message, Message::Error { .. }))
         {
             return Ok(vec![error.clone()]);
         }
+        let session = world.resource::<Self>().session;
+        let Some(session) = session else {
+            return match &world.resource::<Self>().error {
+                Some(error) => Err(error.clone()),
+                None => Ok(inbox),
+            };
+        };
         let frontier = world
             .query::<(&ControllerIdentity, &NativeBuffer<Input>)>()
             .iter(world)
@@ -418,8 +422,20 @@ pub fn install(app: &mut App) {
     );
 }
 
-fn reject_clock_shift(shift: On<LocalTimelineShift>, mut state: ResMut<LivePrediction>) {
-    if shift.delta != 0 && state.session.is_some() && state.error.is_none() {
+fn reject_clock_shift(
+    shift: On<LocalTimelineShift>,
+    mut state: ResMut<LivePrediction>,
+    buffers: Query<&NativeBuffer<Input>, With<ControllerIdentity>>,
+) {
+    // Initial clock synchronization is safe before accepted inputs arrive. Once
+    // resume has received history, native retiming changes its absolute server
+    // ticks even though the imported snapshot and replay keep their old labels.
+    let has_history = state.session.is_some()
+        || (state.resume_preparing
+            && buffers
+                .iter()
+                .any(|buffer| buffer.last_remote_tick.is_some()));
+    if shift.delta != 0 && has_history && state.error.is_none() {
         state.error = Some(PredictionFailure::Recoverable {
             reason: RecoveryReason::ClockShift,
             message: format!(
@@ -428,6 +444,18 @@ fn reject_clock_shift(shift: On<LocalTimelineShift>, mut state: ResMut<LivePredi
             ),
         });
     }
+}
+
+fn prediction_sync_config() -> SyncConfig {
+    let mut config = SyncConfig::default();
+    // Whole-tick shifts invalidate the C epoch. Keep the wider recovery threshold,
+    // but preserve Lightyear's default correction per tick of error: its gain is
+    // (speedup_factor - 1) / max_error_margin, not speedup_factor alone.
+    let max_error_margin = f32::from(PREDICTION_DEPTH) * 4.0;
+    config.speedup_factor =
+        1.0 + (config.speedup_factor - 1.0) * max_error_margin / config.max_error_margin;
+    config.max_error_margin = max_error_margin;
+    config
 }
 
 pub fn prepare(
@@ -466,13 +494,14 @@ pub fn prepare(
         world.insert_resource(manager);
     }
     world.insert_resource(InputTimelineConfig::new(
-        SyncConfig {
-            // A whole-tick jump would move already accepted input out of the C epoch.
-            // Lightyear can still adjust fixed-clock speed below this fail-stop threshold.
-            max_error_margin: f32::from(PREDICTION_DEPTH) * 4.0,
-            ..Default::default()
+        prediction_sync_config(),
+        InputDelayConfig {
+            // Use native input delay before prediction to leave room for jitter.
+            // The same bound must govern native rollback and the C checkpoints.
+            minimum_input_delay_ticks: 0,
+            maximum_input_delay_before_prediction: 3,
+            maximum_predicted_ticks: PREDICTION_DEPTH,
         },
-        InputDelayConfig::no_input_delay(),
     ));
 }
 
@@ -721,6 +750,7 @@ fn start_at(
     state.session = Some(session);
     state.resume_preparing = false;
     state.sequence = sequence;
+    state.command_writer = CommandWriter::new(head);
     state.head = head;
     state.confirmed = head;
     state.checksums.push_back((
@@ -738,7 +768,13 @@ fn write_local(
     mut state: ResMut<LivePrediction>,
     timeline: SyncedLocalTimeline,
     manager: Option<Res<PredictionManager>>,
-    mut local: Single<&mut ActionState<ControllerCommand>, With<InputMarker<ControllerCommand>>>,
+    mut local: Single<
+        (
+            &mut ActionState<ControllerCommand>,
+            &mut NativeBuffer<ControllerCommand>,
+        ),
+        With<InputMarker<ControllerCommand>>,
+    >,
 ) {
     let Some(session) = state.session else {
         return;
@@ -750,20 +786,27 @@ fn write_local(
     {
         return;
     }
-    if timeline.input_delay() != 0 {
-        state.error = Some(
-            "Network timing requires more input delay than this prediction mode supports".into(),
-        );
-        return;
+    let (action, buffer) = &mut *local;
+    let LivePrediction {
+        command_writer,
+        sequence,
+        edges,
+        held,
+        ..
+    } = &mut *state;
+    let result = command_writer.write(
+        buffer,
+        session.anchor,
+        native_tick,
+        timeline.input_delay(),
+        session.epoch,
+        sequence,
+        || edges.pop_front().unwrap_or(*held),
+    );
+    match result {
+        Ok(command) => **action = command,
+        Err(error) => state.error = Some(error.into()),
     }
-    let input = state.edges.pop_front().unwrap_or(state.held);
-    state.sequence += 1;
-    local.0 = ControllerCommand {
-        epoch: session.epoch,
-        sequence: state.sequence,
-        tick: (native_tick - session.anchor - 1) as u32,
-        input,
-    };
 }
 
 fn step_world(
@@ -974,6 +1017,13 @@ fn update_prediction_wait(
     if count != slots.count_ones() || !complete {
         frontier = anchor;
     }
+    if state.resume_preparing && frontier.is_none() {
+        // The clock must keep advancing while a reconnect waits for the first
+        // complete accepted stream. C prediction does not exist yet, so there
+        // is no history window to protect or meaningful local origin to retain.
+        wait.reset();
+        return;
+    }
     if wait.update(tick, frontier, PREDICTION_DEPTH) && wait.is_waiting() {
         state.window_waits += 1;
     }
@@ -1060,6 +1110,51 @@ fn end_replay(mut state: ResMut<LivePrediction>) {
 mod tests {
     use super::*;
     use crate::protocol::RoundState;
+
+    #[test]
+    fn prediction_clock_keeps_native_slew_strength_without_early_resync() {
+        use lightyear::core::time::TickDelta;
+        use lightyear::prelude::client::RemoteTimeline;
+
+        fn adjustment(mut settings: SyncConfig, error: f32) -> (f32, Option<i32>) {
+            // Test a synchronized link without constructing a ping handshake.
+            settings.handshake_pings = 0;
+            let samples = settings.consecutive_errors_threshold;
+            let config = InputTimelineConfig::new(settings, InputDelayConfig::no_input_delay());
+            let mut clock = LocalTimelineSync::default();
+            clock.set_synced(true);
+            let mut remote = RemoteTimeline::default();
+            remote.apply_delta(TickDelta::from_i32(100));
+            let ping = PingManager::default();
+            let step = std::time::Duration::from_nanos(1_000_000_000 / 30);
+            let objective = clock.sync_objective(&remote, &config, &ping, step);
+            let now = objective + TickDelta::from_i32(1) * error;
+            let mut shift = None;
+            for _ in 0..samples {
+                shift = clock.sync(now, &remote, &config, &ping, step);
+            }
+            (clock.relative_speed(), shift)
+        }
+
+        for error in [-3.48, 3.48] {
+            let (speed, shift) = adjustment(prediction_sync_config(), error);
+            let (default_speed, default_shift) = adjustment(SyncConfig::default(), error);
+            assert_eq!(shift, None);
+            assert_eq!(default_shift, None);
+            assert!((speed - default_speed).abs() < 0.00001);
+            assert!((speed - 1.0).abs() > 0.01);
+        }
+        for error in [-12.0, 12.0] {
+            let (speed, shift) = adjustment(prediction_sync_config(), error);
+            assert_eq!(shift, None);
+            assert!((speed - 1.0) * error < 0.0);
+            assert!(adjustment(SyncConfig::default(), error).1.is_some());
+        }
+        for error in [-49.0, 49.0] {
+            let (_, shift) = adjustment(prediction_sync_config(), error);
+            assert_eq!(shift, Some(-error as i32));
+        }
+    }
 
     fn session() -> Session {
         Session {
@@ -1223,6 +1318,146 @@ mod tests {
             matches!(state.verify_confirmations(session(), &frontiers(Some(Tick(400))), (32..=49).map(frame).collect()),
             Err(PredictionFailure::Fatal(message)) if message.contains("diverged at confirmed tick 37"))
         );
+    }
+
+    #[test]
+    fn resume_wait_needs_complete_history_before_bounding_the_clock() {
+        use bevy_ecs::system::RunSystemOnce;
+
+        let mut world = World::new();
+        world.insert_resource(LivePrediction {
+            resume_preparing: true,
+            expected_slot_mask: Some(3),
+            ..Default::default()
+        });
+        let mut timeline = LocalTimeline::default();
+        timeline.apply_delta(243);
+        world.insert_resource(timeline);
+        // A wait origin observed before initial synchronization must not freeze
+        // the synchronized clock before the server's future match anchor.
+        let mut wait = PredictionWindowWait::default();
+        wait.update(Tick(1), None, PREDICTION_DEPTH);
+        wait.update(Tick(243), None, PREDICTION_DEPTH);
+        assert!(wait.is_waiting());
+        world.insert_resource(wait);
+        let controllers: Vec<_> = (0..2)
+            .map(|slot| {
+                world
+                    .spawn((
+                        ControllerIdentity {
+                            participant: ParticipantId(u64::from(slot) + 1),
+                            slot,
+                        },
+                        NativeBuffer::<Input>::default(),
+                    ))
+                    .id()
+            })
+            .collect();
+        world.run_system_once(update_prediction_wait).unwrap();
+        assert!(!world.resource::<PredictionWindowWait>().is_waiting());
+        assert_eq!(
+            world.resource::<PredictionWindowWait>().confirmed_tick(),
+            None
+        );
+        assert_eq!(world.resource::<LivePrediction>().window_waits, 0);
+
+        for (index, controller) in controllers.iter().enumerate() {
+            let mut buffer = world.get_mut::<NativeBuffer<Input>>(*controller).unwrap();
+            buffer.set(Tick(240), ActionState(Input::default()));
+            buffer.last_remote_tick = Some(Tick(240));
+            world.run_system_once(update_prediction_wait).unwrap();
+            let wait = world.resource::<PredictionWindowWait>();
+            assert!(!wait.is_waiting());
+            assert_eq!(wait.confirmed_tick(), (index == 1).then_some(Tick(240)));
+        }
+
+        world.resource_mut::<LocalTimeline>().apply_delta(9);
+        world.run_system_once(update_prediction_wait).unwrap();
+        let wait = world.resource::<PredictionWindowWait>();
+        assert!(wait.is_waiting());
+        assert_eq!(wait.prediction_depth(), i32::from(PREDICTION_DEPTH));
+        assert_eq!(world.resource::<LivePrediction>().window_waits, 1);
+
+        for controller in controllers {
+            let mut buffer = world.get_mut::<NativeBuffer<Input>>(controller).unwrap();
+            buffer.set(Tick(242), ActionState(Input::default()));
+            buffer.last_remote_tick = Some(Tick(242));
+        }
+        world.run_system_once(update_prediction_wait).unwrap();
+        assert!(!world.resource::<PredictionWindowWait>().is_waiting());
+        assert_eq!(
+            world.resource::<PredictionWindowWait>().prediction_depth(),
+            10
+        );
+    }
+
+    #[test]
+    fn resume_initial_clock_sync_without_accepted_history_is_allowed() {
+        let mut world = World::new();
+        world.insert_resource(LivePrediction {
+            resume_preparing: true,
+            ..Default::default()
+        });
+        world.add_observer(reject_clock_shift);
+        let controller = world
+            .spawn((
+                ControllerIdentity {
+                    participant: ParticipantId(1),
+                    slot: 0,
+                },
+                NativeBuffer::<Input>::default(),
+            ))
+            .id();
+        world.trigger(LocalTimelineShift { delta: 170 });
+        assert!(world.resource::<LivePrediction>().error.is_none());
+        assert!(LivePrediction::drain_confirmed(&mut world, vec![]).is_ok());
+
+        let mut buffer = world.get_mut::<NativeBuffer<Input>>(controller).unwrap();
+        buffer.set(Tick(180), ActionState(Input::default()));
+        buffer.last_remote_tick = Some(Tick(180));
+        world.trigger(LocalTimelineShift { delta: 0 });
+        assert!(world.resource::<LivePrediction>().error.is_none());
+    }
+
+    #[test]
+    fn resume_clock_shift_with_accepted_history_requests_a_new_snapshot() {
+        for retained in [true, false] {
+            let mut world = World::new();
+            world.insert_resource(LivePrediction {
+                resume_preparing: true,
+                ..Default::default()
+            });
+            world.add_observer(reject_clock_shift);
+            let mut buffer = NativeBuffer::<Input>::default();
+            buffer.set(Tick(180), ActionState(Input::default()));
+            buffer.last_remote_tick = Some(Tick(180));
+            if !retained {
+                // An empty ring still carries a frontier that filters packets.
+                buffer.pop(Tick(180));
+            }
+            let start = buffer.start_tick;
+            let controller = world
+                .spawn((
+                    ControllerIdentity {
+                        participant: ParticipantId(1),
+                        slot: 0,
+                    },
+                    buffer,
+                ))
+                .id();
+            world.trigger(LocalTimelineShift { delta: -7 });
+            assert!(matches!(
+                LivePrediction::drain_confirmed(&mut world, vec![]),
+                Err(PredictionFailure::Recoverable {
+                    reason: RecoveryReason::ClockShift,
+                    ..
+                })
+            ));
+            let buffer = world.get::<NativeBuffer<Input>>(controller).unwrap();
+            assert_eq!(buffer.start_tick, start);
+            assert_eq!(buffer.last_remote_tick, Some(Tick(180)));
+            assert_eq!(buffer.get(Tick(180)).is_some(), retained);
+        }
     }
 
     #[test]

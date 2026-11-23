@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use tm4_network::protocol::MAX_PLAYERS;
+use tm4_network::{input::Rejection, protocol::MAX_PLAYERS};
 
 pub type Shared = Arc<Mutex<Metrics>>;
 const BOUNDS: [f64; 10] = [
@@ -60,6 +60,7 @@ struct Slot {
     received: u64,
     last_input: Option<Instant>,
     unacknowledged: usize,
+    rejected: [u64; 4],
 }
 
 pub struct Metrics {
@@ -156,6 +157,16 @@ impl Metrics {
         self.slots[slot].received += 1;
         self.slots[slot].last_input = Some(Instant::now());
     }
+    pub fn input_rejected(&mut self, slot: usize, reason: Rejection) {
+        let index = match reason {
+            Rejection::Late => 0,
+            Rejection::Future => 1,
+            Rejection::Full => 2,
+            Rejection::Duplicate => 3,
+        };
+        self.slots[slot].rejected[index] += 1;
+        self.event("rustymetal4_input_rejected_total");
+    }
     pub fn unacknowledged(&mut self, slot: usize, count: usize) {
         self.slots[slot].unacknowledged = count;
     }
@@ -188,6 +199,19 @@ impl Metrics {
                 Measurement::counter("rustymetal4_input_received_total", value.received as f64);
             input.slot = Some(slot);
             rows.push(input);
+            for (name, count) in [
+                "rustymetal4_input_rejected_late_total",
+                "rustymetal4_input_rejected_future_total",
+                "rustymetal4_input_rejected_full_total",
+                "rustymetal4_input_rejected_duplicate_total",
+            ]
+            .into_iter()
+            .zip(value.rejected)
+            {
+                let mut rejected = Measurement::counter(name, count as f64);
+                rejected.slot = Some(slot);
+                rows.push(rejected);
+            }
             let mut pending = Measurement::gauge(
                 "rustymetal4_network_unacknowledged_messages",
                 value.unacknowledged as f64,
@@ -229,6 +253,56 @@ mod tests {
         assert_eq!(rows.last().unwrap().value, 3.0);
         assert!((h.sum - 0.532).abs() < 1e-9);
     }
+    #[test]
+    fn input_rejections_preserve_total_and_distinguish_slot_and_reason() {
+        let mut metrics = Metrics::default();
+        metrics.input_rejected(0, Rejection::Late);
+        metrics.input_rejected(3, Rejection::Late);
+        metrics.input_rejected(3, Rejection::Late);
+        metrics.input_rejected(3, Rejection::Future);
+        metrics.input_rejected(7, Rejection::Full);
+        metrics.input_rejected(7, Rejection::Duplicate);
+        let snapshot = metrics.snapshot("match", 3);
+        let value = |name, slot| {
+            snapshot
+                .measurements
+                .iter()
+                .find(|m| m.name == name && m.slot == slot)
+                .unwrap()
+                .value
+        };
+        assert_eq!(value("rustymetal4_input_rejected_total", None), 6.0);
+        assert_eq!(value("rustymetal4_input_rejected_late_total", Some(0)), 1.0);
+        assert_eq!(value("rustymetal4_input_rejected_late_total", Some(3)), 2.0);
+        assert_eq!(
+            value("rustymetal4_input_rejected_future_total", Some(3)),
+            1.0
+        );
+        assert_eq!(value("rustymetal4_input_rejected_full_total", Some(7)), 1.0);
+        assert_eq!(
+            value("rustymetal4_input_rejected_duplicate_total", Some(7)),
+            1.0
+        );
+        assert_eq!(value("rustymetal4_input_rejected_late_total", Some(7)), 0.0);
+        let rejected: Vec<_> = snapshot
+            .measurements
+            .iter()
+            .filter(|m| m.name.starts_with("rustymetal4_input_rejected_") && m.slot.is_some())
+            .collect();
+        assert_eq!(rejected.len(), MAX_PLAYERS * 4);
+        assert_eq!(rejected.iter().map(|m| m.value).sum::<f64>(), 6.0);
+        assert!(
+            snapshot.measurements.len() <= 200,
+            "Fits the health API bound"
+        );
+        assert!(
+            !snapshot
+                .measurements
+                .iter()
+                .any(|m| m.name == "rustymetal4_input_last_received_age_seconds")
+        );
+    }
+
     #[test]
     fn collection_is_read_only_and_has_no_fabricated_input_timestamp() {
         let mut metrics = Metrics::default();
