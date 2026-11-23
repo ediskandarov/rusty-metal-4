@@ -96,7 +96,7 @@ try {
       "Expired proposal did not get replaced",
     );
     if (!freeze)
-      assert(results[1].delivered - results[1].held > 12, "Initial offer did not actually expire");
+      assert(results[1].delivered - results[1].held > 24, "Initial offer did not actually expire");
   }
   assert.deepEqual(errors, []);
   console.log("PASS native prediction startup", JSON.stringify({ delay, freeze, results }));

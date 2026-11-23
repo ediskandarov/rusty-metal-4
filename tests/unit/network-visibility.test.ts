@@ -124,7 +124,7 @@ async function setup(diagnostics?: Connection["diagnostics"], signal?: AbortSign
       cancellations++;
       delete port.netMatch;
     },
-    _WebNetLocalRollbackDepth: () => 12,
+    _WebNetLocalRollbackDepth: () => 24,
     _WebNetSetInput: () => 1,
     _WebNetQueueTick: (_tick: number) => 1,
     _WebNetConfirmPresentationTick: () => 1,
@@ -489,7 +489,7 @@ test("recovery owns its retarget limit independently of diagnostic counters", as
   first.beforeUpdate(1500);
   const next = await nextConnection();
   await downloadSnapshot(next);
-  next.predictionClock = () => 140;
+  next.predictionClock = () => 150;
   const handoff = { type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 } as const;
   // An inflated diagnostic counter cannot reject the first retarget.
   port.netDiagnostics!.resumeRetargets = 999;

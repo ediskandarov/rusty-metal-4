@@ -159,7 +159,7 @@ try {
     assert.equal(s.audioDuringReplay, 0);
     assert.equal(s.publications, s.steps - s.replayed);
     assert(
-      s.transport.prediction.maxDepth <= 12 && s.transport.prediction.peakBytes <= 8 * 1024 * 1024,
+      s.transport.prediction.maxDepth <= 24 && s.transport.prediction.peakBytes <= 8 * 1024 * 1024,
     );
     assert(s.frames > 30 && s.renderLimit === 30);
     if (combat)

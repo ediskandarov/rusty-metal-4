@@ -156,15 +156,40 @@ try {
   const delayed = pages[1];
   await delayed.evaluate(() => {
     const frames = (globalThis.inputLatencyFrames = []);
+    globalThis.inputResponse = {};
+    document.addEventListener("keydown", (event) => {
+      if (event.code === "KeyX" && globalThis.inputResponse.started === undefined)
+        globalThis.inputResponse.started = performance.now();
+    });
+    const stage = tm4LivePrediction.stage_live_input;
+    tm4LivePrediction.stage_live_input = (tick, slot, buttons, axes, analog) => {
+      const response = globalThis.inputResponse;
+      if (
+        slot === 1 &&
+        buttons & 64 &&
+        response.started !== undefined &&
+        response.localMs === undefined
+      )
+        response.localMs = performance.now() - response.started;
+      return stage(tick, slot, buttons, axes, analog);
+    };
     const record = tm4LivePrediction.journal_authority_frame;
     tm4LivePrediction.journal_authority_frame = (json) => {
       const { frame } = JSON.parse(json);
       frames.push({ tick: frame.tick, buttons: frame.inputs[1].buttons });
+      const response = globalThis.inputResponse;
+      if (
+        frame.inputs[1].buttons & 64 &&
+        response.started !== undefined &&
+        response.authorityMs === undefined
+      )
+        response.authorityMs = performance.now() - response.started;
       record(json);
     };
   });
   await delayed.locator("canvas").click();
   await delayed.keyboard.down("x");
+  await delayed.keyboard.down("w");
   const started = Date.now();
   testStarted = performance.now();
   let last;
@@ -175,6 +200,8 @@ try {
       frames: globalThis.inputLatencyFrames.splice(0),
       status: document.querySelector("#status").textContent,
       transport: tm4Port.netDiagnostics?.transport,
+      cost: { ...tm4Port.netPredictionCost },
+      inputResponse: globalThis.inputResponse,
     }));
     const gas = last.frames.filter(({ buttons }) => buttons & 64).length;
     for (const { buttons } of last.frames) {
@@ -187,6 +214,8 @@ try {
     }
     metrics.push({
       ...last.transport,
+      cost: last.cost,
+      inputResponse: last.inputResponse,
       elapsedSeconds: (Date.now() - started) / 1000,
       configuredDelayMs: delay,
       configuredStallMs: stall,
@@ -197,6 +226,13 @@ try {
     });
     assert.match(last.status, /Live prediction/);
     assert(last.transport, "Transport diagnostics must remain available");
+    assert.equal(last.transport.clock.inputDelayTicks, 0, "No artificial local input delay");
+    assert(last.inputResponse.localMs < 100, "Local gas responds within 100 ms");
+    if (delay >= 100)
+      assert(
+        last.inputResponse.localMs < last.inputResponse.authorityMs,
+        "Local gas precedes authority",
+      );
     assert(last.frames.length >= 250, "Authority should sustain approximately 30 TPS");
     for (const frame of last.frames) {
       if (previousTick !== undefined) assert.equal(frame.tick, previousTick + 1);
@@ -224,6 +260,7 @@ try {
       (stallEndsMs - stallStartsMs) / stallPeriodMs,
       "Deliver every scheduled delayed packet batch",
     );
+  await delayed.keyboard.up("w");
   await delayed.keyboard.up("x");
   await delayed.waitForTimeout(2000);
   const released = await delayed.evaluate(() => globalThis.inputLatencyFrames.slice(-20));
@@ -272,8 +309,10 @@ try {
     "Release after reconnect",
   );
   assert.deepEqual(runtimeErrors, [], "No unexpected runtime errors during reconnect");
+  const resumedTransport = await delayed.evaluate(() => tm4Port.netDiagnostics?.transport);
+  assert.equal(resumedTransport.clock.inputDelayTicks, 0, "No input delay after snapshot handoff");
   metrics.push({
-    ...(await delayed.evaluate(() => tm4Port.netDiagnostics?.transport)),
+    ...resumedTransport,
     reconnected: true,
     expectedConnectionLosses,
   });
@@ -307,9 +346,9 @@ try {
 } finally {
   // Keep the failing sample too; a timing regression must leave evidence before teardown.
   await Bun.write("build/checks/input-latency.json", JSON.stringify(metrics, null, 2));
+  await browser?.close();
   for (const timer of timers) clearTimeout(timer);
   for (const socket of proxy.clients) socket.terminate();
   for (const socket of upstreams) socket.terminate();
   await new Promise((resolve) => proxy.close(resolve));
-  await browser?.close();
 }

@@ -375,7 +375,9 @@ static void draw_network_view(s32 slot)
     /* Turbo effects draw from the secondary RNG between simulation ticks. */
     const u32 effect_seed = WebRenderEffectRandomState();
     RenderBeginFrame();
+    WebInterpolationBeginNetworkDraw();
     RenderBuildFrame();
+    WebInterpolationEndDraw();
     srandrand(effect_seed);
     WebRenderPresentLevelFrame();
     if (saved_gte) {

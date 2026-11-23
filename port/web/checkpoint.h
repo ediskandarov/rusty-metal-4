@@ -3,7 +3,7 @@
 
 #include "tm4/integer.h"
 
-enum { WebCheckpointHistoryTicks = 12 };
+enum { WebCheckpointHistoryTicks = 24 };
 
 u32 WebCheckpointCapture(u32 tick, int retain_history);
 const char* WebCheckpointRestore(u32 tick);

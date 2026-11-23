@@ -233,6 +233,7 @@ add_executable(tm4_web
     "${TM4_WEB}/snapshot_projectile.c"
     "${TM4_WEB}/snapshot_sound.c"
     "${TM4_WEB}/rollback_audio.c"
+    "${TM4_WEB}/rollback_visuals.c"
     "${TM4_WEB}/network_messages.c"
     "${TM4_WEB}/net_state.c"
     "${TM4_WEB}/net_state_cars.c"
@@ -315,6 +316,16 @@ target_include_directories(tm4_rollback_audio_check PRIVATE
 target_compile_options(tm4_rollback_audio_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
 target_link_options(tm4_rollback_audio_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
 set_target_properties(tm4_rollback_audio_check PROPERTIES SUFFIX ".cjs")
+
+add_executable(tm4_rollback_visuals_check EXCLUDE_FROM_ALL
+    "${TM4_ROOT}/tests/native/check_rollback_visuals.c"
+    "${TM4_WEB}/rollback_visuals.c")
+target_include_directories(tm4_rollback_visuals_check PRIVATE
+    ${TM4_GAME_INCLUDE_DIRECTORIES} "${TM4_SDK_ALIASES}"
+    "${TM4_ROOT}/external/psyz/psyz/include")
+target_compile_options(tm4_rollback_visuals_check PRIVATE -UNDEBUG -Wno-nonportable-include-path)
+target_link_options(tm4_rollback_visuals_check PRIVATE -sASSERTIONS=1 -sENVIRONMENT=node -sSINGLE_FILE=1)
+set_target_properties(tm4_rollback_visuals_check PROPERTIES SUFFIX ".cjs")
 
 add_executable(tm4_car_controls_check EXCLUDE_FROM_ALL
     "${TM4_ROOT}/tests/native/check_car_controls.c"

@@ -1,5 +1,6 @@
 #include "interpolation.h"
 #include "overlays.h"
+#include "rollback_visuals.h"
 #include "src/modules/afc/private.h"
 #include "src/modules/anim/private.h"
 #include "src/modules/carprt/private.h"
@@ -16,6 +17,7 @@
 #ifdef TM4_WEB_TEST_HOOKS
 #include "src/modules/ray/private.h"
 #endif
+#include <LIBGTE.H>
 #include "tm4/fixed.h"
 #include "tm4/main/game.h"
 #include "tm4/main/math3d.h"
@@ -26,7 +28,6 @@
 #include "tm4/modules/car.h"
 #include "tm4/modules/ray.h"
 #include "tm4/modules/tele.h"
-#include <LIBGTE.H>
 #include <emscripten.h>
 #include <limits.h>
 #include <math.h>
@@ -122,7 +123,7 @@ static CarPose cars[ArrayCount(GameInfo.cars)];
 static CameraPose cameras[ArrayCount(GameInfo.players)];
 static WebRenderMotionSettings motion_settings = { .enabled = 1 };
 static int completed, drawing;
-static double fraction, draw_phase;
+static double fraction, draw_phase, draw_time;
 static int draw_forecast;
 static u32 restore_effect_seed;
 #ifdef TM4_WEB_TEST_HOOKS
@@ -158,6 +159,7 @@ static u32 serial(const void* object)
 
 void WebInterpolationReset(void)
 {
+    WebRollbackVisualsReset();
     completed = 0;
     object_count = 0;
     anim_size_count = 0;
@@ -484,6 +486,7 @@ void WebInterpolationBeginStep(void)
 
 void WebInterpolationCutCamera(const Camera* camera)
 {
+    WebRollbackVisualsCut(camera);
     for (s32 i = 0; i < ArrayCount(cameras); ++i) {
         if (cameras[i].serial == serial(camera))
             cameras[i].serial = 0;
@@ -492,6 +495,7 @@ void WebInterpolationCutCamera(const Camera* camera)
 
 void WebInterpolationCutCar(const Car* car)
 {
+    WebRollbackVisualsCut(car);
     u32 id = serial(car);
     for (s32 i = 0; i < ArrayCount(cars); ++i) {
         if (cars[i].serial == id)
@@ -505,6 +509,7 @@ void WebInterpolationCutCar(const Car* car)
 
 void WebInterpolationBeginDraw(WebRenderMotionSettings motion, double phase)
 {
+    draw_time = emscripten_get_now();
     draw_phase = fmin(1, fmax(0, phase));
     int have_history = completed && motion.enabled;
     draw_forecast = have_history && motion.lead > 0;
@@ -528,6 +533,15 @@ void WebInterpolationBeginDraw(WebRenderMotionSettings motion, double phase)
         },
         motion.lead, draw_phase, fraction, have_history, motion.enabled);
 #endif
+}
+
+void WebInterpolationBeginNetworkDraw(void)
+{
+    draw_time = emscripten_get_now();
+    draw_phase = fraction = 1;
+    draw_forecast = 0;
+    restore_effect_seed = WebRenderEffectRandomState();
+    drawing = 1;
 }
 
 void WebInterpolationEndDraw(void)
@@ -831,6 +845,14 @@ static void trace_transform(const void* object, const char* name, const MATRIX* 
 Camera* WebInterpolationCamera(Camera* camera, Camera* pose)
 {
     Camera* render = sample_camera(camera, pose);
+    if (drawing) {
+        if (render == camera)
+            *pose = *camera;
+        if (WebRollbackVisualsCamera(camera, &pose->camera_to_world, draw_time)) {
+            InverseMatrix(&pose->camera_to_world, &pose->world_to_camera);
+            render = pose;
+        }
+    }
 #ifdef TM4_WEB_TEST_HOOKS
     if (drawing && test_capture_motion) {
         const CameraPose* previous = draw_forecast ? find_camera_pose(camera) : NULL;
@@ -873,6 +895,14 @@ static Car* sample_car(Car* car, Car* pose)
 Car* WebInterpolationCar(Car* car, Car* pose)
 {
     Car* render = sample_car(car, pose);
+    if (drawing) {
+        if (render == car)
+            *pose = *car;
+        if (WebRollbackVisualsCar(car, &pose->transform, draw_time)) {
+            car_identity = car;
+            car_pose = render = pose;
+        }
+    }
 #ifdef TM4_WEB_TEST_HOOKS
     if (drawing && test_capture_motion && car == GameInfo.players[0].car) {
         const CarPose* previous = draw_forecast ? find_car_pose(car) : NULL;
@@ -1107,10 +1137,16 @@ s32 WebInterpolationCarAccessory(const Car* car, s32 slot, s32 angle)
 
 MATRIX* WebInterpolationCarTransform(const Car* car, MATRIX* sample)
 {
+    if (car != WebInterpolationCarIdentity(car)) {
+        *sample = car->transform;
+        return sample;
+    }
     const CarPose* previous = can_sample_pose() ? find_car_pose(car) : NULL;
     if (!previous
         || !sample_pose(&previous->transform, &car->transform, &previous->forecast, sample))
         *sample = car->transform;
+    if (drawing)
+        WebRollbackVisualsCar(car, sample, draw_time);
     return sample;
 }
 

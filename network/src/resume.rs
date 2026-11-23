@@ -218,11 +218,12 @@ mod tests {
         attempt.sent_frames = 130;
         attempt.offered = true;
         assert!(attempt.can_activate(130, 130));
-        attempt.frames.extend((130..142).map(frame));
-        assert!(attempt.can_activate(130, 142));
-        assert!(!attempt.can_activate(130, 143));
+        let end = 130 + u32::from(PREDICTION_DEPTH);
+        attempt.frames.extend((130..end).map(frame));
+        assert!(attempt.can_activate(130, end));
+        assert!(!attempt.can_activate(130, end + 1));
         attempt.frames.pop_front();
-        assert!(!attempt.can_activate(130, 142));
+        assert!(!attempt.can_activate(130, end));
         assert!(!attempt.can_activate(129, 141));
         attempt.frames.clear();
         attempt.pending_frame = Some(130);

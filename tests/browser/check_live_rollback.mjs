@@ -429,7 +429,7 @@ try {
     if (!testCar && !testWorld) assert(local.destroyed);
     assert(local.transport.prediction.rollbacks > 0 && local.repeated > 0);
     assert(
-      local.transport.prediction.maxDepth <= 12 &&
+      local.transport.prediction.maxDepth <= 24 &&
         local.transport.prediction.peakBytes < 9 * 1024 * 1024,
     );
     assert.equal(local.publications, local.steps - local.repeated);

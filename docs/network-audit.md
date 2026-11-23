@@ -203,11 +203,11 @@ clock synchronization remains free to advance: no C prediction or checkpoint
 history exists yet. A whole-tick shift after accepted history arrives abandons the
 transfer and requests a fresh snapshot rather than reusing retimed input rows.
 
-If an offer arrives beyond the 12-tick rollback window, the client may retarget
+If an offer arrives beyond the 24-tick rollback window, the client may retarget
 at most twice using the current native timeline. Catch-up extends from the
 already verified C head without restoring again or ending replay. Retargeting
 preserves the original tick and time budgets. The server retains only the latest
-12 complete confirmation frames and requires contiguous coverage before granting
+24 complete confirmation frames and requires contiguous coverage before granting
 live control. An exhausted attempt closes; a fresh retry preserves the participant
 identity and leaves survivors running. At handoff,
 Lightyear's `StateRollbackMetadata` requests a bounded rewind of its synchronized
@@ -231,10 +231,10 @@ which resolves inputs in `FixedPreUpdate` and calls the ordinary C step in
 C owns the checkpoint payloads and resource undo log. Lightyear owns input history,
 the rollback decision, and the repeated ticks. The browser bridge passes scalar
 inputs and checkpoint tick IDs between the separate Wasm instances. The rolling
-history keeps the current checkpoint and up to 12 prior ticks with an 8 MiB
+history keeps the current checkpoint and up to 24 prior ticks with an 8 MiB
 snapshot budget. Its world undo marks share one log. Restoring a tick reverses only
 later mutations and discards later checkpoints. Eviction releases log entries older
-than the oldest retained tick. Lightyear refuses corrections beyond 12 ticks, and
+than the oldest retained tick. Lightyear refuses corrections beyond 24 ticks, and
 the adapter stops the probe when that happens.
 
 [The browser probe check](../tests/browser/check_lightyear_rollback.mjs) compares
@@ -258,11 +258,15 @@ server publishes accepted input, and a short overlapping packet history covers
 jitter and delayed delivery. The client uses native fixed ticks for local input and
 stages the controls applied by C in Lightyear's input buffers. Confirmation compares
 the retained C digests at the corresponding completed authority tick. The
-client keeps 25 digest/input and HUD rows for confirmation delivery, separately
-from the 12-tick C rollback history.
+client keeps 49 digest/input and HUD rows for confirmation delivery, separately
+from the 24-tick C rollback history.
 
 Network matches render the latest simulated state at 30 FPS, only after a new
-simulation step, with no interpolation, extrapolation or visual correction.
+simulation step, without interpolation or extrapolation between simulation ticks.
+Small rollback position corrections for cars and cameras fade over 100 ms in
+render-only copies. New simulation movement is applied immediately; only the
+correction offset decays. Explicit cuts, changed object identities or camera
+targets, map resets, and corrections over 256 units on any axis bypass smoothing.
 The renderer keeps the fixed simulation and input-driven rollback intact.
 Rendering controls lock motion smoothing and frame rate for the match and restore
 single-player settings afterwards. Other graphics options remain available.
@@ -278,23 +282,22 @@ Lightyear owns clock pacing. The `SyncConfig` keeps the existing 48-tick
 resynchronization threshold and scales its speedup factor to preserve the default
 correction per tick of error. Raising the threshold alone had weakened that
 correction by 4.8 times. Its native
-`InputDelayConfig` uses a minimum of zero, up to three ticks of input delay before
-prediction, and a maximum prediction budget of 12 ticks. At 250 ms RTT the current
-policy delays local input by three ticks (100 ms at 30 Hz), leaving more room for
-jitter in the C checkpoint history. Lightyear 0.30.1 recalculates input delay when
-configuring or resynchronizing the timeline, not on every RTT update. The policy
-can add more input delay at higher RTT; it does not promise a zero-delay response
-on low-latency links. The adapter refuses delays beyond the command buffer's safe
+`InputDelayConfig` uses zero minimum delay and zero delay before prediction,
+with a maximum prediction budget of 24 ticks (800 ms at 30 Hz). Local input is
+applied on the next simulation tick while latency and its jitter allowance fit
+that budget. Lightyear 0.30.1 recalculates delay when configuring or resynchronizing
+the timeline, not on every RTT update; larger effective latency can still cause
+fallback input delay. The adapter refuses delays beyond the command buffer's safe
 capacity instead of evicting commands still needed for rollback.
 
 The command adapter assigns each sample to the native delayed tick, materializes
 new gaps using the preceding held input, and never rewrites commands already
 queued when delay shrinks. Button edges wait until the next unused tick. Native
-rollback history and the C checkpoint window share the same 12-tick bound:
+rollback history and the C checkpoint window share the same 24-tick bound:
 Lightyear also uses `maximum_predicted_ticks` to limit rollback history, so reducing
 that setting alone would discard inputs still required by C.
 
-At the 12-tick accepted-input boundary, `PredictionWindowWait` pauses the fixed
+At the 24-tick accepted-input boundary, `PredictionWindowWait` pauses the fixed
 clock and resumes when two ticks of headroom return. Whole-tick clock resync and
 expired history request a fresh snapshot for the same participant; actual
 simulation divergence remains fatal. The authority and other clients keep running.
@@ -368,10 +371,14 @@ release builds also need `TM4_DISC_DIR`. `TM4_INPUT_DELAY_MS` sets the delay in
 **each** direction (125 ms by default). `TM4_INPUT_STALL_MS` defaults to 200 ms:
 from seconds 20–60, the proxy holds downstream packets every five seconds and
 releases them in wire order. Set it to zero for the constant-RTT baseline. The
-check rejects prolonged gaps in accepted gas and verifies release, continued
+check verifies zero input delay and local gas preceding its authority confirmation,
+rejects prolonged gaps in accepted gas and verifies release, continued
 confirmations and rollback, then disconnects the delayed client and verifies gas
 and release again after snapshot recovery. Samples and failure diagnostics are saved in
-`build/checks/input-latency.json`. Client journals also retain one transport sample
+`build/checks/input-latency.json`, including response latency, checkpoint memory and
+rollback cost. `tm4_rollback_visuals_check` exercises presentation continuity,
+decay, immediate new movement, identity changes and cuts without disc assets.
+Client journals also retain one transport sample
 per second, including clock pacing, command sequence/tick and rollback counters.
 IO packet/byte counters measure handoff to the socket layer, not server acknowledgement;
 they do not include the browser's internal WebSocket send backlog. Server health
@@ -419,11 +426,11 @@ server's endpoint. Set `TM4_MATCH_PLAYERS` to match its roster size and
 warmup interval while other players fire and a survivor changes real steering
 input. `TM4_RESUME_ALL_CONDITIONED=1` applies 72±12 ms receive conditioning to every
 client. `TM4_RESUME_RETRY_CYCLES=2` repeats interrupted/corrupt attempts.
-`TM4_RESUME_OFFER_HOLD_MS=400` deliberately ages the first handoff offer;
+`TM4_RESUME_OFFER_HOLD_MS=850` deliberately ages the first handoff offer;
 combine `TM4_RESUME_HOLD_OFFERS=3 TM4_RESUME_EXPECT_EXHAUSTION=1` to exhaust its
 retarget budget, then verify a fresh retry. Set `TM4_RESUME_TEST_TICKS=3600` for a
 two-minute live prelude or `TM4_RESUME_EXACT_WINDOW=1` to test handoff at the
-12-tick prediction limit.
+24-tick prediction limit.
 
 `node tests/browser/check_network_rosters.mjs` exercises rendered rosters with
 `TM4_MATCH_PLAYERS`, `TM4_LIVE_DELAY_MS`, `TM4_LIVE_JITTER_MS` and

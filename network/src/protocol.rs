@@ -8,7 +8,7 @@ pub struct SessionChannel;
 pub type AcceptedInputs = lightyear::input::input_message::InputMessage<
     lightyear::prelude::input::native::NativeStateSequence<Input>,
 >;
-pub const PREDICTION_DEPTH: u16 = 12;
+pub const PREDICTION_DEPTH: u16 = 24;
 
 pub const SNAPSHOT_CHUNK_BYTES: usize = 8192;
 pub const SNAPSHOT_MAX_BYTES: usize = 256 * 1024;

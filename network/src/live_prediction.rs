@@ -451,7 +451,7 @@ fn prediction_sync_config() -> SyncConfig {
     // Whole-tick shifts invalidate the C epoch. Keep the wider recovery threshold,
     // but preserve Lightyear's default correction per tick of error: its gain is
     // (speedup_factor - 1) / max_error_margin, not speedup_factor alone.
-    let max_error_margin = f32::from(PREDICTION_DEPTH) * 4.0;
+    let max_error_margin = 48.0;
     config.speedup_factor =
         1.0 + (config.speedup_factor - 1.0) * max_error_margin / config.max_error_margin;
     config.max_error_margin = max_error_margin;
@@ -496,10 +496,10 @@ pub fn prepare(
     world.insert_resource(InputTimelineConfig::new(
         prediction_sync_config(),
         InputDelayConfig {
-            // Use native input delay before prediction to leave room for jitter.
+            // Apply local input immediately while latency fits the prediction budget.
             // The same bound must govern native rollback and the C checkpoints.
             minimum_input_delay_ticks: 0,
-            maximum_input_delay_before_prediction: 3,
+            maximum_input_delay_before_prediction: 0,
             maximum_predicted_ticks: PREDICTION_DEPTH,
         },
     ));
@@ -1302,7 +1302,11 @@ mod tests {
         ));
         let mut state = self::state();
         assert!(matches!(
-            state.verify_confirmations(session(), &frontiers(None), (32..=49).map(frame).collect()),
+            state.verify_confirmations(
+                session(),
+                &frontiers(None),
+                (32..=32 + VERIFICATION_HISTORY as u32).map(frame).collect()
+            ),
             Err(PredictionFailure::Recoverable {
                 reason: RecoveryReason::HistoryExpired,
                 ..
@@ -1371,7 +1375,9 @@ mod tests {
             assert_eq!(wait.confirmed_tick(), (index == 1).then_some(Tick(240)));
         }
 
-        world.resource_mut::<LocalTimeline>().apply_delta(9);
+        world
+            .resource_mut::<LocalTimeline>()
+            .apply_delta(i32::from(PREDICTION_DEPTH) - 3);
         world.run_system_once(update_prediction_wait).unwrap();
         let wait = world.resource::<PredictionWindowWait>();
         assert!(wait.is_waiting());
@@ -1387,7 +1393,7 @@ mod tests {
         assert!(!world.resource::<PredictionWindowWait>().is_waiting());
         assert_eq!(
             world.resource::<PredictionWindowWait>().prediction_depth(),
-            10
+            i32::from(PREDICTION_DEPTH) - 2
         );
     }
 

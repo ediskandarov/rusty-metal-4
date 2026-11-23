@@ -115,7 +115,7 @@ try {
               if (index >= 0) [handoff] = messages.splice(index, 1);
               if (handoff) {
                 const depth = (this.prediction_clock() - handoff.anchor - handoff.head) | 0;
-                if (depth >= 12) {
+                if (depth >= 24) {
                   globalThis.testReconnectDepth = depth;
                   messages.push(handoff);
                   handoff = undefined;
@@ -359,8 +359,8 @@ try {
   assert.equal(reconnected.render, 30);
   assert.equal(reconnected.slot, resumeSlot);
   if (exactWindow) {
-    assert.equal(reconnected.handoffDepth, 12);
-    assert.equal(reconnected.diagnostics.transport.prediction.maxDepth, 12);
+    assert.equal(reconnected.handoffDepth, 24);
+    assert.equal(reconnected.diagnostics.transport.prediction.maxDepth, 24);
     assert(reconnected.diagnostics.transport.prediction.windowWaits > 0);
   }
   console.log("HANDOFF", JSON.stringify(reconnected));
@@ -403,7 +403,7 @@ try {
   for (const offer of replay.offers) {
     assert.equal(offer.link.prediction.resumePreparing, true);
     assert.notEqual(offer.link.prediction.confirmedNativeTick, null);
-    assert(offer.link.prediction.acceptedDepth <= 12);
+    assert(offer.link.prediction.acceptedDepth <= 24);
     assert.equal(offer.link.prediction.historyBytes, 0);
     assert.equal(offer.link.prediction.rollbacks, 0);
   }
@@ -450,7 +450,7 @@ try {
     ),
   );
   for (const state of [reconnected.diagnostics.transport, ...survivorHistories]) {
-    assert(state.prediction.maxDepth <= 12);
+    assert(state.prediction.maxDepth <= 24);
     assert(state.prediction.peakBytes <= 8 * 1024 * 1024);
   }
   assert.deepEqual(errors, []);

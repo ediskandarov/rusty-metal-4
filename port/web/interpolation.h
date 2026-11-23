@@ -31,12 +31,13 @@ void WebInterpolationCutCar(const Car* car);
 u32 WebRenderEffectRandomState(void);
 void WebInterpolationBeginDraw(WebRenderMotionSettings motion, double phase);
 void WebInterpolationEndDraw(void);
+void WebInterpolationBeginNetworkDraw(void);
 WebRenderMotionSettings WebRenderGetMotionSettings(void);
 Camera* WebInterpolationCamera(Camera* camera, Camera* pose);
 Car* WebInterpolationCar(Car* car, Car* pose);
 void WebInterpolationPickup(const PowerupState* power, SVECTOR* position, s32* angle);
-void WebInterpolationProjectile(const WeaponProjectile* projectile, MATRIX* model,
-    SVECTOR* shadow, s32 spin_step, s32* angle);
+void WebInterpolationProjectile(
+    const WeaponProjectile* projectile, MATRIX* model, SVECTOR* shadow, s32 spin_step, s32* angle);
 void WebInterpolationBullet(const Bullet* bullet, SVECTOR* head, SVECTOR* tail);
 int WebInterpolationTrailTip(const WeaponProjectile* projectile, SVECTOR tip[4]);
 void WebInterpolationFireball(const WeaponFireball* fireball, SVECTOR* position);

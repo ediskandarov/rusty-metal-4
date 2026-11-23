@@ -9,6 +9,7 @@
 #include "participant.h"
 #include "port/web/module_import.h"
 #include "rollback_audio.h"
+#include "rollback_visuals.h"
 #include "snapshot.h"
 #include "snapshot_world.h"
 #include "src/main/object/private.h"
@@ -706,8 +707,10 @@ EMSCRIPTEN_KEEPALIVE int WebNetRestoreLocalTick(u32 tick)
 {
     if (!local_checkpoint_boundary())
         return local_checkpoint_error("restore requires a supported match at a tick boundary");
-    if (WebNetRenderedPrediction())
+    if (WebNetRenderedPrediction()) {
         WebRollbackAudioRemember();
+        WebRollbackVisualsRemember(emscripten_get_now());
+    }
     const char* blocker = WebCheckpointRestore(tick);
     if (blocker)
         return local_checkpoint_error(blocker);
@@ -729,8 +732,10 @@ EMSCRIPTEN_KEEPALIVE int WebNetFinishLocalReplay(void)
 {
     if (!local_checkpoint_boundary() || !match.local_replaying)
         return local_checkpoint_error("replay must finish at a tick boundary");
-    if (WebNetRenderedPrediction())
+    if (WebNetRenderedPrediction()) {
         WebRollbackAudioReconcile();
+        WebRollbackVisualsReconcile(emscripten_get_now());
+    }
     match.local_replaying = 0;
     local_checkpoint_error(NULL);
     return 1;
