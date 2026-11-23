@@ -307,11 +307,12 @@ semantics allow a newer sample to overwrite a previously buffered future sample;
 we no longer preserve it by assigning another tick. A sufficiently late tap is
 rejected rather than moved to a later authority step.
 
-Upstream [issue #1816](https://github.com/cBournhonesque/lightyear/issues/1816)
-discusses input-history rewrites and changing delay, but its host-client failure
-is not confirmed to be the same short-press loss. A native-only 0.30.1 reproduction
-shows a one-tick press disappearing when delay falls from three ticks to two;
-with unchanged delay the press reaches `FixedUpdate`.
+Upstream [issue #1821](https://github.com/cBournhonesque/lightyear/issues/1821)
+contains the native-only 0.30.1 reproduction: a one-tick press disappears when delay
+falls from three ticks to two; with unchanged delay it reaches `FixedUpdate`.
+Related [issue #1816](https://github.com/cBournhonesque/lightyear/issues/1816)
+discusses input-history rewrites, but its host-client failure is not confirmed to
+have the same cause.
 
 Server simulation and native input application share the fixed schedule, including
 multiple fixed steps within one application update. Lobby/connection maintenance
