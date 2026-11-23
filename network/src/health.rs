@@ -60,7 +60,7 @@ struct Slot {
     received: u64,
     last_input: Option<Instant>,
     unacknowledged: usize,
-    rejected: [u64; 4],
+    rejected: [u64; 3],
 }
 
 pub struct Metrics {
@@ -161,8 +161,7 @@ impl Metrics {
         let index = match reason {
             Rejection::Late => 0,
             Rejection::Future => 1,
-            Rejection::Full => 2,
-            Rejection::Duplicate => 3,
+            Rejection::Epoch => 2,
         };
         self.slots[slot].rejected[index] += 1;
         self.event("rustymetal4_input_rejected_total");
@@ -202,8 +201,7 @@ impl Metrics {
             for (name, count) in [
                 "rustymetal4_input_rejected_late_total",
                 "rustymetal4_input_rejected_future_total",
-                "rustymetal4_input_rejected_full_total",
-                "rustymetal4_input_rejected_duplicate_total",
+                "rustymetal4_input_rejected_epoch_total",
             ]
             .into_iter()
             .zip(value.rejected)
@@ -260,8 +258,7 @@ mod tests {
         metrics.input_rejected(3, Rejection::Late);
         metrics.input_rejected(3, Rejection::Late);
         metrics.input_rejected(3, Rejection::Future);
-        metrics.input_rejected(7, Rejection::Full);
-        metrics.input_rejected(7, Rejection::Duplicate);
+        metrics.input_rejected(7, Rejection::Epoch);
         let snapshot = metrics.snapshot("match", 3);
         let value = |name, slot| {
             snapshot
@@ -271,16 +268,15 @@ mod tests {
                 .unwrap()
                 .value
         };
-        assert_eq!(value("rustymetal4_input_rejected_total", None), 6.0);
+        assert_eq!(value("rustymetal4_input_rejected_total", None), 5.0);
         assert_eq!(value("rustymetal4_input_rejected_late_total", Some(0)), 1.0);
         assert_eq!(value("rustymetal4_input_rejected_late_total", Some(3)), 2.0);
         assert_eq!(
             value("rustymetal4_input_rejected_future_total", Some(3)),
             1.0
         );
-        assert_eq!(value("rustymetal4_input_rejected_full_total", Some(7)), 1.0);
         assert_eq!(
-            value("rustymetal4_input_rejected_duplicate_total", Some(7)),
+            value("rustymetal4_input_rejected_epoch_total", Some(7)),
             1.0
         );
         assert_eq!(value("rustymetal4_input_rejected_late_total", Some(7)), 0.0);
@@ -289,8 +285,8 @@ mod tests {
             .iter()
             .filter(|m| m.name.starts_with("rustymetal4_input_rejected_") && m.slot.is_some())
             .collect();
-        assert_eq!(rejected.len(), MAX_PLAYERS * 4);
-        assert_eq!(rejected.iter().map(|m| m.value).sum::<f64>(), 6.0);
+        assert_eq!(rejected.len(), MAX_PLAYERS * 3);
+        assert_eq!(rejected.iter().map(|m| m.value).sum::<f64>(), 5.0);
         assert!(
             snapshot.measurements.len() <= 200,
             "Fits the health API bound"

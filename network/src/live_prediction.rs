@@ -1,5 +1,5 @@
 use crate::input::{ControllerCommand, Input};
-use crate::prediction_input::{CommandWriter, LocalInputs};
+use crate::prediction_input::LocalInputs;
 use crate::protocol::{
     ControllerIdentity, MembershipChange, Message, PREDICTION_DEPTH, ParticipantId,
     valid_membership,
@@ -127,14 +127,13 @@ pub struct LivePrediction {
     resume_warmup: bool,
     pending_resume_rollback: Option<Tick>,
     held: Input,
+    delay_stats: Option<(std::time::Duration, std::time::Duration)>,
     local_inputs: LocalInputs,
-    command_writer: CommandWriter,
     edges: VecDeque<Input>,
     checksums: VecDeque<VerifiedRow>,
     confirmations: VecDeque<Message>,
     received_mismatch: bool,
     restoring: bool,
-    sequence: u32,
     head: u32,
     confirmed: u32,
     rollbacks: u32,
@@ -401,6 +400,7 @@ pub fn install(app: &mut App) {
         (update_prediction_wait, discard_waiting_overstep).chain(),
     );
     app.add_systems(PostUpdate, update_prediction_wait);
+    app.add_systems(PostUpdate, refresh_input_delay.before(SyncSystems::Sync));
     app.add_systems(
         PreUpdate,
         (
@@ -493,16 +493,37 @@ pub fn prepare(
         };
         world.insert_resource(manager);
     }
-    world.insert_resource(InputTimelineConfig::new(
+    world.insert_resource(prediction_timeline_config());
+}
+
+fn prediction_timeline_config() -> InputTimelineConfig {
+    InputTimelineConfig::new(
         prediction_sync_config(),
         InputDelayConfig {
-            // Apply local input immediately while latency fits the prediction budget.
-            // The same bound must govern native rollback and the C checkpoints.
             minimum_input_delay_ticks: 0,
             maximum_input_delay_before_prediction: 0,
             maximum_predicted_ticks: PREDICTION_DEPTH,
         },
-    ));
+    )
+}
+
+fn refresh_input_delay(
+    mut state: ResMut<LivePrediction>,
+    link: Single<&Link, With<Connected>>,
+    mut commands: Commands,
+) {
+    if state.expected_slot_mask.is_none() || link.stats.rtt.is_zero() {
+        return;
+    }
+    let stats = (link.stats.rtt, link.stats.jitter);
+    if state.delay_stats == Some(stats) {
+        return;
+    }
+    state.delay_stats = Some(stats);
+    // 0.30.1 recalculates native delay on config insertion or whole-tick resync,
+    // not on RTT updates. Notify it when measurements change, otherwise a loading
+    // spike can leave input delayed indefinitely. All tick assignment stays native.
+    commands.insert_resource(prediction_timeline_config());
 }
 
 pub fn ready(world: &mut World) -> bool {
@@ -564,7 +585,6 @@ pub fn begin(
         },
         checkpoint_depth,
         0,
-        0,
     )
 }
 
@@ -585,7 +605,6 @@ pub fn begin_resume(
     local_slot: u8,
     checkpoint_depth: u16,
     head: u32,
-    sequence: u32,
 ) -> Result<(), &'static str> {
     let bindings = current_bindings(capacity);
     {
@@ -616,7 +635,6 @@ pub fn begin_resume(
         },
         checkpoint_depth,
         head,
-        sequence,
     )?;
     if depth != 0 {
         // Handoff runs between updates. At the limit the forced rollback may
@@ -697,7 +715,6 @@ fn start_at(
     session: Session,
     checkpoint_depth: u16,
     head: u32,
-    sequence: u32,
 ) -> Result<(), &'static str> {
     if !ready(world)
         || world.resource::<LivePrediction>().session.is_some()
@@ -726,7 +743,7 @@ fn start_at(
     if bytes == 0 {
         return Err("The game could not checkpoint the rendered match");
     }
-    let command_writer = {
+    {
         let (mut action, mut buffer) = world
             .query_filtered::<(
                 &mut ActionState<ControllerCommand>,
@@ -734,8 +751,12 @@ fn start_at(
             ), With<InputMarker<ControllerCommand>>>()
             .single_mut(world)
             .map_err(|_| "The local command buffer is missing at prediction handoff")?;
-        *action = ActionState::default();
-        CommandWriter::new(head, boundary, &mut buffer)
+        *action = ActionState(ControllerCommand {
+            epoch: session.epoch,
+            input: Input::default(),
+        });
+        *buffer = NativeBuffer::default();
+        buffer.set(boundary, action.clone());
     };
     let mut manager = PredictionManager::default();
     manager.input_rollback_floor = Some(boundary);
@@ -760,8 +781,6 @@ fn start_at(
     let mut state = world.resource_mut::<LivePrediction>();
     state.session = Some(session);
     state.resume_preparing = false;
-    state.sequence = sequence;
-    state.command_writer = command_writer;
     state.head = head;
     state.confirmed = head;
     state.checksums.push_back((
@@ -779,45 +798,30 @@ fn write_local(
     mut state: ResMut<LivePrediction>,
     timeline: SyncedLocalTimeline,
     manager: Option<Res<PredictionManager>>,
-    mut local: Single<
-        (
-            &mut ActionState<ControllerCommand>,
-            &mut NativeBuffer<ControllerCommand>,
-        ),
-        With<InputMarker<ControllerCommand>>,
-    >,
+    mut local: Single<&mut ActionState<ControllerCommand>, With<InputMarker<ControllerCommand>>>,
 ) {
     let Some(session) = state.session else {
         return;
     };
-    let native_tick = timeline.tick();
-    if native_tick <= session.anchor
-        || manager.is_some_and(|manager| manager.is_rollback())
-        || state.error.is_some()
-    {
+    if manager.is_some_and(|manager| manager.is_rollback()) || state.error.is_some() {
         return;
     }
-    let (action, buffer) = &mut *local;
-    let LivePrediction {
-        command_writer,
-        sequence,
-        edges,
-        held,
-        ..
-    } = &mut *state;
-    let result = command_writer.write(
-        buffer,
-        session.anchor,
-        native_tick,
-        timeline.input_delay(),
-        session.epoch,
-        sequence,
-        || edges.pop_front().unwrap_or(*held),
-    );
-    match result {
-        Ok(command) => **action = command,
-        Err(error) => state.error = Some(error.into()),
+    if usize::from(timeline.input_delay()) + usize::from(PREDICTION_DEPTH) + 1
+        > lightyear::input::input_buffer::INPUT_BUFFER_CAPACITY
+    {
+        state.error = Some("Input delay exceeds the retained command history".into());
+        return;
     }
+    // Consume one captured transition per fixed step. The native input plugin
+    // assigns the tick/delay and records it after WriteClientInputs.
+    local.0 = ControllerCommand {
+        epoch: session.epoch,
+        input: if timeline.tick() <= session.anchor {
+            Input::default()
+        } else {
+            state.edges.pop_front().unwrap_or(state.held)
+        },
+    };
 }
 
 fn step_world(
@@ -1759,3 +1763,7 @@ mod tests {
 
 #[cfg(all(feature = "rollback_probe", target_family = "wasm"))]
 mod diagnostic;
+
+#[cfg(test)]
+#[path = "live_prediction/input_tests.rs"]
+mod input_tests;

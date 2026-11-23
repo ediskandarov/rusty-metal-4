@@ -187,7 +187,7 @@ async function downloadSnapshot(next: Connection, target = 20) {
 }
 async function restore(next: Connection) {
   await downloadSnapshot(next);
-  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 });
+  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20 });
   await Promise.resolve();
   expect(next.sent).toContainEqual({ type: "resume_live_ack", attempt: 1, head: 20 });
   next.onmessage({ type: "resume_active", head: 20 });
@@ -269,7 +269,7 @@ test("a clock shift during snapshot recovery abandons the replay and retries the
   expect(port.netConfirmedTick).toBe(20);
   expect(statuses.at(-1)?.[0]).toBe("playing");
   expect(clientJournal()?.export().stopped).toBeNull();
-  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 });
+  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20 });
   next.onerror(new Error("abandoned recovery"));
   expect(third.readyState).toBe(WebSocket.OPEN);
   expect(statuses.at(-1)?.[0]).toBe("playing");
@@ -490,7 +490,7 @@ test("recovery owns its retarget limit independently of diagnostic counters", as
   const next = await nextConnection();
   await downloadSnapshot(next);
   next.predictionClock = () => 150;
-  const handoff = { type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 } as const;
+  const handoff = { type: "resume_live", attempt: 1, anchor: 100, head: 20 } as const;
   // An inflated diagnostic counter cannot reject the first retarget.
   port.netDiagnostics!.resumeRetargets = 999;
   next.onmessage(handoff);
@@ -536,7 +536,7 @@ test("leaving during handoff cannot restart prediction or acknowledge the old at
   const begin = mock(() => {});
   next.beginResumedPrediction = begin;
   next.predictionClock = () => 119;
-  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20, sequence: 4 });
+  next.onmessage({ type: "resume_live", attempt: 1, anchor: 100, head: 20 });
   await Promise.resolve();
   stop!();
   next.predictionClock = () => 120;

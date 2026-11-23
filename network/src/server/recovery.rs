@@ -145,7 +145,6 @@ impl Match {
                         attempt: attempt.id,
                         anchor: anchor.0,
                         head: target,
-                        sequence: player.received_sequence,
                     },
                 );
                 attempt.offered = true;

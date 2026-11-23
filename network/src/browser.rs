@@ -241,7 +241,6 @@ impl NetworkClient {
         slot: u8,
         checkpoint_depth: u16,
         head: u32,
-        sequence: u32,
     ) -> Result<(), JsValue> {
         live_prediction::begin_resume(
             self.app.world_mut(),
@@ -251,7 +250,6 @@ impl NetworkClient {
             slot,
             checkpoint_depth,
             head,
-            sequence,
         )
         .map_err(JsValue::from_str)
     }

@@ -97,13 +97,18 @@ server. Direct authority startup does not make its configured files public.
 
 ## R3. Preserve and schedule input
 
-Each input record carries session/epoch, sequence, and intended simulation tick.
+Each input record carries the battle epoch and controller state. Lightyear owns
+its native tick, buffered history and duplicate handling; the payload must not
+carry an independent tick or sequence counter.
 Participant ownership comes from the authenticated connection, not a trusted payload
 field. Define device-to-game input mapping once and share it with prediction.
 
 - Retain bounded input history until acknowledged or explicitly expired.
 - Preserve held controls and discrete button transitions. A press/release delivered
-  together must not silently become no action; duplicate delivery must not repeat it.
+  together within the accepted window must not silently become no action; duplicate
+  delivery must not repeat it. Late samples are dropped at their original tick.
+  When native input delay decreases, a newer sample may replace a future sample;
+  the adapter must not move the displaced sample to a different tick.
 - Define how multiple transitions within a simulation step are sampled or queued.
   Preserve original button semantics rather than inventing a new firing rate.
 - Validate values and constrain past/future tick windows and per-client message volume.

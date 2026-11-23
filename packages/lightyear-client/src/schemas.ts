@@ -9,7 +9,7 @@ export const ffaLimitsSchema = z.object({
   timeLimitTicks: z.number().int().min(1).max(0x7fffffff),
   fragLimit: z.number().int().min(1).max(0x7fffffff),
 });
-export const networkProtocolVersion = 20;
+export const networkProtocolVersion = 21;
 const u32 = z.number().int().min(0).max(0xffffffff);
 const i32 = z.number().int().min(-0x80000000).max(0x7fffffff);
 const byte = z.number().int().min(0).max(255);
@@ -248,7 +248,7 @@ export const messageSchema = z.discriminatedUnion("type", [
     data: z.array(byte).min(1).max(8192),
   }),
   z.object({ type: z.literal("resume_catchup"), attempt: u32, start: u32, head: u32, digest: u32 }),
-  z.object({ type: z.literal("resume_live"), attempt: u32, anchor: u32, head: u32, sequence: u32 }),
+  z.object({ type: z.literal("resume_live"), attempt: u32, anchor: u32, head: u32 }),
   z.object({ type: z.literal("resume_active"), head: u32 }),
   z.object({ type: z.literal("prediction_offer"), anchor: u32 }),
   z.object({ type: z.literal("prediction_begin"), anchor: u32 }),
@@ -311,7 +311,7 @@ export const diagnosticsSchema = z.object({
         latest: z
           .object({
             nativeTick: u32,
-            command: z.object({ epoch: u32, sequence: u32, tick: u32, input: inputSchema }),
+            command: z.object({ epoch: u32, input: inputSchema }),
           })
           .nullable(),
       }),

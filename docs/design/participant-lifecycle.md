@@ -156,8 +156,9 @@ not add a departed-player scoreboard.
 A transport loss, hidden tab or recovery request does not schedule departure. The
 existing recovery policy retains that occupied lease until explicit departure or match
 end; choosing a shorter reconnect grace and eviction policy remains mode work.
-Authenticated recovery keeps identity, results, slot and the input sequence watermark.
-Rebinding the connection discards raw commands left by its predecessor. Input acceptance
+Authenticated recovery keeps identity, results and slot. The new connection receives
+a fresh native input buffer; the old connection cannot submit controls into it.
+Input acceptance
 checks participant identity, current native controller entity and connected owner, in
 addition to Lightyear's target authorization.
 

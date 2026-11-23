@@ -278,7 +278,6 @@ impl Match {
                     self.next_resume = self.next_resume.wrapping_add(1);
                     let player = &mut self.controls[slot];
                     player.connection = Some(entity);
-                    player.history.disconnect();
                     player.resume = Some(resume::Attempt::new(self.next_resume));
                     send(links, entity, &Message::Welcome { slot });
                     if let Some(token) = self.participants.at_slot(slot).credential.clone() {

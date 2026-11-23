@@ -1,5 +1,7 @@
-use super::Match;
+use super::{Match, STEP};
 use bevy_ecs::prelude::*;
+use lightyear::input::input_message::{ActionStateSequence, InputMessage, InputTarget};
+use lightyear::prelude::input::native::NativeStateSequence;
 use lightyear::prelude::input::native::{ActionState, NativeBuffer};
 use lightyear::prelude::*;
 use std::{
@@ -7,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tm4_network::{
-    input::ControllerCommand,
+    input::{ControllerCommand, Input, Rejection, STALE_TICKS},
     protocol::{ControllerIdentity, MAX_PLAYERS, Message, Request, SessionChannel},
 };
 
@@ -55,7 +57,7 @@ pub(super) fn bind_controllers(
     commands: &mut Commands,
 ) {
     // Binding data and Lightyear ownership are independent. Replacing a link
-    // preserves the participant, accepted history and sequence watermark.
+    // preserves the participant and accepted history, but clears old native input.
     let Match {
         participants,
         controls,
@@ -76,6 +78,7 @@ pub(super) fn bind_controllers(
                         lifetime: Lifetime::Persistent,
                     },
                     NativeBuffer::<ControllerCommand>::default(),
+                    ActionState::<ControllerCommand>::default(),
                 ));
             }
         } else {
@@ -147,72 +150,155 @@ pub(super) fn bound_reliable_history(
     }
 }
 
-// Read every newly received native-buffer record before FixedPreUpdate advances
-// or trims it. Sampling only ActionState would lose transitions after a stalled frame.
-pub(super) fn accept_native_inputs(
-    mut game: ResMut<Match>,
-    connections: Query<(), With<Connected>>,
-    controllers: Query<(
+pub(super) type ControllerInputs<'w, 's> = Query<
+    'w,
+    's,
+    (
         Entity,
-        &ControllerIdentity,
-        &ControlledBy,
-        &NativeBuffer<ControllerCommand>,
-    )>,
-) {
-    if !game.started || game.ended || game.prediction.anchor.is_none() {
-        return;
+        &'static ControllerIdentity,
+        &'static ControlledBy,
+        &'static ActionState<ControllerCommand>,
+        &'static NativeBuffer<ControllerCommand>,
+    ),
+>;
+
+/// Read the state already applied by Lightyear's FixedPreUpdate. No second queue,
+/// tick assignment or command sequence exists on the authority.
+pub(super) fn applied_inputs(
+    game: &Match,
+    tick: Tick,
+    connections: &Query<(), With<Connected>>,
+    controllers: &ControllerInputs,
+) -> Vec<Input> {
+    game.controls
+        .iter()
+        .enumerate()
+        .map(|(slot, player)| {
+            let Some(controller) = player.controller else {
+                return Input::default();
+            };
+            let Ok((_, identity, owner, action, buffer)) = controllers.get(controller) else {
+                return Input::default();
+            };
+            if !game.participants.human(slot)
+                || game.participants.resolve(identity) != Some(slot)
+                || player.connection != Some(owner.owner)
+                || !connections.contains(owner.owner)
+                || !player.receives_live()
+                || game
+                    .session
+                    .as_ref()
+                    .is_none_or(|session| session.epoch != action.0.epoch)
+                || buffer
+                    .last_remote_tick
+                    .is_none_or(|last| tick - last >= STALE_TICKS as i32)
+            {
+                return Input::default();
+            }
+            action.0.input
+        })
+        .collect()
+}
+
+/// Keep only the still-unsimulated part of the native window. Decode compression
+/// before trimming its prefix so a held button keeps its original meaning.
+fn forward_inputs(
+    states: &NativeStateSequence<ControllerCommand>,
+    end: Tick,
+    now: Tick,
+    epoch: u32,
+) -> Result<Option<NativeStateSequence<ControllerCommand>>, Rejection> {
+    use lightyear::input::input_buffer::INPUT_BUFFER_CAPACITY;
+    if end <= now {
+        return Err(Rejection::Late);
     }
-    let earliest = game.tick;
-    let health = game.health.clone();
+    if end - now > INPUT_BUFFER_CAPACITY as i32 || states.len() > INPUT_BUFFER_CAPACITY {
+        return Err(Rejection::Future);
+    }
+    let mut decoded = NativeBuffer::default();
+    states.clone().update_buffer(&mut decoded, end, STEP);
+    let Some(start) = decoded.start_tick else {
+        return Ok(None);
+    };
+    let start = start.max(now + 1);
+    let mut future = NativeBuffer::default();
+    for offset in 0..=(end - start).max(-1) {
+        let tick = start + offset;
+        match decoded.get(tick) {
+            Some(action) if action.0.epoch == epoch => future.set(tick, action.clone()),
+            Some(_) => return Err(Rejection::Epoch),
+            // An absent sample must not refresh the hold timeout.
+            None => return Ok(None),
+        }
+    }
+    Ok(NativeStateSequence::build_from_input_buffer(
+        &future,
+        future.len(),
+        end,
+    ))
+}
+
+type NativeInputReceivers<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut MessageReceiver<InputMessage<NativeStateSequence<ControllerCommand>>>,
+    ),
+    With<Connected>,
+>;
+
+/// This runs in Lightyear's validation hook before its buffer is updated.
+/// Match membership/epoch are admission rules, not an alternative scheduler.
+pub(super) fn validate_inputs(
+    game: Res<Match>,
+    timeline: Res<LocalTimeline>,
+    controllers: Query<(&ControllerIdentity, &ControlledBy)>,
+    mut receivers: NativeInputReceivers,
+) {
     let epoch = game.session.as_ref().map(|session| session.epoch);
-    for (controller, identity, owner, buffer) in &controllers {
-        let Some(slot) = game.participants.resolve(identity) else {
-            continue;
-        };
-        if !game.participants.human(slot) {
-            continue;
-        }
-        let player = &mut game.controls[slot];
-        if player.controller != Some(controller)
-            || player.connection != Some(owner.owner)
-            || !connections.contains(owner.owner)
-        {
-            continue;
-        }
-        let (Some(mut tick), Some((last, _))) = (buffer.start_tick, buffer.get_last_with_tick())
-        else {
-            continue;
-        };
-        for _ in 0..buffer.len() {
-            if tick > last {
-                break;
-            }
-            if let Some(action) = buffer.get(tick) {
-                let command = action.0;
-                if player.resume.is_none()
-                    && Some(command.epoch) == epoch
-                    && command.sequence > player.received_sequence
+    for (connection, mut receiver) in &mut receivers {
+        receiver.retain_messages(|message| {
+            message.inputs.retain_mut(|data| {
+                let InputTarget::Entity(entity) = data.target else {
+                    return false;
+                };
+                let Ok((identity, owner)) = controllers.get(entity) else {
+                    return false;
+                };
+                let Some(slot) = game.participants.resolve(identity) else {
+                    return false;
+                };
+                let player = &game.controls[slot];
+                if !game.started
+                    || game.ended
+                    || game.prediction.anchor.is_none()
+                    || !game.participants.human(slot)
+                    || player.controller != Some(entity)
+                    || owner.owner != connection
+                    || player.connection != Some(connection)
+                    || !player.receives_live()
                 {
-                    player.received_sequence = command.sequence;
-                    if player.receives_live() {
-                        health.lock().unwrap().input(usize::from(identity.slot));
-                        let queued = player.history.enqueue(
-                            earliest,
-                            command.sequence,
-                            command.tick,
-                            command.input,
-                        );
-                        if let Err(reason) = queued {
-                            health
-                                .lock()
-                                .unwrap()
-                                .input_rejected(usize::from(identity.slot), reason);
-                        }
-                    }
+                    return false;
                 }
-            }
-            tick += 1;
-        }
+                let Some(epoch) = epoch else {
+                    return false;
+                };
+                match forward_inputs(&data.states, message.end_tick, timeline.tick(), epoch) {
+                    Ok(Some(states)) => {
+                        data.states = states;
+                        game.health.lock().unwrap().input(slot);
+                        true
+                    }
+                    Err(reason) => {
+                        game.health.lock().unwrap().input_rejected(slot, reason);
+                        false
+                    }
+                    Ok(None) => false,
+                }
+            });
+            true
+        });
     }
 }
 
@@ -299,4 +385,91 @@ pub(super) fn receive_requests(
         }
     }
     requests
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lightyear::input::input_buffer::INPUT_BUFFER_CAPACITY;
+
+    fn sequence(epoch: u32, start: u32, buttons: &[u16]) -> NativeStateSequence<ControllerCommand> {
+        let mut buffer = NativeBuffer::default();
+        for (offset, &buttons) in buttons.iter().enumerate() {
+            buffer.set(
+                Tick(start + offset as u32),
+                ActionState(ControllerCommand {
+                    epoch,
+                    input: Input {
+                        buttons,
+                        ..Default::default()
+                    },
+                }),
+            );
+        }
+        NativeStateSequence::build_from_input_buffer(
+            &buffer,
+            buttons.len(),
+            Tick(start + buttons.len() as u32 - 1),
+        )
+        .unwrap()
+    }
+    fn decode(
+        states: NativeStateSequence<ControllerCommand>,
+        end: u32,
+    ) -> NativeBuffer<ControllerCommand> {
+        let mut buffer = NativeBuffer::default();
+        states.update_buffer(&mut buffer, Tick(end), STEP);
+        buffer
+    }
+
+    #[test]
+    fn validation_trims_played_ticks_without_rescheduling_a_late_tap() {
+        let states = sequence(1, 100, &[0x40, 0, 0, 0x40]);
+        let future = forward_inputs(&states, Tick(103), Tick(101), 1)
+            .unwrap()
+            .unwrap();
+        let buffer = decode(future, 103);
+        assert_eq!(buffer.start_tick, Some(Tick(102)));
+        assert_eq!(buffer.get(Tick(102)).unwrap().0.input.buttons, 0);
+        assert_eq!(buffer.get(Tick(103)).unwrap().0.input.buttons, 0x40);
+        assert!(matches!(
+            forward_inputs(&states, Tick(103), Tick(103), 1),
+            Err(Rejection::Late)
+        ));
+        let held = forward_inputs(&sequence(1, 100, &[0x40; 4]), Tick(103), Tick(101), 1)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            decode(held, 103).get(Tick(102)).unwrap().0.input.buttons,
+            0x40
+        );
+    }
+
+    #[test]
+    fn validation_fences_epoch_and_bounds_native_history() {
+        assert!(matches!(
+            forward_inputs(&sequence(1, 101, &[0x40]), Tick(101), Tick(100), 2),
+            Err(Rejection::Epoch)
+        ));
+        assert!(matches!(
+            forward_inputs(&sequence(0, 101, &[0x40]), Tick(101), Tick(100), 2),
+            Err(Rejection::Epoch)
+        ));
+        let end = 101 + INPUT_BUFFER_CAPACITY as u32;
+        assert!(matches!(
+            forward_inputs(&sequence(1, end, &[0x40]), Tick(end), Tick(100), 1),
+            Err(Rejection::Future)
+        ));
+    }
+
+    #[test]
+    fn native_overlap_and_reordering_do_not_repeat_or_rewrite_accepted_samples() {
+        let mut buffer = decode(sequence(1, 101, &[0x40, 0, 0x40]), 103);
+        sequence(1, 101, &[0, 0x40]).update_buffer(&mut buffer, Tick(102), STEP);
+        sequence(1, 101, &[0x40, 0, 0x40]).update_buffer(&mut buffer, Tick(103), STEP);
+        assert_eq!(buffer.last_remote_tick, Some(Tick(103)));
+        assert_eq!(buffer.get(Tick(101)).unwrap().0.input.buttons, 0x40);
+        assert_eq!(buffer.get(Tick(102)).unwrap().0.input.buttons, 0);
+        assert_eq!(buffer.get(Tick(103)).unwrap().0.input.buttons, 0x40);
+        assert_eq!(buffer.len(), 3);
+    }
 }

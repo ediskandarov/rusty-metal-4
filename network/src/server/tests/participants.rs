@@ -1,5 +1,5 @@
 use super::super::control::{
-    accept_native_inputs, bind_controllers, detach_connection, reap_closed_links,
+    ControllerInputs, applied_inputs, bind_controllers, detach_connection, reap_closed_links,
 };
 use super::super::tick::update;
 use super::super::*;
@@ -127,21 +127,44 @@ fn bind(world: &mut World) {
         .unwrap();
 }
 
-fn buffer(sequence: u32, buttons: u16) -> NativeBuffer<ControllerCommand> {
+fn buffer(buttons: u16) -> NativeBuffer<ControllerCommand> {
     let mut buffer = NativeBuffer::default();
     buffer.set(
         Tick(101),
         ActionState(ControllerCommand {
             epoch: 1,
-            sequence,
-            tick: 100,
             input: Input {
                 buttons,
                 ..Default::default()
             },
         }),
     );
+    buffer.last_remote_tick = Some(Tick(101));
     buffer
+}
+
+fn read_inputs(world: &mut World) -> Vec<Input> {
+    world
+        .run_system_once(
+            |mut query: Query<(
+                &mut ActionState<ControllerCommand>,
+                &NativeBuffer<ControllerCommand>,
+            )>| {
+                for (mut action, buffer) in &mut query {
+                    *action = buffer.get(Tick(101)).cloned().unwrap_or_default();
+                }
+            },
+        )
+        .unwrap();
+    world
+        .run_system_once(
+            |game: Res<Match>,
+             connections: Query<(), With<Connected>>,
+             controllers: ControllerInputs| {
+                applied_inputs(&game, Tick(101), &connections, &controllers)
+            },
+        )
+        .unwrap()
 }
 
 #[test]
@@ -327,7 +350,6 @@ fn room_admission_and_preparation_reconnect_use_participant_bindings() {
     );
     let controller = world.resource::<Match>().controls[3].controller.unwrap();
     assert_eq!(world.get::<ControllerIdentity>(controller), Some(&a));
-    world.resource_mut::<Match>().controls[3].received_sequence = 41;
     world
         .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
             detach_connection(&mut game, 3, first, &mut commands);
@@ -345,7 +367,6 @@ fn room_admission_and_preparation_reconnect_use_participant_bindings() {
     let game = world.resource::<Match>();
     assert_eq!(game.controls[3].connection, Some(reconnect));
     assert_eq!(game.controls[3].controller, Some(controller));
-    assert_eq!(game.controls[3].received_sequence, 41);
     assert_eq!(game.participants.binding(3), a);
     assert_eq!(
         world.get::<ControlledBy>(controller).unwrap().owner,
@@ -363,19 +384,6 @@ fn preparation_reuse_retires_existing_controller_connection_and_input() {
     game.started = false;
     game.controls[0].connection = Some(old);
     game.controls[1].connection = Some(other);
-    game.controls[0].received_sequence = 41;
-    game.controls[0]
-        .history
-        .enqueue(
-            100,
-            41,
-            100,
-            Input {
-                buttons: 0x40,
-                ..Default::default()
-            },
-        )
-        .unwrap();
     game.prediction.accepted[0].set(
         Tick(101),
         ActionState(Input {
@@ -389,7 +397,7 @@ fn preparation_reuse_retires_existing_controller_connection_and_input() {
     world.insert_resource(game);
     bind(&mut world);
     let old_controller = world.resource::<Match>().controls[0].controller.unwrap();
-    world.entity_mut(old_controller).insert(buffer(42, 0x40));
+    world.entity_mut(old_controller).insert(buffer(0x40));
     world
         .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
             game.replace_preparation(retired, &mut commands).unwrap();
@@ -398,11 +406,9 @@ fn preparation_reuse_retires_existing_controller_connection_and_input() {
     bind(&mut world);
     assert!(world.get_entity(old_controller).is_err());
     {
-        let mut game = world.resource_mut::<Match>();
+        let game = world.resource::<Match>();
         assert_eq!(game.controls[0].connection, None);
         assert_eq!(game.controls[0].controller, None);
-        assert_eq!(game.controls[0].received_sequence, 0);
-        assert_eq!(game.controls[0].history.sample(100), Input::default());
         assert_eq!(game.prediction.accepted[0].len(), 0);
         assert_ne!(game.participants.binding(0), retired);
         assert_eq!(game.participants.binding(1), unaffected);
@@ -527,42 +533,27 @@ fn reused_sparse_slot_rejects_previous_owner_and_accepts_slot_seven() {
     world.resource_mut::<Match>().started = true;
     bind(&mut world);
     let controller = world.resource::<Match>().controls[7].controller.unwrap();
-    world
-        .entity_mut(controller)
-        .insert((retired, buffer(1, 0x40)));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(world.resource::<Match>().controls[7].received_sequence, 0);
-    world
-        .entity_mut(controller)
-        .insert((current, buffer(1, 0x40)));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(
-        world.resource_mut::<Match>().controls[7]
-            .history
-            .sample(100)
-            .buttons,
-        0x40
-    );
+    world.entity_mut(controller).insert((retired, buffer(0x40)));
+    assert_eq!(read_inputs(&mut world)[7], Input::default());
+    world.entity_mut(controller).insert((current, buffer(0x40)));
+    assert_eq!(read_inputs(&mut world)[7].buttons, 0x40);
     assert!(
-        world
-            .resource::<Match>()
-            .controls
+        read_inputs(&mut world)
             .iter()
             .enumerate()
             .filter(|(slot, _)| *slot != 7)
-            .all(|(_, control)| control.received_sequence == 0)
+            .all(|(_, input)| *input == Input::default())
     );
 }
 
 #[test]
-fn reconnect_keeps_binding_results_and_watermark_and_fences_the_old_connection() {
+fn reconnect_keeps_binding_results_and_fences_the_old_connection() {
     let mut world = World::new();
     let old = connection(&mut world, 1);
     let replacement = connection(&mut world, 2);
     let duplicate = connection(&mut world, 3);
     let mut game = game();
     game.controls[0].connection = Some(old);
-    game.controls[0].received_sequence = 41;
     let token = "ab".repeat(32);
     game.participants.at_slot_mut(0).credential = Some(token.clone());
     game.participants.at_slot_mut(0).car = Some("Orbital".into());
@@ -572,8 +563,8 @@ fn reconnect_keeps_binding_results_and_watermark_and_fences_the_old_connection()
     bind(&mut world);
     let controller = world.resource::<Match>().controls[0].controller.unwrap();
     // Native records not consumed before disconnect must not enter the new
-    // connection's command stream, even if they carry a larger sequence.
-    world.entity_mut(controller).insert(buffer(999, 99));
+    // connection's native input buffer.
+    world.entity_mut(controller).insert(buffer(99));
     world.resource_mut::<Match>().controls[0].disconnect(old);
     world.entity_mut(old).remove::<Connected>();
     request(
@@ -628,7 +619,6 @@ fn reconnect_keeps_binding_results_and_watermark_and_fences_the_old_connection()
         let game = world.resource::<Match>();
         assert_eq!(game.participants.binding(0), binding);
         assert_eq!(game.controls[0].controller, Some(controller));
-        assert_eq!(game.controls[0].received_sequence, 41);
         assert_eq!(game.participants.at_slot(0).car.as_deref(), Some("Orbital"));
         assert_eq!(game.last_state.as_ref().unwrap().scores[0].frags, 3);
     }
@@ -661,26 +651,12 @@ fn reconnect_keeps_binding_results_and_watermark_and_fences_the_old_connection()
         world.get::<ControlledBy>(controller).unwrap().owner,
         replacement
     );
-    // Restore activation is unchanged; the next command must still exceed
-    // the original participant's high-water mark.
+    // Restoration gates control; after activation the new native buffer is used.
     world.resource_mut::<Match>().controls[0].resume = None;
-    world.entity_mut(controller).insert(buffer(41, 7));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(
-        world.resource_mut::<Match>().controls[0]
-            .history
-            .sample(100),
-        Input::default()
-    );
-    world.entity_mut(controller).insert(buffer(42, 8));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(
-        world.resource_mut::<Match>().controls[0]
-            .history
-            .sample(100)
-            .buttons,
-        8
-    );
+    world.entity_mut(controller).insert(buffer(7));
+    assert_eq!(read_inputs(&mut world)[0].buttons, 7);
+    world.entity_mut(controller).insert(buffer(8));
+    assert_eq!(read_inputs(&mut world)[0].buttons, 8);
 }
 
 #[test]
@@ -714,9 +690,8 @@ fn input_requires_the_current_participant_controller_and_connected_owner() {
             ..identity
         },
     ] {
-        world.entity_mut(controller).insert((invalid, buffer(1, 9)));
-        world.run_system_once(accept_native_inputs).unwrap();
-        assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+        world.entity_mut(controller).insert((invalid, buffer(9)));
+        assert_eq!(read_inputs(&mut world)[0], Input::default());
     }
     world.entity_mut(controller).insert((
         identity,
@@ -725,8 +700,7 @@ fn input_requires_the_current_participant_controller_and_connected_owner() {
             lifetime: Lifetime::Persistent,
         },
     ));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+    assert_eq!(read_inputs(&mut world)[0], Input::default());
     world.entity_mut(controller).insert(ControlledBy {
         owner,
         lifetime: Lifetime::Persistent,
@@ -739,29 +713,20 @@ fn input_requires_the_current_participant_controller_and_connected_owner() {
                 owner,
                 lifetime: Lifetime::Persistent,
             },
-            buffer(999, 9),
+            buffer(9),
         ))
         .id();
     world
         .entity_mut(controller)
         .insert(NativeBuffer::<ControllerCommand>::default());
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+    assert_eq!(read_inputs(&mut world)[0], Input::default());
     world.despawn(forged);
     world.entity_mut(owner).remove::<Connected>();
-    world.entity_mut(controller).insert(buffer(1, 9));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+    world.entity_mut(controller).insert(buffer(9));
+    assert_eq!(read_inputs(&mut world)[0], Input::default());
     world.entity_mut(owner).insert(Connected);
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(
-        world.resource_mut::<Match>().controls[0]
-            .history
-            .sample(100)
-            .buttons,
-        9
-    );
-    assert_eq!(world.resource::<Match>().controls[1].received_sequence, 0);
+    assert_eq!(read_inputs(&mut world)[0].buttons, 9);
+    assert_eq!(read_inputs(&mut world)[1], Input::default());
 }
 
 #[test]
@@ -793,7 +758,6 @@ fn lobby_disconnect_preserves_authenticated_room_identity_but_not_an_open_seat()
             .unwrap();
         }
         game.controls[0].connection = Some(old);
-        game.controls[0].received_sequence = 41;
         let binding = game.participants.binding(0);
         let other_binding = game.participants.binding(1);
         let compatibility = game.compatibility.clone().unwrap();
@@ -822,14 +786,12 @@ fn lobby_disconnect_preserves_authenticated_room_identity_but_not_an_open_seat()
         if room {
             assert_eq!(game.participants.binding(0), binding);
             assert_eq!(game.controls[0].controller, Some(controller));
-            assert_eq!(game.controls[0].received_sequence, 41);
         } else {
             assert_ne!(
                 game.participants.binding(0).participant,
                 binding.participant
             );
             assert_ne!(game.controls[0].controller, Some(controller));
-            assert_eq!(game.controls[0].received_sequence, 0);
         }
     }
 }
@@ -1008,14 +970,13 @@ fn slot_reuse_retires_credentials_controllers_and_queued_commands() {
     let new_link = connection(&mut world, 92);
     let mut game = live_game();
     game.controls[0].connection = Some(old_link);
-    game.controls[0].received_sequence = 50;
     game.participants.at_slot_mut(0).credential = Some("ab".repeat(32));
     game.participants.at_slot_mut(0).room_credential = Some("cd".repeat(32));
     let old = game.participants.binding(0);
     world.insert_resource(game);
     bind(&mut world);
     let controller = world.resource::<Match>().controls[0].controller.unwrap();
-    world.entity_mut(controller).insert(buffer(999, 99));
+    world.entity_mut(controller).insert(buffer(99));
     world
         .run_system_once(move |mut game: ResMut<Match>, mut commands: Commands| {
             game.retire_live(old, &mut commands)
@@ -1033,7 +994,6 @@ fn slot_reuse_retires_credentials_controllers_and_queued_commands() {
                 .find_room_credential(&"cd".repeat(32))
                 .is_none()
         );
-        assert_eq!(game.controls[0].received_sequence, 0);
         let fresh = game.reserve_live().unwrap();
         game.participants.commit_live(fresh).unwrap();
         game.controls[0].connection = Some(new_link);
@@ -1047,15 +1007,13 @@ fn slot_reuse_retires_credentials_controllers_and_queued_commands() {
         Some(controller)
     );
     // Even a retained old entity with stale native records cannot contribute
-    // to the new lease's accepted command queue.
+    // to the new lease's applied input.
     world.entity_mut(controller).insert(ControlledBy {
         owner: old_link,
         lifetime: Lifetime::Persistent,
     });
-    world.run_system_once(accept_native_inputs).unwrap();
-    let mut game = world.resource_mut::<Match>();
-    assert_eq!(game.controls[0].received_sequence, 0);
-    assert_eq!(game.controls[0].history.sample(100), Input::default());
+    assert_eq!(read_inputs(&mut world)[0], Input::default());
+    let game = world.resource::<Match>();
     assert!(game.retired_connections.contains(&old_link));
 }
 
@@ -1744,32 +1702,22 @@ fn next_stage_rejects_previous_epoch_input_even_from_the_same_participant() {
     world.insert_resource(game);
     bind(&mut world);
     let controller = world.resource::<Match>().controls[0].controller.unwrap();
-    world.entity_mut(controller).insert(buffer(999, 9));
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 0);
+    world.entity_mut(controller).insert(buffer(9));
+    assert_eq!(read_inputs(&mut world)[0], Input::default());
     let mut input = NativeBuffer::default();
     input.set(
         Tick(101),
         ActionState(ControllerCommand {
             epoch: 2,
-            sequence: 1,
-            tick: 100,
             input: Input {
                 buttons: 7,
                 ..Default::default()
             },
         }),
     );
+    input.last_remote_tick = Some(Tick(101));
     world.entity_mut(controller).insert(input);
-    world.run_system_once(accept_native_inputs).unwrap();
-    assert_eq!(world.resource::<Match>().controls[0].received_sequence, 1);
-    assert_eq!(
-        world.resource_mut::<Match>().controls[0]
-            .history
-            .sample(100)
-            .buttons,
-        7
-    );
+    assert_eq!(read_inputs(&mut world)[0].buttons, 7);
 }
 
 #[test]
@@ -1954,4 +1902,94 @@ fn tournament_transport_leave_does_not_schedule_membership_change() {
     let game = world.resource::<Match>();
     assert!(game.membership.departing.is_empty());
     assert!(!game.ended);
+}
+
+#[test]
+fn native_fixed_steps_keep_batched_edges_and_expire_held_input() {
+    use bevy_app::{App, FixedUpdate};
+    use bevy_time::TimeUpdateStrategy;
+    use lightyear::prelude::server::{Server, ServerPlugins, Started};
+    #[derive(Resource, Default)]
+    struct Rows(Vec<(Tick, Vec<Input>)>);
+    let mut app = App::new();
+    app.add_plugins((
+        bevy_app::TaskPoolPlugin::default(),
+        bevy_state::app::StatesPlugin,
+    ));
+    app.add_plugins(ServerPlugins {
+        tick_duration: STEP,
+    });
+    game_protocol::protocol(&mut app);
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(STEP));
+    app.insert_resource(game());
+    app.init_resource::<Rows>();
+    app.add_systems(
+        FixedUpdate,
+        |game: Res<Match>,
+         clock: Res<LocalTimeline>,
+         connections: Query<(), With<Connected>>,
+         controllers: ControllerInputs,
+         mut rows: ResMut<Rows>| {
+            rows.0.push((
+                clock.tick(),
+                applied_inputs(&game, clock.tick(), &connections, &controllers),
+            ));
+        },
+    );
+    app.finish();
+    app.cleanup();
+    let server = app.world_mut().spawn(Server::default()).id();
+    app.update();
+    app.world_mut().entity_mut(server).insert(Started);
+    let owner = connection(app.world_mut(), 1);
+    app.world_mut().resource_mut::<Match>().controls[0].connection = Some(owner);
+    bind(app.world_mut());
+    let controller = app.world().resource::<Match>().controls[0]
+        .controller
+        .unwrap();
+    let start = app.world().resource::<LocalTimeline>().tick() + 1;
+    let mut buffer = NativeBuffer::default();
+    for (offset, buttons) in [0x40, 0, 0x40].into_iter().enumerate() {
+        buffer.set(
+            start + offset as i32,
+            ActionState(ControllerCommand {
+                epoch: 1,
+                input: Input {
+                    buttons,
+                    ..Default::default()
+                },
+            }),
+        );
+    }
+    buffer.last_remote_tick = Some(start + 2);
+    app.world_mut().entity_mut(controller).insert(buffer);
+    app.world_mut().resource_mut::<Rows>().0.clear();
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(STEP * 3));
+    app.update();
+    let rows = &app.world().resource::<Rows>().0;
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows.iter()
+            .map(|(_, inputs)| inputs[0].buttons)
+            .collect::<Vec<_>>(),
+        [0x40, 0, 0x40]
+    );
+    assert_eq!(
+        rows.iter().map(|(tick, _)| *tick).collect::<Vec<_>>(),
+        [start, start + 1, start + 2]
+    );
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(STEP));
+    for _ in 0..9 {
+        app.update();
+    }
+    let rows = &app.world().resource::<Rows>().0;
+    assert_eq!(rows[10].1[0].buttons, 0x40);
+    assert_eq!(rows[11].1[0], Input::default());
+    // Even an already buffered future input cannot survive losing its owner.
+    app.world_mut().resource_mut::<Match>().controls[0].disconnect(owner);
+    app.update();
+    assert_eq!(
+        app.world().resource::<Rows>().0.last().unwrap().1[0],
+        Input::default()
+    );
 }

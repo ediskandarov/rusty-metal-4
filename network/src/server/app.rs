@@ -1,11 +1,11 @@
 use super::{
     AcceptedTimeline, ControllerState, Match, ParticipantRoster, STEP,
-    control::{Admission, accept_native_inputs, bound_reliable_history, reap_closed_links},
-    tick::update,
+    control::{Admission, bound_reliable_history, reap_closed_links, validate_inputs},
+    tick::{fixed_step, update},
 };
 use crate::{management, simulator};
 use aeronet_io::connection::LocalAddr;
-use bevy_app::{App, PostUpdate, PreUpdate, Update};
+use bevy_app::{App, FixedUpdate, PostUpdate, Update};
 use bevy_ecs::prelude::*;
 use lightyear::prelude::server::*;
 use lightyear::prelude::*;
@@ -139,16 +139,14 @@ pub(crate) fn run_match(
     app.insert_resource(game);
     app.insert_non_send(simulator);
     app.add_systems(Update, update);
+    app.add_systems(FixedUpdate, fixed_step);
     app.add_systems(
         PostUpdate,
         (bound_reliable_history, reap_closed_links)
             .chain()
             .after(lightyear::transport::plugin::TransportSystems::Send),
     );
-    app.add_systems(
-        PreUpdate,
-        accept_native_inputs.after(lightyear::input::server::InputSystems::ReceiveInputs),
-    );
+    app.add_input_validator(validate_inputs);
     app.finish();
     app.cleanup();
     let started = Instant::now();

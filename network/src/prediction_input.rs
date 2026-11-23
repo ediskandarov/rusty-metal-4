@@ -1,127 +1,9 @@
-//! Local commands survive authoritative corrections to the separate accepted-input buffer.
-use crate::input::{ControllerCommand, FUTURE_WINDOW, Input};
+//! Reconnect warmup samples survive corrections to the accepted-input buffer.
+use crate::input::{ControllerCommand, Input};
 use crate::protocol::PREDICTION_DEPTH;
-use lightyear::input::input_buffer::INPUT_BUFFER_CAPACITY;
 use lightyear::prelude::Tick;
-use lightyear::prelude::input::native::{ActionState, NativeBuffer};
+use lightyear::prelude::input::native::NativeBuffer;
 use std::collections::VecDeque;
-
-/// Assign samples once to future native ticks. A change in input delay must not
-/// rewrite an already queued press/release, or copy its tick/sequence into a gap.
-#[derive(Default)]
-pub(crate) struct CommandWriter {
-    next_tick: u32,
-    held: Input,
-}
-
-impl CommandWriter {
-    pub(crate) fn new(
-        head: u32,
-        boundary: Tick,
-        buffer: &mut NativeBuffer<ControllerCommand>,
-    ) -> Self {
-        // Loading/reconnect has no commands for this handoff, but Lightyear may
-        // already have buffered delayed default samples beyond its first tick.
-        // Seed the checkpoint boundary so pre-start buffering cannot establish
-        // a window that excludes the commands needed to advance that checkpoint.
-        *buffer = NativeBuffer::default();
-        buffer.set(boundary, ActionState::default());
-        Self {
-            next_tick: head,
-            held: Input::default(),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn write(
-        &mut self,
-        buffer: &mut NativeBuffer<ControllerCommand>,
-        anchor: Tick,
-        current: Tick,
-        delay: u16,
-        epoch: u32,
-        sequence: &mut u32,
-        next_input: impl FnOnce() -> Input,
-    ) -> Result<ActionState<ControllerCommand>, String> {
-        if epoch == 0
-            || u32::from(delay) > FUTURE_WINDOW
-            || usize::from(delay) + usize::from(PREDICTION_DEPTH) + 1 > INPUT_BUFFER_CAPACITY
-        {
-            return Err("Input delay exceeds the retained command history".into());
-        }
-        let current_tick = current
-            .0
-            .checked_sub(anchor.0)
-            .and_then(|tick| tick.checked_sub(1))
-            .ok_or("Input sampling precedes the match timeline")?;
-        let target = current_tick
-            .checked_add(u32::from(delay))
-            .ok_or("Input target tick overflow")?;
-        let native = current
-            .0
-            .checked_add(u32::from(delay))
-            .map(Tick)
-            .ok_or("Native input tick overflow")?;
-        if target < self.next_tick {
-            let queued = buffer
-                .get(native)
-                .ok_or("A previously queued delayed command is missing")?;
-            if queued.0.epoch != epoch
-                || queued.0.tick != target
-                || queued.0.sequence == 0
-                || queued.0.sequence > *sequence
-            {
-                return Err("A previously queued delayed command is misaligned".into());
-            }
-            return Ok(queued.clone());
-        }
-        let gap = target - self.next_tick;
-        if gap > FUTURE_WINDOW {
-            return Err("Input scheduling exceeded the future window".into());
-        }
-        let next_tick = target.checked_add(1).ok_or("Input target tick overflow")?;
-        sequence
-            .checked_add(gap + 1)
-            .ok_or("Input command sequence overflow")?;
-        let first_native = native.0 - gap;
-        if buffer
-            .start_tick
-            .is_some_and(|start| start.0 > first_native)
-        {
-            return Err(format!(
-                "Input scheduling fell outside the retained command history: anchor={}, current={}, delay={}, next={}, target={}, first={}, buffer_start={:?}, buffer_end={:?}, sequence={}",
-                anchor.0,
-                current.0,
-                delay,
-                self.next_tick,
-                target,
-                first_native,
-                buffer.start_tick,
-                buffer.end_tick(),
-                sequence,
-            ));
-        }
-
-        // All bounds are checked before consuming an edge or changing history.
-        let sampled = next_input();
-        for tick in self.next_tick..=target {
-            *sequence += 1;
-            let input = if tick == target { sampled } else { self.held };
-            buffer.set(
-                Tick(first_native + (tick - self.next_tick)),
-                ActionState(ControllerCommand {
-                    epoch,
-                    sequence: *sequence,
-                    tick,
-                    input,
-                }),
-            );
-        }
-        self.next_tick = next_tick;
-        self.held = sampled;
-        Ok(buffer.get(native).unwrap().clone())
-    }
-}
 
 #[derive(Default)]
 pub(crate) struct LocalInputs {
@@ -162,7 +44,7 @@ impl LocalInputs {
                 commands.start_tick
             )
         })?;
-        if command.0.tick != tick || command.0.epoch != epoch {
+        if command.0.epoch != epoch {
             return Err("Lightyear lost the predicted local input for a fixed tick".into());
         }
         Ok(command.0.input)
@@ -187,11 +69,9 @@ mod tests {
         }
     }
 
-    fn command(tick: u32, input: Input) -> ActionState<ControllerCommand> {
+    fn command(input: Input) -> ActionState<ControllerCommand> {
         ActionState(ControllerCommand {
             epoch: EPOCH,
-            sequence: tick + 1,
-            tick,
             input,
         })
     }
@@ -201,318 +81,6 @@ mod tests {
         authority.set(tick, ActionState(input));
         let message = NativeStateSequence::build_from_input_buffer(&authority, 1, tick).unwrap();
         assert_eq!(message.update_buffer(buffer, tick, STEP), Some(tick));
-    }
-
-    fn sample(
-        writer: &mut CommandWriter,
-        buffer: &mut NativeBuffer<ControllerCommand>,
-        sequence: &mut u32,
-        tick: u32,
-        delay: u16,
-        buttons: u16,
-    ) -> ActionState<ControllerCommand> {
-        let native = Tick(ANCHOR + tick + 1);
-        let command = writer
-            .write(buffer, Tick(ANCHOR), native, delay, EPOCH, sequence, || {
-                input(buttons)
-            })
-            .unwrap();
-        // Lightyear buffers the returned ActionState again after WriteClientInputs.
-        buffer.set(native + i32::from(delay), command.clone());
-        command
-    }
-
-    #[test]
-    fn match_start_replaces_preparation_samples_before_the_first_command() {
-        let mut buffer = NativeBuffer::default();
-        // The loading handshake left only delayed, epoch-zero samples. Its first
-        // retained tick is later than the first input needed by the C world.
-        for tick in ANCHOR + 6..=ANCHOR + 22 {
-            buffer.set(Tick(tick), ActionState::default());
-        }
-        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
-        let mut sequence = 0;
-        // Lightyear continues buffering before the agreed start boundary.
-        buffer.set(Tick(ANCHOR + 22), ActionState::default());
-        let first = sample(&mut writer, &mut buffer, &mut sequence, 0, 22, 64);
-        assert_eq!((first.0.tick, first.0.sequence), (22, 23));
-        for tick in 0..=22 {
-            let command = &buffer.get(Tick(ANCHOR + tick + 1)).unwrap().0;
-            assert_eq!(
-                (command.epoch, command.tick, command.sequence),
-                (EPOCH, tick, tick + 1)
-            );
-            assert_eq!(command.input, input(if tick == 22 { 64 } else { 0 }));
-        }
-    }
-
-    #[test]
-    fn handoff_seeds_zero_and_delayed_input_for_fresh_and_resumed_worlds() {
-        for head in [0, 30] {
-            for delay in [0, 3, 22, 39] {
-                let boundary = Tick(ANCHOR + head);
-                let mut buffer = NativeBuffer::default();
-                // An old epoch must not survive the handoff either.
-                buffer.set(boundary + 6, command(99, input(1)));
-                let mut writer = CommandWriter::new(head, boundary, &mut buffer);
-                assert_eq!(buffer.end_tick(), Some(boundary));
-                let mut sequence = 80;
-                // Native buffering still runs while waiting for the agreed tick.
-                for offset in -2..=0 {
-                    buffer.set(boundary + offset + i32::from(delay), ActionState::default());
-                }
-                let first = sample(&mut writer, &mut buffer, &mut sequence, head, delay, 64);
-                assert_eq!(first.0.input, input(64));
-                for offset in 0..=u32::from(delay) {
-                    let command = &buffer.get(boundary + offset as i32 + 1).unwrap().0;
-                    assert_eq!(
-                        (command.epoch, command.tick, command.sequence),
-                        (EPOCH, head + offset, 81 + offset)
-                    );
-                    assert_eq!(
-                        command.input,
-                        input(if offset == u32::from(delay) { 64 } else { 0 })
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn lost_command_history_is_still_rejected_after_handoff() {
-        let mut buffer = NativeBuffer::default();
-        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
-        let mut sequence = 0;
-        sample(&mut writer, &mut buffer, &mut sequence, 0, 0, 64);
-        buffer.pop(Tick(ANCHOR + 2));
-        let error = writer
-            .write(
-                &mut buffer,
-                Tick(ANCHOR),
-                Tick(ANCHOR + 2),
-                0,
-                EPOCH,
-                &mut sequence,
-                || panic!("lost history consumed a button edge"),
-            )
-            .unwrap_err();
-        assert!(error.contains("Input scheduling fell outside the retained command history"));
-        assert_eq!(sequence, 1);
-        assert_eq!(writer.next_tick, 1);
-    }
-
-    #[test]
-    fn delayed_commands_keep_edges_through_increasing_and_decreasing_delay() {
-        let mut buffer = NativeBuffer::default();
-        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
-        let mut sequence = 0;
-        assert_eq!(
-            sample(&mut writer, &mut buffer, &mut sequence, 0, 2, 64)
-                .0
-                .tick,
-            2
-        );
-        assert_eq!(
-            sample(&mut writer, &mut buffer, &mut sequence, 1, 4, 0)
-                .0
-                .tick,
-            5
-        );
-        assert_eq!(sequence, 6);
-        for tick in 2..=4 {
-            let native = Tick(ANCHOR + tick + 1);
-            let queued = writer
-                .write(
-                    &mut buffer,
-                    Tick(ANCHOR),
-                    native,
-                    1,
-                    EPOCH,
-                    &mut sequence,
-                    || panic!("reducing input delay must not consume the next button edge"),
-                )
-                .unwrap();
-            assert_eq!(queued.0.tick, tick + 1);
-            buffer.set(native + 1, queued);
-            assert_eq!(sequence, 6);
-        }
-        sample(&mut writer, &mut buffer, &mut sequence, 5, 1, 1);
-        let expected = [0, 0, 64, 64, 64, 0, 1];
-        let local = LocalInputs::default();
-        for (tick, buttons) in expected.into_iter().enumerate() {
-            let tick = tick as u32;
-            let native = Tick(ANCHOR + tick + 1);
-            let command = &buffer.get(native).unwrap().0;
-            assert_eq!(command.sequence, tick + 1);
-            assert_eq!(
-                local.get(&buffer, native, EPOCH, tick).unwrap(),
-                input(buttons)
-            );
-        }
-
-        // Transport and the authoritative acceptance queue observe the same tick labels.
-        let packet =
-            NativeStateSequence::build_from_input_buffer(&buffer, 7, Tick(ANCHOR + 7)).unwrap();
-        let mut received = NativeBuffer::<ControllerCommand>::default();
-        packet.update_buffer(&mut received, Tick(ANCHOR + 7), STEP);
-        let mut authority = crate::input::InputHistory::default();
-        for tick in 0..7 {
-            let command = &received.get(Tick(ANCHOR + tick + 1)).unwrap().0;
-            assert_eq!(
-                authority.enqueue(0, command.sequence, command.tick, command.input),
-                Ok(tick)
-            );
-        }
-        for (tick, buttons) in expected.into_iter().enumerate() {
-            assert_eq!(authority.sample(tick as u32), input(buttons));
-        }
-    }
-
-    #[test]
-    fn delayed_commands_begin_at_the_resumed_head() {
-        let mut buffer = NativeBuffer::default();
-        let mut writer = CommandWriter::new(30, Tick(ANCHOR + 30), &mut buffer);
-        let mut sequence = 80;
-        sample(&mut writer, &mut buffer, &mut sequence, 30, 2, 64);
-        assert_eq!(buffer.start_tick, Some(Tick(ANCHOR + 30)));
-        assert_eq!(buffer.get(Tick(ANCHOR + 31)).unwrap().0.input, input(0));
-        assert_eq!(buffer.get(Tick(ANCHOR + 32)).unwrap().0.input, input(0));
-        let target = &buffer.get(Tick(ANCHOR + 33)).unwrap().0;
-        assert_eq!(
-            (target.tick, target.sequence, target.input),
-            (32, 83, input(64))
-        );
-    }
-
-    #[test]
-    fn delay_bounds_preserve_the_rollback_window() {
-        let max_delay = (INPUT_BUFFER_CAPACITY - usize::from(PREDICTION_DEPTH) - 1)
-            .min(FUTURE_WINDOW as usize) as u16;
-        let mut buffer = NativeBuffer::default();
-        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
-        let mut sequence = 0;
-        for tick in 0..=u32::from(PREDICTION_DEPTH) {
-            sample(&mut writer, &mut buffer, &mut sequence, tick, 0, 64);
-        }
-        let current = u32::from(PREDICTION_DEPTH) + 1;
-        sample(
-            &mut writer,
-            &mut buffer,
-            &mut sequence,
-            current,
-            max_delay,
-            0,
-        );
-        let local = LocalInputs::default();
-        for tick in current - u32::from(PREDICTION_DEPTH)..=current {
-            assert_eq!(
-                local
-                    .get(&buffer, Tick(ANCHOR + tick + 1), EPOCH, tick)
-                    .unwrap(),
-                input(64)
-            );
-        }
-        let before_sequence = sequence;
-        let before_end = buffer.end_tick();
-        assert!(
-            writer
-                .write(
-                    &mut buffer,
-                    Tick(ANCHOR),
-                    Tick(ANCHOR + current + 2),
-                    max_delay + 1,
-                    EPOCH,
-                    &mut sequence,
-                    || panic!("invalid delay consumed an input"),
-                )
-                .is_err()
-        );
-        assert_eq!(sequence, before_sequence);
-        assert_eq!(buffer.end_tick(), before_end);
-    }
-
-    #[test]
-    fn command_writer_rejects_missing_or_corrupted_existing_targets() {
-        let mut buffer = NativeBuffer::default();
-        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
-        let mut sequence = 0;
-        sample(&mut writer, &mut buffer, &mut sequence, 0, 2, 64);
-        let native = Tick(ANCHOR + 2);
-        buffer.set(
-            native,
-            ActionState(ControllerCommand {
-                epoch: EPOCH + 1,
-                ..buffer.get(native).unwrap().0
-            }),
-        );
-        assert!(
-            writer
-                .write(
-                    &mut buffer,
-                    Tick(ANCHOR),
-                    native,
-                    0,
-                    EPOCH,
-                    &mut sequence,
-                    || panic!("corrupted history consumed an input")
-                )
-                .is_err()
-        );
-        buffer.set_empty(native);
-        assert!(
-            writer
-                .write(
-                    &mut buffer,
-                    Tick(ANCHOR),
-                    native,
-                    0,
-                    EPOCH,
-                    &mut sequence,
-                    || panic!("missing history consumed an input")
-                )
-                .is_err()
-        );
-        assert_eq!(sequence, 3);
-    }
-
-    #[test]
-    fn command_writer_overflow_is_atomic() {
-        let mut buffer = NativeBuffer::default();
-        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
-        let mut sequence = u32::MAX - 1;
-        assert!(
-            writer
-                .write(
-                    &mut buffer,
-                    Tick(ANCHOR),
-                    Tick(ANCHOR + 1),
-                    2,
-                    EPOCH,
-                    &mut sequence,
-                    || panic!("sequence overflow consumed an input")
-                )
-                .is_err()
-        );
-        assert_eq!(sequence, u32::MAX - 1);
-        assert_eq!(buffer.end_tick(), Some(Tick(ANCHOR)));
-        assert_eq!(buffer.get(Tick(ANCHOR)), Some(&ActionState::default()));
-        assert_eq!(writer.next_tick, 0);
-        assert!(
-            writer
-                .write(
-                    &mut buffer,
-                    Tick(ANCHOR),
-                    Tick(u32::MAX),
-                    1,
-                    EPOCH,
-                    &mut sequence,
-                    || panic!("tick overflow consumed an input")
-                )
-                .is_err()
-        );
-        assert_eq!(buffer.end_tick(), Some(Tick(ANCHOR)));
-        assert_eq!(buffer.get(Tick(ANCHOR)), Some(&ActionState::default()));
-        assert_eq!(writer.next_tick, 0);
     }
 
     #[test]
@@ -526,7 +94,7 @@ mod tests {
             let tick = tick as u32;
             let native = Tick(ANCHOR + tick + 1);
             accepted.set(native, ActionState(input(buttons)));
-            commands.set(native, command(tick, input(buttons)));
+            commands.set(native, command(input(buttons)));
         }
         correct(&mut accepted, Tick(ANCHOR + 1), input(0));
         assert_eq!(accepted.last_remote_tick, Some(Tick(ANCHOR + 1)));
@@ -582,7 +150,7 @@ mod tests {
         // Once past warmup, a newly sampled command supplies both forward and replay input.
         let tick = u32::from(PREDICTION_DEPTH);
         let native = Tick(ANCHOR + tick + 1);
-        commands.set(native, command(tick, input(4)));
+        commands.set(native, command(input(4)));
         assert_eq!(local.get(&commands, native, EPOCH, tick).unwrap(), input(4));
     }
 
@@ -592,11 +160,9 @@ mod tests {
         let mut commands = NativeBuffer::<ControllerCommand>::default();
         let native = Tick(ANCHOR + 2);
         // A previous command must never stand in for a missing tick.
-        commands.set(native - 1u32, command(0, input(1)));
+        commands.set(native - 1u32, command(input(1)));
         assert!(local.get(&commands, native, EPOCH, 1).is_err());
-        commands.set(native, command(0, input(1)));
-        assert!(local.get(&commands, native, EPOCH, 1).is_err());
-        commands.set(native, command(1, input(1)));
+        commands.set(native, command(input(1)));
         assert!(local.get(&commands, native, EPOCH + 1, 1).is_err());
     }
 }

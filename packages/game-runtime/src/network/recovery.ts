@@ -227,7 +227,7 @@ export function createSnapshotRecovery({
           run(async () => {
             await active.applied;
             signal.throwIfAborted();
-            const { anchor, head, sequence, attempt } = message;
+            const { anchor, head, attempt } = message;
             while (((connection.predictionClock() - anchor - head) | 0) < 0) {
               await new Promise<void>((resolve) => setTimeout(resolve, 5));
               signal.throwIfAborted();
@@ -250,7 +250,6 @@ export function createSnapshotRecovery({
               configuration.slot,
               configuration.depth,
               head,
-              sequence,
             );
             active.stage = "activating";
             port.netConfirmedTick = head;

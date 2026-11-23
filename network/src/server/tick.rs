@@ -1,23 +1,21 @@
 use super::{
     Match, STEP,
-    control::{Admission, bind_controllers, receive_requests, send},
+    control::{
+        Admission, ControllerInputs, applied_inputs, bind_controllers, receive_requests, send,
+    },
     prediction::PredictionStart,
 };
 use crate::{journal, simulator};
 use bevy_ecs::prelude::*;
 use lightyear::prelude::*;
 use std::time::{Duration, Instant};
-use tm4_network::{
-    input::Input,
-    protocol::{
-        self as game_protocol, JOURNAL_MAX_TICKS, MembershipChange, Message, Request, SessionStart,
-    },
+use tm4_network::protocol::{
+    self as game_protocol, JOURNAL_MAX_TICKS, MembershipChange, Message, Request, SessionStart,
 };
 const SIMULATOR_LAG_LIMIT: Duration = Duration::from_millis(250);
 
 pub(super) fn update(
     native_timeline: Res<LocalTimeline>,
-    mut accepted_senders: Query<&mut MessageSender<game_protocol::AcceptedInputs>, With<Connected>>,
     mut game: ResMut<Match>,
     mut simulator: NonSendMut<simulator::Simulator>,
     mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -56,7 +54,26 @@ pub(super) fn update(
     }
     let now = Instant::now();
     let native_tick = native_timeline.tick();
-    if !synchronize_clock(&mut game, &mut links, native_tick, now) {
+    synchronize_clock(&mut game, &mut links, native_tick, now);
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn fixed_step(
+    native_timeline: Res<LocalTimeline>,
+    mut accepted_senders: Query<&mut MessageSender<game_protocol::AcceptedInputs>, With<Connected>>,
+    mut game: ResMut<Match>,
+    mut simulator: NonSendMut<simulator::Simulator>,
+    mut links: Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
+    connections: Query<(), With<Connected>>,
+    controllers: ControllerInputs,
+    mut commands: Commands,
+) {
+    if !game.started
+        || game.ended
+        || !game.authority_ready
+        || game.prediction.anchor.is_none()
+        || game.journal.is_none()
+    {
         return;
     }
     advance_simulation(
@@ -64,9 +81,11 @@ pub(super) fn update(
         &mut links,
         &mut simulator,
         &mut accepted_senders,
+        &connections,
+        &controllers,
         &mut commands,
-        native_tick,
-        now,
+        native_timeline.tick(),
+        Instant::now(),
     );
 }
 
@@ -282,6 +301,7 @@ pub(super) fn synchronize_clock(
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn advance_simulation(
     game: &mut Match,
     links: &mut Query<(Entity, &mut MessageSender<Message>), With<Connected>>,
@@ -290,6 +310,8 @@ fn advance_simulation(
         &mut MessageSender<game_protocol::AcceptedInputs>,
         With<Connected>,
     >,
+    connections: &Query<(), With<Connected>>,
+    controllers: &ControllerInputs,
     commands: &mut Commands,
     native_tick: Tick,
     now: Instant,
@@ -299,131 +321,116 @@ fn advance_simulation(
         return;
     }
     let due = game.prediction.anchor.unwrap() + game.tick as i32 + 1;
-    let lag_ticks = native_tick - due;
-    let lag = STEP * lag_ticks.max(0) as u32;
-    if lag > SIMULATOR_LAG_LIMIT {
-        eprintln!(
-            "Authority tick {} late by {} ms ({} Lightyear ticks, last C step {:?})",
-            game.tick,
-            lag.as_millis(),
-            lag_ticks,
-            game.last_step_duration,
-        );
+    if native_tick < due {
+        return;
+    }
+    if native_tick != due {
+        game.fail(links, "The authority missed its native fixed tick.");
+        return;
+    }
+    let step_started = Instant::now();
+    let scheduled = *game.tick_schedule.get_or_insert(step_started);
+    let lateness = step_started.saturating_duration_since(scheduled);
+    if lateness > SIMULATOR_LAG_LIMIT {
         game.fail(
             links,
             "Simulator overrun: more than 250 ms behind the 30 Hz schedule.",
         );
         return;
     }
-    if lag_ticks >= 0 {
-        let step_started = Instant::now();
-        let scheduled = *game.tick_schedule.get_or_insert(step_started);
-        let lateness = step_started.saturating_duration_since(scheduled);
-        let tick = game.tick;
-        let proposed = game.membership.scheduled.remove(&tick).unwrap_or_default();
-        let mut changes = Vec::with_capacity(proposed.len());
-        for change in &proposed {
-            let identity = change.identity();
-            match simulator.membership(tick, change) {
-                Ok(true) => {
-                    match change {
-                        MembershipChange::Admit { .. } => {
-                            game.participants
-                                .commit_live(identity)
-                                .expect("admission owns its reservation");
-                            game.membership.pending.remove(&identity.participant);
-                        }
-                        MembershipChange::Depart { .. } => game.retire_live(identity, commands),
+    let tick = game.tick;
+    let proposed = game.membership.scheduled.remove(&tick).unwrap_or_default();
+    let mut changes = Vec::with_capacity(proposed.len());
+    for change in &proposed {
+        let identity = change.identity();
+        match simulator.membership(tick, change) {
+            Ok(true) => {
+                match change {
+                    MembershipChange::Admit { .. } => {
+                        game.participants
+                            .commit_live(identity)
+                            .expect("admission owns its reservation");
+                        game.membership.pending.remove(&identity.participant);
                     }
-                    changes.push(change.clone());
+                    MembershipChange::Depart { .. } => game.retire_live(identity, commands),
                 }
-                Ok(false) if matches!(change, MembershipChange::Admit { .. }) => {
-                    if let Some(connection) = game.controls[usize::from(identity.slot)].connection {
-                        send(links, connection, &Message::Error { message: "The selected car could not be prepared; the admission was cancelled.".into() });
-                    }
-                    game.retire_live(identity, commands);
+                changes.push(change.clone());
+            }
+            Ok(false) if matches!(change, MembershipChange::Admit { .. }) => {
+                if let Some(connection) = game.controls[usize::from(identity.slot)].connection {
+                    send(links, connection, &Message::Error { message: "The selected car could not be prepared; the admission was cancelled.".into() });
                 }
-                result => {
-                    eprintln!("Membership event rejected: {change:?}: {result:?}");
-                    game.fail(
-                        links,
-                        "The authoritative membership event could not be applied.",
-                    );
-                    return;
-                }
+                game.retire_live(identity, commands);
+            }
+            result => {
+                eprintln!("Membership event rejected: {change:?}: {result:?}");
+                game.fail(
+                    links,
+                    "The authoritative membership event could not be applied.",
+                );
+                return;
             }
         }
-        if changes != proposed {
-            // A failed preparation is not a committed event. Replace the forecast
-            // before confirming this row; replay records only actual mutations.
-            game.broadcast(
-                links,
-                &Message::Membership {
-                    tick,
-                    changes: changes.clone(),
-                },
-            );
+    }
+    if changes != proposed {
+        // A failed preparation is not a committed event. Replace the forecast
+        // before confirming this row; replay records only actual mutations.
+        game.broadcast(
+            links,
+            &Message::Membership {
+                tick,
+                changes: changes.clone(),
+            },
+        );
+    }
+    let occupied: Vec<_> = game.participants.human_slots().collect();
+    let inputs = applied_inputs(game, native_tick, connections, controllers);
+    let packet = game
+        .prediction
+        .packet(tick, &inputs, &game.controls, &occupied);
+    for player in &game.controls {
+        if let Some(entity) = player.connection
+            && let Ok(mut sender) = accepted_senders.get_mut(entity)
+        {
+            sender.send::<lightyear::prelude::input::InputChannel>(packet.clone());
         }
-        let occupied: Vec<_> = game.participants.human_slots().collect();
-        let inputs: Vec<_> = game
-            .controls
-            .iter_mut()
-            .enumerate()
-            .map(|(slot, player)| {
-                if occupied.contains(&slot) {
-                    player.history.sample(tick)
-                } else {
-                    Input::default()
-                }
-            })
-            .collect();
-        let packet = game
-            .prediction
-            .packet(tick, &inputs, &game.controls, &occupied);
-        for player in &game.controls {
-            if let Some(entity) = player.connection
-                && let Ok(mut sender) = accepted_senders.get_mut(entity)
-            {
-                sender.send::<lightyear::prelude::input::InputChannel>(packet.clone());
-            }
-        }
-        match simulator.step(tick, &inputs) {
-            Ok(state) => {
-                if state.unsupported.is_some() {
-                    game.health
-                        .lock()
-                        .unwrap()
-                        .event("rustymetal4_simulation_unsupported_total");
-                }
-                game.completed(links, tick, inputs, changes, state, now);
-                if game.participants.count() == 0
-                    && game
-                        .session
-                        .as_ref()
-                        .is_some_and(|session| !session.bots.is_empty())
-                {
-                    game.ended = true;
-                    game.finish_journal(journal::End::Aborted);
-                }
-                if game.tick == tick + 1 {
-                    game.health
-                        .lock()
-                        .unwrap()
-                        .tick(step_started.elapsed(), lateness);
-                    game.tick_schedule = Some(scheduled + STEP);
-                }
-                if game.ended {
-                    game.maintain_membership(links, commands);
-                }
-            }
-            Err(error) => {
+    }
+    match simulator.step(tick, &inputs) {
+        Ok(state) => {
+            if state.unsupported.is_some() {
                 game.health
                     .lock()
                     .unwrap()
-                    .event("rustymetal4_simulation_errors_total");
-                eprintln!("Embedded simulator tick {tick} failed: {error:#}");
-                game.fail(links, "The embedded simulator did not finish its tick.");
+                    .event("rustymetal4_simulation_unsupported_total");
             }
+            game.completed(links, tick, inputs, changes, state, now);
+            if game.participants.count() == 0
+                && game
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| !session.bots.is_empty())
+            {
+                game.ended = true;
+                game.finish_journal(journal::End::Aborted);
+            }
+            if game.tick == tick + 1 {
+                game.health
+                    .lock()
+                    .unwrap()
+                    .tick(step_started.elapsed(), lateness);
+                game.tick_schedule = Some(scheduled + STEP);
+            }
+            if game.ended {
+                game.maintain_membership(links, commands);
+            }
+        }
+        Err(error) => {
+            game.health
+                .lock()
+                .unwrap()
+                .event("rustymetal4_simulation_errors_total");
+            eprintln!("Embedded simulator tick {tick} failed: {error:#}");
+            game.fail(links, "The embedded simulator did not finish its tick.");
         }
     }
 }

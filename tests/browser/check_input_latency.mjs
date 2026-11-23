@@ -154,9 +154,19 @@ try {
     }, 50);
   });
   const delayed = pages[1];
-  await delayed.evaluate(() => {
+  await delayed.evaluate(async () => {
     const frames = (globalThis.inputLatencyFrames = []);
     globalThis.inputResponse = {};
+    const { NetworkClient } = await import(
+      new URL("network/tm4_network.js", document.baseURI).href
+    );
+    const sample = NetworkClient.prototype.prediction_input;
+    NetworkClient.prototype.prediction_input = function (buttons, axes, analog) {
+      const response = globalThis.inputResponse;
+      if (buttons & 64 && response.started !== undefined && response.sampleMs === undefined)
+        response.sampleMs = performance.now() - response.started;
+      return sample.call(this, buttons, axes, analog);
+    };
     document.addEventListener("keydown", (event) => {
       if (event.code === "KeyX" && globalThis.inputResponse.started === undefined)
         globalThis.inputResponse.started = performance.now();

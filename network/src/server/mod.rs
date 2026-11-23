@@ -25,7 +25,7 @@ use std::{
 use tm4_network::modes::{self, BattleProgress, PreparedRoster};
 use tm4_network::protocol as game_protocol;
 use tm4_network::{
-    input::{Input, InputHistory},
+    input::Input,
     protocol::{
         Catalog, Compatibility, LobbyPlayer, MembershipChange, Message, RoundState, SessionStart,
     },
@@ -42,9 +42,7 @@ struct ControllerState {
     ready: bool,
     compatibility: Option<Compatibility>,
     initial_digest: Option<u32>,
-    history: InputHistory,
     controller: Option<Entity>,
-    received_sequence: u32,
     progress_tick: u32,
     resume: Option<resume::Attempt>,
 }
@@ -55,7 +53,6 @@ impl ControllerState {
             return false;
         }
         self.connection = None;
-        self.history.disconnect();
         self.resume = None;
         true
     }

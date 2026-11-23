@@ -85,7 +85,6 @@ impl MembershipPredictionFixture {
             },
             PREDICTION_DEPTH,
             0,
-            0,
         )
         .map_err(JsValue::from_str)?;
         Ok(Self { app, anchor })

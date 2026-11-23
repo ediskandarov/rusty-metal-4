@@ -18,7 +18,7 @@ pub const JOURNAL_MAX_TICKS: u32 =
     ((JOURNAL_DISK_BYTES - 8192) / (journal_frame_bytes(MAX_PLAYERS) + 5)) as u32;
 pub const REPLAY_CHUNK_TICKS: u32 = 64;
 pub const MAX_PLAYERS: usize = 8;
-pub const PROTOCOL_VERSION: u16 = 20;
+pub const PROTOCOL_VERSION: u16 = 21;
 
 pub const JOURNAL_FRAME_PREFIX: usize = 130;
 pub const JOURNAL_INPUT_BYTES: usize = 7;
@@ -498,7 +498,6 @@ pub enum Message {
         attempt: u32,
         anchor: u32,
         head: u32,
-        sequence: u32,
     },
     PredictionPrepare(SessionStart),
     PredictionBegin {

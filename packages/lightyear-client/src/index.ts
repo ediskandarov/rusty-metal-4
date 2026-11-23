@@ -40,7 +40,6 @@ interface RustClient {
     slot: number,
     depth: number,
     head: number,
-    sequence: number,
   ): void;
   prediction_input(buttons: number, axes: number, analog: boolean): void;
   condition(latency: number, jitter: number): void;
@@ -127,9 +126,8 @@ export async function connectNetwork(endpoint: string) {
       slot: number,
       depth: number,
       head: number,
-      sequence: number,
     ) => {
-      client.begin_resumed_prediction(anchor, epoch, capacity, slot, depth, head, sequence);
+      client.begin_resumed_prediction(anchor, epoch, capacity, slot, depth, head);
       lastPoll = performance.now();
       maxPollGapMs = maxUpdateMs = 0;
     },

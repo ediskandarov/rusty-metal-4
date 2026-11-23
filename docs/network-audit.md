@@ -8,7 +8,8 @@ this page records actual coverage and limitations, not revised requirements.
 
 C owns gameplay, including physics, weapons and scoring. The Rust server embeds
 Wasmtime 47.0.1 and runs that same wasm32 C simulation as a WASI reactor. Lightyear
-selects accepted inputs and advances it synchronously on its 30 Hz timeline. There
+assigns input ticks and applies buffered state in `FixedPreUpdate`; the server steps
+C once in `FixedUpdate` at the same 30 Hz tick. There
 is no server browser, JavaScript runtime, Python host, or simulation subprocess.
 Clients agree on a start tick before prediction begins. An authority scheduling
 overrun over 250 ms fails the session explicitly; this is not an RTT limit. After
@@ -22,8 +23,8 @@ The wire uses typed binary Lightyear messages, not JSON WebSocket payloads.
 
 Controller ownership is replicated through Lightyear entities. Its native input
 plugin buffers tick-indexed records and validates controlled targets. The server
-reads every newly received buffer record before fixed-step trimming, then applies
-an explicit game-tick acceptance policy. Connection synchronization, typed channels,
+uses the native validation hook to fence ownership, battle epochs and already
+simulated ticks; it does not queue or retime controller commands. Connection synchronization, typed channels,
 replication ownership, bandwidth priority, RTT/jitter and packet conditioning are
 live. Network FFA uses native prediction and rollback for supported stock rosters;
 its implemented and deferred policies are defined in the
@@ -51,10 +52,11 @@ Sources: [Rust protocol](../network/src/protocol.rs),
   menu files are excluded. Fingerprints are compatibility checks only. Roster and
   map selection use names supplied by the authority; local exposed cheats are blocked.
 - Lightyear carries controller samples and the authority's accepted input history.
-  The server retains a bounded acceptance queue for each slot, preserves button
-  edges, and expires held input after nine ticks. Future acceptance and the queue
-  are bounded to 60 ticks and 60 records. Prediction verifies C results against
-  accepted inputs at the same native tick.
+  Native tick-indexed windows carry controller state and a battle epoch, without
+  a second tick or sequence counter in each sample. The server accepts only future
+  samples within Lightyear's 64-tick bound and expires held input nine ticks after
+  the last received native tick. Prediction verifies C results against the actual
+  applied inputs at the same native tick; raw input rebroadcast is not authoritative.
 - A disconnected client loses queued controls immediately; its participant and car
   remain available for recovery. Explicit departure retires the participant and removes
   its car through the shared membership path. Survivors continue. Finished/error paths release C resources,
@@ -286,22 +288,52 @@ correction by 4.8 times. Its native
 with a maximum prediction budget of 24 ticks (800 ms at 30 Hz). Local input is
 applied on the next simulation tick while latency and its jitter allowance fit
 that budget. Lightyear 0.30.1 recalculates delay when configuring or resynchronizing
-the timeline, not on every RTT update; larger effective latency can still cause
-fallback input delay. The adapter refuses delays beyond the command buffer's safe
-capacity instead of evicting commands still needed for rollback.
+the timeline, not on every RTT update. The adapter reinserts the same public
+configuration when measured RTT/jitter change, invoking Lightyear's own calculation
+so a loading spike does not leave stale delay behind. It assigns no ticks and
+does not alter buffered history. Larger effective latency can still cause fallback
+input delay; delays beyond the command buffer's safe capacity are rejected rather
+than evicting commands still needed for rollback.
 
 At a fresh start or snapshot handoff, the local command buffer is reset and
-seeded at the checkpoint boundary. Preparation can leave delayed default samples
-beyond the first gameplay tick; retaining that window would prevent the adapter
-from writing the initial commands. The active session's command history is never
-reset this way.
+seeded at the checkpoint boundary with neutral input for the current epoch.
+Before that boundary, the sampling system publishes neutral state without consuming
+captured button transitions. Active command history is never reset this way.
 
-The command adapter assigns each sample to the native delayed tick, materializes
-new gaps using the preceding held input, and never rewrites commands already
-queued when delay shrinks. Button edges wait until the next unused tick. Native
-rollback history and the C checkpoint window share the same 24-tick bound:
+The client writes only `ActionState` in `WriteClientInputs`. Lightyear owns delayed
+tick assignment, gap filling, buffering and retransmission. One captured button
+transition is consumed per forward fixed step. When delay decreases, native
+semantics allow a newer sample to overwrite a previously buffered future sample;
+we no longer preserve it by assigning another tick. A sufficiently late tap is
+rejected rather than moved to a later authority step.
+
+Upstream [issue #1816](https://github.com/cBournhonesque/lightyear/issues/1816)
+discusses input-history rewrites and changing delay, but its host-client failure
+is not confirmed to be the same short-press loss. A native-only 0.30.1 reproduction
+shows a one-tick press disappearing when delay falls from three ticks to two;
+with unchanged delay the press reaches `FixedUpdate`.
+
+Server simulation and native input application share the fixed schedule, including
+multiple fixed steps within one application update. Lobby/connection maintenance
+remains in `Update`. Reconnect retains participant identity and results, clears the
+old connection's native buffer, and gates control until snapshot handoff completes.
+There is no sequence watermark in handoff. Protocol 21 requires matching client
+and server builds; protocol 20 is not supported.
+
+The native-scheduling migration passes the two-browser high-RTT check: 70 seconds
+of held gas at approximately 255 ms RTT, eight 200 ms downstream stalls, release,
+and input after snapshot reconnect. Accepted gas has no gaps after its first
+arrival; the authority sustains 30 TPS and local input delay remains zero. The
+check records sampling and local/authority response times separately. Native
+pipeline tests cover batched press/release, delay changes, epoch fencing, held-input
+expiry and fresh RTT replacing stale loading-time delay. This is controlled
+Chromium coverage, not a repeat of every historical capacity test below.
+
+Native rollback history and the C checkpoint window share the same 24-tick bound:
 Lightyear also uses `maximum_predicted_ticks` to limit rollback history, so reducing
-that setting alone would discard inputs still required by C.
+that setting alone would discard inputs still required by C. Reconnect warmup
+samples and the authoritative applied-input stream remain separate from local
+commands; neither assigns new input ticks.
 
 At the 24-tick accepted-input boundary, `PredictionWindowWait` pauses the fixed
 clock and resumes when two ticks of headroom return. Whole-tick clock resync and
@@ -385,11 +417,10 @@ and release again after snapshot recovery. Samples and failure diagnostics are s
 rollback cost. `tm4_rollback_visuals_check` exercises presentation continuity,
 decay, immediate new movement, identity changes and cuts without disc assets.
 Client journals also retain one transport sample
-per second, including clock pacing, command sequence/tick and rollback counters.
+per second, including clock pacing, native command buffer bounds and rollback counters.
 IO packet/byte counters measure handoff to the socket layer, not server acknowledgement;
 they do not include the browser's internal WebSocket send backlog. Server health
-also splits rejected input by slot and reason (`late`, `future`, `full`,
-`duplicate`), preserving the aggregate counter.
+also splits rejected input by slot and reason (`late`, `future`, `epoch`), preserving the aggregate counter.
 Run `bun tests/browser/check_prediction_start.mjs` with a fresh server to
 exercise replacement of a delayed offer. Run `bun tests/browser/check_manual_match.mjs`
 with a fresh server to exercise the embedded authority and both clients' default
