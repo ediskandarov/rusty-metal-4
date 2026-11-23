@@ -24,23 +24,29 @@ const server = Bun.serve({
   },
 });
 
+async function playStartupMovies(page) {
+  await page.waitForFunction(() => globalThis.tm4Port?.movie?.name === "N89STUDI");
+  const start = page.locator("#tm4-movie-start");
+  if (await start.count()) await start.click();
+  else await page.locator("canvas").click();
+  await page.waitForFunction(
+    () => tm4Port.movie?.name === "INTRO" && tm4Port.movie.frame >= 4,
+    null,
+    { timeout: 60_000 },
+  );
+  assert.equal(await page.evaluate(() => tm4Port.movieHistory[0]?.reason), "complete");
+  await page.keyboard.press("Enter", { delay: 150 });
+  await page.waitForFunction(() => tm4Port.screen === "main" && tm4Port.menuReady, null, {
+    timeout: 30_000,
+  });
+  assert.equal(await page.evaluate(() => tm4Port.movie.reason), "skipped");
+}
+
 let browser;
 try {
   browser = await launchBrowser();
   const context = await browser.newContext();
   const page = await context.newPage();
-  // Intro playback has its own tests. Exercise the normal optional-movie fallback here.
-  await page.addInitScript(() => {
-    let assets;
-    Object.defineProperty(globalThis, "tm4Assets", {
-      configurable: true,
-      get: () => assets,
-      set(value) {
-        assets = value;
-        assets.readMovie = () => Promise.reject(Error("Intro omitted by mod smoke test"));
-      },
-    });
-  });
   const errors = [];
   if (process.env.TM4_MOD_TEST_LOG)
     page.on("console", (message) => {
@@ -128,8 +134,9 @@ try {
     }
   }
 
-  await screen("main");
-  console.log("PASS installed TM3 reached the main menu");
+  await playStartupMovies(page);
+  assert.deepEqual(errors, []);
+  console.log("PASS installed TM3 reached the main menu after playing and skipping intro movies");
   await page.locator("canvas").focus();
   await press("x");
   await screen("newgame");
@@ -158,7 +165,7 @@ try {
     async function openMenu() {
       await page.reload();
       await page.locator("#disc-folder:enabled").setInputFiles(TM4_DISC);
-      await screen("main");
+      await playStartupMovies(page);
       await page.locator("canvas").focus();
     }
 
@@ -243,6 +250,7 @@ try {
   await stock.locator("#startup").waitFor({ state: "hidden", timeout: 90_000 });
   await stock.locator("#video-controls").waitFor({ timeout: 30_000 });
   assert.equal(await stock.locator("#active-mods").textContent(), "No active mods.");
+  await playStartupMovies(stock);
   console.log("PASS Play Disk works with the same disc when mod storage is blocked");
 } finally {
   await browser?.close();
