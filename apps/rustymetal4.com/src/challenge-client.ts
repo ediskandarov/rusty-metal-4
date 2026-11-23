@@ -1,3 +1,5 @@
+import { createModLibraryStore, sessionReleases } from "@tm4/mods/library";
+
 import {
   type ChallengePlayer,
   type ChallengeRelease,
@@ -8,6 +10,32 @@ import {
 
 const element = <T extends HTMLElement = HTMLElement>(id: string) =>
   document.getElementById(id) as T;
+const libraryStore = createModLibraryStore();
+const tm3Status = element("challenge-tm3");
+const tm3Message = tm3Status.querySelector("span")!;
+const tm3Action = tm3Status.querySelector("a")!;
+function showTm3({ library, busy, error }: ReturnType<typeof libraryStore.getState>) {
+  if (busy) return;
+  const active = sessionReleases(library).find(({ manifest }) => manifest.id === "tm3");
+  const installed = library.releases.some(({ manifest }) => manifest.id === "tm3");
+  tm3Action.hidden = !!active && !error;
+  tm3Action.href = installed || error ? "/mods/" : "/mods/tm3/";
+  tm3Action.textContent = error ? "Manage mods" : installed ? "Enable TM3" : "Install TM3";
+  tm3Message.textContent = error
+    ? "Could not read your mod library."
+    : active
+      ? "TM3 enabled · 16 cars and 10 arenas."
+      : installed
+        ? "TM3 is installed and disabled."
+        : "Add 16 cars and 10 arenas with TM3.";
+  tm3Status.hidden = false;
+}
+libraryStore.subscribe(showTm3);
+showTm3(libraryStore.getState());
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) void libraryStore.refresh();
+});
+
 const frame = element<HTMLIFrameElement>("challenge-player");
 const error = (value?: unknown) => {
   const target = element("challenge-error");

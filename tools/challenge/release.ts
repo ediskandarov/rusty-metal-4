@@ -38,7 +38,7 @@ export function contentType(path: string): string {
 }
 // This list is intentionally public runtime code only. No DATA/, MR, IMG, BIN, VAB or disc files.
 export function publicArtifact(path: string): boolean {
-  return /^(?:index\.html|tm4_web\.(?:js|wasm)|simulation-build\.json|player-build\.json|challenge-build\.json|coi-serviceworker(?:\.LICENSE\.txt|\.js)|modules\/[a-z0-9_]+\.wasm|_astro\/[A-Za-z0-9_.-]+\.(?:js|css|map|svg|png|wasm))$/.test(
+  return /^(?:index\.html|tm4_web\.(?:js|wasm)|simulation-build\.json|player-build\.json|challenge-build\.json|coi-serviceworker(?:\.LICENSE\.txt|\.js)|modules\/(?:tm3\/)?[a-z0-9_]+\.wasm|_astro\/[A-Za-z0-9_.-]+\.(?:js|css|map|svg|png|wasm))$/.test(
     path,
   );
 }

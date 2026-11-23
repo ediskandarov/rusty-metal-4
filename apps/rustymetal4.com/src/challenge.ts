@@ -37,6 +37,40 @@ export const challengeModels = [
   "Super Thumper",
   "Super Slamm",
 ] as const;
+// Display names from the TM3 converter. The prefix keeps the two games' car records distinct.
+const tm3Cars = [
+  "Auger",
+  "Axel",
+  "Club Kid",
+  "Darkside",
+  "Firestarter",
+  "Flower Power",
+  "Mr. Grimm",
+  "Hammerhead",
+  "Minion",
+  "Outlaw",
+  "Primeval",
+  "Roadkill",
+  "Spectre",
+  "Sweet Tooth",
+  "Thumper",
+  "Warthog",
+].map((name) => "TM3 " + name);
+const tm3Arenas = [
+  "Hollywood",
+  "Washington",
+  "Hangar 18",
+  "North Pole",
+  "London",
+  "Tokyo",
+  "Egypt",
+  "Blimp",
+  "Warehouse",
+  "Club Kid's House",
+];
+const supportedCars = new Set<string>([...challengeModels, ...tm3Cars]);
+const supportedArenas = new Set<string>([...challengeMaps, ...tm3Arenas]);
+
 export interface ChallengeWin {
   frags?: number;
   model: string;
@@ -64,10 +98,10 @@ export interface ChallengeRelease {
 export function completion(input: unknown): ChallengeWin {
   if (!input || typeof input !== "object") throw new RoomError(400, "A completion is required.");
   const { model, map, version, frags } = input as Record<string, unknown>;
-  if (typeof model !== "string" || !challengeModels.some((name) => name === model))
-    throw new RoomError(400, "Choose an original car model.");
-  if (typeof map !== "string" || !challengeMaps.some((name) => name === map))
-    throw new RoomError(400, "Choose a tournament map.");
+  if (typeof model !== "string" || !supportedCars.has(model))
+    throw new RoomError(400, "Choose a challenge car.");
+  if (typeof map !== "string" || !supportedArenas.has(map))
+    throw new RoomError(400, "Choose a challenge arena.");
   if (version !== challengeVersion) throw new RoomError(400, "Unknown challenge version.");
   if (frags === undefined) return { model, map, version }; // Previously published players omit frags.
   if (typeof frags !== "number" || !Number.isInteger(frags) || frags < 0 || frags > 200)

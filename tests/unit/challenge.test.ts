@@ -32,6 +32,14 @@ test("challenge catalog rejects bonus maps, created models and unknown versions"
   expect(challengeMaps).toHaveLength(8);
   expect(new Set(challengeModels).size).toBe(22);
   expect(completion(attempt)).toEqual(attempt);
+  for (const [model, map] of [
+    ["TM3 Sweet Tooth", "Hollywood"],
+    ["Sweet Tooth", "Tokyo"],
+    ["TM3 Outlaw", "The Carnival"],
+  ] as const) {
+    const win = { ...attempt, model, map, frags: 12 };
+    expect(completion(win)).toEqual(win);
+  }
   for (const frags of [null, -1, 201, 1.5, "23"])
     expect(() => completion({ ...attempt, frags })).toThrow();
   expect(() => completion({ ...attempt, map: "The Pits" })).toThrow();
@@ -109,6 +117,12 @@ test("leaderboard counts unique models across maps and permits equal display nam
     expect((await reply(a("leaderboard"))).players.map((p) => p.score)).toEqual([2, 1]);
     await b("completion", { ...attempt, frags: 63 });
     expect((await reply(a("leaderboard"))).players.map((p) => p.totalScore)).toEqual([63, 62]);
+    const tm3 = await reply(
+      a("completion", { ...attempt, model: "TM3 Sweet Tooth", map: "Hollywood", frags: 17 }),
+    );
+    expect(tm3.player.score).toBe(3);
+    expect(tm3.player.totalScore).toBe(79);
+    expect(tm3.player.completions.find((car) => car.model === "Sweet Tooth")?.bestFrags).toBe(20);
     const denied = await mf.dispatchFetch(`${origin}/api/challenge/identity`, {
       method: "POST",
       headers: { Origin: "https://elsewhere.test" },
