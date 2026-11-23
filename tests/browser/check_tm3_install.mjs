@@ -157,6 +157,20 @@ try {
     const port = globalThis.tm4Port;
     return port?.level === "Hollywood" && port.levelFrames >= 30;
   });
+  assert.equal((await state()).music.track, 0);
+  await press("Enter");
+  await page.waitForFunction(() => tm4Port.paused, null, { timeout: 10_000 });
+  const pausedFrame = (await state()).levelFrames;
+  await press("x");
+  await page.waitForFunction(
+    (frame) => !tm4Port.paused && tm4Port.levelFrames >= frame + 15,
+    pausedFrame,
+    { timeout: 10_000 },
+  );
+  const { track, playing } = (await state()).music;
+  assert.equal(track, 0);
+  assert.equal(playing, false);
+  console.log("PASS Hollywood starts and resumes without a CD track");
   assert.deepEqual(errors, []);
   console.log(
     "PASS TM3 disc conversion, persistence, and gameplay through the native car/map menus",

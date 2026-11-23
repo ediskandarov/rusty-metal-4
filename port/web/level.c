@@ -7,6 +7,7 @@
 #include "loading.h"
 #include "match_mode.h"
 #include "movie.h"
+#include "music.h"
 #include "port/extensions/fragment_effects_runtime.h"
 #include "widescreen.h"
 #include "world_texture.h"
@@ -142,8 +143,13 @@ void WebLevelStart(void)
     ObjectStartupInstance();
     WebCheckpointArenaSelect(0);
     SoundSetMusicVolume(GameInfo.music_volume);
-    if (!WebSimulationOnly())
-        RedbookMusic(1, restore_music_volume, *(s32*)RegGetFileDataPS(metadata, "musicTrackNum"));
+    if (!WebSimulationOnly()) {
+        const s32* track = RegGetFileDataPS(metadata, "musicTrackNum");
+        if (track)
+            RedbookMusic(1, restore_music_volume, *track);
+        else
+            WebMusicControl(CdlStop, NULL, NULL);
+    }
     SoundStopSounds();
     RenderConstructor();
     ScreenInitialize();
