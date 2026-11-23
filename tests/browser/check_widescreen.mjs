@@ -38,7 +38,7 @@ async function observeHud(page) {
           );
           if (id < 0 || probe.found[id]) continue;
           if (
-            probe.pause &&
+            probe.dim &&
             (bytes.getUint32(at + format.color, true) !== 0x80000000 ||
               !(bytes.getUint16(at + format.uv + 6, true) & 0x8000))
           )
@@ -120,7 +120,7 @@ async function sampleHud(page, baseline, width = 320, height = 240) {
   return found;
 }
 
-async function checkBackdrop(page, width = 320, height = 240, pause = true) {
+async function checkBackdrop(page, width = 320, height = 240, dim = true) {
   const scale = Math.max(1, Math.min(Math.floor(width / 320), Math.floor(height / 240)));
   // PsyZ rounds the canvas to eight game pixels and centres the original frame.
   const w = Math.ceil(Math.floor(width / scale) / 8) * 8;
@@ -128,10 +128,10 @@ async function checkBackdrop(page, width = 320, height = 240, pause = true) {
   const x = (320 - w) / 2;
   const y = (240 - h) / 2;
   await page.evaluate(
-    ({ origin, size, pause }) => {
-      globalThis.hudProbe = { expected: [origin], found: [null], size, pause };
+    ({ origin, size, dim }) => {
+      globalThis.hudProbe = { expected: [origin], found: [null], size, dim };
     },
-    { origin: [x, y], size: [w, h], pause },
+    { origin: [x, y], size: [w, h], dim },
   );
   await page.waitForFunction(() => globalThis.hudProbe.found[0]);
   const vertices = await page.evaluate(() => {
@@ -253,9 +253,30 @@ try {
     await menu("main");
     assert.equal(await wide(), false, "returning to menu restores 4:3 without leaving fullscreen");
     assert(await page.evaluate(() => !!document.fullscreenElement));
+    await press("x");
+    await menu("newgame");
+    if ((await page.evaluate(() => globalThis.tm4Port.gameType)) !== 1) await press("ArrowRight");
+    await press("x");
+    await menu("dmatch");
+    await press("x");
+    await menu("carsel");
+    await press("x");
+    await page.waitForFunction(
+      () => globalThis.tm4Port.widescreen && globalThis.tm4Port.levelFrames > 30,
+    );
+    await page.evaluate(() => globalThis.Module._WebTestDefeatOpponents());
+    await page.waitForFunction(() => {
+      globalThis.Module._WebTestReadMatchState();
+      return globalThis.tm4Port.match.roundFinished && globalThis.tm4Port.match.wins === 1;
+    });
+    await checkBackdrop(page, width, height);
+    await page.screenshot({ path: `build/checks/fullscreen-results-${height}.png` });
+    await page.evaluate(() => document.exitFullscreen());
+    await page.waitForFunction(() => !globalThis.tm4Port.widescreen);
+    await checkBackdrop(page);
     assert.deepEqual(errors, []);
     console.log(
-      `PASS ${width}x${height}: HUD anchors/scale/UVs, vertex correction on/off, abbreviated HUD, fullscreen transitions, death backdrop and pause`,
+      `PASS ${width}x${height}: HUD anchors/scale/UVs, vertex correction on/off, abbreviated HUD, fullscreen transitions, death, pause and match result backdrops`,
     );
     await context.close();
   }

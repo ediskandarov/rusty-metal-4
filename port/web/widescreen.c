@@ -58,6 +58,12 @@ void WebWidescreenUpdate(void)
 
 PsyzRect WebWidescreenDrawArea(void) { return draw_area; }
 
+void WebWidescreenFitBackdrop(TILE* tile)
+{
+    setXY0(tile, draw_area.sx, draw_area.sy);
+    setWH(tile, draw_area.ex - draw_area.sx, draw_area.ey - draw_area.sy);
+}
+
 /* SetDrawEnv appends an optional background TILE after its six GPU state
  * commands. Its clip expands in PsyZ's native canvas, but the TILE does not. */
 static void update_view_background(DR_ENV* environment)
@@ -71,6 +77,8 @@ static void update_view_background(DR_ENV* environment)
 
 void WebWidescreenBeginDraw(void)
 {
+    /* Match results use the draw buffer; view environments use the display buffer. */
+    WebWidescreenFitBackdrop(&RenderGetDrawBuffer()->black_tiles[0]);
     if (GameInfo.player_count == 1) {
         Tm4RenderBuffer* buffer = RenderGetDisplayBuffer();
         if (buffer) {

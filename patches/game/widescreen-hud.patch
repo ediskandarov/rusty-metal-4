@@ -107,13 +107,11 @@ diff --git a/src/main/screen.c b/src/main/screen.c
          RenderBuildFrame();
          RenderPresent(1);
          buffer = RenderBeginFrame();
-@@ -572,6 +574,9 @@
+@@ -572,6 +574,7 @@
          }
          for (index = 0; index < marker_count; index++)
              addPrim(buffer->ordering_table, &workspace->markers[index]);
-+        PsyzRect area = WebWidescreenDrawArea();
-+        setXY0(&workspace->background, area.sx, area.sy);
-+        setWH(&workspace->background, area.ex - area.sx, area.ey - area.sy);
++        WebWidescreenFitBackdrop(&workspace->background);
          addPrim(buffer->ordering_table, &workspace->background);
          addPrim(buffer->ordering_table, &workspace->page);
          display = RenderGetDisplayBuffer();

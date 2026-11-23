@@ -1,10 +1,12 @@
 #ifndef TM4_WEB_WIDESCREEN_H
 #define TM4_WEB_WIDESCREEN_H
 
+#include <libgpu.h>
 #include <psyz/types.h>
 
 void WebWidescreenUpdate(void);
 PsyzRect WebWidescreenDrawArea(void);
+void WebWidescreenFitBackdrop(TILE* tile);
 void WebWidescreenBeginDraw(void);
 void WebWidescreenEndDraw(void);
 int WebWidescreenClipX(int x, unsigned int original_width);
