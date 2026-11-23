@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { nativeBridge } from "../rooms/native.ts";
 import { eventually, runtime } from "../rooms/runtime.ts";
 import { launchBrowser } from "./helpers/browser.mjs";
+import { confirmCar, previewCar } from "./helpers/car-selection.mjs";
 import { setPanelOpen } from "./helpers/player.mjs";
 
 if (!process.env.TM4_DISC_DIR) throw new Error("Set TM4_DISC_DIR to your local disc folder");
@@ -61,7 +62,7 @@ try {
     });
     await frame.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
     await frame.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
-    await page.locator("#room-car").selectOption("Orbital");
+    await previewCar(page, "Orbital");
     await page.locator("#room-player").scrollIntoViewIfNeeded();
     await setPanelOpen(frame, "render-settings", true);
     await frame.locator("#render-scale").selectOption("1");
@@ -93,11 +94,14 @@ try {
     frames.push(frame);
   }
   await host.locator("#prepare-match").click();
-  await host.waitForFunction(() => !document.getElementById("room-ready").disabled, null, {
-    timeout: 120000,
-  });
-  for (const page of pages) await page.locator("#room-ready").click();
-  await host.waitForFunction(() => !document.getElementById("start-match").disabled);
+  for (const page of pages) await confirmCar(page);
+  await host.waitForFunction(
+    () =>
+      !document.getElementById("start-match").hidden &&
+      !document.getElementById("start-match").disabled,
+    null,
+    { timeout: 120000 },
+  );
   const id = await host.evaluate(
     async () => (await (await fetch("/api" + location.pathname)).json()).room.match.id,
   );

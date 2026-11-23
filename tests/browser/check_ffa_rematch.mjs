@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { nativeBridge } from "../rooms/native.ts";
 import { eventually, runtime } from "../rooms/runtime.ts";
 import { launchBrowser } from "./helpers/browser.mjs";
+import { confirmCar, previewCar } from "./helpers/car-selection.mjs";
 import { setPanelOpen } from "./helpers/player.mjs";
 
 if (!process.env.TM4_DISC_DIR) throw new Error("Set TM4_DISC_DIR to your local disc folder");
@@ -49,6 +50,15 @@ try {
     const page = await context.newPage();
     pages.push(page);
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("response", async (response) => {
+      if (response.status() >= 400 && response.url().includes("/api/rooms/"))
+        console.error(
+          "Room request failed",
+          response.url(),
+          response.status(),
+          await response.text().catch(String),
+        );
+    });
     page.on("request", (request) => {
       if (request.method() === "PUT") uploads[index].push(request.url());
     });
@@ -70,8 +80,7 @@ try {
     });
     await frame.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
     await frame.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
-    await page.waitForFunction(() => !document.getElementById("room-car").disabled);
-    await page.locator("#room-car").selectOption(index ? "Quatro" : "Calypso");
+    await previewCar(page, index ? "Quatro" : "Calypso");
     await page.locator("#room-player").scrollIntoViewIfNeeded();
     await setPanelOpen(frame, "render-settings", true);
     await frame.locator("#render-scale").selectOption("1");
@@ -121,23 +130,38 @@ try {
     console.log("Starting browser cycle", cycle + 1);
     const activePages = cycle ? pages : pages.slice(0, 2);
     await host.locator("#prepare-match").click();
-    await host.waitForFunction(() => !document.getElementById("room-ready").disabled, null, {
-      timeout: 120000,
-    });
-    for (const page of activePages) await page.locator("#room-ready").click();
-    await host.waitForFunction(() => !document.getElementById("start-match").disabled);
+    for (const [index, page] of activePages.entries())
+      await confirmCar(page, index ? "Quatro" : "Calypso");
+    await host.waitForFunction(
+      () =>
+        (!document.getElementById("start-match").hidden &&
+          !document.getElementById("start-match").disabled) ||
+        document.getElementById("match-status").textContent.includes("failed"),
+      null,
+      { timeout: 120000 },
+    );
+    assert(
+      !(await host.locator("#start-match").isHidden()),
+      await host.locator("#match-status").textContent(),
+    );
     const before = await snapshot();
     ids.push(before.match.id);
     await host.locator("#start-match").click();
     for (const frame of frames) {
       await frame.waitForFunction(
         () =>
-          tm4Port.netMatch &&
-          tm4Port.netDiagnostics?.transportActive &&
-          tm4Port.netConfirmedTick >= 30 &&
-          tm4Port.netMatchServerState?.completion.reasons === 0,
+          document.getElementById("status").dataset.matchState === "error" ||
+          (tm4Port.netMatch &&
+            tm4Port.netDiagnostics?.transportActive &&
+            tm4Port.netConfirmedTick >= 30 &&
+            tm4Port.netMatchServerState?.completion.reasons === 0),
         null,
         { timeout: 90000 },
+      );
+      assert.notEqual(
+        await frame.locator("#status").getAttribute("data-match-state"),
+        "error",
+        await frame.locator("#status").textContent(),
       );
       assert(
         (await frame.evaluate(() => tm4Port.netMatchServerState.scores)).every(
@@ -157,6 +181,7 @@ try {
         );
       }
     }
+    console.log("Both clients predicting", cycle + 1);
     const credentials = await Promise.all(
       activePages.map(async (page) => (await snapshot(page)).match.credential),
     );
@@ -188,7 +213,7 @@ try {
       await late.locator("#join-form button").click();
       await load(late, 2);
       markers.push(await frames[2].evaluate(() => globalThis.rematchMarker));
-      await late.locator("#room-ready").click();
+      await confirmCar(late);
       await frames[2].waitForFunction(
         () => Module._WebNetSlotMask() === 7 && tm4Port.netConfirmedTick > 300,
         null,
@@ -196,6 +221,7 @@ try {
       );
       for (const frame of frames)
         await frame.waitForFunction(() => tm4Port.netMatchServerState?.remaining === 3);
+      console.log("Late participant admitted");
       const head = await frames[1].evaluate(() => tm4Port.netConfirmedTick);
       await guest.locator("#reconnect-match").click();
       await frames[1].waitForFunction(
@@ -203,6 +229,7 @@ try {
         head,
         { timeout: 30000 },
       );
+      console.log("Guest reconnected");
       members = (await snapshot()).participants.map((row) => row.id);
     } else {
       assert.deepEqual(
@@ -308,6 +335,19 @@ try {
     "PASS same loaded pages: two native FFA matches, lethal combat/respawn, late admission, reconnect, identical named authoritative results, retained room result, fresh session/credentials/zero scores and zero surviving servers",
   );
 } catch (error) {
+  console.error(
+    "Room states",
+    await Promise.all(
+      pages.map((page) =>
+        page
+          .evaluate(async () => ({
+            room: (await (await fetch("/api" + location.pathname)).json()).room,
+            status: document.getElementById("match-status")?.textContent,
+          }))
+          .catch(String),
+      ),
+    ),
+  );
   console.error(
     "Browser states",
     await Promise.all(

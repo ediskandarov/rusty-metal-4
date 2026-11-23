@@ -131,7 +131,8 @@ try {
   );
   assert.equal((await stranger(path + "/join", { playerName: "Late" })).status, 200);
   assert.equal(
-    (await stranger(path + "/player", { car: "Pizza Boy", compatibility, ready: true })).status,
+    (await stranger(path + "/player", { car: "Unavailable car", compatibility, ready: true }))
+      .status,
     409,
     "late admission is limited to the declared prepared pool",
   );

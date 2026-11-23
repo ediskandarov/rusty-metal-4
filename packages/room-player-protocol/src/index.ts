@@ -2,19 +2,19 @@ import { compatibilitySchema, sha256Schema } from "@tm4/lightyear-client/schemas
 import { matchIdSchema, roomIdSchema } from "@tm4/rooms-client/schemas";
 import { z } from "zod";
 
-export const tournamentStatusSchema = z.object({
+export const carSelectionStatusSchema = z.object({
   phase: z.enum(["choosing", "confirming", "waiting", "ready", "reconnecting", "error"]),
   title: z.string(),
   message: z.string(),
 });
-export type TournamentStatus = z.infer<typeof tournamentStatusSchema>;
+export type CarSelectionStatus = z.infer<typeof carSelectionStatusSchema>;
 
 const roomEnvelope = z.strictObject({ type: z.literal("rm4-room"), roomId: roomIdSchema });
 export const roomCommandSchema = z.discriminatedUnion("action", [
   roomEnvelope.extend({
     action: z.literal("car-selection-status"),
     requestId: z.string().uuid(),
-    status: tournamentStatusSchema,
+    status: carSelectionStatusSchema,
   }),
   roomEnvelope.extend({
     action: z.literal("car-selection"),

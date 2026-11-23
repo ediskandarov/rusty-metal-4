@@ -100,7 +100,7 @@ try {
     await page.keyboard.press("ArrowRight", { delay: 150 });
     await frame.waitForFunction(() => tm4Port.menuReady);
     await page.keyboard.press("KeyX", { delay: 150 });
-    await frame.waitForFunction(() => Module.ccall("WebTournamentSelectedCar", "string", [], []));
+    await frame.waitForFunction(() => Module.ccall("WebSelectedCar", "string", [], []));
   }
   const participants = (await view()).participants.map(({ id, car }) => ({ id, car }));
   await eventually(view, (room) => room.participants.every((p) => p.ready));
@@ -302,10 +302,7 @@ try {
     const frame = frames[index];
     await page.bringToFront();
     await frame.waitForFunction(() => tm4Port.screen === "carsel" && tm4Port.menuReady);
-    assert.equal(
-      await frame.evaluate(() => Module.ccall("WebTournamentSelectedCar", "string", [], [])),
-      "",
-    );
+    assert.equal(await frame.evaluate(() => Module.ccall("WebSelectedCar", "string", [], [])), "");
     await frame.locator("canvas").focus();
     await page.keyboard.press("KeyX", { delay: 150 });
   }

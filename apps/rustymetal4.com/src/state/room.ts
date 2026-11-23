@@ -9,16 +9,12 @@ import {
 } from "@tm4/rooms-client/schemas";
 import { createStore, type StoreApi } from "zustand/vanilla";
 
-import type { FfaSlice } from "../modes/ffa/state.ts";
 import {
-  createFfaSlice,
-  createTournamentSlice,
-  initialModeState,
-  modePlayerChoice,
-  modePlayerRequestFinished,
-  modeRoomReceived,
-} from "../modes/state.ts";
-import type { TournamentSlice } from "../modes/tournament/state.ts";
+  type CarSelectionSlice,
+  createCarSelectionSlice,
+  initialCarSelection,
+  playerChoice,
+} from "../modes/car-selection/state.ts";
 
 type RoomsClient = ReturnType<typeof createRoomsClient>;
 type Operation = "join" | "settings" | "leave" | "player" | "prepare" | "cancel" | "start";
@@ -29,7 +25,7 @@ interface Disc {
   compatibility: Compatibility;
   cars: readonly string[];
 }
-export interface RoomState extends FfaSlice, TournamentSlice {
+export interface RoomState extends CarSelectionSlice {
   room: RoomSnapshot | null;
   connection: Connection;
   departed: boolean;
@@ -74,9 +70,6 @@ export function roomCarChoices(state: RoomState): readonly string[] {
     ? cars.filter((car) => match.cars.includes(car))
     : cars;
 }
-export function roomSelectedCar(state: RoomState): string | null {
-  return state.room ? modePlayerChoice[state.room.modeId](state).car : null;
-}
 export function roomConnectionLabel(state: RoomState) {
   if (state.room?.closed) return "Room closed";
   return {
@@ -92,8 +85,7 @@ const errorMessage = (error: unknown) => (error instanceof Error ? error.message
 
 export function createRoomStore(id: string, rooms: RoomsClient, session: () => Promise<unknown>) {
   const store: StoreApi<RoomState> = createStore<RoomState>()((set, get, api) => ({
-    ...createFfaSlice(syncPlayer)(set, get, api),
-    ...createTournamentSlice(syncPlayer)(set, get, api),
+    ...createCarSelectionSlice(syncPlayer)(set, get, api),
     room: null,
     connection: "loading",
     departed: false,
@@ -157,7 +149,13 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
               playerStatus: "",
             }
           : {}),
-        ...modeRoomReceived(state, reset || modeChanged, retainedDiscNeedsSync),
+        ...(reset ||
+        modeChanged ||
+        (state.room?.match &&
+          state.room.match.id !== room.match?.id &&
+          ["starting", "connecting", "playing", "stopping"].includes(state.room.match.stage))
+          ? { carSelection: initialCarSelection() }
+          : {}),
         ...(room.match?.endpoint ? { playerNeedsSync: false } : {}),
         ...(retainedDiscNeedsSync ? { playerNeedsSync: true } : {}),
       });
@@ -178,7 +176,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
           ? {
               room: null,
               disc: null,
-              ...initialModeState(),
+              carSelection: initialCarSelection(),
               playerNeedsSync: false,
               settingsDraft: null,
             }
@@ -213,7 +211,12 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     async leave() {
       const result = await perform("leave", "room", () => rooms.leave(id));
       if (!result) return false;
-      set({ departed: true, disc: null, playerNeedsSync: false, ...initialModeState() });
+      set({
+        departed: true,
+        disc: null,
+        playerNeedsSync: false,
+        carSelection: initialCarSelection(),
+      });
       return true;
     },
     runtimeChecked(available) {
@@ -224,7 +227,7 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       set({
         disc,
         uploadReport: null,
-        ...initialModeState(),
+        carSelection: initialCarSelection(),
         playerNeedsSync: !get().room?.match?.endpoint,
       });
       void syncPlayer();
@@ -334,12 +337,11 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
     } finally {
       store.setState({
         operation: null,
-        ...(operation === "player" ? modePlayerRequestFinished(store.getState()) : {}),
       });
       if (store.getState().playerNeedsSync) void syncPlayer();
     }
   }
-  async function syncPlayer(ready?: boolean) {
+  async function syncPlayer() {
     const state = store.getState();
     if (
       state.operation ||
@@ -349,13 +351,13 @@ export function createRoomStore(id: string, rooms: RoomsClient, session: () => P
       state.departed
     )
       return;
-    const choice = modePlayerChoice[state.room.modeId](state);
+    const choice = playerChoice(state);
     store.setState({ playerNeedsSync: false });
     await perform("player", "player", () =>
       rooms.player(id, {
         car: choice.car,
         compatibility: state.disc?.compatibility ?? null,
-        ready: ready ?? choice.ready,
+        ready: choice.ready,
       }),
     );
   }

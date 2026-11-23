@@ -162,11 +162,13 @@ memory. Directory-removal failures retain a future retry deadline; stale summari
 also expire independently. Explicit creation tickets expire before empty cleanup,
 so old requests cannot recreate deleted rooms without leaving tombstones.
 
-Preparation begins only after the host loads a local disc. Resource validation
-precedes readiness so the native build/content identity and car catalog can be
-checked. The start operation freezes all current participants, with 2–8 required;
-room capacity is only an upper bound. Settings are locked during preparation,
-while car/resource changes clear the affected readiness.
+Preparation begins only after the host loads a local disc. Players confirm their cars
+with the engine's Done action, before or after preparation. Validation preserves only
+choices matching the prepared build/content identity and car catalog. Starting freezes
+all confirmed participants: FFA permits one or more humans within its quota, Tournament
+requires two. Settings are locked during preparation. Back cancels a choice; changing
+host resources invalidates readiness. FFA late arrivals confirm a prepared car and join
+with the same Done action. See the [room workflow](dev-environment.md#rustymetal4com-website).
 
 Each session addresses its own `TestServer` object. Directory capacity leases are
 private; expired reservations destroy their old server before freeing capacity.

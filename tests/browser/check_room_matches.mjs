@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
 import { launchBrowser } from "./helpers/browser.mjs";
+import { confirmCar, previewCar } from "./helpers/car-selection.mjs";
 import { setPanelOpen } from "./helpers/player.mjs";
 
 if (!process.env.TM4_DISC_DIR) throw new Error("Set TM4_DISC_DIR to your own disc folder");
@@ -61,10 +62,7 @@ try {
     await frame.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
     await frame.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 60000 });
     if (!resuming) {
-      await page.waitForFunction(() => !document.getElementById("room-car").disabled, null, {
-        timeout: 120000,
-      });
-      await page.locator("#room-car").selectOption(car);
+      await previewCar(page, car);
     }
     await page.locator("#room-player").scrollIntoViewIfNeeded();
     await setPanelOpen(frame, "render-settings", true);
@@ -118,19 +116,14 @@ try {
     const frames = [await load(a, "Calypso"), await load(b, "Quatro")];
     assert.equal(native.starts, session, "loading local discs must not allocate a server");
     await a.locator("#prepare-match").click();
+    for (const page of pages) await confirmCar(page);
     await a.waitForFunction(
       () =>
-        !document.getElementById("room-ready").disabled ||
-        document.getElementById("player-status").textContent.startsWith("Error:"),
+        !document.getElementById("start-match").hidden &&
+        !document.getElementById("start-match").disabled,
       null,
       { timeout: 120000 },
     );
-    assert(
-      !(await a.locator("#room-ready").isDisabled()),
-      await a.locator("#player-status").innerText(),
-    );
-    for (const page of pages) await page.locator("#room-ready").click();
-    await a.waitForFunction(() => !document.getElementById("start-match").disabled);
     sessions.push(
       await a.evaluate(
         async () => (await (await fetch("/api" + location.pathname)).json()).room.match.id,
@@ -168,9 +161,7 @@ try {
     assert.equal(waiting.state.roundFinished, false);
     assert.equal(waiting.state.nextMode, 0);
     let respawnModel;
-    const availableModels = await a
-      .locator("#room-car option")
-      .evaluateAll((options) => options.map((option) => option.value));
+    const availableModels = await frames[0].evaluate(() => tm4Port.catalog.cars);
     for (const frame of frames) {
       await frame.waitForFunction(
         (due) => tm4Port.netConfirmedTick > due + 10 && Module._WebTestCarHandle(1) > 0,
@@ -261,8 +252,7 @@ try {
         await third.locator("#join-form button").click();
         await third.locator("#match-panel").waitFor({ state: "visible" });
         const thirdFrame = await load(third, "Quatro");
-        assert.equal(await third.locator("#room-ready").innerText(), "Join match");
-        await third.locator("#room-ready").click();
+        await confirmCar(third);
         await thirdFrame.waitForFunction(
           () => tm4Port.netViewSlot === 2 && Module._WebNetSlotMask() === 7,
           null,

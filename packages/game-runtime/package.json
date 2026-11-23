@@ -12,7 +12,6 @@
   },
   "exports": {
     "./runtime/*": "./src/runtime/*.ts",
-    "./network/*": "./src/network/*.ts",
-    "./tournament/*": "./src/tournament/*.ts"
+    "./network/*": "./src/network/*.ts"
   }
 }

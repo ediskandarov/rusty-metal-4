@@ -1,42 +1,16 @@
+import { createCarSelectionControls } from "../car-selection/controls.ts";
 import type { RoomMode } from "../types.ts";
-import { ffaControls } from "./selectors.ts";
 import { ffaSettings } from "./settings.ts";
+import { ffaSelectionStatus } from "./status.ts";
 export const ffa: RoomMode = {
   settings: ffaSettings,
-  createControls(store) {
-    const car = document.getElementById("room-car") as HTMLSelectElement;
-    const ready = document.getElementById("room-ready") as HTMLButtonElement;
-    car.onchange = () => {
-      void store.getState().selectCar(car.value);
-    };
-    ready.onclick = () => {
-      void store.getState().toggleReady();
-    };
-    return {
-      reset() {
-        car.onchange = null;
-        ready.onclick = null;
-      },
-      render() {
-        const state = store.getState();
-        const view = ffaControls(state);
-        if (!view) return;
-        car.closest("label")!.hidden = false;
-        ready.hidden = false;
-        document.getElementById("match-help")!.textContent =
-          "Each player loads their own disc below. Only the host uploads required resources to the private match server. Start with at least one ready human player; bots use their reserved places.";
-        const choices = view.choices;
-        if (
-          car.options.length !== choices.length ||
-          choices.some((name, index) => car.options[index]?.value !== name)
-        )
-          car.replaceChildren(...choices.map((name) => new Option(name, name)));
-        car.value = view.selectedCar ?? "";
-        car.disabled = view.carDisabled;
-        ready.disabled = view.readyDisabled;
-        ready.textContent = view.readyLabel;
-      },
-    };
+  createControls(store, send) {
+    return createCarSelectionControls(
+      store,
+      send,
+      ffaSelectionStatus,
+      "Each player loads their own disc, chooses a car in the game and presses Done. Back cancels the choice. The host prepares the server and starts with at least one confirmed human player. During a match, Done joins with the chosen car. Bots keep their reserved places.",
+    );
   },
   results(result) {
     const winners = result.participants.filter((row) => row.winner);

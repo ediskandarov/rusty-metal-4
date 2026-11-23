@@ -58,35 +58,33 @@ try {
     await frame.locator("canvas").focus();
     await page.keyboard.press("ArrowRight", { delay: 150 });
     await page.keyboard.press("KeyX", { delay: 150 });
-    await frame.waitForFunction(
-      () => Module.ccall("WebTournamentSelectedCar", "string", [], []),
-      null,
-      { timeout: 10000 },
-    );
+    await frame.waitForFunction(() => Module.ccall("WebSelectedCar", "string", [], []), null, {
+      timeout: 10000,
+    });
     if (page === guest) {
       await page
         .locator("#player-status")
         .filter({ hasText: "Temporary confirmation failure" })
         .waitFor();
-      await frame.locator('#tournament-status[data-phase="error"]').waitFor();
+      await frame.locator('#car-selection-status[data-phase="error"]').waitFor();
       assert.match(
-        await frame.locator("#tournament-status-message").textContent(),
+        await frame.locator("#car-selection-status-message").textContent(),
         /Done to retry/,
       );
-      const revision = await frame.evaluate(() => Module._WebTournamentSelectionRevision());
+      const revision = await frame.evaluate(() => Module._WebCarSelectionRevision());
       // Let the 30 Hz menu sample key-up before pressing Done for a second time.
       await page.waitForTimeout(100);
       await page.keyboard.press("KeyX", { delay: 150 });
       await frame.waitForFunction(
-        (previous) => Module._WebTournamentSelectionRevision() > previous,
+        (previous) => Module._WebCarSelectionRevision() > previous,
         revision,
       );
     }
     frames.push(frame);
     if (page === host) {
-      await frame.locator('#tournament-status[data-phase="waiting"]').waitFor();
+      await frame.locator('#car-selection-status[data-phase="waiting"]').waitFor();
       assert.match(
-        await frame.locator("#tournament-status-message").textContent(),
+        await frame.locator("#car-selection-status-message").textContent(),
         /Guest to choose/,
       );
       await page.screenshot({ path: "build/checks/tournament-waiting.png", fullPage: true });
@@ -99,9 +97,9 @@ try {
   );
   assert(rejectedConfirmation, "Retry exercised a failed confirmation");
   for (const frame of frames) {
-    await frame.locator('#tournament-status[data-phase="ready"]').waitFor();
+    await frame.locator('#car-selection-status[data-phase="ready"]').waitFor();
     assert.equal(
-      await frame.locator("#tournament-status-title").textContent(),
+      await frame.locator("#car-selection-status-title").textContent(),
       "Both cars confirmed",
     );
   }
@@ -109,8 +107,8 @@ try {
   assert.equal(confirmed.capacity, 2);
   assert.equal(confirmed.freePlaces, 0);
   assert.equal(confirmed.match, null, "Selection does not allocate an FFA server");
-  assert(await host.locator("#room-car").isHidden());
-  assert(await host.locator("#room-ready").isHidden());
+  assert.equal(await host.locator("#room-car").count(), 0);
+  assert.equal(await host.locator("#room-ready").count(), 0);
   assert(await host.locator("#start-match").isHidden());
   for (const frame of frames) assert.equal(await frame.evaluate(() => tm4Port.menuMode), 0);
   // Preparing the server must not leave a stale upload overlay on native selection.
@@ -120,7 +118,7 @@ try {
   await host.locator("#match-status").filter({ hasText: "Server ready" }).waitFor();
   assert(!(await frames[0].locator("#status").textContent()).includes("Server"));
   assert(await frames[0].locator("#status").isHidden());
-  assert(await frames[0].locator("#tournament-status").isVisible());
+  assert(await frames[0].locator("#car-selection-status").isVisible());
   assert(await frames[0].evaluate(() => tm4Port.menuReady));
   await host.locator("#cancel-preparation").click();
   await eventually(view, (room) => room.match === null);
@@ -138,10 +136,10 @@ try {
       );
   }, roomId);
   await frames[0].locator("canvas").focus();
-  const revision = await frames[0].evaluate(() => Module._WebTournamentSelectionRevision());
+  const revision = await frames[0].evaluate(() => Module._WebCarSelectionRevision());
   await host.keyboard.press("KeyX", { delay: 150 });
   await frames[0].waitForFunction(
-    (previous) => Module._WebTournamentSelectionRevision() > previous,
+    (previous) => Module._WebCarSelectionRevision() > previous,
     revision,
   );
   await host.screenshot({ path: "build/checks/tournament-room.png", fullPage: true });
@@ -155,21 +153,23 @@ try {
       !room.participants[1].ready &&
       room.participants[1].car === null,
   );
-  await frames[0].locator('#tournament-status[data-phase="waiting"]').waitFor();
-  await frames[1].locator('#tournament-status[data-phase="choosing"]').waitFor();
+  await frames[0].locator('#car-selection-status[data-phase="waiting"]').waitFor();
+  await frames[1].locator('#car-selection-status[data-phase="choosing"]').waitFor();
   await host.bringToFront();
   await host.locator('[name="modeId"]').selectOption("ffa");
   await host.locator('#settings-form button[type="submit"]').click();
   await eventually(
     view,
-    (room) => room.modeId === "ffa" && room.participants.every((p) => !p.ready && p.car),
+    (room) => room.modeId === "ffa" && room.participants.every((p) => !p.ready),
   );
-  for (const frame of frames) await frame.waitForFunction(() => !tm4Port.menuReady);
-  for (const frame of frames) assert(await frame.locator("#tournament-status").isHidden());
-  assert(await host.locator("#room-car").isVisible());
+  for (const frame of frames)
+    await frame.waitForFunction(() => tm4Port.screen === "carsel" && tm4Port.menuReady);
+  for (const frame of frames)
+    await frame.locator('#car-selection-status[data-phase="choosing"]').waitFor();
+  assert.equal(await host.locator("#room-car").count(), 0);
   assert.deepEqual(errors, []);
   console.log(
-    "PASS two real engine menus confirm room roster, back clears selection, FFA restores HTML controls",
+    "PASS two real engine menus confirm room roster, back clears selection, FFA opens a fresh native selection",
   );
 } finally {
   await browser.close();

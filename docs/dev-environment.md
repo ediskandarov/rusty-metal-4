@@ -301,12 +301,17 @@ from the native launcher in `apps/server` and standalone player in `apps/player`
 Rooms gather players, choose settings and prepare one match at a time. Browsing
 and joining need no disc resources or simulation container. The embedded existing
 player reads each participant's own disc. The host explicitly prepares the private
-server, then every participant readies and the host starts the actual roster.
+server and starts the confirmed roster. Both FFA and Tournament use the engine's
+car selection screen: Done confirms the car and readiness together, Back cancels.
+Players can confirm before or during preparation; server validation clears incompatible
+choices. The room's shared `modes/car-selection` slice/controller owns delivery and
+confirmation, while each mode supplies its waiting prompts and admission rules.
+There is no separate HTML car picker or Ready button.
 FFA respawns after deaths and finishes at its immutable time or frag limit; normal
 completion releases the private server and returns members to the same room.
 Explicit departure releases seats, and an empty room releases its
 private server. FFA always provides eight places, independently of the initial roster
-size. During play, a newcomer can load their own disc, select from the explicit startup-prepared model pool and join a free seat;
+size. During play, a newcomer can load their own disc, choose a car from the startup-prepared pool in the engine and press Done to join a free seat;
 explicit room leave schedules native departure. Closing a tab preserves recovery
 identity rather than releasing its gameplay seat.
 

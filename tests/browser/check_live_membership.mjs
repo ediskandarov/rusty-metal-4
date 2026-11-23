@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { resolve } from "node:path";
 
 import { launchBrowser } from "./helpers/browser.mjs";
+import { confirmCar, previewCar } from "./helpers/car-selection.mjs";
 import { setPanelOpen } from "./helpers/player.mjs";
 
 /* global Module, tm4Port */
@@ -74,10 +75,7 @@ try {
       timeout: 60000,
     });
     await frame.locator("#disc-folder").setInputFiles(process.env.TM4_DISC_DIR);
-    await page.waitForFunction(() => !document.getElementById("room-car").disabled, null, {
-      timeout: 120000,
-    });
-    await page.locator("#room-car").selectOption("Orbital");
+    await previewCar(page, "Orbital");
     await page.locator("#room-player").scrollIntoViewIfNeeded();
     await setPanelOpen(frame, "render-settings", true);
     await frame.locator("#render-scale").selectOption("1");
@@ -175,11 +173,14 @@ try {
   });
   console.log("Initial three local discs loaded");
   await host.locator("#prepare-match").click();
-  await host.waitForFunction(() => !document.getElementById("room-ready").disabled, null, {
-    timeout: 120000,
-  });
-  for (const page of pages.slice(0, 3)) await page.locator("#room-ready").click();
-  await host.waitForFunction(() => !document.getElementById("start-match").disabled);
+  for (const page of pages.slice(0, 3)) await confirmCar(page);
+  await host.waitForFunction(
+    () =>
+      !document.getElementById("start-match").hidden &&
+      !document.getElementById("start-match").disabled,
+    null,
+    { timeout: 120000 },
+  );
   await host.locator("#start-match").click();
   try {
     for (const frame of frames)
@@ -245,9 +246,8 @@ try {
   );
   await join(late, "Late");
   let lateFrame = await load(late);
-  if (ffa) await late.locator("#room-car").selectOption("Pizza Boy");
-  assert.equal(await late.locator("#room-ready").innerText(), "Join match");
-  await late.locator("#room-ready").click();
+  if (ffa) await previewCar(late, "Pizza Boy");
+  await confirmCar(late);
   // Observe C prediction crossing the announced admission while the authority
   // is still behind it, then lose only the preparing client's native socket.
   // The trace wraps bridge calls for observation; Lightyear owns every restore.
@@ -310,8 +310,7 @@ try {
   assert.equal(canceledRoom.you, pendingRoom.you);
   assert.equal(canceledRoom.match.credential, null);
   lateFrame = await load(late);
-  await late.waitForFunction(() => !document.getElementById("room-ready").disabled);
-  await late.locator("#room-ready").click();
+  await confirmCar(late);
   const retriedRoom = await late.evaluate(
     async () => (await (await fetch("/api" + location.pathname)).json()).room,
   );
@@ -370,7 +369,7 @@ try {
   console.log("Explicit departure committed without ending the other players");
   await join(late, "Fresh entry");
   lateFrame = await load(late);
-  await late.locator("#room-ready").click();
+  await confirmCar(late);
   await lateFrame.waitForFunction(() => globalThis.tm4Port?.netConfirmedTick > 30, null, {
     timeout: 90000,
   });

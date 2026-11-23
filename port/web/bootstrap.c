@@ -9,7 +9,7 @@
 #include "render_sync.h"
 #include "widescreen.h"
 #include "subpixel.h"
-#include "tournament_menu.h"
+#include "car_selection.h"
 #include <libgte.h>
 #ifdef TM4_WEB_TEST_HOOKS
 #include "tests/native/hooks.h"
@@ -51,13 +51,13 @@ static int menu_directory_saved;
 static int menu_initialized;
 static int direct_startup;
 static int simulation_only;
-static int tournament_menu_request;
+static int car_selection_request;
 
-EMSCRIPTEN_KEEPALIVE int WebSetTournamentSelection(int enabled)
+EMSCRIPTEN_KEEPALIVE int WebSetCarSelection(int enabled)
 {
     if (!direct_startup || simulation_only || WebLevelActive() || WebNetMatchActive())
         return 0;
-    tournament_menu_request = enabled ? 1 : -1;
+    car_selection_request = enabled ? 1 : -1;
     return 1;
 }
 int WebSimulationOnly(void) { return simulation_only; }
@@ -300,7 +300,7 @@ void WebLeaveMenu(void)
     WEB_BROWSER_REPORT({ tm4Port.menuReady = false; });
     if (!menu_initialized)
         return;
-    WebTournamentMenuClose();
+    WebCarSelectionMenuClose();
     WEB_MODULE("menu", MenuShutdown)();
     menu_initialized = 0;
     if (menu_directory_saved)
@@ -401,19 +401,19 @@ static void browser_frame(void)
 {
     if (WebLevelCheckpointActive() && !WebNetRenderedPrediction())
         return;
-    if (tournament_menu_request) {
-        int request = tournament_menu_request;
-        tournament_menu_request = 0;
+    if (car_selection_request) {
+        int request = car_selection_request;
+        car_selection_request = 0;
         if (request > 0) {
-            WebTournamentMenuClose();
+            WebCarSelectionMenuClose();
             if (!menu_initialized) {
                 if (RegGetFileDataS("/menu/menu.bit"))
                     WebReturnToMenu();
                 else
                     initialize_menu();
             }
-            WebTournamentMenuOpen();
-        } else if (request < 0 && WebTournamentMenuActive()) {
+            WebCarSelectionMenuOpen();
+        } else if (request < 0 && WebCarSelectionMenuActive()) {
             WebLeaveMenu();
         }
     }

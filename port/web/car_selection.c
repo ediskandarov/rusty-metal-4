@@ -1,4 +1,4 @@
-#include "tournament_menu.h"
+#include "car_selection.h"
 #include "port/web/module_import.h"
 #include "src/modules/menu/private.h"
 #include "tm4/main/game.h"
@@ -35,7 +35,7 @@ static void process_car(void)
 }
 
 /* Keep the native preview/selection path, but never enter its local-game transition. */
-void WebTournamentMenuOpen(void)
+void WebCarSelectionMenuOpen(void)
 {
     if (active)
         return;
@@ -64,7 +64,7 @@ void WebTournamentMenuOpen(void)
     WEB_MODULE("menu", MenuSwitchScreen)(&WEB_MODULE("menu", MenuScreenPlayerCar), 0);
 }
 
-void WebTournamentMenuClose(void)
+void WebCarSelectionMenuClose(void)
 {
     if (!active)
         return;
@@ -74,11 +74,11 @@ void WebTournamentMenuClose(void)
     confirmed_car = NULL;
 }
 
-int WebTournamentMenuActive(void) { return active; }
+int WebCarSelectionMenuActive(void) { return active; }
 
-EMSCRIPTEN_KEEPALIVE const char* WebTournamentSelectedCar(void) { return confirmed_car; }
+EMSCRIPTEN_KEEPALIVE const char* WebSelectedCar(void) { return confirmed_car; }
 
-EMSCRIPTEN_KEEPALIVE unsigned int WebTournamentSelectionRevision(void)
+EMSCRIPTEN_KEEPALIVE unsigned int WebCarSelectionRevision(void)
 {
     return selection_revision;
 }

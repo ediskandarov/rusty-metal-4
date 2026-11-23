@@ -93,10 +93,33 @@ try {
       { id, compatibility },
     );
   };
+  const choose = async (page, car) => {
+    const frame = await player(page);
+    await frame.waitForFunction(() =>
+      window.commands.some((c) => c.action === "car-selection" && c.enabled),
+    );
+    await frame.evaluate(
+      ({ id, car }) => {
+        const command = window.commands.findLast((c) => c.action === "car-selection" && c.enabled);
+        parent.postMessage(
+          {
+            type: "rm4-player",
+            roomId: id,
+            event: "car-selection",
+            requestId: command.requestId,
+            car,
+          },
+          location.origin,
+        );
+      },
+      { id, car },
+    );
+  };
   const hostPlayer = await player(host);
   await loaded(hostPlayer);
-  await eventually(view, (room) => room.participants[0]?.car === "Orbital");
-  await host.waitForFunction(() => !document.getElementById("room-car").disabled);
+  await eventually(view, (room) => room.participants[0]?.loaded);
+  assert.equal((await view()).participants[0].car, null);
+  assert.equal(await host.locator("#room-car, #room-ready").count(), 0);
 
   await host.locator("#edit-bots").selectOption(["Orbital", "Pizza Boy"]);
   await host.locator("#edit-human-limit").fill("4");
@@ -147,13 +170,8 @@ try {
       location.origin,
     );
   }, id);
-  await host.locator("#player-status").filter({ hasText: "Boundary checked" }).waitFor();
-  assert.equal(await host.locator("#room-car").inputValue(), "Orbital");
-  assert.deepEqual(await host.locator("#room-car option").allTextContents(), [
-    "Orbital",
-    "Pizza Boy",
-  ]);
-  assert(!(await host.locator("#room-car").isDisabled()));
+  await host.locator("#player-status").filter({ hasText: "Choose your car" }).waitFor();
+  assert((await view()).participants[0].loaded);
   console.log(
     "PASS malformed, old-shape and unrelated player messages cannot change the room's loaded disc",
   );
@@ -175,20 +193,20 @@ try {
     },
     { times: 1 },
   );
-  await host.locator("#room-car").selectOption("Pizza Boy");
+  await choose(host, "Pizza Boy");
   await seen;
-  assert(await host.locator("#room-car").isDisabled());
+  await host.locator("#player-status").filter({ hasText: "Confirming your choice" }).waitFor();
   assert(await host.locator("#prepare-match").isDisabled());
   await host.locator("#edit-name").fill("Unsaved name");
   await guest.goto(invite);
   await guest.locator("#join-player").fill("Guest");
   await guest.locator("#join-form button").click();
   await host.getByText("Guest", { exact: true }).waitFor();
-  assert.equal(await host.locator("#room-car").inputValue(), "Pizza Boy");
+  assert.equal((await view()).participants[0].car, null);
   assert.equal(await host.locator("#edit-name").inputValue(), "Unsaved name");
   release();
   await eventually(view, (room) => room.participants[0]?.car === "Pizza Boy");
-  await host.waitForFunction(() => !document.getElementById("room-car").disabled);
+  await eventually(view, (room) => room.participants[0]?.ready);
 
   await host.route(
     `**/api/rooms/${id}/player`,
@@ -199,18 +217,18 @@ try {
       }),
     { times: 1 },
   );
-  await host.locator("#room-car").selectOption("Orbital");
+  await choose(host, "Orbital");
   await host
     .locator("#player-status")
     .filter({ hasText: "Car selection temporarily unavailable" })
     .waitFor();
-  assert.equal(await host.locator("#room-car").inputValue(), "Pizza Boy");
+  assert.equal((await view()).participants[0].car, "Pizza Boy");
   const guestPlayer = await player(guest);
   await loaded(guestPlayer);
-  await eventually(view, (room) => room.participants[1]?.car === "Orbital");
-  assert.equal(
+  await eventually(view, (room) => room.participants[1]?.loaded);
+  assert.match(
     await host.locator("#player-status").textContent(),
-    "Car selection temporarily unavailable",
+    /Car selection temporarily unavailable/,
   );
   assert.equal(
     await hostPlayer.evaluate(
@@ -219,14 +237,14 @@ try {
     0,
     "server preparation status must stay in the room",
   );
-  await host.locator("#room-car").selectOption("Orbital");
+  await choose(host, "Orbital");
   await eventually(view, (room) => room.participants[0]?.car === "Orbital");
-  await host.waitForFunction(() => !document.getElementById("room-car").disabled);
+  await eventually(view, (room) => room.participants[0]?.ready);
   await host.locator("#settings-form button").click();
   await host.getByText("Settings saved for everyone.", { exact: true }).waitFor();
   assert.equal(await host.locator("#room-name").textContent(), "Unsaved name");
   console.log(
-    "PASS pending car and settings drafts survive live updates; rejected selection restores authority without losing the error",
+    "PASS pending car and settings drafts survive live updates; rejected Done retains the error and can be retried",
   );
 
   await host.locator("#edit-bots").selectOption(["Pizza Boy"]);
@@ -256,8 +274,7 @@ try {
       .locator("#server-region")
       .filter({ hasText: "Western Europe · Germany · FRA" })
       .waitFor();
-    await page.waitForFunction(() => !document.getElementById("room-ready").disabled);
-    await page.locator("#room-ready").click();
+    await choose(page, "Orbital");
   }
   await host.waitForFunction(() => !document.getElementById("start-match").disabled);
   await host.locator("#start-match").click();
@@ -281,8 +298,7 @@ try {
   await late.locator("#leave-button").waitFor();
   const latePlayer = await player(late);
   await loaded(latePlayer);
-  await late.waitForFunction(() => !document.getElementById("room-ready").disabled);
-  await late.locator("#room-ready").click();
+  await choose(late, "Orbital");
   await latePlayer.waitForFunction(() =>
     window.commands.some((command) => command.action === "join"),
   );

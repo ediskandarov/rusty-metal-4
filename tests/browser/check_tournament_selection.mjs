@@ -11,7 +11,7 @@ try {
   await page.goto(new URL("?session=1", process.env.TM4_WEB_URL ?? "http://127.0.0.1:8351/").href);
   await page.waitForFunction(() => globalThis.tm4Port?.compatibility, null, { timeout: 90000 });
   const open = async () => {
-    assert.equal(await page.evaluate(() => Module._WebSetTournamentSelection(1)), 1);
+    assert.equal(await page.evaluate(() => Module._WebSetCarSelection(1)), 1);
     await page.waitForFunction(() => tm4Port.screen === "carsel" && tm4Port.menuReady, null, {
       timeout: 30000,
     });
@@ -22,15 +22,13 @@ try {
   await page.keyboard.press("ArrowRight", { delay: 150 });
   await page.waitForFunction((first) => tm4Port.selectedCar !== first, before);
   await page.keyboard.press("KeyX", { delay: 150 });
-  await page.waitForFunction(() => Module.ccall("WebTournamentSelectedCar", "string", [], []));
-  const confirmed = await page.evaluate(() =>
-    Module.ccall("WebTournamentSelectedCar", "string", [], []),
-  );
+  await page.waitForFunction(() => Module.ccall("WebSelectedCar", "string", [], []));
+  const confirmed = await page.evaluate(() => Module.ccall("WebSelectedCar", "string", [], []));
   assert(confirmed);
   assert(await page.evaluate((car) => tm4Port.catalog.cars.includes(car), confirmed));
   await page.keyboard.press("ArrowRight", { delay: 150 });
   assert.equal(
-    await page.evaluate(() => Module.ccall("WebTournamentSelectedCar", "string", [], [])),
+    await page.evaluate(() => Module.ccall("WebSelectedCar", "string", [], [])),
     confirmed,
   );
   assert.equal(
@@ -40,14 +38,11 @@ try {
   );
   await page.screenshot({ path: "build/checks/tournament-selection.png" });
   await page.keyboard.press("KeyS", { delay: 150 });
-  await page.waitForFunction(() => !Module.ccall("WebTournamentSelectedCar", "string", [], []));
-  await page.evaluate(() => Module._WebSetTournamentSelection(0));
+  await page.waitForFunction(() => !Module.ccall("WebSelectedCar", "string", [], []));
+  await page.evaluate(() => Module._WebSetCarSelection(0));
   await page.waitForFunction(() => !tm4Port.menuReady);
   await open();
-  assert.equal(
-    await page.evaluate(() => Module.ccall("WebTournamentSelectedCar", "string", [], [])),
-    "",
-  );
+  assert.equal(await page.evaluate(() => Module.ccall("WebSelectedCar", "string", [], [])), "");
   const replay = async (target) =>
     target.evaluate(() => {
       const check = (value, message) => {
@@ -100,7 +95,7 @@ try {
       }
       return states;
     });
-  await page.evaluate(() => Module._WebSetTournamentSelection(0));
+  await page.evaluate(() => Module._WebSetCarSelection(0));
   await page.waitForFunction(() => !tm4Port.menuReady);
   const afterMenu = await replay(page);
   const fresh = await browser.newPage();

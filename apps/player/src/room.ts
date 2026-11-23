@@ -1,7 +1,7 @@
+import { selectNetworkCar } from "@tm4/game-runtime/network/car-selection";
 import { joinMatch } from "@tm4/game-runtime/network/match";
 import type { NetworkPort } from "@tm4/game-runtime/network/protocol";
 import type { GameModule } from "@tm4/game-runtime/runtime/module";
-import { selectTournamentCar } from "@tm4/game-runtime/tournament/selection";
 import type { DiscSources } from "@tm4/resources/loader/types";
 import { type PlayerEvent, type PlayerMessage, roomCommandSchema } from "@tm4/room-player-protocol";
 import { createRoomsClient } from "@tm4/rooms-client";
@@ -49,7 +49,7 @@ export async function roomPlayerReady(engine: GameModule, sources: DiscSources):
   const id = roomId;
   selection?.stop();
   selection = null;
-  document.getElementById("tournament-status")!.hidden = true;
+  document.getElementById("car-selection-status")!.hidden = true;
   playerEngine = engine;
   session?.dispose();
   session = createRoomSession({
@@ -70,7 +70,7 @@ export async function roomPlayerReady(engine: GameModule, sources: DiscSources):
       uploadRoomResources(sources, resources.resources(id, sessionId), signal, progress),
   });
   notify({ event: "loaded", compatibility: port.compatibility, cars: port.catalog.cars });
-  show("lobby", "Disc loaded. Choose your car in the room.");
+  show("lobby", "Disc loaded. Choose your car in the game.");
 }
 if (inRoom) {
   window.addEventListener("message", (event: MessageEvent<unknown>) => {
@@ -80,11 +80,11 @@ if (inRoom) {
     const command = parsed.data;
     if (command.action === "car-selection-status") {
       if (selection?.id !== command.requestId) return;
-      const panel = document.getElementById("tournament-status")!;
+      const panel = document.getElementById("car-selection-status")!;
       panel.hidden = false;
       panel.dataset.phase = command.status.phase;
-      document.getElementById("tournament-status-title")!.textContent = command.status.title;
-      document.getElementById("tournament-status-message")!.textContent = command.status.message;
+      document.getElementById("car-selection-status-title")!.textContent = command.status.title;
+      document.getElementById("car-selection-status-message")!.textContent = command.status.message;
       return;
     }
     if (command.action === "car-selection") {
@@ -93,11 +93,11 @@ if (inRoom) {
         if (selection?.id === command.requestId) {
           selection.stop();
           selection = null;
-          document.getElementById("tournament-status")!.hidden = true;
+          document.getElementById("car-selection-status")!.hidden = true;
           document.getElementById("status")!.hidden = false;
           matchStatus(document.getElementById("status")!)(
             "lobby",
-            "Disc loaded. Choose your car in the room.",
+            "Disc loaded. Choose your car in the game.",
           );
         }
         return;
@@ -105,7 +105,7 @@ if (inRoom) {
       if (selection?.id === command.requestId) return;
       selection?.stop();
       try {
-        const stop = selectTournamentCar(playerEngine, (car) => {
+        const stop = selectNetworkCar(playerEngine, (car) => {
           if (selection?.id === command.requestId) {
             notify({ event: "car-selection", requestId: command.requestId, car });
           }
@@ -114,7 +114,7 @@ if (inRoom) {
         document.getElementById("status")!.hidden = true;
       } catch (error) {
         selection = null;
-        document.getElementById("tournament-status")!.hidden = true;
+        document.getElementById("car-selection-status")!.hidden = true;
         document.getElementById("status")!.hidden = false;
         matchStatus(document.getElementById("status")!)("error", String(error));
       }
@@ -123,7 +123,7 @@ if (inRoom) {
     if (selection && command.action === "join") {
       selection.stop();
       selection = null;
-      document.getElementById("tournament-status")!.hidden = true;
+      document.getElementById("car-selection-status")!.hidden = true;
     }
     session?.handle(command);
   });

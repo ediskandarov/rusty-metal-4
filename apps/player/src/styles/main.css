@@ -362,7 +362,7 @@ html.network-game :is(#cheat-settings, #mods, #startup-mods, #mod-drop-hint) {
   padding: 4px 0;
 }
 
-#tournament-status {
+#car-selection-status {
   position: absolute;
   left: 50%;
   bottom: 12%;
@@ -379,9 +379,9 @@ html.network-game :is(#cheat-settings, #mods, #startup-mods, #mod-drop-hint) {
   line-height: 1.4;
   pointer-events: none;
 }
-#tournament-status p {
+#car-selection-status p {
   margin: 4px 0 0;
 }
-#tournament-status[data-phase="error"] {
+#car-selection-status[data-phase="error"] {
   border-color: #a7696e;
 }

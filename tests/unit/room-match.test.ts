@@ -52,11 +52,11 @@ describe("room match authority", () => {
     expect(snapshot(state, "third").freePlaces).toBe(5);
     expect(match.roster).toHaveLength(2);
   });
-  test("car and resources changes require separate readiness confirmation", () => {
+  test("Done atomically confirms a prepared car; incompatible resources are rejected", () => {
     const state = fixture();
-    expect(() =>
-      updatePlayer(state, "guest", { ...selected, car: "Pizza Boy", ready: true }),
-    ).toThrow();
+    updatePlayer(state, "guest", { ...selected, car: "Pizza Boy", ready: true });
+    expect(state.members[1]!.car).toBe("Pizza Boy");
+    expect(state.members[1]!.ready).toBe(true);
     updatePlayer(state, "guest", { ...selected, car: "Pizza Boy" });
     expect(() => freezeRoster(state, "host", 200)).toThrow("every participant ready");
     updatePlayer(state, "guest", { ...selected, car: "Pizza Boy", ready: true });
@@ -332,4 +332,37 @@ test("finished FFA keeps its mode after the host switches the next match to tour
   });
   expect(snapshot(state, "host").modeId).toBe("tournament");
   expect(snapshot(state, "host").result).toEqual(saved);
+});
+
+test("FFA Done survives preparation, unavailable choices are invalidated and Back cancels", async () => {
+  const { ffaRules } = await import("../../apps/rustymetal4.com/src/modes/ffa/rules.ts");
+  const state = createState("room", "host", { name: "Crew", playerName: "Host" }, 100);
+  connect(state, "host", "tab");
+  updatePlayer(state, "host", { ...selected, ready: true });
+  const match = beginPreparation(state, "host", 100);
+  expect(state.members[0]!.ready).toBe(true);
+  match.compatibility = compatibility;
+  match.cars = ["Orbital"];
+  match.stage = "ready";
+  ffaRules.serverPrepared(state);
+  expect(state.members[0]!.ready).toBe(true);
+  updatePlayer(state, "host", { car: null, compatibility, ready: false });
+  expect(() => freezeRoster(state, "host", 200)).toThrow("every participant ready");
+  expect(() => updatePlayer(state, "host", { ...selected, car: "Pizza Boy", ready: true })).toThrow(
+    "prepared server",
+  );
+  updatePlayer(state, "host", { ...selected, ready: true });
+  match.cars = ["Pizza Boy"];
+  ffaRules.serverPrepared(state);
+  expect(state.members[0]!.ready).toBe(false);
+});
+
+test("FFA late admission checks the running server even when the new host has no loaded disc", () => {
+  const state = fixture();
+  const match = freezeRoster(state, "host", 200);
+  match.stage = "playing";
+  join(state, "late", "Late", 300);
+  state.members[0]!.compatibility = null;
+  updatePlayer(state, "late", { ...selected, ready: true });
+  expect(state.members[2]!.ready).toBe(true);
 });

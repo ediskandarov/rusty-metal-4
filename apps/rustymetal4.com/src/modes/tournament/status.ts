@@ -1,34 +1,13 @@
-import type { TournamentStatus } from "@tm4/room-player-protocol";
+import type { CarSelectionStatus } from "@tm4/room-player-protocol";
 
 import { roomMember } from "../../state/room.ts";
+import { pendingSelectionStatus } from "../car-selection/status.ts";
 import type { RoomState } from "../types.ts";
 
-export function tournamentSelectionStatus(state: RoomState): TournamentStatus {
-  if (state.connection !== "live")
-    return {
-      phase: "reconnecting",
-      title: "Reconnecting to the room…",
-      message: "Waiting for the server to confirm the players' readiness.",
-    };
-  if (state.errors.player)
-    return {
-      phase: "error",
-      title: "Your choice was not confirmed",
-      message: state.errors.player + " Press Done to retry, or Back to choose again.",
-    };
-  if (state.operation === "player" || state.playerNeedsSync)
-    return {
-      phase: "confirming",
-      title: "Confirming your choice…",
-      message: "Waiting for the room server.",
-    };
-  const self = roomMember(state);
-  if (!self?.ready)
-    return {
-      phase: "choosing",
-      title: "Choose your car",
-      message: "Use the game controls below. Done confirms your choice; Back cancels it.",
-    };
+export function tournamentSelectionStatus(state: RoomState): CarSelectionStatus {
+  const pending = pendingSelectionStatus(state);
+  if (pending) return pending;
+  const self = roomMember(state)!;
   const other = state.room?.participants.find((member) => member.id !== self.id);
   const back = "Use Back to change your choice.";
   if (!other)

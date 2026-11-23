@@ -3,12 +3,9 @@ import { expect, test } from "bun:test";
 import { createRoomsClient, RoomsApiError } from "@tm4/rooms-client";
 import type { MatchSnapshot, RoomSnapshot } from "@tm4/rooms-client/schemas";
 
+import { selectedCar } from "../../apps/rustymetal4.com/src/modes/car-selection/state.ts";
 import { tournamentSelectionStatus } from "../../apps/rustymetal4.com/src/modes/tournament/status.ts";
-import {
-  createRoomStore,
-  roomCarChoices,
-  roomSelectedCar,
-} from "../../apps/rustymetal4.com/src/state/room.ts";
+import { createRoomStore, roomCarChoices } from "../../apps/rustymetal4.com/src/state/room.ts";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -56,6 +53,9 @@ function snapshot(version = 1): RoomSnapshot {
     emptyUntil: null,
     closed: false,
   };
+}
+function choose(store: ReturnType<typeof createRoomStore>, car: string | null) {
+  return store.getState().engineCarSelected(store.getState().openCarSelection()!, car);
 }
 function setup() {
   const api = createRoomsClient({
@@ -107,7 +107,7 @@ test("settings errors and unsaved edits survive live updates, retry uses the lat
   expect(store.getState().settingsSaved).toBe(false);
 });
 
-test("a pending car selection stays visible across broadcasts and rolls back on rejection", async () => {
+test("a pending native choice survives broadcasts and remains available for retry after rejection", async () => {
   const { api, store } = setup();
   const response = deferred<RoomSnapshot>();
   let requests = 0;
@@ -116,38 +116,37 @@ test("a pending car selection stays visible across broadcasts and rolls back on 
     expect(input.car).toBe("Quatro");
     return response.promise;
   };
-  const selecting = store.getState().selectCar("Quatro");
+  const selecting = choose(store, "Quatro");
   expect(store.getState().operation).toBe("player");
   store.getState().receive(snapshot(2));
-  expect(roomSelectedCar(store.getState())).toBe("Quatro");
-  await store.getState().selectCar("Calypso");
-  await store.getState().toggleReady();
+  expect(selectedCar(store.getState())).toBe("Quatro");
   expect(requests).toBe(1);
   response.reject(new Error("Car not available"));
   await selecting;
-  expect(roomSelectedCar(store.getState())).toBe("Calypso");
+  expect(selectedCar(store.getState())).toBe("Quatro");
+  expect(store.getState().room?.participants[0]?.ready).toBe(false);
   store.getState().playerReported("Player is running");
   store.getState().receive(snapshot(3));
   expect(store.getState().errors.player).toBe("Car not available");
 });
 
-test("a successful selection follows the latest authority and Ready uses that car", async () => {
+test("a successful Done confirmation uses the selected car despite a stale response", async () => {
   const { api, store } = setup();
   const response = deferred<RoomSnapshot>();
   api.player = () => response.promise;
-  const selecting = store.getState().selectCar("Quatro");
+  const selecting = choose(store, "Quatro");
   const accepted = snapshot(3);
   accepted.participants[0]!.car = "Quatro";
   store.getState().receive(accepted);
   response.resolve(snapshot(2));
   await selecting;
   expect(store.getState().room?.version).toBe(3);
-  expect(roomSelectedCar(store.getState())).toBe("Quatro");
+  expect(selectedCar(store.getState())).toBe("Quatro");
   api.player = (_id, input) => {
     expect(input).toEqual({ car: "Quatro", compatibility, ready: true });
     return Promise.resolve({ ...accepted, version: 4 });
   };
-  await store.getState().toggleReady();
+  await choose(store, "Quatro");
 });
 
 test("loading a disc during an operation publishes the latest resources afterwards", async () => {
@@ -159,7 +158,7 @@ test("loading a disc during an operation publishes the latest resources afterwar
   let published = 0;
   api.player = (_id, input) => {
     published++;
-    expect(input).toEqual({ car: "Quatro", compatibility: loaded.compatibility, ready: false });
+    expect(input).toEqual({ car: null, compatibility: loaded.compatibility, ready: false });
     return Promise.resolve({
       ...snapshot(3),
       participants: [{ ...snapshot().participants[0]!, car: "Quatro" }],
@@ -182,7 +181,7 @@ test("late joining offers only prepared cars and loading a running session does 
     .getState()
     .receive({ ...snapshot(2), match: { ...match, stage: "playing", cars: ["Quatro"] } });
   expect(roomCarChoices(store.getState())).toEqual(["Quatro"]);
-  expect(roomSelectedCar(store.getState())).toBe("Quatro");
+  expect(selectedCar(store.getState())).toBeNull();
   api.player = () => {
     throw new Error("Must not reset a running session");
   };
@@ -207,7 +206,7 @@ test("temporary recovery failures retain room state; expiry cannot be undone by 
   expect(store.getState().errors.room).toBeNull();
   const response = deferred<RoomSnapshot>();
   api.player = () => response.promise;
-  const selecting = store.getState().selectCar("Quatro");
+  const selecting = choose(store, "Quatro");
   store.getState().loadFailed(new RoomsApiError(410, "Expired"));
   response.resolve(snapshot(5));
   await selecting;
@@ -222,13 +221,13 @@ test("losing membership while choosing a car cannot resurrect the old player", a
   const { api, store } = setup();
   const response = deferred<RoomSnapshot>();
   api.player = () => response.promise;
-  const selecting = store.getState().selectCar("Quatro");
+  const selecting = choose(store, "Quatro");
   store.getState().receive({ ...snapshot(3), you: null });
   response.resolve(snapshot(4));
   await selecting;
   expect(store.getState().room?.you).toBeNull();
   expect(store.getState().disc).toBeNull();
-  expect(store.getState().ffa.carDraft).toBeUndefined();
+  expect(store.getState().carSelection.choice).toBeNull();
 });
 
 test("leave completes even if its live event arrives before the HTTP response", async () => {
@@ -277,7 +276,7 @@ test("journal downloading is independent of room operations and cannot be duplic
   expect((await store.getState().downloadJournal())?.matchId).toBe(match.id);
 });
 
-test("another room tab cannot strand this tab's retained disc and selection between matches", async () => {
+test("another room tab cannot strand retained resources; a new choice still requires Done", async () => {
   const { api, store } = setup();
   const selected = snapshot(2);
   selected.participants[0]!.car = "Quatro";
@@ -285,7 +284,7 @@ test("another room tab cannot strand this tab's retained disc and selection betw
   let published = 0;
   api.player = (_id, input) => {
     published++;
-    expect(input).toEqual({ car: "Quatro", compatibility, ready: false });
+    expect(input).toEqual({ car: null, compatibility, ready: false });
     return Promise.resolve({ ...selected, version: 4 });
   };
   const unloaded = snapshot(3);
@@ -295,7 +294,7 @@ test("another room tab cannot strand this tab's retained disc and selection betw
   await settled(store);
   expect(published).toBe(1);
   expect(store.getState().disc).toBe(disc);
-  expect(roomSelectedCar(store.getState())).toBe("Quatro");
+  expect(selectedCar(store.getState())).toBe("Quatro");
   expect(store.getState().room?.participants[0]!.loaded).toBe(true);
 });
 
@@ -324,7 +323,7 @@ test("engine confirmation received during a player request is sent after it comp
     };
   };
   store.getState().playerLoaded(disc);
-  const selectionId = store.getState().openTournamentSelection()!;
+  const selectionId = store.getState().openCarSelection()!;
   await store.getState().engineCarSelected(selectionId, "Quatro");
   expect(inputs).toHaveLength(1);
   first.resolve({ ...tournament, version: 3 });
@@ -339,7 +338,7 @@ test("changing from tournament to FFA publishes a new choice without carrying re
   const { api, store } = setup();
   store.setState({
     room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
-    tournament: { ...store.getState().tournament, choice: { car: "Quatro" } },
+    carSelection: { ...store.getState().carSelection, choice: { car: "Quatro" } },
   });
   const next = snapshot(3);
   next.participants[0]!.car = null;
@@ -354,8 +353,8 @@ test("changing from tournament to FFA publishes a new choice without carrying re
   };
   store.getState().receive(next);
   await settled(store);
-  expect(inputs).toEqual([{ car: "Calypso", compatibility, ready: false }]);
-  expect(store.getState().tournament.choice).toBeNull();
+  expect(inputs).toEqual([{ car: null, compatibility, ready: false }]);
+  expect(store.getState().carSelection.choice).toBeNull();
 });
 
 test("a refreshed tournament snapshot stops the previous match before opening car selection", async () => {
@@ -424,7 +423,7 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     expect(messages[1]?.enabled).toBe(true);
     store.setState({ playerStatus: "Refreshed" });
     expect(messages).toHaveLength(3);
-    const requestId = store.getState().tournament.selectionId!;
+    const requestId = store.getState().carSelection.selectionId!;
     const { tournament } = await import("../../apps/rustymetal4.com/src/modes/tournament/index.ts");
     const controls = tournament.createControls(store, (message) => messages.push(message));
     const beforeRender = store.getState();
@@ -441,9 +440,9 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
     });
     expect(messages.map((message) => message.action)).toEqual(["car-selection", "join"]);
     expect(messages[0]).toMatchObject({ requestId, enabled: false });
-    expect(store.getState().tournament.selectionId).toBeNull();
+    expect(store.getState().carSelection.selectionId).toBeNull();
     await store.getState().engineCarSelected(requestId, "Quatro");
-    expect(store.getState().tournament.choice).toBeNull();
+    expect(store.getState().carSelection.choice).toBeNull();
     messages.length = 0;
     store.getState().receive({ ...snapshot(14), modeId: "tournament", capacity: 2 });
     expect(messages.map((message) => message.action)).toEqual([
@@ -451,8 +450,8 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
       "car-selection",
       "car-selection-status",
     ]);
-    expect(store.getState().tournament.selectionId).not.toBe(requestId);
-    const secondId = store.getState().tournament.selectionId;
+    expect(store.getState().carSelection.selectionId).not.toBe(requestId);
+    const secondId = store.getState().carSelection.selectionId;
     messages.length = 0;
     store.getState().receive(snapshot(15));
     expect(messages[0]).toMatchObject({
@@ -460,12 +459,9 @@ test("a refreshed tournament snapshot stops the previous match before opening ca
       requestId: secondId,
       enabled: false,
     });
-    expect(messages.filter((message) => message.action === "car-selection")).toHaveLength(1);
-    expect(store.getState().tournament).toEqual({
-      choice: null,
-      selectionId: null,
-      sentStatus: null,
-    });
+    expect(messages.filter((message) => message.action === "car-selection")).toHaveLength(2);
+    expect(store.getState().carSelection.choice).toBeNull();
+    expect(store.getState().carSelection.selectionId).not.toBe(secondId);
   } finally {
     dispose?.();
     for (const [key, descriptor] of originals) {
@@ -481,7 +477,7 @@ test("tournament waiting status follows confirmed room state rather than local D
   store.setState({ room: current, connection: "live", playerNeedsSync: false });
   expect(tournamentSelectionStatus(store.getState()).phase).toBe("choosing");
   store.setState({
-    tournament: { ...store.getState().tournament, choice: { car: "Calypso" } },
+    carSelection: { ...store.getState().carSelection, choice: { car: "Calypso" } },
     operation: "player",
   });
   expect(tournamentSelectionStatus(store.getState()).phase).toBe("confirming");
@@ -518,7 +514,7 @@ test("tournament waiting status follows confirmed room state rather than local D
   expect(tournamentSelectionStatus(store.getState()).message).toContain("Done to retry");
 });
 
-test("mode changes atomically reset both slices and discard a pending old-mode response", async () => {
+test("mode changes atomically reset selection and discard a pending old-mode response", async () => {
   const { api, store } = setup();
   const response = deferred<RoomSnapshot>();
   const inputs: unknown[] = [];
@@ -534,14 +530,18 @@ test("mode changes atomically reset both slices and discard a pending old-mode r
     if (inputs.length === 1) return response.promise;
     return { ...next, version: 5 };
   };
-  const selecting = store.getState().selectCar("Quatro");
+  const selecting = choose(store, "Quatro");
   const observed: unknown[] = [];
   const unsubscribe = store.subscribe((state) => {
-    if (state.room?.modeId === "tournament") observed.push(state.ffa);
+    if (state.room?.modeId === "tournament") observed.push(state.carSelection);
   });
   store.getState().receive(next);
   expect(
-    observed.every((value) => JSON.stringify(value) === JSON.stringify({ carDraft: undefined })),
+    observed.every(
+      (value) =>
+        JSON.stringify(value) ===
+        JSON.stringify({ choice: null, selectionId: null, sentStatus: null }),
+    ),
   ).toBe(true);
   // Even a later-version response belongs to the obsolete mode, not the new selection.
   response.resolve({
@@ -551,36 +551,34 @@ test("mode changes atomically reset both slices and discard a pending old-mode r
   await selecting;
   await settled(store);
   expect(store.getState().room?.modeId).toBe("tournament");
-  expect(store.getState().tournament.choice).toBeNull();
+  expect(store.getState().carSelection.choice).toBeNull();
   expect(inputs[1]).toEqual({ car: null, compatibility, ready: false });
   unsubscribe();
 });
 
-test("native confirmations are scoped to the current menu and cannot run FFA actions", async () => {
+test("native confirmations are scoped to the current menu and loaded disc", async () => {
   const { store } = setup();
   store.setState({
     room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
     operation: "settings",
   });
-  const firstId = store.getState().openTournamentSelection()!;
+  const firstId = store.getState().openCarSelection()!;
   expect(firstId).not.toBeNull();
-  store.getState().closeTournamentSelection();
-  const secondId = store.getState().openTournamentSelection()!;
+  store.getState().closeCarSelection();
+  const secondId = store.getState().openCarSelection()!;
   expect(secondId).not.toBe(firstId);
   await store.getState().engineCarSelected(firstId, "Quatro");
-  expect(store.getState().tournament.choice).toBeNull();
+  expect(store.getState().carSelection.choice).toBeNull();
   await store.getState().engineCarSelected(secondId, "Quatro");
-  expect(store.getState().tournament.choice).toEqual({ car: "Quatro" });
-  await store.getState().selectCar("Calypso");
-  expect(store.getState().ffa.carDraft).toBeUndefined();
+  expect(store.getState().carSelection.choice).toEqual({ car: "Quatro" });
   store.getState().playerLoaded(null);
-  expect(store.getState().tournament).toEqual({
+  expect(store.getState().carSelection).toEqual({
     choice: null,
     selectionId: null,
     sentStatus: null,
   });
   await store.getState().engineCarSelected(secondId, "Calypso");
-  expect(store.getState().tournament.choice).toBeNull();
+  expect(store.getState().carSelection.choice).toBeNull();
 });
 
 test("a replaced disc discards the old confirmation error and publishes the new resources", async () => {
@@ -593,7 +591,7 @@ test("a replaced disc discards the old confirmation error and publishes the new 
     if (inputs.length === 1) return response.promise;
     return { ...store.getState().room!, version: 3 };
   };
-  const requestId = store.getState().openTournamentSelection()!;
+  const requestId = store.getState().openCarSelection()!;
   const choosing = store.getState().engineCarSelected(requestId, "Quatro");
   const replacement = { ...disc, compatibility: { ...compatibility, content: "e".repeat(64) } };
   store.getState().playerLoaded(replacement);
@@ -601,7 +599,7 @@ test("a replaced disc discards the old confirmation error and publishes the new 
   await choosing;
   await settled(store);
   expect(store.getState().errors.player).toBeNull();
-  expect(store.getState().tournament.choice).toBeNull();
+  expect(store.getState().carSelection.choice).toBeNull();
   expect(inputs[1]).toEqual({
     car: "Calypso",
     compatibility: replacement.compatibility,
@@ -615,84 +613,84 @@ test("room expiry clears a native menu and its pending choice without waiting fo
     room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
     operation: "settings",
   });
-  const requestId = store.getState().openTournamentSelection()!;
+  const requestId = store.getState().openCarSelection()!;
   await store.getState().engineCarSelected(requestId, "Quatro");
-  store.getState().tournamentStatusSent("Confirmed");
+  store.getState().carSelectionStatusSent("Confirmed");
   store.getState().loadFailed(new RoomsApiError(410, "Expired"));
-  expect(store.getState().tournament).toEqual({
+  expect(store.getState().carSelection).toEqual({
     choice: null,
     selectionId: null,
     sentStatus: null,
   });
-  expect(store.getState().ffa).toEqual({ carDraft: undefined });
 });
 
-test("FFA controls derive readiness, operation locks and late admission from the room", async () => {
-  const { ffaControls } = await import("../../apps/rustymetal4.com/src/modes/ffa/selectors.ts");
+test("native selection is available before preparation and for FFA late join only", async () => {
+  const { carSelectionAvailable } =
+    await import("../../apps/rustymetal4.com/src/modes/car-selection/state.ts");
   const { store } = setup();
-  expect(ffaControls(store.getState())).toMatchObject({
-    carDisabled: false,
-    readyDisabled: true,
-    readyLabel: "Ready",
-  });
-  store.setState({ room: { ...snapshot(2), match } });
-  expect(ffaControls(store.getState())).toMatchObject({ carDisabled: false, readyDisabled: false });
-  store.setState({ operation: "player" });
-  expect(ffaControls(store.getState())).toMatchObject({ carDisabled: true, readyDisabled: true });
-  store.setState({ operation: null, disc: null });
-  expect(ffaControls(store.getState())).toMatchObject({ carDisabled: true, readyDisabled: true });
+  expect(carSelectionAvailable(store.getState())).toBe(true);
+  for (const stage of ["uploading", "validating", "ready", "playing"] as const) {
+    store.setState({ room: { ...snapshot(2), match: { ...match, stage } } });
+    expect(carSelectionAvailable(store.getState())).toBe(true);
+  }
   store.setState({
-    disc,
     room: {
       ...snapshot(3),
-      participants: [{ ...snapshot().participants[0]!, ready: true }],
-      match,
+      modeId: "tournament",
+      capacity: 2,
+      match: { ...match, stage: "playing" },
     },
   });
-  expect(ffaControls(store.getState())?.readyLabel).toBe("Not ready");
+  expect(carSelectionAvailable(store.getState())).toBe(false);
   store.setState({
-    room: { ...snapshot(4), match: { ...match, stage: "playing", cars: ["Quatro"] } },
+    room: { ...snapshot(4), match: { ...match, stage: "playing", endpoint: "/socket" } },
   });
-  expect(ffaControls(store.getState())).toMatchObject({
-    choices: ["Quatro"],
-    selectedCar: "Quatro",
-    carDisabled: false,
-    readyDisabled: false,
-    readyLabel: "Join match",
-  });
-  store.setState({
-    room: {
-      ...snapshot(5),
-      match: { ...match, stage: "playing", endpoint: "/socket", credential: "a".repeat(64) },
-    },
-  });
-  expect(ffaControls(store.getState())).toMatchObject({
-    carDisabled: true,
-    readyDisabled: true,
-  });
-  store.setState({ room: { ...snapshot(6), modeId: "tournament", capacity: 2 } });
-  expect(ffaControls(store.getState())).toBeNull();
+  expect(carSelectionAvailable(store.getState())).toBe(false);
+  store.setState({ room: snapshot(5), disc: null });
+  expect(carSelectionAvailable(store.getState())).toBe(false);
 });
 
-test("tournament controls derive waiting status without modifying the selection", async () => {
-  const { tournamentControls } =
-    await import("../../apps/rustymetal4.com/src/modes/tournament/selectors.ts");
-  const { store } = setup();
-  expect(tournamentControls(store.getState())).toBeNull();
+test("FFA late join rejects unavailable cars and Done submits car and readiness together", async () => {
+  const { api, store } = setup();
   store.setState({
-    room: { ...snapshot(2), modeId: "tournament", capacity: 2 },
-    connection: "live",
+    room: { ...snapshot(2), match: { ...match, stage: "playing", cars: ["Quatro"] } },
   });
-  expect(tournamentControls(store.getState())?.selectionStatus).toBeNull();
-  store.getState().openTournamentSelection();
-  expect(tournamentControls(store.getState())?.selectionStatus?.phase).toBe("choosing");
-  const confirmed = { ...snapshot(3), modeId: "tournament" as const, capacity: 2 as const };
-  confirmed.participants[0]!.ready = true;
-  store.getState().receive(confirmed);
-  const before = store.getState();
-  expect(tournamentControls(before)?.selectionStatus?.phase).toBe("waiting");
-  expect(tournamentControls(before)?.selectionStatus?.message).toContain("second player");
-  expect(store.getState()).toBe(before);
+  const inputs: unknown[] = [];
+  api.player = (_id, input) => {
+    inputs.push(input);
+    return Promise.resolve({
+      ...snapshot(3),
+      match: { ...match, stage: "playing", endpoint: "/socket" },
+    });
+  };
+  const requestId = store.getState().openCarSelection()!;
+  await store.getState().engineCarSelected(requestId, "Calypso");
+  expect(inputs).toEqual([]);
+  expect(store.getState().errors.player).toContain("not available");
+  await store.getState().engineCarSelected(requestId, "Quatro");
+  expect(inputs).toEqual([{ car: "Quatro", compatibility, ready: true }]);
+  await store.getState().engineCarSelected(requestId, null);
+  expect(inputs).toHaveLength(1);
+});
+
+test("next FFA match requires a fresh Done and ignores the previous menu's events", async () => {
+  const { api, store } = setup();
+  api.player = (_id, input) =>
+    Promise.resolve({
+      ...snapshot(2),
+      participants: [{ ...snapshot().participants[0]!, car: input.car, ready: input.ready }],
+    });
+  const old = store.getState().openCarSelection()!;
+  await store.getState().engineCarSelected(old, "Quatro");
+  store
+    .getState()
+    .receive({ ...snapshot(3), match: { ...match, stage: "playing", endpoint: "/socket" } });
+  store.getState().receive(snapshot(4));
+  const next = store.getState().openCarSelection()!;
+  expect(next).not.toBe(old);
+  await store.getState().engineCarSelected(old, "Quatro");
+  expect(store.getState().carSelection.choice).toBeNull();
+  expect(store.getState().room?.participants[0]?.ready).toBe(false);
 });
 
 test("preparation controls follow host authority, upload stage and each mode's minimum roster", async () => {
@@ -822,12 +820,10 @@ test("upload reports belong to the current preparation and cannot replace server
   expect(matchPreparationStatus(store.getState())).toBe("Validating resources");
   receive(4, "ready", "Server ready");
   expect(matchPreparationStatus(store.getState())).toBe("Server ready");
-  store
-    .getState()
-    .receive({
-      ...snapshot(5),
-      match: { ...match, id: "new-match", stage: "uploading", message: "New preparation" },
-    });
+  store.getState().receive({
+    ...snapshot(5),
+    match: { ...match, id: "new-match", stage: "uploading", message: "New preparation" },
+  });
   report("error", "Old upload failed");
   expect(matchPreparationStatus(store.getState())).toBe("New preparation");
   report("progress", "New upload", "new-match");
@@ -835,4 +831,19 @@ test("upload reports belong to the current preparation and cannot replace server
   expect(store.getState().uploadReport).toBeNull();
   report("error", "Cancelled upload failed", "new-match");
   expect(store.getState().uploadReport).toBeNull();
+});
+
+test("a refreshed snapshot can skip straight from combat to the next preparation", async () => {
+  const { store } = setup();
+  store.setState({ operation: "player" });
+  const old = store.getState().openCarSelection()!;
+  await store.getState().engineCarSelected(old, "Quatro");
+  store
+    .getState()
+    .receive({ ...snapshot(2), match: { ...match, stage: "playing", endpoint: "/socket" } });
+  store
+    .getState()
+    .receive({ ...snapshot(4), match: { ...match, id: "37a6d4db-2a4c-4de8-aecb-3a9bf74e4bcc" } });
+  expect(store.getState().carSelection.choice).toBeNull();
+  expect(store.getState().openCarSelection()).not.toBe(old);
 });

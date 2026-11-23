@@ -123,6 +123,8 @@ export async function nativeBridge(
               : request.body,
         },
       );
+      if (!response.ok)
+        log += `Native ${request.method} ${path} failed (${response.status}): ${await response.clone().text()}\n`;
       if (["/api/journal", "/_server/journal"].includes(path) && response.ok) {
         // Bun's streaming proxy drops the upstream length. Preserve the bounded
         // fixture's exact response length so the production archive validator runs.
