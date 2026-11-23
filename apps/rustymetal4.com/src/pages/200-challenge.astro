@@ -16,21 +16,15 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
   </ul>
   <h2>Survive. Switch cars. Do it again.</h2>
   <p>
-    Win on any map to master your chosen car. Each different car adds one point
-    to your score. Winning with the same car again earns bragging rights.
+    Win on any map to master your chosen car. Your total score adds up your best frag count for each
+    car. Win again with more frags to improve it.
   </p>
   <section aria-labelledby="challenge-driver-heading">
     <h2 id="challenge-driver-heading">Your name</h2>
     <form id="challenge-name-form">
       <label for="challenge-name">
         Display name
-        <input
-          id="challenge-name"
-          name="name"
-          autocomplete="nickname"
-          maxlength="24"
-          required
-        />
+        <input id="challenge-name" name="name" autocomplete="nickname" maxlength="24" required />
       </label>
       <button type="submit">Save name</button>
     </form>
@@ -41,9 +35,7 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
   </section>
   <section aria-labelledby="challenge-play-heading" class="challenge-play">
     <h2 id="challenge-play-heading">Play</h2>
-    <p>
-      You need your own Twisted Metal 4 disc files. They stay on your computer.
-    </p>
+    <p>You need your own Twisted Metal 4 disc files. They stay on your computer.</p>
     <p id="challenge-release" role="status">
       Checking the pinned challenge build…
     </p>
@@ -71,12 +63,30 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
           <tr>
             <th scope="col">Driver</th>
             <th scope="col">Cars mastered</th>
+            <th scope="col">Total score</th>
           </tr>
         </thead>
         <tbody id="challenge-board"></tbody>
       </table>
     </div>
   </section>
+  <dialog id="driver-records" aria-labelledby="driver-records-title">
+    <h2 id="driver-records-title"></h2>
+    <table class="room-table">
+      <thead>
+        <tr>
+          <th scope="col">Car</th>
+          <th scope="col">Best frags</th>
+          <th scope="col">Arena</th>
+          <th scope="col">Date</th>
+        </tr>
+      </thead>
+      <tbody id="driver-records-body"></tbody>
+    </table>
+    <form method="dialog">
+      <button autofocus>Close</button>
+    </form>
+  </dialog>
   <details>
     <summary>Cars &amp; arenas</summary>
     <p>{challengeMaps.join(" · ")}</p>
@@ -97,21 +107,31 @@ import { challengeMaps, challengeModels } from "../challenge.ts";
   :global(#challenge-board td) {
     vertical-align: top;
   }
-  :global(#challenge-board .challenge-wins) {
-    margin-top: 0.4rem;
-    white-space: normal;
-    overflow-wrap: anywhere;
+  #driver-records {
+    max-width: min(42rem, 94vw);
+    max-height: 85vh;
+    background: var(--panel, #1d242e);
+    color: inherit;
+    border: 1px solid #354151;
+    border-radius: 0.5rem;
   }
-  :global(#challenge-board .challenge-wins summary) {
-    cursor: pointer;
+  #driver-records .room-table {
+    min-width: 0;
+  }
+  #driver-records form {
+    margin-top: 1rem;
+  }
+  #driver-records::backdrop {
+    background: #0009;
+  }
+  :global(#challenge-board button) {
+    background: transparent;
     color: var(--accent, #e9aa55);
-  }
-  :global(#challenge-board .challenge-wins ul) {
-    padding-left: 1.2rem;
-    margin: 0.6rem 0 0;
-  }
-  :global(#challenge-board .challenge-wins li + li) {
-    margin-top: 0.4rem;
+    border: 0;
+    padding: 0;
+    text-align: left;
+    overflow-wrap: anywhere;
+    text-decoration: underline;
   }
   .challenge-play iframe {
     width: 100%;

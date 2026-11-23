@@ -37,16 +37,23 @@ export const challengeModels = [
   "Super Thumper",
   "Super Slamm",
 ] as const;
-export interface ChallengeCompletion {
+export interface ChallengeWin {
+  frags?: number;
   model: string;
   map: string;
-  date: string;
   version: string;
+}
+export interface ChallengeCompletion extends Omit<ChallengeWin, "frags"> {
+  date: string;
+  bestFrags: number | null;
+  bestMap: string | null;
+  bestDate: string | null;
 }
 export interface ChallengePlayer {
   id: string;
   name: string;
   score: number;
+  totalScore: number;
   completions: ChallengeCompletion[];
 }
 export interface ChallengeRelease {
@@ -54,15 +61,18 @@ export interface ChallengeRelease {
   version: string;
   playerUrl: string;
 }
-export function completion(input: unknown): Omit<ChallengeCompletion, "date"> {
+export function completion(input: unknown): ChallengeWin {
   if (!input || typeof input !== "object") throw new RoomError(400, "A completion is required.");
-  const { model, map, version } = input as Record<string, unknown>;
+  const { model, map, version, frags } = input as Record<string, unknown>;
   if (typeof model !== "string" || !challengeModels.some((name) => name === model))
     throw new RoomError(400, "Choose an original car model.");
   if (typeof map !== "string" || !challengeMaps.some((name) => name === map))
     throw new RoomError(400, "Choose a tournament map.");
   if (version !== challengeVersion) throw new RoomError(400, "Unknown challenge version.");
-  return { model, map, version };
+  if (frags === undefined) return { model, map, version }; // Previously published players omit frags.
+  if (typeof frags !== "number" || !Number.isInteger(frags) || frags < 0 || frags > 200)
+    throw new RoomError(400, "Frags must be a whole number from 0 to 200.");
+  return { model, map, version, frags };
 }
 export function releasePath(buildId: string): string {
   if (!/^[a-f0-9]{64}$/.test(buildId)) throw new Error("Invalid challenge build ID");

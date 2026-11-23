@@ -2,6 +2,7 @@ import {
   type ChallengePlayer,
   type ChallengeRelease,
   challengeVersion,
+  type ChallengeWin,
   completion,
 } from "./challenge.ts";
 
@@ -36,8 +37,33 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
 }
 let player: ChallengePlayer | null = null;
 let release: ChallengeRelease | null = null;
-const pendingWins = new Map<string, { model: string; map: string; version: string }>();
-const submitted = new Set<string>();
+const pendingWins: { win: ChallengeWin; runId?: string; token: number }[] = [];
+let saving = false;
+let lastPhase: unknown;
+let lastRun: unknown;
+let roundToken = 0;
+const records = element<HTMLDialogElement>("driver-records");
+function showRecords(driver: ChallengePlayer) {
+  element("driver-records-title").textContent = driver.name;
+  element("driver-records-body").replaceChildren(
+    ...driver.completions.map((car) => {
+      const row = document.createElement("tr");
+      const name = document.createElement("th");
+      name.scope = "row";
+      name.textContent = car.model;
+      row.append(name);
+      for (const value of [
+        car.bestFrags ?? "—",
+        car.bestMap ?? car.map,
+        (car.bestDate ?? car.date).slice(0, 10),
+      ]) {
+        row.insertCell().textContent = String(value);
+      }
+      return row;
+    }),
+  );
+  records.showModal();
+}
 function profile(value: ChallengePlayer | null) {
   player = value;
   element("challenge-profile").textContent = value
@@ -48,51 +74,52 @@ function profile(value: ChallengePlayer | null) {
 async function board() {
   const { players } = await api<{ players: ChallengePlayer[] }>("leaderboard");
   element("challenge-board-status").textContent = players.length
-    ? "Top 100 drivers, ranked by cars mastered."
+    ? "Top 100 drivers, ranked by total score, then cars mastered."
     : "No survivors yet. Be the first.";
   element("challenge-board").replaceChildren(
     ...players.map((entry) => {
-      const row = document.createElement("tr"),
-        name = document.createElement("th"),
-        score = document.createElement("td");
+      const row = document.createElement("tr");
+      const name = document.createElement("th");
       name.scope = "row";
-      name.textContent = entry.name;
-      score.textContent = String(entry.score);
-      if (entry.completions.length) {
-        const details = document.createElement("details"),
-          summary = document.createElement("summary"),
-          wins = document.createElement("ul");
-        details.className = "challenge-wins";
-        summary.textContent = entry.completions.map((item) => item.model).join(" · ");
-        for (const item of entry.completions) {
-          const win = document.createElement("li"),
-            car = document.createElement("strong"),
-            date = document.createElement("time");
-          car.textContent = item.model;
-          date.dateTime = item.date;
-          date.textContent = item.date.slice(0, 10);
-          win.append(car, ` — ${item.map} · `, date);
-          wins.append(win);
-        }
-        details.append(summary, wins);
-        score.append(details);
-      }
-      row.append(name, score);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("aria-haspopup", "dialog");
+      button.textContent = entry.name;
+      button.onclick = () => showRecords(entry);
+      name.append(button);
+      row.append(name);
+      row.insertCell().textContent = String(entry.score);
+      row.insertCell().textContent = String(entry.totalScore);
       return row;
     }),
   );
 }
 async function saveWin() {
-  if (!player) return;
-  for (const win of pendingWins.values()) {
-    if (submitted.has(win.model)) continue;
-    const value = await api<{ added: boolean; player: ChallengePlayer }>("completion", win);
-    submitted.add(win.model);
-    pendingWins.delete(win.model);
-    profile(value.player);
-    element("challenge-game-status").textContent = value.added
-      ? `You survived in ${win.model}! Your score is ${value.player.score}.`
-      : `You already mastered ${win.model}. Your score stays ${value.player.score}.`;
+  if (!player || saving || !pendingWins.length) return;
+  saving = true;
+  try {
+    while (pendingWins.length) {
+      const { win, runId, token } = pendingWins[0]!;
+      const { player: updated, gain } = await api<{ player: ChallengePlayer; gain: number }>(
+        "completion",
+        win,
+      );
+      pendingWins.shift();
+      profile(updated);
+      if (roundToken !== token || lastPhase !== "won") continue;
+      const best = updated.completions.find((car) => car.model === win.model)?.bestFrags;
+      element("challenge-game-status").textContent =
+        win.frags === undefined
+          ? `You survived in ${win.model}!`
+          : `Your frags: ${win.frags}. Personal best: ${best}. Total score: ${updated.totalScore} (+${gain}).`;
+      if (runId && best != null)
+        frame.contentWindow?.postMessage(
+          { type: "tm4:200-challenge-score", runId, best, total: updated.totalScore, gain },
+          location.origin,
+        );
+    }
+  } finally {
+    saving = false;
   }
   await board();
 }
@@ -107,8 +134,8 @@ element<HTMLFormElement>("challenge-name-form").addEventListener("submit", (even
     } catch {
       /* Name remembering is optional. */
     }
-    await saveWin();
-    await board();
+    if (pendingWins.length) await saveWin();
+    else await board();
   })().catch(error);
 });
 element<HTMLButtonElement>("challenge-launch").onclick = () => {
@@ -123,16 +150,28 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
   if (message?.type !== "tm4:200-challenge" || !message.challenge) return;
   const state = message.challenge;
   if (state.version !== challengeVersion) return;
+  const repeatedWin = lastPhase === "won" && state.status === "won" && lastRun === state.runId;
+  if (lastRun !== state.runId || (lastPhase !== state.status && state.status === "playing"))
+    ++roundToken;
+  lastRun = state.runId;
+  lastPhase = state.status;
   if (state.status === "playing")
     element("challenge-game-status").textContent =
       `${String(state.model)} · ${String(state.map)} · ${String(state.cars)} cars remaining`;
   if (state.status === "lost")
-    element("challenge-game-status").textContent = "Wrecked. Pick a car and try again.";
+    element("challenge-game-status").textContent =
+      state.frags === undefined
+        ? "Wrecked. Run not counted."
+        : `Your frags: ${state.frags}. Run not counted.`;
   if (state.status === "error") error(state.error ?? "This challenge round could not start.");
-  if (state.status === "won") {
+  if (state.status === "won" && !repeatedWin) {
     try {
       const win = completion(state);
-      pendingWins.set(win.model, win);
+      pendingWins.push({
+        win,
+        runId: typeof state.runId === "string" ? state.runId : undefined,
+        token: roundToken,
+      });
       if (!player)
         element("challenge-game-status").textContent =
           `You survived in ${win.model}! Save your name to record the win.`;

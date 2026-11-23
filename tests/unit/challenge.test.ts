@@ -22,6 +22,7 @@ import { publishObject } from "../../tools/web/release-objects.ts";
 const reply = async (response: Promise<{ json(): Promise<unknown> }>) =>
   (await (await response).json()) as {
     added: boolean;
+    gain: number;
     player: ChallengePlayer;
     players: ChallengePlayer[];
     release: unknown;
@@ -31,6 +32,8 @@ test("challenge catalog rejects bonus maps, created models and unknown versions"
   expect(challengeMaps).toHaveLength(8);
   expect(new Set(challengeModels).size).toBe(22);
   expect(completion(attempt)).toEqual(attempt);
+  for (const frags of [null, -1, 201, 1.5, "23"])
+    expect(() => completion({ ...attempt, frags })).toThrow();
   expect(() => completion({ ...attempt, map: "The Pits" })).toThrow();
   expect(() => completion({ ...attempt, model: "My Car" })).toThrow();
   expect(() => completion({ ...attempt, version: "other" })).toThrow();
@@ -78,6 +81,34 @@ test("leaderboard counts unique models across maps and permits equal display nam
     expect(board.players[0]!.name).toBe(board.players[1]!.name);
     expect(board.players[0]!.id).not.toBe(board.players[1]!.id);
     expect((await a("completion", { ...attempt, map: "The Pits" })).status).toBe(400);
+    expect(board.players[0]!.totalScore).toBe(0);
+    expect(board.players[0]!.completions[0]!.bestFrags).toBeNull();
+    const zero = await reply(a("completion", { ...attempt, frags: 0 }));
+    expect(zero.player.completions.find((c) => c.model === "Orbital")!.bestFrags).toBe(0);
+    expect(zero.gain).toBe(0);
+    const record = { ...attempt, map: "The Carnival", frags: 42 };
+    const improved = await reply(a("completion", record));
+    expect(improved.gain).toBe(42);
+    const best = improved.player.completions.find((c) => c.model === "Orbital")!;
+    expect(best).toMatchObject({
+      map: attempt.map,
+      date: repeated.player.completions[0]!.date,
+      bestFrags: 42,
+      bestMap: "The Carnival",
+    });
+    for (const win of [attempt, { ...attempt, frags: 41 }, { ...attempt, frags: 42 }]) {
+      const retry = await reply(a("completion", win));
+      expect(retry.gain).toBe(0);
+      expect(retry.player.completions.find((c) => c.model === "Orbital")).toEqual(best);
+    }
+    expect(
+      (await reply(a("completion", { ...attempt, model: "Sweet Tooth", frags: 20 }))).player
+        .totalScore,
+    ).toBe(62);
+    await b("completion", { ...attempt, frags: 62 });
+    expect((await reply(a("leaderboard"))).players.map((p) => p.score)).toEqual([2, 1]);
+    await b("completion", { ...attempt, frags: 63 });
+    expect((await reply(a("leaderboard"))).players.map((p) => p.totalScore)).toEqual([63, 62]);
     const denied = await mf.dispatchFetch(`${origin}/api/challenge/identity`, {
       method: "POST",
       headers: { Origin: "https://elsewhere.test" },
