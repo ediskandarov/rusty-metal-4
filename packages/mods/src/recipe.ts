@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { converterFilePattern, tm3ConverterPath } from "./converter-paths.ts";
 import { type ModDraft, sha256 } from "./package.ts";
 
 export interface RecipeInput {
@@ -20,18 +21,22 @@ export const converterReleaseSchema = z.strictObject({
   files: z
     .array(
       z.strictObject({
-        path: z.string().regex(/^(?:converter\.js|modules\/[a-z][a-z0-9_]*\.wasm)$/),
+        path: z.string().regex(converterFilePattern),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
       }),
     )
     .min(2)
-    .max(64),
+    .max(64)
+    .refine((files) => {
+      const paths = new Set(files.map(({ path }) => path));
+      return paths.has("converter.js") && paths.size === files.length;
+    }, "Invalid TM3 converter file inventory"),
 });
 
-const converterPinSchema = z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/) });
+export const converterPinSchema = z.strictObject({ digest: z.string().regex(/^[a-f0-9]{64}$/) });
 
 export async function loadTm3Converter(origin: string) {
-  const root = new URL("/mod-converters/tm3/", origin);
+  const root = new URL(tm3ConverterPath, origin);
   const response = await fetch(new URL("pin.json", root), { cache: "no-store" });
   if (response.status === 404) return undefined;
   if (!response.ok) throw Error(`Could not load TM3 converter pin: HTTP ${response.status}`);
@@ -40,9 +45,13 @@ export async function loadTm3Converter(origin: string) {
   const manifest = await fetch(new URL("release.json", directory));
   if (!manifest.ok) throw Error("Could not load the TM3 converter release");
   const bytes = new Uint8Array(await manifest.arrayBuffer());
-  if ((await sha256(bytes)) !== digest) throw Error("TM3 converter release does not match its pin");
-  const release = converterReleaseSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
-  return { directory, release };
+  return { directory, release: await readConverterRelease(bytes, digest) };
+}
+
+export async function readConverterRelease(bytes: Uint8Array<ArrayBuffer>, expected?: string) {
+  if (expected && (await sha256(bytes)) !== expected)
+    throw Error("TM3 converter release does not match its pin");
+  return converterReleaseSchema.parse(JSON.parse(new TextDecoder().decode(bytes)));
 }
 
 export interface ConverterRequest {

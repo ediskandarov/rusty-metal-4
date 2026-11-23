@@ -2,10 +2,14 @@
 import { cp, mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
+import { tm3ConverterPath } from "@tm4/mods/converter-paths";
+import { converterPinSchema } from "@tm4/mods/recipe";
+
+import pinnedConverter from "../../config/tm3-converter-release.json";
 import { type BuildIdentity, playerBuildDigest } from "../../tools/build-identity.ts";
+import { stageConverter } from "../../tools/mods/converter.ts";
 import { buildSite } from "../../tools/web/build.ts";
 import { buildPlayer } from "../player/build.ts";
-import { installConverter } from "./mod-converter.ts";
 
 const root = resolve(import.meta.dir, "../..");
 const site = join(root, "build/release/rustymetal4.com-site");
@@ -32,7 +36,14 @@ if (await Bun.file(join(runtime, "simulation-build.json")).exists()) {
     await cp(join(runtime, name), join(player, name));
   await cp(join(runtime, "modules"), join(player, "modules"), { recursive: true });
   await buildPlayer({ mode: "release", site: player, modLibrary: true });
-  if (converter) await installConverter(converter, site, digest);
+  if (converter) {
+    await stageConverter(converter, site, digest);
+  } else {
+    await Bun.write(
+      join(site, tm3ConverterPath, "pin.json"),
+      JSON.stringify(converterPinSchema.parse(pinnedConverter)),
+    );
+  }
 } else {
   if (converter) throw Error("A player runtime is required to ship a TM3 converter");
   console.log(

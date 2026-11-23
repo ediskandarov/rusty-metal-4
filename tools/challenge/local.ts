@@ -36,7 +36,7 @@ export async function challengeRuntime(
               worker: "challenge-local",
               exportName: "ChallengeLeaderboard",
             },
-            CHALLENGE_RELEASES: { type: "r2" },
+            RELEASES: { type: "r2" },
             CHALLENGE_BUILD_ID: { type: "text", value: manifest?.buildId ?? "" },
             ...(options.site ? { ASSETS: { type: "assets" } } : {}),
           },
@@ -57,7 +57,7 @@ export async function challengeRuntime(
   await mf.ready;
   if (manifest && options.release) {
     // Miniflare's mapped Node types currently infer an unrelated Request for this binding.
-    const bucket = (await mf.getR2Bucket("CHALLENGE_RELEASES", "challenge-local")) as unknown as {
+    const bucket = (await mf.getR2Bucket("RELEASES", "challenge-local")) as unknown as {
       put(
         key: string,
         bytes: Uint8Array,

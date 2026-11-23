@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/package.ts",
+    "./converter-paths": "./src/converter-paths.ts",
     "./assembly": "./src/assembly.ts",
     "./library": "./src/library.ts",
     "./recipe": "./src/recipe.ts"

@@ -41,6 +41,7 @@
     "test:simulation:modules": "bun tests/browser/check_simulation_modules.mjs",
     "test:emscripten": "bun tests/emscripten/dlsym-catchup/check.mjs",
     "publish:challenge": "bun tools/challenge/publish.ts",
+    "publish:tm3-converter": "bun tools/mods/publish.ts",
     "dev:challenge": "bun tools/challenge/serve.ts",
     "build:mr-preparation": "bun packages/mr-preparation/build.ts",
     "test:mr-preparation": "bun packages/mr-preparation/build.ts --test"

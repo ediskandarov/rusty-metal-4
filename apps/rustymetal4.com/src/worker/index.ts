@@ -1,3 +1,4 @@
+import { converterFilePattern, tm3ConverterPath } from "@tm4/mods/converter-paths";
 import { maps, modes } from "@tm4/rooms-client/schemas";
 
 import pinnedChallenge from "../../../../config/challenge-release.json";
@@ -16,7 +17,7 @@ export { Room } from "./room.ts";
 export { TestServer } from "./test-server.ts";
 export interface Env {
   CHALLENGE: DurableObjectNamespace<ChallengeLeaderboard>;
-  CHALLENGE_RELEASES?: R2Bucket;
+  RELEASES?: R2Bucket;
   CHALLENGE_BUILD_ID?: string;
   SERVER: DurableObjectNamespace<TestServer>;
   TM4_ADMIN_SECRET: string;
@@ -37,6 +38,17 @@ function credential(request: Request, name = sessionName): string | null {
   return value && /^[a-f0-9]{64}$/.test(value) ? value : null;
 }
 
+async function releaseAsset(request: Request, bucket: R2Bucket | undefined, key: string) {
+  const object = await (request.method === "HEAD" ? bucket?.head(key) : bucket?.get(key));
+  if (!object) return;
+  const body = "body" in object ? (object as R2ObjectBody).body : null;
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("ETag", object.httpEtag);
+  headers.set("Cache-Control", "public, max-age=31536000, immutable");
+  return isolated(new Response(body, { headers }));
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
@@ -51,13 +63,25 @@ export default {
           file.split("/").some((part) => part === "." || part === "..")
         )
           return isolated(new Response("Not found", { status: 404 }));
-        const object = await env.CHALLENGE_RELEASES?.get(`${release[1]}/${file}`);
-        if (!object) return isolated(new Response("Challenge release not found", { status: 404 }));
-        const headers = new Headers();
-        object.writeHttpMetadata(headers);
-        headers.set("ETag", object.httpEtag);
-        headers.set("Cache-Control", "public, max-age=31536000, immutable");
-        return isolated(new Response(request.method === "HEAD" ? null : object.body, { headers }));
+        return (
+          (await releaseAsset(request, env.RELEASES, `${release[1]}/${file}`)) ??
+          isolated(new Response("Challenge release not found", { status: 404 }))
+        );
+      }
+      if (url.pathname.startsWith(tm3ConverterPath)) {
+        const path = url.pathname.slice(tm3ConverterPath.length);
+        if (path === "pin.json") {
+          const response = await frontend(env.ASSETS, request);
+          response.headers.set("Cache-Control", "no-store");
+          return response;
+        }
+        const asset = /^[a-f0-9]{64}\/(.+)$/.exec(path)?.[1];
+        if (asset && (asset === "release.json" || converterFilePattern.test(asset))) {
+          if (!["GET", "HEAD"].includes(request.method))
+            return isolated(new Response(null, { status: 405 }));
+          const response = await releaseAsset(request, env.RELEASES, url.pathname.slice(1));
+          if (response) return response;
+        }
       }
       const api = url.pathname.startsWith("/api/");
       if (!api) {

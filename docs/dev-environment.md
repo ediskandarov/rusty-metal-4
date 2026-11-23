@@ -224,12 +224,22 @@ Build the browser converter in the [TM3 mod repository](https://github.com/edisk
 against the player build you intend to serve. The converter release contains JavaScript,
 precompiled behavior modules and a file manifest. It can be built without either game disc.
 
-In this repository, set `TM4_TM3_CONVERTER` to the generated release directory for
-`bun run dev:rustymetal4.com`, `bun run build:rustymetal4.com` or `bun run deploy`.
-Publishing requires the converter directory so an ordinary deployment cannot drop the installer.
-The site checks all release hashes and the exact runtime ID before writing the pin.
-Keep the release directory to reuse it when rebuilding the site against the same runtime.
-A changed runtime ID requires a converter release built against that runtime.
+Publish a frozen converter release once, using the existing Wrangler login:
+
+```sh
+bun run publish:tm3-converter /path/to/frozen-converter
+```
+
+The publisher checks file hashes and uploads under `mod-converters/tm3/<digest>/`
+in the existing `rm4-challenge-releases` bucket. It verifies uploaded bytes and
+writes the manifest last. Set the printed `digest` in `config/tm3-converter-release.json`.
+Then use `bun run deploy`. Deploy checks the pinned R2 manifest against the player
+runtime. Routine deployments reuse the published converter. A changed runtime ID
+requires a compatible converter release and an updated pin.
+
+For local previews, set `TM4_TM3_CONVERTER` to the generated release directory
+when running `bun run dev:rustymetal4.com` or `bun run build:rustymetal4.com`.
+This overrides the production pin locally, including for diagnostic builds.
 
 Open `/mods/tm3/` in the preview. The converter reads both selected disc folders
 in a browser worker. The installed package stays in that browser's mod library.

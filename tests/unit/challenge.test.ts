@@ -11,13 +11,13 @@ import {
   releasePath,
 } from "../../apps/rustymetal4.com/src/challenge.ts";
 import { challengeRuntime } from "../../tools/challenge/local.ts";
-import { publishObject } from "../../tools/challenge/publish.ts";
 import {
   inventory,
   publicArtifact,
   releaseId,
   verifyRelease,
 } from "../../tools/challenge/release.ts";
+import { publishObject } from "../../tools/web/release-objects.ts";
 
 const reply = async (response: Promise<{ json(): Promise<unknown> }>) =>
   (await (await response).json()) as {
@@ -251,3 +251,45 @@ test.each([
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("the shared release bucket serves immutable TM3 modules through the website", async () => {
+  const site = await mkdtemp(join(tmpdir(), "rm4-release-site-"));
+  const digest = "c".repeat(64);
+  const pin = "/mod-converters/tm3/pin.json";
+  const path = `/mod-converters/tm3/${digest}/modules/test.wasm`;
+  await Bun.write(join(site, pin), JSON.stringify({ digest }));
+  const mf = await challengeRuntime({ site });
+  try {
+    const bucket = (await mf.getR2Bucket("RELEASES", "challenge-local")) as unknown as {
+      put(
+        key: string,
+        bytes: Uint8Array,
+        options: {
+          httpMetadata: { contentType: string };
+        },
+      ): Promise<unknown>;
+    };
+    const bytes = Uint8Array.of(0, 97, 115, 109, 1, 0, 0, 0);
+    await bucket.put(path.slice(1), bytes, { httpMetadata: { contentType: "application/wasm" } });
+    const origin = (await mf.ready).origin;
+    const pinned = await mf.dispatchFetch(origin + pin);
+    expect(pinned.headers.get("cache-control")).toBe("no-store");
+    expect(await pinned.json()).toEqual({ digest });
+    const asset = await mf.dispatchFetch(origin + path);
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-type")).toBe("application/wasm");
+    expect(asset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(asset.headers.get("cross-origin-embedder-policy")).toBe("require-corp");
+    expect(new Uint8Array(await asset.arrayBuffer())).toEqual(bytes);
+    const head = await mf.dispatchFetch(origin + path, { method: "HEAD" });
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+    expect((await mf.dispatchFetch(origin + path, { method: "POST" })).status).toBe(405);
+    expect(
+      (await mf.dispatchFetch(origin + path.replace("test.wasm", "missing.wasm"))).status,
+    ).toBe(404);
+  } finally {
+    await mf.dispose();
+    await rm(site, { recursive: true, force: true });
+  }
+}, 30000);
