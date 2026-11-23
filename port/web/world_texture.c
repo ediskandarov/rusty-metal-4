@@ -50,9 +50,14 @@ static void* copy_resource(RegistryFile* file)
     return copy;
 }
 
-static void set_bank(u16* page, unsigned bank)
+u16 WebWorldTexturePage(u16 page)
 {
-    *page = (*page & ~BankMask) | (bank << 9);
+    return (page & ~BankMask) | (world_texture_bank << 9);
+}
+
+static void bind_world_page(u16* page)
+{
+    *page = WebWorldTexturePage(*page);
 }
 
 void WebWorldTextureClose(void)
@@ -143,12 +148,12 @@ void WebWorldTextureInitialize(void)
     world_shaders = shader_copy;
     world_horizon = horizon_copy;
     for (s32 i = 0; i < count; ++i)
-        set_bank((u16*)(world_shaders + i * ShaderBytes + 6), world_texture_bank);
+        bind_world_page((u16*)(world_shaders + i * ShaderBytes + 6));
     if (world_horizon) {
         u8* record = world_horizon + 8 + world_horizon[0] * 176 + world_horizon[1] * 128;
         for (unsigned i = 0; i < world_horizon[2]; ++i, record += 196)
             for (unsigned slot = 0; slot < 4; ++slot)
-                set_bank((u16*)(record + 32 + slot * 40 + 22), world_texture_bank);
+                bind_world_page((u16*)(record + 32 + slot * 40 + 22));
     }
 }
 
@@ -171,9 +176,9 @@ void WebWorldTextureBindReflections(void)
     original_specular = WorldReflectionTextureSpecular;
     reflections_bound = 1;
     if (RegGetFilePtrS("/world/textures/reflchro"))
-        set_bank(&WorldReflectionTextureChrome.uv.tpage, world_texture_bank);
+        bind_world_page(&WorldReflectionTextureChrome.uv.tpage);
     if (RegGetFilePtrS("/world/textures/reflspec"))
-        set_bank(&WorldReflectionTextureSpecular.uv.tpage, world_texture_bank);
+        bind_world_page(&WorldReflectionTextureSpecular.uv.tpage);
 }
 
 void WebWorldAnimateTextures(void)

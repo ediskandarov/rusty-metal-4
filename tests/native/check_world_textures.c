@@ -135,6 +135,7 @@ int main(void)
         assert(pixels[640] == 0x5555 && shaders[3] == 0x1f0a && reflection[3] == 0x1f0a);
         assert(WorldDisplayShaders != (u8*)shaders && bound_horizon != horizon.bytes);
         u16 page = 0x10a | (next_bank << 9);
+        assert(WebWorldTexturePage(0x1f6a) == (page | 0x60));
         assert(((u16*)WorldDisplayShaders)[3] == page);
         assert(((u16*)WorldDisplayShaders)[9] == page);
         for (unsigned i = 0; i < 4; ++i) {
@@ -154,6 +155,7 @@ int main(void)
             load();
             assert(WorldDisplayShaders == (u8*)shaders && bound_horizon == horizon.bytes);
             assert(!active_bank && WorldReflectionTextureChrome.uv.tpage == 0x1f0a);
+            assert(WebWorldTexturePage(0x16a) == 0x16a);
             WebWorldAnimateTextures();
             assert(target == 9);
             stock = 0;
