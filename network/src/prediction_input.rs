@@ -15,7 +15,17 @@ pub(crate) struct CommandWriter {
 }
 
 impl CommandWriter {
-    pub(crate) fn new(head: u32) -> Self {
+    pub(crate) fn new(
+        head: u32,
+        boundary: Tick,
+        buffer: &mut NativeBuffer<ControllerCommand>,
+    ) -> Self {
+        // Loading/reconnect has no commands for this handoff, but Lightyear may
+        // already have buffered delayed default samples beyond its first tick.
+        // Seed the checkpoint boundary so pre-start buffering cannot establish
+        // a window that excludes the commands needed to advance that checkpoint.
+        *buffer = NativeBuffer::default();
+        buffer.set(boundary, ActionState::default());
         Self {
             next_tick: head,
             held: Input::default(),
@@ -78,7 +88,18 @@ impl CommandWriter {
             .start_tick
             .is_some_and(|start| start.0 > first_native)
         {
-            return Err("Input scheduling fell outside the retained command history".into());
+            return Err(format!(
+                "Input scheduling fell outside the retained command history: anchor={}, current={}, delay={}, next={}, target={}, first={}, buffer_start={:?}, buffer_end={:?}, sequence={}",
+                anchor.0,
+                current.0,
+                delay,
+                self.next_tick,
+                target,
+                first_native,
+                buffer.start_tick,
+                buffer.end_tick(),
+                sequence,
+            ));
         }
 
         // All bounds are checked before consuming an edge or changing history.
@@ -202,9 +223,88 @@ mod tests {
     }
 
     #[test]
-    fn delayed_commands_keep_edges_through_increasing_and_decreasing_delay() {
-        let mut writer = CommandWriter::new(0);
+    fn match_start_replaces_preparation_samples_before_the_first_command() {
         let mut buffer = NativeBuffer::default();
+        // The loading handshake left only delayed, epoch-zero samples. Its first
+        // retained tick is later than the first input needed by the C world.
+        for tick in ANCHOR + 6..=ANCHOR + 22 {
+            buffer.set(Tick(tick), ActionState::default());
+        }
+        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
+        let mut sequence = 0;
+        // Lightyear continues buffering before the agreed start boundary.
+        buffer.set(Tick(ANCHOR + 22), ActionState::default());
+        let first = sample(&mut writer, &mut buffer, &mut sequence, 0, 22, 64);
+        assert_eq!((first.0.tick, first.0.sequence), (22, 23));
+        for tick in 0..=22 {
+            let command = &buffer.get(Tick(ANCHOR + tick + 1)).unwrap().0;
+            assert_eq!(
+                (command.epoch, command.tick, command.sequence),
+                (EPOCH, tick, tick + 1)
+            );
+            assert_eq!(command.input, input(if tick == 22 { 64 } else { 0 }));
+        }
+    }
+
+    #[test]
+    fn handoff_seeds_zero_and_delayed_input_for_fresh_and_resumed_worlds() {
+        for head in [0, 30] {
+            for delay in [0, 3, 22, 39] {
+                let boundary = Tick(ANCHOR + head);
+                let mut buffer = NativeBuffer::default();
+                // An old epoch must not survive the handoff either.
+                buffer.set(boundary + 6, command(99, input(1)));
+                let mut writer = CommandWriter::new(head, boundary, &mut buffer);
+                assert_eq!(buffer.end_tick(), Some(boundary));
+                let mut sequence = 80;
+                // Native buffering still runs while waiting for the agreed tick.
+                for offset in -2..=0 {
+                    buffer.set(boundary + offset + i32::from(delay), ActionState::default());
+                }
+                let first = sample(&mut writer, &mut buffer, &mut sequence, head, delay, 64);
+                assert_eq!(first.0.input, input(64));
+                for offset in 0..=u32::from(delay) {
+                    let command = &buffer.get(boundary + offset as i32 + 1).unwrap().0;
+                    assert_eq!(
+                        (command.epoch, command.tick, command.sequence),
+                        (EPOCH, head + offset, 81 + offset)
+                    );
+                    assert_eq!(
+                        command.input,
+                        input(if offset == u32::from(delay) { 64 } else { 0 })
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lost_command_history_is_still_rejected_after_handoff() {
+        let mut buffer = NativeBuffer::default();
+        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
+        let mut sequence = 0;
+        sample(&mut writer, &mut buffer, &mut sequence, 0, 0, 64);
+        buffer.pop(Tick(ANCHOR + 2));
+        let error = writer
+            .write(
+                &mut buffer,
+                Tick(ANCHOR),
+                Tick(ANCHOR + 2),
+                0,
+                EPOCH,
+                &mut sequence,
+                || panic!("lost history consumed a button edge"),
+            )
+            .unwrap_err();
+        assert!(error.contains("Input scheduling fell outside the retained command history"));
+        assert_eq!(sequence, 1);
+        assert_eq!(writer.next_tick, 1);
+    }
+
+    #[test]
+    fn delayed_commands_keep_edges_through_increasing_and_decreasing_delay() {
+        let mut buffer = NativeBuffer::default();
+        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
         let mut sequence = 0;
         assert_eq!(
             sample(&mut writer, &mut buffer, &mut sequence, 0, 2, 64)
@@ -270,11 +370,11 @@ mod tests {
 
     #[test]
     fn delayed_commands_begin_at_the_resumed_head() {
-        let mut writer = CommandWriter::new(30);
         let mut buffer = NativeBuffer::default();
+        let mut writer = CommandWriter::new(30, Tick(ANCHOR + 30), &mut buffer);
         let mut sequence = 80;
         sample(&mut writer, &mut buffer, &mut sequence, 30, 2, 64);
-        assert_eq!(buffer.start_tick, Some(Tick(ANCHOR + 31)));
+        assert_eq!(buffer.start_tick, Some(Tick(ANCHOR + 30)));
         assert_eq!(buffer.get(Tick(ANCHOR + 31)).unwrap().0.input, input(0));
         assert_eq!(buffer.get(Tick(ANCHOR + 32)).unwrap().0.input, input(0));
         let target = &buffer.get(Tick(ANCHOR + 33)).unwrap().0;
@@ -288,8 +388,8 @@ mod tests {
     fn delay_bounds_preserve_the_rollback_window() {
         let max_delay = (INPUT_BUFFER_CAPACITY - usize::from(PREDICTION_DEPTH) - 1)
             .min(FUTURE_WINDOW as usize) as u16;
-        let mut writer = CommandWriter::new(0);
         let mut buffer = NativeBuffer::default();
+        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
         let mut sequence = 0;
         for tick in 0..=u32::from(PREDICTION_DEPTH) {
             sample(&mut writer, &mut buffer, &mut sequence, tick, 0, 64);
@@ -333,8 +433,8 @@ mod tests {
 
     #[test]
     fn command_writer_rejects_missing_or_corrupted_existing_targets() {
-        let mut writer = CommandWriter::new(0);
         let mut buffer = NativeBuffer::default();
+        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
         let mut sequence = 0;
         sample(&mut writer, &mut buffer, &mut sequence, 0, 2, 64);
         let native = Tick(ANCHOR + 2);
@@ -377,8 +477,8 @@ mod tests {
 
     #[test]
     fn command_writer_overflow_is_atomic() {
-        let mut writer = CommandWriter::new(0);
         let mut buffer = NativeBuffer::default();
+        let mut writer = CommandWriter::new(0, Tick(ANCHOR), &mut buffer);
         let mut sequence = u32::MAX - 1;
         assert!(
             writer
@@ -394,7 +494,8 @@ mod tests {
                 .is_err()
         );
         assert_eq!(sequence, u32::MAX - 1);
-        assert!(buffer.is_empty());
+        assert_eq!(buffer.end_tick(), Some(Tick(ANCHOR)));
+        assert_eq!(buffer.get(Tick(ANCHOR)), Some(&ActionState::default()));
         assert_eq!(writer.next_tick, 0);
         assert!(
             writer
@@ -409,7 +510,8 @@ mod tests {
                 )
                 .is_err()
         );
-        assert!(buffer.is_empty());
+        assert_eq!(buffer.end_tick(), Some(Tick(ANCHOR)));
+        assert_eq!(buffer.get(Tick(ANCHOR)), Some(&ActionState::default()));
         assert_eq!(writer.next_tick, 0);
     }
 

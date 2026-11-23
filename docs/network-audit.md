@@ -290,6 +290,12 @@ the timeline, not on every RTT update; larger effective latency can still cause
 fallback input delay. The adapter refuses delays beyond the command buffer's safe
 capacity instead of evicting commands still needed for rollback.
 
+At a fresh start or snapshot handoff, the local command buffer is reset and
+seeded at the checkpoint boundary. Preparation can leave delayed default samples
+beyond the first gameplay tick; retaining that window would prevent the adapter
+from writing the initial commands. The active session's command history is never
+reset this way.
+
 The command adapter assigns each sample to the native delayed tick, materializes
 new gaps using the preceding held input, and never rewrites commands already
 queued when delay shrinks. Button edges wait until the next unused tick. Native

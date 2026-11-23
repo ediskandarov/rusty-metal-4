@@ -726,6 +726,17 @@ fn start_at(
     if bytes == 0 {
         return Err("The game could not checkpoint the rendered match");
     }
+    let command_writer = {
+        let (mut action, mut buffer) = world
+            .query_filtered::<(
+                &mut ActionState<ControllerCommand>,
+                &mut NativeBuffer<ControllerCommand>,
+            ), With<InputMarker<ControllerCommand>>>()
+            .single_mut(world)
+            .map_err(|_| "The local command buffer is missing at prediction handoff")?;
+        *action = ActionState::default();
+        CommandWriter::new(head, boundary, &mut buffer)
+    };
     let mut manager = PredictionManager::default();
     manager.input_rollback_floor = Some(boundary);
     manager.rollback_policy = RollbackPolicy {
@@ -750,7 +761,7 @@ fn start_at(
     state.session = Some(session);
     state.resume_preparing = false;
     state.sequence = sequence;
-    state.command_writer = CommandWriter::new(head);
+    state.command_writer = command_writer;
     state.head = head;
     state.confirmed = head;
     state.checksums.push_back((
